@@ -10,6 +10,16 @@ export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? 'https://tsu-waterbottle.com'),
   title: 'WATERBOTTLE 紫微命理',
   description: '紫微命盤分析、紫微牌卡占卜、水瓶先生論命預約與紫微課程服務。',
+  icons: {
+    icon: [
+      {
+        url: '/brand/waterbottle-logo-transparent-cropped.png',
+        type: 'image/png'
+      }
+    ],
+    shortcut: '/brand/waterbottle-logo-transparent-cropped.png',
+    apple: '/brand/waterbottle-logo-web.png'
+  },
   alternates: {
     canonical: '/'
   },
