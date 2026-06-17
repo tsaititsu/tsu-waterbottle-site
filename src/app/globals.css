@@ -1,0 +1,193 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #1f1b2e;
+  background: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 18% 8%, rgba(237, 231, 246, 0.95), transparent 28%),
+    radial-gradient(circle at 84% 18%, rgba(242, 228, 196, 0.48), transparent 24%),
+    #ffffff;
+  font-family: Inter, 'Noto Sans TC', system-ui, sans-serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.section-shell {
+  width: min(1200px, calc(100% - 40px));
+  margin: 0 auto;
+}
+
+.focus-ring:focus-visible {
+  outline: 3px solid rgba(200, 155, 60, 0.38);
+  outline-offset: 3px;
+}
+
+.chart-workspace {
+  min-height: calc(100vh - 150px);
+}
+
+.original-ziwei-view {
+  width: 100%;
+}
+
+.original-ziwei-view .chart-wrapper {
+  max-width: none;
+  width: 100%;
+}
+
+.original-ziwei-view .chart-grid {
+  grid-template-rows: repeat(4, minmax(clamp(110px, 17vh, 240px), 1fr));
+  min-height: min(78vh, 900px);
+}
+
+.original-ziwei-view .decadal-timeline,
+.original-ziwei-view .yearly-timeline {
+  max-width: none;
+  width: 100%;
+}
+
+.waterbottle-chart-embed {
+  --zce-background: rgba(246, 241, 255, 0.94);
+  --zce-surface: rgba(255, 255, 255, 0.88);
+  --zce-border: #d8caeb;
+  --zce-text: #1f1b2e;
+  --zce-muted: #6f687c;
+  --zce-major: #3b0f75;
+  --zce-minor: #201f2c;
+  --zce-soft: #6b6380;
+  --zce-tough: #7d2935;
+  --zce-flower: #7d5fb4;
+  --zce-mutagen: #b74135;
+  --zce-ming-bg: rgba(255, 255, 255, 0.9);
+  --zce-body-bg: rgba(246, 241, 255, 0.88);
+}
+
+.waterbottle-chart-embed .zce-grid {
+  max-width: none;
+  width: 100%;
+  grid-template-rows: repeat(4, minmax(clamp(92px, 16vh, 190px), 1fr));
+  min-height: min(78vh, 820px);
+}
+
+.waterbottle-chart-embed .zce-center {
+  background:
+    radial-gradient(circle at 50% 45%, rgba(255, 255, 255, 0.95), rgba(246, 241, 255, 0.82));
+}
+
+.waterbottle-chart-embed .zce-star__name {
+  font-size: clamp(10px, 1.5vw, 18px);
+}
+
+.waterbottle-chart-embed .zce-palace__name {
+  font-size: clamp(10px, 1.45vw, 18px);
+}
+
+.waterbottle-chart-embed .zce-palace__branch {
+  font-size: clamp(10px, 1.2vw, 15px);
+}
+
+.waterbottle-chart-embed .zce-center__name {
+  font-size: clamp(14px, 2vw, 26px);
+}
+
+.waterbottle-chart-embed .zce-info-row dd {
+  font-size: clamp(10px, 1.05vw, 13px);
+}
+
+.waterbottle-chart-embed .zce-palace {
+  cursor: pointer;
+}
+
+.star-field {
+  background-image:
+    radial-gradient(circle, rgba(200, 155, 60, 0.7) 1px, transparent 1px),
+    radial-gradient(circle, rgba(91, 33, 182, 0.28) 1px, transparent 1px);
+  background-position:
+    0 0,
+    18px 22px;
+  background-size:
+    54px 54px,
+    72px 72px;
+}
+
+.hero-cosmos {
+  position: relative;
+  background:
+    linear-gradient(90deg, #ffffff 0%, rgba(255, 255, 255, 0.96) 38%, rgba(247, 243, 255, 0.7) 58%, rgba(59, 15, 117, 0.88) 100%),
+    radial-gradient(circle at 72% 24%, rgba(242, 228, 196, 0.95), transparent 18%),
+    radial-gradient(circle at 86% 18%, rgba(255, 255, 255, 0.58), transparent 16%),
+    #f7f3ff;
+}
+
+.hero-cosmos::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle, rgba(200, 155, 60, 0.88) 1.5px, transparent 1.5px),
+    radial-gradient(circle, rgba(255, 255, 255, 0.75) 1px, transparent 1px),
+    linear-gradient(135deg, transparent 0 16%, rgba(200, 155, 60, 0.38) 16.2% 16.5%, transparent 16.7% 100%),
+    linear-gradient(32deg, transparent 0 61%, rgba(255, 255, 255, 0.26) 61.2% 61.5%, transparent 61.7% 100%);
+  background-position:
+    0 0,
+    22px 18px,
+    0 0,
+    0 0;
+  background-size:
+    74px 74px,
+    96px 96px,
+    260px 260px,
+    330px 330px;
+  opacity: 0.75;
+}
+
+.hero-cosmos::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 40%;
+  background:
+    radial-gradient(ellipse at 72% 100%, rgba(255, 255, 255, 0.98), transparent 54%),
+    radial-gradient(ellipse at 86% 96%, rgba(237, 231, 246, 0.9), transparent 45%),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.96), transparent);
+}
+
+@media (max-width: 768px) {
+  .section-shell {
+    width: min(100% - 28px, 1200px);
+  }
+
+  .chart-workspace {
+    min-height: auto;
+  }
+
+  .waterbottle-chart-embed .zce-grid {
+    grid-template-rows: repeat(4, minmax(82px, 1fr));
+    min-height: 560px;
+  }
+}

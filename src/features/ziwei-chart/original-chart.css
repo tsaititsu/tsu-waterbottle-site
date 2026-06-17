@@ -1,0 +1,2118 @@
+/* ── Variables ─────────────────────────────────────────────────────────────── */
+:root {
+  --red:        #c0392b;
+  --blue:       #2c3e8f;
+  --darkblue:   #1a2660;
+  --purple:     #7b5ea7;
+  --green:      #1a7a3c;
+  --black:      #1a1a1a;
+  --gray:       #888;
+  --border:     #c8c8c8;
+  --active-bg:  #FFDAB9;
+  --badge-bg:   #c0392b;
+  --font:       'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  --fs-star:    clamp(16px, 2.19vw, 22px);
+  --fs-pinyin:  clamp(14px, 1.73vw, 17px);
+  --fs-small:   clamp(15px, 1.96vw, 20px);
+  --fs-name:    clamp(16px, 2.19vw, 22px);
+  /* 拼音模式星名字體 — 與英文模式相同大小 */
+  --fs-py-star:  clamp(10px, 1.27vw, 13px);
+  --fs-py-small: clamp(8px, 0.96vw, 11px);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body { font-family: var(--font); background: #f5f5f0; color: var(--black); }
+
+/* ── App shell ──────────────────────────────────────────────────────────────── */
+.app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: clamp(6px, 1.5vw, 16px);
+  min-height: 100vh;
+}
+
+/* ── Birth Form ─────────────────────────────────────────────────────────────── */
+.birth-form-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  gap: 16px;
+}
+.app-title    { font-size: clamp(22px, 4vw, 32px); font-weight: 700; letter-spacing: 2px; }
+.app-subtitle { font-size: 13px; color: var(--gray); }
+
+.birth-form {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 300px;
+  max-width: 400px;
+  width: 90vw;
+}
+.form-row { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.form-row label { width: 80px; font-weight: 600; flex-shrink: 0; }
+.label-en { font-size: 11px; color: var(--gray); font-weight: 400; }
+.unit-label { font-size: 12px; color: var(--gray); }
+.input-year { width: 68px; border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font-size: 14px; }
+.input-md   { width: 48px; border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font-size: 14px; text-align: center; }
+.input-name { flex: 1; border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 14px; }
+.select-time { border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font-size: 14px; flex: 1; }
+.form-row select { border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font-size: 14px; }
+.radio-label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.btn-submit {
+  margin-top: 8px; padding: 10px; background: #2d2d3a; color: #fff;
+  border: none; border-radius: 6px; font-size: 16px; cursor: pointer; letter-spacing: 2px;
+}
+.btn-submit:hover { background: #1a1a26; }
+.form-error { color: #c0392b; font-size: 13px; padding: 6px 0; }
+
+/* ── Chart Wrapper ──────────────────────────────────────────────────────────── */
+.chart-wrapper { width: 100%; max-width: 980px; }
+
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* Row height: 27vw gives ≈8% extra over cell width, ensuring identity-stack fits at all sizes.
+     ThreeSideLine SVG uses (row+0.5)/4 which is correct for any uniform row height. */
+  grid-template-rows: repeat(4, clamp(120px, 33vw, 260px));
+  border: 1px solid var(--border);
+  background: #f5f3ee;   /* 米色，與命盤資料庫頁一致（取代原 #fff 白底） */
+  position: relative;   /* SVG overlay anchors here */
+}
+
+/* ── SVG 三方四正 overlay ───────────────────────────────────────────────────── */
+.three-side-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* ── Palace Cell ────────────────────────────────────────────────────────────── */
+.palace-cell {
+  border: 1px solid var(--border);
+  padding: clamp(1px, 0.4vw, 5px);
+  display: flex;
+  flex-direction: column;
+  gap: 0px;
+  overflow: hidden;
+  background: #f5f3ee;   /* 米色底，與資料庫頁一致 */
+  position: relative;
+  z-index: 1;
+}
+.palace-cell { cursor: pointer; }
+.palace-cell.active-decadal    { background: var(--active-bg); }
+.palace-cell.active-yearly     { background: #d0f0ea; }
+.palace-cell.active-monthly    { background: #ece0f5; }
+.palace-cell.active-daily      { background: #fbe0ee; }
+.palace-cell.active-minor-limit { background: #fff8d0; }
+.palace-cell.clicked-palace { background: #e8edf8; }
+
+.palace-age   { font-size: var(--fs-small); color: var(--black); flex: 1; text-align: center; }
+.doctor-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  color: var(--gray);
+  flex-shrink: 0;
+}
+.doctor-label .star-zh     { font-size: calc(var(--fs-small) * 0.84); font-weight: 400; }
+.doctor-label .star-pinyin { font-size: calc((var(--fs-pinyin) - 3px) * 0.84); }
+[data-show-pinyin="false"][data-locale^="zh"] .doctor-label .star-zh {
+  writing-mode: horizontal-tb;
+  font-size: calc(var(--fs-small) * 0.84);
+  font-weight: 400;
+}
+[data-locale="en"] .doctor-label .star-zh          { font-size: calc(var(--fs-en-small, clamp(8px, 0.96vw, 11px)) * 0.84); }
+[data-show-pinyin="true"] .doctor-label .star-pinyin { font-size: calc(var(--fs-en-small, clamp(8px, 0.96vw, 11px)) * 0.84); font-weight: 500; }
+
+/* Overlay labels at top-right */
+.palace-overlay-ids {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0px;
+}
+.overlay-id {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 2px;
+  line-height: 1.2;
+}
+.overlay-id .id-zh   { font-size: clamp(12px, 1.27vw, 14px); font-weight: 600; }
+.overlay-id .id-en   { font-size: clamp(9px, 1.04vw, 12px); color: inherit; opacity: 0.8; }
+
+/* ── Star content wrapper: takes available space so palace-bottom always shows ── */
+.star-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Stars ──────────────────────────────────────────────────────────────────── */
+.star-group         { display: flex; flex-wrap: wrap; gap: 0px 3px; }
+.star-group.minor   { margin-top: 1px; }
+/* Row 3: 大限+流年 overlay combined */
+.star-group.overlay-combined {
+  border-top: 1px dashed #bbb;
+  margin-top: 2px;
+  padding-top: 1px;
+}
+/* Row 4: other unlisted stars */
+.star-group.other-minor {
+  border-top: 1px dotted #ddd;
+  margin-top: 2px;
+  padding-top: 1px;
+}
+/* 長生神 + 小限 badge 同一行 */
+/* stem-cs-col: 長生12 + 宮干的縱向容器，兩者永遠緊貼在一起 */
+.stem-cs-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+
+/* 長生12: stem-cs-col 頂端，宮干正上方 */
+.chang-sheng-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+/* 十二長生神 */
+.star-group.chang-sheng {
+  padding-top: 1px;
+  flex-shrink: 0;
+}
+/* In pinyin/en mode: stem-cs-col width is set by min-content of stem-col;
+   chang-sheng-group stretches to 100% and long pinyin wraps at soft hyphens */
+[data-show-pinyin="true"] .stem-cs-col,
+[data-locale="en"] .stem-cs-col {
+  width: min-content;
+}
+[data-show-pinyin="true"] .chang-sheng-group,
+[data-locale="en"] .chang-sheng-group {
+  width: 100%;
+}
+[data-show-pinyin="true"] .star-group.chang-sheng,
+[data-locale="en"] .star-group.chang-sheng {
+  flex-shrink: 1;
+  min-width: 0;
+}
+[data-show-pinyin="true"] .star-group.chang-sheng .star,
+[data-locale="en"] .star-group.chang-sheng .star {
+  min-width: 0;
+}
+[data-show-pinyin="true"] .star-group.chang-sheng .star-pinyin,
+[data-locale="en"] .star-group.chang-sheng .star-pinyin,
+[data-locale="en"] .star-group.chang-sheng .star-abbr {
+  white-space: normal;
+  hyphens: manual;
+}
+
+
+/* Stars are horizontal: name + pinyin on same line */
+.star {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.star-zh     { font-size: var(--fs-star); font-weight: 500; color: inherit; }
+.star-pinyin { font-size: calc(var(--fs-pinyin) - 1px); color: inherit; opacity: 0.8; }
+
+/* Star colors — set on wrapper so both .star-zh and .star-pinyin inherit */
+.star-red       { color: var(--red); }
+.star-blue      { color: var(--blue); }
+.star-darkblue  { color: var(--darkblue); }
+.star-green     { color: var(--green); }
+.star-black     { color: var(--black); }
+.star-lightblue { color: #5a8ec0; }
+.star-decadal    { color: #9b6a30; }
+.star-yearly     { color: #1a7a6b; }
+.star-monthly    { color: #8a4fb0; }
+.star-daily      { color: #c43e8e; }
+.star-minorLimit { color: var(--blue); }
+
+/* 祿羊陀標記（本命 + 運限 + 流年 + 流月 + 流日）。
+   原為完整外框（border + padding，耗空間）；改為底線標記，
+   保留「運線加星」語意但省掉左右/上邊框與內距。 */
+.star-framed {
+  border-bottom: 1.5px solid currentColor;
+  border-radius: 0;
+  padding: 0;
+  line-height: 1.15;
+}
+
+.brightness { display: none; }
+
+/* 四化 badge */
+.mutagen-badge {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 1px;
+  color: #fff;
+  padding: 0 3px;
+  border-radius: 2px;
+  margin-left: 2px;
+  vertical-align: middle;
+  line-height: 1.4;
+}
+.mutagen-badge.mutagen-origin     { background: #c0392b; }
+.mutagen-badge.mutagen-decadal   { background: #9b6a30; }
+.mutagen-badge.mutagen-yearly    { background: #1a7a6b; }
+.mutagen-badge.mutagen-monthly   { background: #8a4fb0; }
+.mutagen-badge.mutagen-daily     { background: #c43e8e; }
+.mutagen-badge.mutagen-minorLimit { background: var(--blue); }
+.badge-zh           { font-size: var(--fs-pinyin); font-weight: 700; }
+.badge-pinyin       { font-size: calc(var(--fs-pinyin) - 2px); font-weight: 400; opacity: 0.9; }
+.badge-pinyin-abbr  { display: none; }   /* desktop: abbr hidden, full visible */
+
+/* Bottom bar: always visible because .star-content takes remaining flex space */
+.palace-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+/* Left col: 小限年紀（上，線上方）+ 博士+大限年（下，線下方） */
+.palace-blc {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  flex: 1;
+}
+.palace-bl-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding-top: 2px;
+}
+
+/* Left side: doctor label */
+.palace-bl {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding-left: clamp(2px, 0.4vw, 5px);
+  flex-shrink: 0;
+}
+
+/* Right side: 宮名欄 + 直排干支 */
+.palace-br {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+/* name-col: overlays + native name stacked above stem */
+.name-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+/* 宮名 + 直排干支 並排 */
+.name-stem {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+/* 干支直排（中文模式） */
+.stem-col {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  padding-left: 2px;
+  line-height: 1;
+}
+.stem-col .sb-zh {
+  font-size: var(--fs-small);
+  color: var(--gray);
+  font-weight: 400;
+  letter-spacing: 0.05em;
+}
+.stem-col .sb-pinyin { display: none; }
+
+/* 拼音/英文模式：干支改橫排 */
+[data-show-pinyin="true"] .stem-col,
+[data-locale="en"] .stem-col {
+  writing-mode: horizontal-tb;
+  border-left: none;
+  padding-left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+[data-show-pinyin="true"] .stem-col .sb-zh,
+[data-locale="en"] .stem-col .sb-zh {
+  font-size: calc(var(--fs-pinyin) - 1px);
+  display: none;
+}
+[data-show-pinyin="true"] .stem-col .sb-pinyin,
+[data-locale="en"] .stem-col .sb-pinyin {
+  display: inline;
+  font-size: var(--fs-en-small, clamp(8px, 0.96vw, 11px));
+  color: #aaa;
+}
+.id-row {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 2px;
+  line-height: 1.15;
+}
+.id-zh   { font-size: var(--fs-small); font-weight: 600; }
+.id-en   { font-size: clamp(12px, 1.38vw, 15px); color: inherit; opacity: 0.85; }
+
+/* Colors for each id-row scope */
+.yearly-id  .id-zh  { color: #1a7a6b; }
+.yearly-id  .id-en  { color: #1a7a6b; opacity: 0.8; }
+.decadal-id .id-zh  { color: #9b6a30; }
+.decadal-id .id-en  { color: #9b6a30; opacity: 0.8; }
+.monthly-id .id-zh  { color: #8a4fb0; }
+.monthly-id .id-en  { color: #8a4fb0; opacity: 0.8; }
+.daily-id   .id-zh  { color: #c43e8e; }
+.daily-id   .id-en  { color: #c43e8e; opacity: 0.8; }
+.native-id  .id-zh  { color: var(--red); font-size: var(--fs-small); }
+/* 身 inline — blue to distinguish from palace name */
+.shen-char { color: var(--purple); font-weight: 600; }
+.sb-zh     { font-size: var(--fs-small); color: var(--gray); font-weight: 400; }
+.sb-pinyin { font-size: calc(var(--fs-pinyin) - 3px); color: #aaa; }
+
+/* Overlay id-rows (流X / 大X) are compact secondary labels — one natural step below palace name */
+.id-row.yearly-id  .id-zh,
+.id-row.decadal-id .id-zh,
+.id-row.monthly-id .id-zh,
+.id-row.daily-id   .id-zh { font-size: var(--fs-pinyin); font-weight: 600; line-height: 1.2; }
+.id-row.yearly-id  .id-en,
+.id-row.decadal-id .id-en,
+.id-row.monthly-id .id-en,
+.id-row.daily-id   .id-en { font-size: clamp(7px, 0.83vw, 9px); }
+
+/* Aliases for any remaining usages */
+.decadal-overlay-label { color: #9b6a30; font-weight: 600; }
+.yearly-overlay-label  { color: #1a7a6b; font-weight: 600; }
+
+.palace-badges { display: flex; gap: 2px; }
+.badge { font-size: clamp(10px, 1.15vw, 13px); padding: 0 3px; border-radius: 2px; color: #fff; line-height: 1.5; white-space: nowrap; }
+/* Chinese mode: 身/小限 badges larger */
+[data-locale^="zh"][data-show-pinyin="false"] .badge { font-size: clamp(12px, 1.32vw, 15px); }
+.badge-minor        { background: var(--blue); }
+.badge-minor-on     { background: var(--darkblue); outline: 2px solid var(--blue); outline-offset: 1px; }
+.badge-decadal      { background: #9b6a30; }
+.badge-body         { background: var(--purple); }
+
+/* Other adjective stars — small but visible */
+.star-small .star-zh    { font-size: var(--fs-small); font-weight: 400; }
+.star-small .star-pinyin { font-size: calc(var(--fs-pinyin) - 2px); }
+
+/* 博士十二神 tiny stars — no pinyin */
+.star-tiny .star-zh { font-size: calc(var(--fs-pinyin) - 2px); font-weight: 400; color: var(--gray); }
+
+/* ── Center Cell ────────────────────────────────────────────────────────────── */
+.center-cell {
+  border: 1px solid var(--border);
+  background: #fff;   /* 中央資訊卡維持白色（與米色宮格對比）*/
+  z-index: 1;
+  overflow: hidden;
+}
+.center-info {
+  height: 100%;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: clamp(4px, 1vw, 8px);
+  gap: 3px;
+  text-align: center;
+}
+.center-locale-wrap {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.center-locale-btn {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px 4px;
+  opacity: 0.55;
+  line-height: 1;
+}
+.center-locale-btn:hover { opacity: 1; }
+.center-hide-btn {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: none;
+  border: none;
+  font-size: 15px;
+  cursor: pointer;
+  padding: 2px 4px;
+  opacity: 0.5;
+  line-height: 1;
+}
+.center-hide-btn:hover { opacity: 1; }
+.center-hide-btn.active { opacity: 1; }
+.center-locale-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: white;
+  border: 1px solid #e0dbd3;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  overflow: hidden;
+  z-index: 100;
+  min-width: 110px;
+}
+.center-locale-item {
+  display: block;
+  width: 100%;
+  padding: 8px 14px;
+  background: none;
+  border: none;
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.center-locale-item:hover { background: #f5f1eb; }
+.center-locale-item.active { font-weight: 600; color: var(--black); }
+.center-name    { font-size: clamp(17px, 2.53vw, 25px); font-weight: 700; letter-spacing: 1px; }
+/* 彩蛋：隱藏狀態下改外號的 inline 輸入框（融入中央卡，沿用 center-name 字級） */
+.center-alias-input {
+  font: inherit; font-weight: 700; letter-spacing: 1px;
+  text-align: center; width: 8em; max-width: 90%;
+  color: inherit; background: rgba(0,0,0,0.04);
+  border: none; border-bottom: 1px dashed currentColor;
+  padding: 1px 4px; border-radius: 4px; outline: none;
+}
+
+/* 定盤 time row */
+.center-time-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.center-time-inner {
+  display: flex;
+  align-items: center;
+  border-radius: 6px;
+  padding: 2px 6px;
+  transition: background 0.2s;
+}
+.center-time-inner.rectified {
+  background: rgba(180, 120, 0, 0.13);
+  outline: 1.5px solid rgba(180, 120, 0, 0.35);
+}
+.btn-time-arrow {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: clamp(10px, 1.2vw, 13px);
+  color: var(--gray);
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+  line-height: 1;
+}
+.btn-time-arrow:hover { color: var(--black); background: rgba(0,0,0,0.06); }
+
+.center-time       { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.center-time-main  { font-size: clamp(17px, 2.53vw, 23px); font-weight: 700; line-height: 1.2; }
+.center-time-hours { font-size: clamp(11px, 1.15vw, 14px); font-weight: 400; color: var(--gray); line-height: 1.2; }
+.center-gender  { font-size: clamp(14px, 1.50vw, 17px); color: var(--gray); }
+.center-five    { font-size: clamp(13px, 1.38vw, 16px); color: var(--gray); }
+
+.center-details { width: 100%; font-size: clamp(13px, 1.38vw, 16px); }
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 1px 0;
+  border-bottom: 1px solid #f0f0f0;
+  gap: 4px;
+  text-align: left;
+}
+.detail-label       { color: var(--gray); flex-shrink: 0; }
+.lunar-gz           { font-weight: 700; color: #8a5a2b; }   /* 農曆出生年干支，稍微突出 */
+.detail-sub         { color: var(--gray); }
+.detail-value-small { font-size: clamp(9px, 1.04vw, 13px); }
+
+.btn-reset {
+  font-size: 12px;
+  line-height: 1.4;
+  width: 72px;
+  padding: 4px 0;
+  text-align: center;
+  background: #2d2d3a;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn-reset:hover { background: #1a1a26; }
+
+/* ── Decadal Timeline ───────────────────────────────────────────────────────── */
+.decadal-timeline {
+  display: flex;
+  width: 100%;
+  max-width: 980px;
+  border: 1px solid var(--border);
+  border-top: none;
+  background: #fff;
+  overflow: hidden;
+}
+.timeline-cell {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 4px 1px;
+  text-align: center;
+  border-right: 1px solid var(--border);
+  line-height: 1.5;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.timeline-cell:hover:not(.timeline-active) { background: #f0ece6; }
+.timeline-cell:last-child { border-right: none; }
+.timeline-cell.timeline-active  { background: #9b6a30; color: #fff; }
+.timeline-cell.timeline-realtime { box-shadow: inset 0 0 0 2px #9b6a30; }
+
+/* 童限格：淡青色底，區分於一般大限 */
+.timeline-cell.timeline-childhood { background: #eaf3f8; border-right: 2px dashed #7ab3cc; }
+.timeline-cell.timeline-childhood:hover:not(.timeline-active) { background: #d6eaf4; }
+.timeline-cell.timeline-childhood.timeline-active { background: #4a8fa8; color: #fff; }
+
+/* 展開/收合按鈕（左/右兩側） */
+.timeline-expand-btn {
+  flex: 0 0 auto;
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  border: none;
+  border-right: 1px solid var(--border);
+  background: #f5f0ea;
+  color: #7a5c3a;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  writing-mode: vertical-rl;
+  letter-spacing: 1px;
+  transition: background 0.15s, color 0.15s;
+  line-height: 1.2;
+}
+.timeline-expand-btn:hover { background: #e8e0d5; color: #4a3010; }
+.timeline-expand-btn.expanded { background: #ddd4c5; color: #4a3010; }
+.timeline-expand-right { border-right: none; border-left: 1px solid var(--border); writing-mode: vertical-rl; }
+
+.tl-label    { font-weight: 700; font-size: clamp(11px, 3.2vw, 15px); white-space: nowrap; overflow: hidden; text-overflow: clip; }
+.tl-label-en { font-weight: 400; font-size: clamp(9px,  2.6vw, 13px); opacity: 0.85; }
+.tl-stem     { font-size: clamp(10px, 3.0vw, 14px); }
+.tl-pinyin, .tl-stem-pinyin { font-size: clamp(9px, 2.6vw, 13px); opacity: 0.8; }
+.tl-age      { font-size: clamp(9px,  2.6vw, 12px); opacity: 0.7; }
+.tl-dash     { font-size: 0.8em; }
+
+/* en/pinyin: label bold; stem block font matches pinyin text to remove strut surplus;
+   2-line stem + 1-line age = zh 1-line stem + 2-line age = 72px */
+[data-show-pinyin="true"] .tl-label-en,
+[data-locale="en"] .tl-label-en      { font-size: clamp(11px, 3.2vw, 15px); font-weight: 700; opacity: 1; }
+[data-show-pinyin="true"] .tl-stem-pinyin,
+[data-locale="en"] .tl-stem-pinyin   { font-size: clamp(9px, 2.8vw, 11px); opacity: 1; }
+[data-show-pinyin="true"] .tl-stem,
+[data-locale="en"] .tl-stem          { font-size: clamp(9px, 2.8vw, 11px); }
+[data-show-pinyin="true"] .tl-age,
+[data-locale="en"] .tl-age           { max-height: 1.5em; overflow: hidden; white-space: nowrap; font-size: clamp(8px, 2.2vw, 11px); }
+
+/* ── Yearly Timeline ────────────────────────────────────────────────────────── */
+.yearly-timeline {
+  display: flex;
+  width: 100%;
+  max-width: 980px;
+  border: 1px solid var(--border);
+  border-top: none;
+  background: #fff;
+  overflow: hidden;
+}
+.yearly-cell {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 4px 1px;
+  text-align: center;
+  border-right: 1px solid var(--border);
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.yearly-cell:hover:not(.yearly-active) { background: #f0ece6; }
+.yearly-cell:last-child { border-right: none; }
+.yearly-cell.yearly-active { background: #1a7a6b; color: #fff; }
+
+.yl-stem   { font-weight: 700; font-size: clamp(11px, 3.0vw, 14px); }
+.yl-pinyin { font-size: clamp(9px, 2.4vw, 12px); opacity: 0.8; }
+.yl-year   { font-size: clamp(10px, 2.6vw, 13px); opacity: 0.8; }
+.yl-age    { font-size: clamp(9px, 2.2vw, 12px); opacity: 0.65; }
+.yl-dash   { font-size: 0.8em; }
+
+/* en/pinyin yearly: yl-pinyin replaces yl-stem as primary bold label */
+[data-show-pinyin="true"] .yl-pinyin,
+[data-locale="en"] .yl-pinyin        { font-size: clamp(11px, 3.0vw, 14px); font-weight: 700; opacity: 1; }
+
+/* ── Twin toggle (always visible) ── */
+.twin2-badge {
+  display: inline-block;
+  margin-left: 8px;
+  background: #7a4a9b;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 10px;
+  vertical-align: middle;
+}
+
+.center-twin2-label {
+  font-size: clamp(10px, 1.2vw, 13px);
+  color: #7a4a9b;
+  font-weight: 600;
+  margin-bottom: 4px;
+  text-align: center;
+}
+
+/* ── Pinyin toggle (inside CenterInfo) ── */
+.center-btn-row {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.lang-toggle-inline {
+  background: transparent;
+  color: #888;
+  border: 1.5px solid #bbb;
+  border-radius: 4px;
+  width: 72px;
+  padding: 4px 0;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.lang-toggle-inline.active {
+  background: #f0ede8;
+  color: #333;
+  border-color: #666;
+}
+.lang-toggle-inline:active { opacity: 0.8; }
+
+/* Advanced 模式：只留小 Beta 徽章 + ⓘ（說明點了才彈出），省中央卡高度 */
+.center-adv-beta {
+  position: relative;
+  margin-top: 4px;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+}
+.adv-beta-badge {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em;
+  color: #fff; background: #b0822f; border-radius: 4px; padding: 1px 6px;
+}
+.adv-info-btn {
+  background: none; border: none; cursor: pointer; padding: 0;
+  color: #b0822f; font-size: 13px; line-height: 1;
+}
+.adv-info-pop {
+  position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%);
+  width: max-content; max-width: 200px;
+  background: #4a4234; color: #fff; font-size: 11px; line-height: 1.4;
+  padding: 6px 9px; border-radius: 6px; z-index: 50; cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.28); text-align: center;
+}
+
+/* 筆記按鈕：與其他文字鈕同大小同 style，僅有筆記時金框高亮 */
+.center-notes-btn.has-notes {
+  border-color: #b0822f;
+  background: #fbf6ec;
+  color: #333;
+}
+
+/* ── 筆記編輯 modal ── */
+.notes-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.notes-modal {
+  background: #fff; border-radius: 12px;
+  width: 100%; max-width: 420px;
+  padding: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.notes-modal-title {
+  font-size: 15px; font-weight: 600; color: #333;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.notes-count { font-size: 11px; font-weight: 400; color: #999; }
+.notes-textarea {
+  width: 100%; box-sizing: border-box;
+  min-height: 160px; resize: vertical;
+  border: 1.5px solid #ccc; border-radius: 8px;
+  padding: 10px; font-size: 14px; line-height: 1.5;
+  font-family: inherit; color: #333;
+}
+.notes-textarea:focus { outline: none; border-color: #b0822f; }
+/* 唯讀檢視：保留換行，URL 自動可點 */
+.notes-view {
+  min-height: 120px; max-height: 50vh; overflow-y: auto;
+  border: 1.5px solid #eee; border-radius: 8px;
+  padding: 10px; font-size: 14px; line-height: 1.6;
+  color: #333; white-space: pre-wrap; word-break: break-word;
+}
+.notes-link { color: #2563eb; text-decoration: underline; word-break: break-all; }
+.notes-link:active { opacity: 0.7; }
+.notes-modal-btns {
+  display: flex; justify-content: flex-end; gap: 8px;
+}
+.notes-btn-cancel, .notes-btn-save {
+  border-radius: 6px; padding: 7px 18px; font-size: 14px;
+  cursor: pointer; border: 1.5px solid transparent;
+}
+.notes-btn-cancel { background: #f0f0f0; color: #555; border-color: #ddd; }
+.notes-btn-save { background: #b0822f; color: #fff; }
+.notes-btn-save:active, .notes-btn-cancel:active { opacity: 0.85; }
+
+/* ── Pinyin visibility (global, all screen sizes) ── */
+/* OFF: show zh only */
+[data-show-pinyin="false"] .star-pinyin           { display: none; }
+[data-show-pinyin="false"] .id-en                 { display: none; }
+[data-show-pinyin="false"] .sb-pinyin             { display: none; }
+[data-show-pinyin="false"] .badge-pinyin-full     { display: none; }
+[data-show-pinyin="false"] .badge-pinyin-abbr     { display: none; }
+[data-show-pinyin="false"] .tl-label-en           { display: none; }
+[data-show-pinyin="false"] .tl-pinyin             { display: none; }
+[data-show-pinyin="false"] .tl-stem-pinyin        { display: none; }
+[data-show-pinyin="false"] .yl-pinyin             { display: none; }
+[data-show-pinyin="false"] .center-time-pinyin     { display: none; }
+[data-show-pinyin="false"] .center-gender-en      { display: none; }
+[data-show-pinyin="false"] .center-gender-divider { display: none; }
+
+/* English locale: gender spans always visible (not subject to pinyin toggle) */
+[data-locale="en"] .center-gender-en      { display: inline !important; }
+[data-locale="en"] .center-gender-divider { display: inline !important; }
+
+/* English locale overrides: stems/branches always show as pinyin, not Chinese */
+[data-locale="en"] .sb-zh    { display: none; }
+[data-locale="en"] .sb-pinyin { display: inline; color: #aaa; font-size: var(--fs-en-small, clamp(8px, 0.96vw, 11px)); }
+/* English locale: allow star names to wrap (long English names) */
+[data-locale="en"] .star                  { white-space: normal; line-height: 1.25; }
+[data-locale="en"] .star-zh               { font-size: var(--fs-en-star, clamp(10px, 1.27vw, 13px)); }
+[data-locale="en"] .star-small .star-zh   { font-size: var(--fs-en-small, clamp(8px, 0.96vw, 11px)); }
+/* Abbreviated labels hidden by default; container query activates them when cell is too narrow */
+.name-abbr { display: none; }
+.star-abbr { display: none; }
+.ov-abbr   { display: none; }
+
+/* Each palace cell is a container — abbreviated labels activate when cell width < 140px */
+.palace-cell { container-type: inline-size; }
+@container (max-width: 140px) {
+  /* Star names */
+  .star-full { display: none; }
+  .star-abbr { display: inline; }
+  /* Overlay palace names (大限/流年) */
+  .ov-full { display: none; }
+  .ov-abbr { display: inline; }
+  /* Native palace name */
+  .native-id .name-full { display: none; }
+  .native-id .name-abbr { display: inline; }
+}
+/* Age range position variants — center (default) vs top-of-br (mobile en/pinyin) */
+.palace-age-top { display: none; }
+/* Body badge in stem-col — hidden by default, shown only on mobile en/pinyin */
+.badge-body-stem { display: none; }
+
+/* English locale: right-align palace-br (native name + stem) */
+[data-locale="en"] .palace-br { text-align: right; }
+[data-locale="en"] .palace-age { font-size: var(--fs-en-small, clamp(8px, 0.96vw, 11px)); }
+/* Ensure palace name stays LEFT of stem in en mode; clip long names */
+[data-locale="en"] .name-stem { flex-direction: row; align-items: flex-end; }
+[data-locale="en"] .name-col  { min-width: 0; overflow: hidden; }
+/* English locale: native palace name / overlay labels (slightly larger) */
+[data-locale="en"] .native-id .id-zh         { font-size: var(--fs-en-small, clamp(8px, 0.96vw, 11px)); white-space: normal; }
+[data-locale="en"] .id-row.decadal-id .id-zh,
+[data-locale="en"] .id-row.yearly-id  .id-zh { font-size: clamp(7px, 0.83vw, 9px); white-space: normal; }
+/* English locale: timelines show pinyin, not Chinese chars */
+[data-locale="en"] .tl-label-zh    { display: none; }
+[data-locale="en"] .tl-label-en    { display: inline !important; }
+[data-locale="en"] .tl-stem-zh     { display: none; }
+[data-locale="en"] .tl-stem-pinyin { display: inline !important; }
+[data-locale="en"] .yl-stem        { display: none; }
+[data-locale="en"] .yl-pinyin      { display: block !important; }
+/* English locale: mutagen 四化 badge shows pinyin abbreviation (Lu/Qn/Ke/Ji) */
+[data-locale="en"] .badge-zh           { display: none; }
+[data-locale="en"] .badge-pinyin-full  { display: none; }
+[data-locale="en"] .badge-pinyin-abbr  { display: inline; font-weight: 700; }
+/* ON: show pinyin only, hide zh — promote pinyin to primary font size */
+[data-show-pinyin="true"] .star-zh                { display: none; }
+[data-show-pinyin="true"] .star-pinyin            { font-size: var(--fs-en-star, clamp(10px, 1.27vw, 13px)); font-weight: 500; opacity: 1; }
+[data-show-pinyin="true"] .star-small .star-pinyin{ font-size: var(--fs-en-small, clamp(8px, 0.96vw, 11px)); }
+/* Pinyin mode: right-align palace-br (native name + stem) */
+[data-show-pinyin="true"] .palace-br { text-align: right; }
+[data-show-pinyin="true"] .palace-age { font-size: var(--fs-en-small, clamp(8px, 0.96vw, 11px)); }
+/* Ensure palace name stays LEFT of stem in pinyin mode; clip long names */
+[data-show-pinyin="true"] .name-stem { flex-direction: row; align-items: flex-end; }
+[data-show-pinyin="true"] .name-col  { min-width: 0; overflow: hidden; }
+/* Pinyin mode: native palace name / overlay labels (slightly larger) */
+[data-show-pinyin="true"] .native-id .id-en          { font-size: var(--fs-en-small, clamp(8px, 0.96vw, 11px)); color: var(--red); font-weight: 600; opacity: 1; white-space: normal; }
+[data-show-pinyin="true"] .id-row.decadal-id .id-en,
+[data-show-pinyin="true"] .id-row.yearly-id  .id-en  { font-size: clamp(7px, 0.83vw, 9px); opacity: 1; }
+[data-show-pinyin="true"] .id-zh                  { display: none; }
+[data-show-pinyin="true"] .sb-zh                  { display: none; }
+[data-show-pinyin="true"] .sb-pinyin              { font-size: var(--fs-en-small, clamp(8px, 0.96vw, 11px)); }
+[data-show-pinyin="true"] .badge-zh               { display: none; }
+[data-show-pinyin="true"] .tl-label-zh            { display: none; }
+[data-show-pinyin="true"] .tl-stem-zh             { display: none; }
+[data-show-pinyin="true"] .yl-stem                { display: none; }
+[data-show-pinyin="true"] .center-time-zh          { display: none; }
+[data-show-pinyin="true"] .center-gender-zh       { display: none; }
+[data-show-pinyin="true"] .center-gender-divider  { display: none; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   VERTICAL MODE — 中文直書 (data-show-pinyin="false" + data-locale^="zh")
+   Only applies when locale is zh-TW or zh-CN (NOT English).
+   Each star becomes a thin vertical column (writing-mode: vertical-lr).
+   All star groups sit in a horizontal row (flex-direction: row), then wrap
+   to next row when the palace width is exceeded.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* 1. Allow overflow — stars may exceed cell height */
+[data-show-pinyin="false"][data-locale^="zh"] .palace-cell {
+  overflow: visible;
+}
+
+/* 2. Star-content: horizontal row of star-group columns, wrapping to next row */
+[data-show-pinyin="false"][data-locale^="zh"] .star-content {
+  overflow: visible;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;           /* ← wrap groups to next row when full */
+  align-content: flex-start;
+  align-items: flex-start;
+  gap: 1px;
+  min-height: 0;
+}
+
+/* 3. Native star groups: transparent to flex layout — stars flow directly in star-content */
+[data-show-pinyin="false"][data-locale^="zh"] .star-group {
+  display: contents;
+}
+/* overlay-combined and chang-sheng stay as flex blocks */
+[data-show-pinyin="false"][data-locale^="zh"] .star-group.overlay-combined {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0 1px;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  border-top: none;
+  margin-top: 0;
+  padding-top: 0;
+}
+[data-show-pinyin="false"][data-locale^="zh"] .star-group.chang-sheng {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0 1px;
+  padding-top: 0;
+}
+
+/* 4. Each star: physical flex column so align-items:center actually works.
+   writing-mode moves to .star-zh so characters still render upright vertically.
+   The parent .star-group lays .star items in the vertical direction (writing-mode:vertical-lr
+   on the container), while .star itself is a horizontal flex-column for reliable centering. */
+[data-show-pinyin="false"][data-locale^="zh"] .star {
+  display: flex;
+  flex-direction: column;
+  align-items: center;          /* truly centers badge & star-zh horizontally */
+  writing-mode: horizontal-tb;  /* override parent; content writing-mode set per child */
+  white-space: nowrap;
+  flex-shrink: 0;
+  gap: 1px;
+}
+
+/* 5. Star characters: vertical writing restored explicitly on the text element */
+[data-show-pinyin="false"][data-locale^="zh"] .star-zh {
+  writing-mode: vertical-lr;
+  text-orientation: upright;
+  font-size: var(--fs-zh-star, clamp(11px, 3vw, 20px));
+  font-weight: 600;
+  line-height: 1.15;
+}
+[data-show-pinyin="false"][data-locale^="zh"] .star-small .star-zh {
+  font-size: var(--fs-zh-small, clamp(9px, 2.5vw, 16px));
+  font-weight: 400;
+}
+[data-show-pinyin="false"][data-locale^="zh"] .star-tiny .star-zh {
+  font-size: var(--fs-zh-tiny, clamp(7px, 2vw, 13px));
+}
+/* Palace-bottom items: align to 小星耀 size in zh mode */
+[data-show-pinyin="false"][data-locale^="zh"] .doctor-label .star-zh { font-size: calc(var(--fs-zh-small, clamp(9px, 2.5vw, 16px)) * 0.84); }
+[data-show-pinyin="false"][data-locale^="zh"] .native-id .id-zh       { font-size: var(--fs-zh-small, clamp(9px, 2.5vw, 16px)); }
+[data-show-pinyin="false"][data-locale^="zh"] .sb-zh                  { font-size: var(--fs-zh-small, clamp(9px, 2.5vw, 16px)); }
+[data-show-pinyin="false"][data-locale^="zh"] .palace-age             { font-size: var(--fs-zh-tiny, clamp(7px, 2vw, 13px)); }
+/* Overlay palace names: one step below 小星耀 */
+[data-show-pinyin="false"][data-locale^="zh"] .id-row.decadal-id .id-zh,
+[data-show-pinyin="false"][data-locale^="zh"] .id-row.yearly-id  .id-zh,
+[data-show-pinyin="false"][data-locale^="zh"] .id-row.monthly-id .id-zh,
+[data-show-pinyin="false"][data-locale^="zh"] .id-row.daily-id   .id-zh { font-size: var(--fs-zh-tiny, clamp(7px, 2vw, 13px)); }
+
+/* 6. Mutagen 四化 badge: horizontal, centered by parent flex align-items:center.
+   No transform hack needed — the flex column centers it reliably at all sizes. */
+[data-show-pinyin="false"][data-locale^="zh"] .mutagen-badge {
+  writing-mode: horizontal-tb;
+  margin-left: 0;
+  padding: 0 2px;
+}
+[data-show-pinyin="false"][data-locale^="zh"] .badge-zh {
+  font-size: calc(var(--fs-pinyin) - 1px);
+}
+/* badge-pinyin already hidden via global [data-show-pinyin="false"] rules */
+
+/* 7. 小限年紀 — green ages above palace-bottom (natal mode only, always horizontal) */
+.minor-limit-ages {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  gap: 0 3px;
+  padding: 1px 0;
+  writing-mode: horizontal-tb;
+}
+.ml-age {
+  color: #2e7d32;
+  font-size: clamp(9px, min(1.1vw, 1.3vh), 11px);
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  writing-mode: horizontal-tb;
+}
+
+/* ── Globe locale menu ── */
+.locale-menu-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+.btn-locale {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 6px;
+  opacity: 0.5;
+  line-height: 1;
+}
+.btn-locale:hover { opacity: 1; }
+.locale-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  overflow: hidden;
+  z-index: 100;
+  min-width: 120px;
+}
+.locale-menu-item {
+  display: block;
+  width: 100%;
+  padding: 11px 18px;
+  border: none;
+  background: none;
+  text-align: left;
+  font-size: 14px;
+  font-family: var(--font);
+  cursor: pointer;
+  color: var(--black);
+}
+.locale-menu-item:hover { background: #f5f3ee; }
+.locale-menu-item.active { font-weight: 700; color: var(--red); }
+
+/* ── Sidebar locale section ── */
+.sidebar-locale {
+  padding: 14px 24px 10px;
+  border-top: 1px solid #eee;
+}
+.sidebar-locale-label {
+  font-size: 11px;
+  color: var(--gray);
+  margin-bottom: 8px;
+  letter-spacing: 0.5px;
+}
+.sidebar-locale-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sidebar-locale-btn {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 14px;
+  font-family: var(--font);
+  cursor: pointer;
+  text-align: left;
+  color: var(--black);
+}
+.sidebar-locale-btn:hover { background: #f5f3ee; }
+.sidebar-locale-btn.active { border-color: var(--black); font-weight: 700; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Chart page wrapper
+═══════════════════════════════════════════════════════════════════════════ */
+.chart-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+/* ── Big-frame layout: lock chart to viewport at ALL screen sizes ──────────
+   Set outer frame first (100vh), let inner content scale to fit.
+   This matches dreamkinin's approach: frame → rows → fonts, not the reverse.
+   ─────────────────────────────────────────────────────────────────────────── */
+.app.page-chart {
+  min-height: 0;    /* override .app { min-height: 100vh } — otherwise min-height wins over height on iOS */
+  height: 100vh;
+  height: 100svh;   /* safari/chrome mobile: excludes browser chrome */
+  overflow: hidden;
+  padding: 0;       /* override .app base padding; chart-page controls its own */
+}
+.app.page-chart .chart-page {
+  height: 100%;
+  width: 100%;
+  max-width: 980px;
+  margin: 0 auto;
+  /* 底部預留安全區（iPhone home indicator / 手勢區），避免最底 chip 列被蓋住點不到 */
+  padding: 4px 2px max(6px, env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+/* chart-wrapper fills remaining height above timelines */
+.app.page-chart .chart-wrapper {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+/* grid rows fill the available height — content scales inside */
+.app.page-chart .chart-grid {
+  height: 100%;
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+}
+/* Timelines must never be squeezed off-screen */
+.app.page-chart .decadal-timeline,
+.app.page-chart .yearly-timeline {
+  flex-shrink: 0;
+  width: 100%;
+  max-width: 980px;
+}
+/* Extra padding on desktop */
+@media (min-width: 769px) {
+  .app.page-chart .chart-page { padding: 6px; }
+}
+.chart-topbar {
+  width: 100%;
+  max-width: 980px;
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+}
+.btn-back {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--black);
+}
+.btn-back:hover { background: #f0ece6; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Chart List page
+═══════════════════════════════════════════════════════════════════════════ */
+.chart-list-page {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 680px;
+  min-height: 100vh;
+  background: #f5f3ee;
+}
+.chart-list-header {
+  display: flex;
+  align-items: center;
+  padding: 14px 16px 10px;
+  gap: 12px;
+  background: #f5f3ee;
+}
+.chart-list-title {
+  flex: 1;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.btn-hamburger {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 8px;
+  color: var(--black);
+}
+.btn-add-chart {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 8px;
+  color: var(--black);
+}
+
+/* Privacy button */
+.btn-privacy {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 6px;
+  opacity: 0.45;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.btn-privacy:hover { opacity: 0.8; }
+.btn-privacy.active { opacity: 1; }
+
+/* Category tabs row — wraps to next line if too many tabs */
+.category-tabs-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 16px 10px;
+  flex-wrap: wrap;
+}
+
+.category-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1px solid #ddd;
+  background: #fff;
+  font-size: 13px;
+  font-family: var(--font);
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--black);
+  flex-shrink: 0;
+  transition: background 0.12s, color 0.12s;
+}
+.category-tab.active {
+  background: var(--black);
+  color: #fff;
+  border-color: var(--black);
+}
+.category-tab-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.45;
+  cursor: pointer;
+  margin-left: 1px;
+}
+.category-tab-delete:hover { opacity: 1; }
+
+/* Custom tab: draggable */
+.category-tab[draggable="true"] { cursor: grab; }
+.category-tab[draggable="true"]:active { cursor: grabbing; }
+.category-tab.dragging { opacity: 0.4; }
+.category-tab.drag-over { border-color: var(--black); background: #f0f0f0; }
+
+.category-tab-add {
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1px dashed #bbb;
+  background: transparent;
+  color: #bbb;
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+  line-height: 1;
+  font-family: var(--font);
+}
+.category-tab-add:hover { border-color: #888; color: #888; }
+.category-count {
+  flex-shrink: 0;
+  align-self: center;
+  font-size: 11px;
+  color: #aaa;
+  margin-left: 2px;
+  white-space: nowrap;
+}
+
+.category-tab-input-wrap {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.category-tab-input {
+  width: 80px;
+  padding: 4px 10px;
+  border: 1.5px solid var(--black);
+  border-radius: 20px;
+  font-size: 13px;
+  font-family: var(--font);
+  outline: none;
+}
+
+/* Category badge (in list items, 全部 view) */
+.category-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: #ede9e3;
+  color: #888;
+  font-size: 11px;
+  font-weight: 400;
+  vertical-align: middle;
+}
+
+/* Search bar */
+.search-bar {
+  display: flex;
+  align-items: center;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 8px 14px;
+  margin: 0 16px 8px;
+  gap: 8px;
+}
+.search-icon { color: #aaa; font-size: 16px; }
+.search-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-size: 15px;
+  background: transparent;
+}
+.search-clear {
+  background: none;
+  border: none;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+}
+
+/* Chart items list */
+.chart-items {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 16px 24px;
+}
+.chart-empty {
+  text-align: center;
+  color: var(--gray);
+  font-size: 14px;
+  padding: 40px 20px;
+}
+.chart-local-notice {
+  text-align: center;
+  color: var(--gray);
+  font-size: 12px;
+  padding: 0 20px 16px;
+  opacity: 0.8;
+}
+.chart-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid #e8e4df;
+  gap: 10px;
+}
+.chart-item-main {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  gap: 12px;
+  cursor: pointer;
+  min-width: 0;
+}
+.chart-item-main:hover .chart-item-name { color: #9b6a30; }
+.chart-gender-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.chart-gender-icon.female { color: #e05a7a; border: 2px solid #e05a7a; }
+.chart-gender-icon.male   { color: #3a8fff; border: 2px solid #3a8fff; }
+.chart-item-info { min-width: 0; }
+.chart-item-name { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chart-item-date { color: var(--gray); font-size: 13px; margin-top: 2px; }
+.chart-item-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.btn-edit {
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  background: #fff;
+  color: #555;
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn-edit:hover { background: #f5f5f5; }
+.btn-delete {
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid #e05a7a;
+  background: #fff;
+  color: #e05a7a;
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn-delete.confirm { background: #e05a7a; color: #fff; }
+.btn-delete:hover { opacity: 0.8; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Sidebar
+═══════════════════════════════════════════════════════════════════════════ */
+.sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+}
+.sidebar-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+}
+.sidebar-drawer {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 280px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 2px 0 12px rgba(0,0,0,0.15);
+  z-index: 1;
+}
+.sidebar-title {
+  padding: 20px 24px 16px;
+  font-size: 17px;
+  font-weight: 700;
+  border-bottom: 1px solid #eee;
+  letter-spacing: 1px;
+}
+.sidebar-account {
+  display: flex;
+  align-items: center;
+  padding: 14px 24px;
+  gap: 12px;
+  font-size: 14px;
+  color: var(--gray);
+  border-bottom: 1px solid #eee;
+}
+.sidebar-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-icon { font-size: 18px; flex-shrink: 0; }
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  padding: 14px 24px;
+  gap: 14px;
+  cursor: pointer;
+  font-size: 15px;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  color: var(--black);
+}
+.sidebar-item:hover { background: #f5f5f5; }
+.sidebar-item-logout { color: #e05a7a; }
+.sidebar-item-bug    { color: var(--darkblue); }
+.sidebar-local-notice {
+  font-size: 12px;
+  color: var(--gray);
+  padding: 4px 24px 12px;
+  opacity: 0.8;
+  line-height: 1.5;
+}
+.sidebar-sync-status { padding: 4px 16px 4px 44px; font-size: 11px; color: var(--gray); }
+.sidebar-sync-error  { color: #c0392b; }
+.sidebar-footer {
+  margin-top: auto;
+  padding: 16px 24px;
+  border-top: 1px solid #eee;
+}
+.sidebar-version {
+  font-size: 11px;
+  color: #d0d0d0;
+  margin-bottom: 8px;
+}
+.sidebar-version-date {
+  opacity: 0.7;
+}
+.sidebar-privacy {
+  background: none;
+  border: none;
+  color: var(--gray);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+}
+.sidebar-privacy:hover { color: var(--black); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Modal (shared: ChartModal + AuthPage)
+═══════════════════════════════════════════════════════════════════════════ */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.modal-box {
+  background: #fff;
+  border-radius: 14px;
+  padding: 24px;
+  width: min(480px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+.modal-title { font-size: 17px; font-weight: 700; }
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: #aaa;
+  padding: 0 4px;
+  line-height: 1;
+}
+.modal-close:hover { color: var(--black); }
+/* 隨機起盤鈕（新增 modal 右上，✕ 左邊；帶文字標籤，手機亦可辨識，不靠 hover） */
+.modal-header-actions { display: flex; align-items: center; gap: 10px; }
+.modal-random-btn {
+  background: var(--cream, #f5f3ee);
+  border: 1px solid #d9d4c8;
+  border-radius: 999px;
+  font-size: 13px; font-weight: 600;
+  color: #6b6456;
+  padding: 4px 10px; cursor: pointer; line-height: 1.2;
+  white-space: nowrap;
+}
+.modal-random-btn:hover { background: #ece8dd; color: var(--black); }
+.modal-random-btn:active { transform: scale(0.96); }
+.modal-field { margin-bottom: 16px; }
+.modal-field > label {
+  display: block;
+  font-size: 13px;
+  color: var(--gray);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+.modal-optional { font-weight: 400; font-size: 11px; }
+.modal-twin-hint { font-size: 11px; color: #888; margin-top: 4px; }
+.modal-advanced-toggle {
+  display: block;
+  width: fit-content;
+  margin: 12px auto 2px;
+  text-align: center;
+  font-size: 13px;
+  color: #777;
+  cursor: pointer;
+  padding: 6px 16px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  user-select: none;
+  letter-spacing: 0.5px;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.modal-advanced-toggle:hover { color: #444; border-color: #999; background: #fafafa; }
+.modal-advanced-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid #f0f0f0; }
+.birth-order-select { display: flex; gap: 8px; }
+.birth-order-btn {
+  flex: 1;
+  padding: 10px 8px;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  cursor: pointer;
+  background: #fff;
+  font-size: 14px;
+  font-family: var(--font);
+  transition: all 0.15s;
+}
+.birth-order-btn.selected { border-color: #7a4a9b; color: #7a4a9b; background: #f5f0fa; }
+.modal-input {
+  width: 100%;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 15px;
+  font-family: var(--font);
+  box-sizing: border-box;
+  outline: none;
+}
+.modal-input:focus { border-color: #9b6a30; }
+.modal-date-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.modal-input-year {
+  width: 76px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 10px 8px;
+  font-size: 15px;
+  text-align: center;
+}
+.modal-input-md {
+  width: 52px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 10px 8px;
+  font-size: 15px;
+  text-align: center;
+}
+.modal-date-sep { color: var(--gray); font-size: 14px; }
+.category-select {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.category-btn {
+  padding: 7px 14px;
+  border: 1.5px solid #ddd;
+  border-radius: 20px;
+  cursor: pointer;
+  background: #fff;
+  font-size: 14px;
+  font-family: var(--font);
+  color: var(--black);
+  transition: all 0.12s;
+}
+.category-btn.selected {
+  border-color: #9b6a30;
+  color: #9b6a30;
+  background: #fdf5ec;
+}
+
+.gender-select {
+  display: flex;
+  gap: 12px;
+}
+.gender-btn {
+  flex: 1;
+  padding: 12px;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  cursor: pointer;
+  background: #fff;
+  font-size: 15px;
+  font-family: var(--font);
+  transition: all 0.15s;
+}
+.gender-btn.selected.female { border-color: #e05a7a; color: #e05a7a; background: #fff0f4; }
+.gender-btn.selected.male   { border-color: #3a8fff; color: #3a8fff; background: #f0f6ff; }
+.btn-confirm {
+  width: 100%;
+  padding: 14px;
+  background: var(--red);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-family: var(--font);
+  cursor: pointer;
+  margin-top: 8px;
+  letter-spacing: 0.5px;
+}
+.btn-confirm:hover { background: #a93226; }
+.btn-confirm:disabled { background: #ccc; cursor: not-allowed; }
+.btn-cancel {
+  width: 100%;
+  padding: 12px;
+  background: none;
+  border: none;
+  color: var(--gray);
+  font-size: 15px;
+  font-family: var(--font);
+  cursor: pointer;
+  margin-top: 4px;
+}
+.btn-cancel:hover { color: var(--black); }
+
+/* ── Auth-specific ── */
+.auth-box { max-width: 400px; }
+.auth-title {
+  font-size: 22px;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 24px;
+  margin-top: 8px;
+}
+.pw-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.pw-row .modal-input { flex: 1; }
+.btn-show-pw {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  color: #888;
+}
+.btn-show-pw:hover { color: #333; }
+.auth-forgot-row { text-align: right; margin-bottom: 8px; }
+.auth-link {
+  background: none;
+  border: none;
+  color: #e05a7a;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0;
+  font-family: var(--font);
+}
+.auth-link:hover { text-decoration: underline; }
+.auth-switch {
+  text-align: center;
+  margin-top: 16px;
+  font-size: 14px;
+  color: var(--gray);
+}
+.form-success {
+  color: #1a7a3c;
+  font-size: 13px;
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  background: #f0fff4;
+  border-radius: 6px;
+}
+
+/* ── Mobile ≤768px: bump chart list font sizes ── */
+@media (max-width: 768px) {
+  .chart-item-name { font-size: 17px; }
+  .chart-item-date { font-size: 15px; }
+  .btn-edit, .btn-delete { font-size: 14px; padding: 5px 12px; }
+}
+
+/* ── Small screens ≤520px ── */
+@media (max-width: 520px) {
+  /* Chd / Ext expand buttons: narrower on mobile to give space to decade cells */
+  .timeline-expand-btn {
+    width: 18px;
+    min-width: 18px;
+    font-size: 8px;
+    letter-spacing: 0;
+  }
+
+  :root {
+    --fs-star:   12px;
+    --fs-pinyin: 10px;
+    --fs-small:  11px;
+  }
+  .mutagen-badge { margin-left: 1px; padding: 0 2px; gap: 0; }
+  /* grid-template-rows is now controlled by big-frame layout (.app.page-chart .chart-grid) */
+  .palace-cell { padding: 2px; }
+  .palace-age  { font-size: 8px; }
+  .badge       { font-size: 8px; padding: 0 2px; }
+  /* swap full↔abbr pinyin on mobile */
+  .badge-pinyin-full                       { display: none; }
+  .badge-pinyin-abbr                       { display: inline; }
+  /* pinyin mode on mobile: same swap, with pinyin styling */
+  [data-lang="pinyin"] .badge-pinyin-full  { display: none; }
+  [data-lang="pinyin"] .badge-pinyin-abbr  { display: inline; font-size: var(--fs-pinyin); font-weight: 700; opacity: 1; }
+
+  .center-name       { font-size: clamp(14px, 4vw, 22px); }
+  .center-time-main  { font-size: clamp(13.6px, 3.8vw, 20.4px); }
+  .center-time-hours { font-size: clamp(9px, 2.2vw, 11.9px); }
+  .center-details { font-size: clamp(10px, 2.6vw, 13px); }
+  .btn-reset, .lang-toggle-inline { font-size: 11px; }
+  .btn-reset      { padding: 4px 10px; }
+
+  /* Chart list: stack action buttons vertically, allow name to wrap */
+  .chart-item-actions { flex-direction: column; gap: 4px; }
+  .chart-item-name    { white-space: normal; }
+}
+
+/* ── Tablet + mobile (≤768px): layout adjustments ── */
+@media (max-width: 768px) {
+  /* palace-br fixed 44px; palace-bl grows to fill remaining space */
+  .palace-br { flex: 0 0 44px; }
+  .palace-bl { flex: 1; min-width: 0; }
+
+  /* name-col takes remaining space after stem-col; long names clip silently */
+  [data-locale="en"] .name-col,
+  [data-show-pinyin="true"] .name-col {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  /* All locales on mobile: age moves above palace name; center slot hidden */
+  .palace-age-center { display: none; }
+  .palace-age-top { display: block; text-align: left; margin-bottom: 1px; }
+
+  /* Mobile en/pinyin only: body badge moves above stem; hide inline badge */
+  [data-locale="en"] .native-id .badge-body,
+  [data-show-pinyin="true"] .native-id .badge-body { display: none; }
+  [data-locale="en"] .badge-body-stem,
+  [data-show-pinyin="true"] .badge-body-stem { display: inline-block; margin-bottom: 1px; }
+
+  /* Mobile zh 無拼音：宮位名 / 博士 / 運線宮名固定小尺寸（桌面用 clamp() 自動縮放）*/
+  [data-show-pinyin="false"][data-locale^="zh"] .doctor-label .star-zh { font-size: 10px; }
+  [data-show-pinyin="false"][data-locale^="zh"] .native-id .id-zh       { font-size: 10px; }
+  [data-show-pinyin="false"][data-locale^="zh"] .id-row.decadal-id .id-zh,
+  [data-show-pinyin="false"][data-locale^="zh"] .id-row.yearly-id  .id-zh,
+  [data-show-pinyin="false"][data-locale^="zh"] .id-row.monthly-id .id-zh,
+  [data-show-pinyin="false"][data-locale^="zh"] .id-row.daily-id   .id-zh { font-size: 9px; }
+
+}
+
+/* ── Privacy Policy modal ───────────────────────────────────────────────────── */
+.privacy-box {
+  max-width: 520px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.privacy-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 20px;
+}
+.privacy-body { display: flex; flex-direction: column; gap: 18px; }
+.privacy-body section h3 {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  color: var(--black);
+}
+.privacy-body section p {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #333;
+  margin-bottom: 4px;
+}
+.privacy-en {
+  color: var(--gray) !important;
+  font-size: 12px !important;
+}
+/* 致謝（About）內文字級略大，獨立於隱私政策 */
+.about-box .privacy-body section h3 { font-size: 16px; }
+.about-box .privacy-body section p  { font-size: 15px; line-height: 1.75; }
+.about-box .privacy-body > p        { font-size: 15px; line-height: 1.75; }
+.about-box .about-note {
+  margin-top: 6px;
+  padding-top: 14px;
+  border-top: 1px solid #eee;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #999;
+}
+
+/* ── Bug Report Modal ──────────────────────────────────────────────────────── */
+.bug-report-modal { max-width: 480px; width: 92vw; }
+.bug-report-form  { display: flex; flex-direction: column; gap: 14px; padding: 16px 24px 24px; }
+.bug-report-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--gray); }
+.bug-report-form input,
+.bug-report-form textarea {
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid #d0ccc8;
+  border-radius: 6px;
+  background: #faf9f7;
+  color: var(--black);
+  resize: vertical;
+  font-family: inherit;
+}
+.bug-report-form input:focus,
+.bug-report-form textarea:focus { outline: none; border-color: var(--blue); }
+.bug-report-error { font-size: 13px; color: #e05a7a; }
+.bug-report-success { display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 32px 24px; text-align: center; }
+.bug-report-success-msg { font-size: 15px; color: var(--black); }
+.bug-report-screenshot { display: flex; flex-direction: column; gap: 6px; }
+.bug-report-screenshot-label { font-size: 13px; color: var(--gray); display: flex; align-items: baseline; gap: 6px; }
+.bug-report-screenshot-hint { font-size: 11px; color: #aaa; }
+.bug-report-file-input { font-size: 13px; color: var(--black); }
+.bug-field-label { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.bug-field-label .field-count { font-size: 11px; color: #aaa; font-weight: 400; white-space: nowrap; }
+.bug-report-preview-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.bug-report-preview-item { position: relative; }
+.bug-report-preview { max-width: 100%; max-height: 120px; object-fit: contain; border-radius: 6px; border: 1px solid var(--border); display: block; }
+.bug-report-preview-remove {
+  position: absolute; top: -6px; right: -6px;
+  width: 20px; height: 20px; border-radius: 50%;
+  border: none; background: rgba(0,0,0,0.65); color: #fff;
+  font-size: 11px; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.bug-report-preview-remove:active { opacity: 0.8; }
+.btn-primary {
+  padding: 10px 20px;
+  background: var(--darkblue);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  align-self: flex-end;
+}
+.btn-primary:hover   { background: #1a3a6e; }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── chip 版選單用樣式（流月/流日 picker；部分為動態 class）─────────── */
+/* 閏月格：淡紫底，與一般月區隔 */
+.adv-leap-cell { background: #f4ecf7; }
+.adv-leap-cell:hover:not(.yearly-active) { background: #ecdff3; }
+
+/* 選中態：picker 動態加 adv-active-${level}（僅 monthly/daily 會生成）*/
+.adv-active-monthly { background: #8a4fb0 !important; color: #fff !important; }
+.adv-active-daily   { background: #c43e8e !important; color: #fff !important; }
+
+/* ── chip 版：保留 timeline，下方加一條細「流月/流日」chip 列 ───────── */
+.adv-chip-row {
+  display: flex; align-items: stretch; gap: 4px;
+  width: 100%; max-width: 980px;
+  padding: 3px 8px;
+  border: 1px solid var(--border); border-top: none;
+  background: #fff;   /* 與上方 timeline 導航列同為白色，整條導航無色差帶 */
+}
+.adv-chip-tag {
+  display: flex; align-items: center;
+  font-size: 11px; font-weight: 700; color: #a89a7c;
+  padding: 0 2px; letter-spacing: 0.5px;
+}
+/* 無外框、省空間：改用淡色塊區分三個 chip（流月淡紫/流日淡粉/📅 淡灰），不用框 */
+.adv-chip {
+  flex: 1 1 0; min-width: 0;
+  display: flex; align-items: baseline; gap: 5px;
+  cursor: pointer;
+  padding: 3px 5px; color: #4a4234; border-radius: 6px;
+}
+.adv-chip-month { background: rgba(138, 79, 176, 0.12); }   /* 淡紫 = 流月層色 */
+.adv-chip-day   { background: rgba(196, 62, 142, 0.12); }   /* 淡粉 = 流日層色 */
+.adv-chip-month:hover { background: rgba(138, 79, 176, 0.2); }
+.adv-chip-day:hover   { background: rgba(196, 62, 142, 0.2); }
+.adv-chip-k { font-weight: 700; font-size: clamp(12px, 3.2vw, 14px); white-space: nowrap; }
+.adv-chip-v { font-size: clamp(11px, 2.8vw, 13px); opacity: 0.78; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.adv-chip-caret { font-size: 0.7em; opacity: 0.5; }
+/* 拆兩半：標籤(adv-chip-refocus) = 再按一次該層(切焦點)；值(adv-chip-open) = 開選單 */
+.adv-chip-refocus, .adv-chip-open {
+  background: none; border: none; margin: 0; padding: 0;
+  color: inherit; cursor: pointer; font-family: inherit;
+  display: inline-flex; align-items: baseline; gap: 5px;
+}
+.adv-chip-refocus { flex: 0 0 auto; padding-right: 7px; border-right: 1px solid rgba(0,0,0,0.18); }
+.adv-chip-refocus:hover { text-decoration: underline; }
+.adv-chip-open { flex: 1 1 0; min-width: 0; padding-left: 7px; }
+.adv-sheet-ctx { font-weight: 400; font-size: 12px; color: #8a7a5c; }
+/* 選中時：只反白「值」半邊（右，開選單）；左半邊「流月/流日」標籤維持中性，兩半分明 */
+.adv-chip-on .adv-chip-open { color: #fff; border-radius: 5px; padding: 2px 7px; margin: -2px -2px -2px 0; }
+.adv-chip-on .adv-chip-open .adv-chip-v { opacity: 0.95; }
+.adv-chip-monthly .adv-chip-open { background: #8a4fb0; }
+.adv-chip-daily   .adv-chip-open { background: #c43e8e; }
+.adv-chip-today {
+  flex: 0 0 auto;
+  border: none; background: rgba(0, 0, 0, 0.06);   /* 淡灰色塊，與兩個 chip 一致可辨 */
+  color: #7a5c3a; font-size: clamp(15px, 4vw, 18px);
+  padding: 0 8px; cursor: pointer; border-radius: 6px;
+}
+.adv-chip-today:hover { background: rgba(0,0,0,0.12); color: #4a3010; }
+
+/* 日期彈窗：點 📅 → 中間彈出，預設今天，可選/輸入任一西元日 */
+.adv-date-backdrop { justify-content: center !important; align-items: center !important; }
+.adv-date-pop {
+  background: #fff; border-radius: 14px;
+  width: 94%;                          /* maxWidth/maxHeight 由 JS 依螢幕量測，inline 套用 */
+  display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.22);
+  animation: adv-slide 0.18s cubic-bezier(.2,.8,.2,1);
+}
+.adv-date-pop .adv-sheet-head { flex: 0 0 auto; }
+
+/* 年/月/日 直接輸入 */
+.adv-cal-inputs { flex: 0 0 auto; display: flex; gap: 8px; padding: 12px 14px 4px; }
+.adv-cal-inputs label {
+  flex: 1; display: flex; align-items: center; gap: 4px;
+  font-size: 12px; font-weight: 700; color: #a89a7c;
+}
+.adv-cal-inputs input {
+  flex: 1; width: 100%; min-width: 0;
+  border: 1px solid var(--border); border-radius: 7px;
+  padding: 8px 6px; font-size: 16px; color: #4a4234; text-align: center;
+}
+
+/* 自繪月曆：可捲動區（永遠在彈窗內、不外溢）*/
+.adv-cal { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px 14px 4px; }
+.adv-cal-nav { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 2px 0 10px; }
+.adv-cal-title { font-weight: 700; font-size: 15px; color: #4a4234; flex: 1; text-align: center; }
+.adv-cal-arrow {
+  flex: 0 0 auto;
+  border: 1px solid var(--border); border-radius: 7px; background: #f5f0ea;
+  color: #7a5c3a; font-size: 16px; line-height: 1; width: 32px; height: 32px; cursor: pointer;
+}
+.adv-cal-arrow:hover { background: #e8e0d5; }
+.adv-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.adv-cal-wd { text-align: center; font-size: 11px; color: #a89a7c; padding: 2px 0 4px; }
+.adv-cal-blank { min-height: 34px; }
+.adv-cal-day {
+  min-height: clamp(30px, 8vw, 40px);
+  border: 1px solid transparent; border-radius: 8px;
+  background: #f7f3ec; color: #4a4234; font-size: 14px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.adv-cal-day:hover { background: #ece5d8; }
+.adv-cal-today { box-shadow: inset 0 0 0 2px #d4a017; }
+.adv-cal-sel { background: #c43e8e; color: #fff; border-color: transparent; }
+.adv-cal-todaybtn {
+  flex: 0 0 auto; margin: 10px 14px 14px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: #f5f0ea; color: #7a5c3a; font-weight: 700;
+  padding: 10px; font-size: 14px; cursor: pointer;
+}
+.adv-cal-todaybtn:hover { background: #e8e0d5; }
+
+/* ── 彈出選單 bottom sheet（手機優先：底部滑出）──────────────── */
+.adv-sheet-backdrop {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,0.38);
+  display: flex; flex-direction: column; justify-content: flex-end;
+  animation: adv-fade 0.15s ease;
+}
+@keyframes adv-fade { from { opacity: 0; } to { opacity: 1; } }
+.adv-sheet {
+  background: #fff;
+  border-radius: 16px 16px 0 0;
+  max-height: 70vh; display: flex; flex-direction: column;
+  box-shadow: 0 -4px 24px rgba(0,0,0,0.18);
+  animation: adv-slide 0.2s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes adv-slide { from { transform: translateY(100%); } to { transform: translateY(0); } }
+/* 桌面：置中靠下、限寬 */
+@media (min-width: 769px) {
+  .adv-sheet-backdrop { justify-content: center; align-items: center; }
+  .adv-sheet { max-width: 560px; width: 92%; border-radius: 14px; max-height: 76vh; }
+  @keyframes adv-slide { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+}
+.adv-sheet-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px; border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.adv-sheet-title { font-weight: 700; font-size: 16px; color: #4a4234; flex: 1; }
+.adv-sheet-today {
+  border: 1px solid var(--border); border-radius: 6px;
+  background: #f5f0ea; color: #7a5c3a; font-weight: 700;
+  padding: 5px 12px; font-size: 14px; cursor: pointer;
+}
+.adv-sheet-close {
+  border: none; background: none; color: #9a9384;
+  font-size: 18px; padding: 4px 8px; cursor: pointer; line-height: 1;
+}
+.adv-sheet-grid {
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 12px; display: grid; gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+}
+/* 流日 36×… 多項 → 更密的格 */
+.adv-sheet-grid-daily { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+/* 流月：干支分兩行 + 日期範圍 → 格子寬一點 */
+.adv-sheet-grid-monthly { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); }
+
+.adv-opt {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; min-height: 52px; padding: 8px 6px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: #fff; color: #4a4234; cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.adv-opt:hover { background: #f3efe7; }
+.adv-opt-label { font-weight: 700; font-size: clamp(13px, 3.6vw, 15px); white-space: nowrap; }
+.adv-opt-sub { font-size: clamp(10px, 2.6vw, 12px); opacity: 0.72; white-space: nowrap; }
+.adv-opt-active { color: #fff; border-color: transparent; }
+.adv-opt-active .adv-opt-sub { opacity: 0.92; }
+.adv-opt-now { box-shadow: inset 0 0 0 2px #d4a017; }
+
+/* 日名 + 換干小標 同一行(小標放日名旁、字較小) */
+.adv-opt-labelrow {
+  display: flex; align-items: baseline; justify-content: center;
+  flex-wrap: wrap; gap: 2px 4px;
+}
+/* 換干「起點」：跨節當天 → 左實線；「終點」：前一日 → 右虛線 */
+.adv-opt-switch { border-left: 3px solid #b5523f; }
+.adv-opt-switchend { border-right: 3px dashed #b5523f; }
+.adv-opt-mark {
+  font-size: clamp(9px, 2.4vw, 11px); font-weight: 700;
+  color: #b5523f; line-height: 1.1; white-space: nowrap;
+}
+.adv-opt-mark-end { color: #9a8a6a; }
+.adv-opt-active .adv-opt-mark { color: #ffd9cf; }
+.adv-opt-active .adv-opt-mark-end { color: #f0e6d8; }
+
