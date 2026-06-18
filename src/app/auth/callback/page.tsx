@@ -15,8 +15,17 @@ function AuthCallbackContent() {
     async function finishLogin() {
       try {
         const supabase = getSupabaseBrowserClient()
-        const { error } = await supabase.auth.exchangeCodeForSession(window.location.href)
-        if (error) throw error
+        const code = searchParams.get('code')
+
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code)
+          if (error) throw error
+        } else {
+          const { data } = await supabase.auth.getSession()
+          if (!data.session) {
+            throw new Error('登入連結已失效，請回首頁重新登入。')
+          }
+        }
 
         if (!cancelled) {
           const next = searchParams.get('next') || '/account'
