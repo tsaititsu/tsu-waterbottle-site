@@ -4,7 +4,7 @@ import { CalendarDays, CheckCircle2 } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { ActionButton } from './ActionButton'
 import { bookingPlans, getBookingPlan } from '@/lib/bookingPlans'
-import { getMockUser } from '@/lib/mockAuth'
+import { getAuthAccessToken, getMockUser } from '@/lib/mockAuth'
 import { hasBookingConflict, savePendingBooking, type BookingFormInput } from '@/lib/mockBooking'
 
 const availableSlots = ['13:00', '15:00', '17:00']
@@ -74,7 +74,8 @@ export function BookingForm() {
   })
 
   const buildInput = (): BookingFormInput | null => {
-    if (!getMockUser()) {
+    const user = getMockUser()
+    if (!user) {
       setFormError('請先登入會員，再進行水瓶先生論命預約。')
       return null
     }
@@ -96,6 +97,7 @@ export function BookingForm() {
     }
 
     return {
+      userId: user.id,
       planId,
       startTime,
       endTime,
@@ -119,9 +121,13 @@ export function BookingForm() {
 
     let bookingId: string | undefined
     try {
+      const accessToken = await getAuthAccessToken()
       const response = await fetch('/api/bookings/create', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
+        },
         body: JSON.stringify(input)
       })
       const data = await response.json().catch(() => ({}))

@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server'
 import { getBookingPlan } from '@/lib/bookingPlans'
+import { getUserIdFromRequest } from '@/lib/supabase/auth'
 import { createSupabaseBooking } from '@/lib/supabase/bookings'
 
 export async function POST(req: Request) {
   try {
     const body = await req.json()
+    const userId = await getUserIdFromRequest(req)
     const plan = getBookingPlan(body.planId)
 
     if (!plan) {
@@ -14,7 +16,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, message: '預約資料不完整' }, { status: 400 })
     }
 
-    const booking = await createSupabaseBooking(body)
+    const booking = await createSupabaseBooking({ ...body, userId: userId ?? body.userId })
     const bookingId = booking?.id ?? `mock-booking-${Date.now()}`
     const paymentId = `mock-payment-${Date.now()}`
 

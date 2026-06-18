@@ -4,6 +4,7 @@ import { getSupabaseAdmin, hasSupabaseAdminConfig } from './admin'
 
 type BookingRow = {
   id: string
+  user_id: string | null
   plan_id: string | null
   plan_name: string
   amount_twd: number
@@ -44,7 +45,7 @@ function normalizeBirthTime(value: string) {
 export function mapBookingRow(row: BookingRow): BookingRecord {
   return {
     id: row.id,
-    userId: 'supabase',
+    userId: row.user_id ?? 'supabase',
     planId: row.plan_id ?? '',
     planName: row.plan_name,
     durationMinutes: getBookingPlan(row.plan_id ?? '')?.durationMinutes ?? 60,
@@ -90,6 +91,7 @@ export async function createSupabaseBooking(input: BookingFormInput) {
     .from('bookings')
     .insert({
       plan_id: input.planId,
+      user_id: input.userId ?? null,
       plan_name: plan.name,
       amount_twd: plan.price,
       currency: 'TWD',
@@ -118,15 +120,21 @@ export async function createSupabaseBooking(input: BookingFormInput) {
   return mapBookingRow(data as BookingRow)
 }
 
-export async function listSupabaseBookings() {
+export async function listSupabaseBookings(userId?: string) {
   if (!hasSupabaseAdminConfig()) return []
 
   const supabase = getSupabaseAdmin()
-  const { data, error } = await supabase
+  let query = supabase
     .from('bookings')
     .select('*')
     .order('starts_at', { ascending: false })
     .limit(100)
+
+  if (userId) {
+    query = query.eq('user_id', userId)
+  }
+
+  const { data, error } = await query
 
   if (error) throw new Error(error.message)
   return (data as BookingRow[]).map(mapBookingRow)

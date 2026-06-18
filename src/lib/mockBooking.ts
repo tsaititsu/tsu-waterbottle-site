@@ -6,6 +6,7 @@ import { getBookingPlan } from './bookingPlans'
 export type BookingStatus = 'pending_payment' | 'paid' | 'confirmed' | 'cancelled' | 'failed'
 
 export type BookingFormInput = {
+  userId?: string
   planId: string
   startTime: string
   endTime: string

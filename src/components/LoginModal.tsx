@@ -3,6 +3,7 @@
 import { X } from 'lucide-react'
 import { loginWithProvider } from '@/lib/mockAuth'
 import { LogoMark } from './LogoMark'
+import { useState } from 'react'
 
 type LoginModalProps = {
   open: boolean
@@ -11,12 +12,21 @@ type LoginModalProps = {
 }
 
 export function LoginModal({ open, onClose, onSuccess }: LoginModalProps) {
+  const [error, setError] = useState('')
+  const [loadingProvider, setLoadingProvider] = useState<'line' | 'google' | ''>('')
+
   if (!open) return null
 
-  const handleLogin = (provider: 'line' | 'google') => {
-    loginWithProvider(provider)
-    onSuccess?.()
-    onClose()
+  const handleLogin = async (provider: 'line' | 'google') => {
+    setError('')
+    setLoadingProvider(provider)
+    try {
+      await loginWithProvider(provider)
+      onSuccess?.()
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : '登入失敗，請稍後再試。')
+      setLoadingProvider('')
+    }
   }
 
   return (
@@ -41,18 +51,21 @@ export function LoginModal({ open, onClose, onSuccess }: LoginModalProps) {
           <button
             className="focus-ring w-full rounded-lg bg-lineGreen px-4 py-3 font-semibold text-white"
             onClick={() => handleLogin('line')}
+            disabled={Boolean(loadingProvider)}
             type="button"
           >
-            使用 LINE 登入
+            {loadingProvider === 'line' ? '前往 LINE...' : '使用 LINE 登入'}
           </button>
           <button
             className="focus-ring w-full rounded-lg border border-[#D9D9E3] bg-white px-4 py-3 font-semibold text-textDark"
             onClick={() => handleLogin('google')}
+            disabled={Boolean(loadingProvider)}
             type="button"
           >
-            使用 Google Email 登入
+            {loadingProvider === 'google' ? '前往 Google...' : '使用 Google 帳號登入'}
           </button>
         </div>
+        {error && <p className="mt-4 rounded-lg bg-softPurple px-4 py-3 text-sm font-semibold text-deepPurple">{error}</p>}
       </div>
     </div>
   )

@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { LoginModal } from '@/components/LoginModal'
 import { PageHero } from '@/components/PageHero'
-import { getMockUser, subscribeAuthChange, type UserProfile } from '@/lib/mockAuth'
+import { getAuthAccessToken, getMockUser, subscribeAuthChange, type UserProfile } from '@/lib/mockAuth'
 import { getUserBookingRecords, subscribeBookingChange, updateBookingRecord, type BookingRecord } from '@/lib/mockBooking'
 
 const cancellationLimitHours = 24
@@ -51,7 +51,10 @@ export default function AccountBookingsPage() {
 
     async function loadBookings() {
       try {
-        const response = await fetch('/api/bookings/list')
+        const accessToken = await getAuthAccessToken()
+        const response = await fetch('/api/bookings/list', {
+          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {}
+        })
         const data = await response.json().catch(() => ({}))
         if (!cancelled && response.ok && data.ok !== false && Array.isArray(data.bookings)) {
           setBookings(data.bookings)
