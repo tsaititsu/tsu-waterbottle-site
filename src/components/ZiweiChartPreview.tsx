@@ -56,15 +56,17 @@ export function ZiweiChartPreview() {
           )
         })}
 
-        <div className="col-start-2 col-end-4 row-start-2 row-end-4 grid place-items-center border border-[#d9cbea] bg-white/12 px-5 backdrop-blur-sm">
-          <Image
-            src="/brand/waterbottle-logo-transparent.png"
-            alt="WATERBOTTLE"
-            width={150}
-            height={150}
-            className="h-36 w-36 object-contain opacity-80 md:h-56 md:w-56"
-            priority
-          />
+        <div className="col-start-2 col-end-4 row-start-2 row-end-4 flex items-center justify-center border border-[#d9cbea] bg-white/12 px-5 backdrop-blur-sm">
+          <div className="relative h-[62%] w-[62%] md:h-[70%] md:w-[70%]">
+            <Image
+              src="/brand/waterbottle-logo-transparent-cropped.png"
+              alt="WATERBOTTLE"
+              fill
+              sizes="(max-width: 768px) 160px, 260px"
+              className="object-contain opacity-80"
+              priority
+            />
+          </div>
         </div>
       </div>
     </div>

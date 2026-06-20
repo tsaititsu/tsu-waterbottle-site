@@ -106,6 +106,10 @@ export function getMockUser(): UserProfile | null {
 }
 
 export async function loginWithProvider(provider: 'line' | 'google') {
+  if (provider === 'line') {
+    throw new Error('LINE 登入正在準備中，請先使用 Google 登入。')
+  }
+
   if (!hasSupabaseBrowserConfig()) {
     throw new Error('Supabase 登入尚未設定完成')
   }
@@ -115,7 +119,7 @@ export async function loginWithProvider(provider: 'line' | 'google') {
   const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(currentPath || '/account')}`
 
   const { error } = await supabase.auth.signInWithOAuth({
-    provider: provider as 'google',
+    provider: 'google',
     options: {
       redirectTo
     }
