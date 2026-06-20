@@ -27,6 +27,22 @@ function AuthCallbackContent() {
           }
         }
 
+        const { data: sessionData } = await supabase.auth.getSession()
+        const accessToken = sessionData.session?.access_token
+
+        if (accessToken) {
+          try {
+            await fetch('/api/auth/sync-profile', {
+              method: 'POST',
+              headers: {
+                authorization: `Bearer ${accessToken}`
+              }
+            })
+          } catch (syncError) {
+            console.warn('Profile sync failed', syncError)
+          }
+        }
+
         if (!cancelled) {
           const next = searchParams.get('next') || '/account'
           router.replace(next.startsWith('/') ? next : '/account')

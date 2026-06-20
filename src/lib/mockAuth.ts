@@ -19,6 +19,7 @@ const AUTH_CHANGE_EVENT = 'waterbottle-auth-change'
 
 let cachedUser: UserProfile | null = null
 let initialized = false
+const syncedProfileUserIds = new Set<string>()
 
 function notifyAuthChange() {
   if (typeof window === 'undefined') return
@@ -63,6 +64,37 @@ function getLegacyMockUser(): UserProfile | null {
   }
 }
 
+async function syncProfileToServer() {
+  if (typeof window === 'undefined' || !hasSupabaseBrowserConfig()) return
+
+  let userId: string | undefined
+
+  try {
+    const supabase = getSupabaseBrowserClient()
+    const { data } = await supabase.auth.getSession()
+    const session = data.session
+    userId = session?.user.id
+    const accessToken = session?.access_token
+
+    if (!userId || !accessToken || syncedProfileUserIds.has(userId)) return
+
+    syncedProfileUserIds.add(userId)
+
+    const response = await fetch('/api/auth/sync-profile', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+      },
+    })
+
+    if (!response.ok) {
+      syncedProfileUserIds.delete(userId)
+    }
+  } catch {
+    if (userId) syncedProfileUserIds.delete(userId)
+  }
+}
+
 export async function refreshAuthUser() {
   if (typeof window === 'undefined' || !hasSupabaseBrowserConfig()) return cachedUser
 
@@ -70,8 +102,14 @@ export async function refreshAuthUser() {
     const supabase = getSupabaseBrowserClient()
     const { data } = await supabase.auth.getUser()
     cachedUser = data.user ? profileFromSupabaseUser(data.user) : null
+    if (cachedUser) {
+      void syncProfileToServer()
+    } else {
+      syncedProfileUserIds.clear()
+    }
   } catch {
     cachedUser = null
+    syncedProfileUserIds.clear()
   }
 
   notifyAuthChange()
@@ -93,6 +131,11 @@ function ensureAuthListener() {
   const supabase = getSupabaseBrowserClient()
   const { data } = supabase.auth.onAuthStateChange((_event, session) => {
     cachedUser = session?.user ? profileFromSupabaseUser(session.user) : null
+    if (cachedUser) {
+      void syncProfileToServer()
+    } else {
+      syncedProfileUserIds.clear()
+    }
     notifyAuthChange()
   })
   // Keep one shared auth listener for the whole tab; pages mount/unmount independently.
@@ -132,11 +175,13 @@ export function logoutMockUser() {
   if (typeof window === 'undefined') return
   window.localStorage.removeItem(LEGACY_USER_KEY)
   cachedUser = null
+  syncedProfileUserIds.clear()
   notifyAuthChange()
 
   if (hasSupabaseBrowserConfig()) {
     void getSupabaseBrowserClient().auth.signOut().finally(() => {
       cachedUser = null
+      syncedProfileUserIds.clear()
       notifyAuthChange()
     })
   }
