@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { CalendarCheck, FileText, LogOut, Menu, Sparkles, UserRound, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   getMockUser,
   loginWithProvider,
@@ -26,6 +26,7 @@ export function Header() {
   const pathname = usePathname()
   const [menuOpen, setMenuOpen] = useState(false)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
+  const accountMenuRef = useRef<HTMLDivElement | null>(null)
   const [loginMessage, setLoginMessage] = useState('')
   const [loadingProvider, setLoadingProvider] = useState<'line' | 'google' | ''>('')
   const [user, setUser] = useState<UserProfile | null>(null)
@@ -40,6 +41,18 @@ export function Header() {
     setMenuOpen(false)
     setAccountMenuOpen(false)
   }, [pathname])
+
+  useEffect(() => {
+    if (!accountMenuOpen) return
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (accountMenuRef.current?.contains(event.target as Node)) return
+      setAccountMenuOpen(false)
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    return () => document.removeEventListener('mousedown', handlePointerDown)
+  }, [accountMenuOpen])
 
   const handleProviderLogin = async (provider: 'line' | 'google') => {
     setLoginMessage('')
@@ -60,25 +73,25 @@ export function Header() {
   }
 
   const accountMenu = user ? (
-    <div className="absolute right-0 top-[calc(100%+14px)] z-50 w-[330px] overflow-hidden rounded-xl bg-[#050505] text-white shadow-2xl ring-1 ring-white/10">
-      <div className="bg-[#1c1c1f] px-6 py-5">
+    <div className="absolute right-0 top-[calc(100%+14px)] z-50 w-[340px] overflow-hidden rounded-[20px] bg-[#050505] text-white shadow-2xl ring-1 ring-white/10">
+      <div className="bg-[#1c1c1f] px-7 py-6">
         <p className="text-lg font-semibold">{user.displayName || 'WATERBOTTLE 會員'}</p>
         {user.googleEmail ? <p className="mt-1 text-sm text-white/60">{user.googleEmail}</p> : null}
       </div>
-      <nav className="grid py-3 text-[17px] font-semibold">
-        <Link href="/account" className="flex items-center gap-4 px-6 py-4 transition hover:bg-white/10">
+      <nav className="grid py-3 text-lg font-semibold">
+        <Link href="/account" className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
           <UserRound size={22} />
           會員中心
         </Link>
-        <Link href="/account/bookings" className="flex items-center gap-4 px-6 py-4 transition hover:bg-white/10">
+        <Link href="/account/bookings" className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
           <CalendarCheck size={22} />
           我的預約
         </Link>
-        <Link href="/ai-chart" className="flex items-center gap-4 px-6 py-4 transition hover:bg-white/10">
+        <Link href="/ai-chart" className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
           <FileText size={22} />
           命盤紀錄
         </Link>
-        <Link href="/ai-divination" className="flex items-center gap-4 px-6 py-4 transition hover:bg-white/10">
+        <Link href="/ai-divination" className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
           <Sparkles size={22} />
           紫微牌卡占卜
         </Link>
@@ -86,15 +99,15 @@ export function Header() {
       <button
         type="button"
         onClick={handleLogout}
-        className="flex w-full items-center gap-4 border-t border-white/15 bg-[#1c1c1f] px-6 py-5 text-left text-[17px] font-semibold transition hover:bg-white/10"
+        className="flex w-full items-center gap-5 border-t border-white/15 bg-[#1c1c1f] px-7 py-5 text-left text-lg font-semibold transition hover:bg-white/10"
       >
         <LogOut size={22} />
         登出
       </button>
     </div>
   ) : (
-    <div className="absolute right-0 top-[calc(100%+14px)] z-50 w-[330px] overflow-hidden rounded-xl bg-[#050505] text-white shadow-2xl ring-1 ring-white/10">
-      <div className="bg-[#1c1c1f] px-6 py-5">
+    <div className="absolute right-0 top-[calc(100%+14px)] z-50 w-[340px] overflow-hidden rounded-[20px] bg-[#050505] text-white shadow-2xl ring-1 ring-white/10">
+      <div className="bg-[#1c1c1f] px-7 py-6">
         <p className="text-lg font-semibold">會員登入</p>
         <p className="mt-1 text-sm leading-relaxed text-white/60">登入後可保存命盤、預約與課程紀錄。</p>
       </div>
@@ -172,7 +185,7 @@ export function Header() {
           ))}
         </nav>
 
-        <div className="relative hidden lg:block">
+        <div ref={accountMenuRef} className="relative hidden lg:block">
           <button
             type="button"
             onClick={() => setAccountMenuOpen((open) => !open)}

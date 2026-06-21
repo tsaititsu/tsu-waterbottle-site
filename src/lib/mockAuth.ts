@@ -1,18 +1,10 @@
 'use client'
 
 import type { User } from '@supabase/supabase-js'
+import type { UserProfile } from './auth/types'
 import { getSupabaseBrowserClient, hasSupabaseBrowserConfig } from './supabase/client'
 
-export type UserProfile = {
-  id: string
-  provider: 'line' | 'google'
-  lineUserId?: string
-  googleEmail?: string
-  displayName?: string
-  avatarUrl?: string
-  createdAt: string
-  lastLoginAt: string
-}
+export type { UserProfile } from './auth/types'
 
 const LEGACY_USER_KEY = 'waterbottle_mock_user'
 const AUTH_CHANGE_EVENT = 'waterbottle-auth-change'
@@ -26,26 +18,66 @@ function notifyAuthChange() {
   window.dispatchEvent(new Event(AUTH_CHANGE_EVENT))
 }
 
+type MetadataRecord = Record<string, unknown>
+
+type SupabaseIdentity = {
+  id?: string | null
+  provider?: string | null
+  identity_data?: MetadataRecord | null
+}
+
+function metadataText(metadata: MetadataRecord | null | undefined, keys: string[]) {
+  if (!metadata) return undefined
+
+  for (const key of keys) {
+    const value = metadata[key]
+    if (typeof value === 'string' && value.trim()) return value
+  }
+
+  return undefined
+}
+
+function identityList(user: Pick<User, 'identities'>) {
+  return Array.isArray(user.identities) ? (user.identities as SupabaseIdentity[]) : []
+}
+
+function isLineProvider(value: unknown) {
+  return value === 'line' || value === 'custom:line'
+}
+
 function providerFromUser(user: User): UserProfile['provider'] {
-  return user.app_metadata.provider === 'line' ? 'line' : 'google'
+  const appMetadata = (user.app_metadata ?? {}) as MetadataRecord
+  const providers = Array.isArray(appMetadata.providers) ? appMetadata.providers : []
+
+  if (isLineProvider(appMetadata.provider) || providers.some(isLineProvider)) return 'line'
+  return identityList(user).some((identity) => isLineProvider(identity.provider)) ? 'line' : 'google'
+}
+
+function lineUserIdFromUser(user: User) {
+  const userMetadata = (user.user_metadata ?? {}) as MetadataRecord
+  const metadataId = metadataText(userMetadata, ['line_user_id', 'provider_id', 'sub', 'user_id', 'userId'])
+
+  if (metadataId) return metadataId
+
+  const lineIdentity = identityList(user).find((identity) => isLineProvider(identity.provider))
+  return metadataText(lineIdentity?.identity_data, ['provider_id', 'sub', 'user_id', 'userId']) ?? lineIdentity?.id ?? user.id
 }
 
 function profileFromSupabaseUser(user: User): UserProfile {
   const provider = providerFromUser(user)
+  const userMetadata = (user.user_metadata ?? {}) as MetadataRecord
   const displayName =
-    user.user_metadata.full_name ||
-    user.user_metadata.name ||
-    user.user_metadata.display_name ||
+    metadataText(userMetadata, ['full_name', 'name', 'display_name', 'preferred_username']) ||
     user.email ||
     (provider === 'line' ? 'LINE 會員' : 'Google 會員')
 
   return {
     id: user.id,
     provider,
-    lineUserId: provider === 'line' ? String(user.user_metadata.provider_id || user.user_metadata.sub || user.id) : undefined,
+    lineUserId: provider === 'line' ? lineUserIdFromUser(user) : undefined,
     googleEmail: user.email ?? undefined,
     displayName,
-    avatarUrl: user.user_metadata.avatar_url || user.user_metadata.picture || '',
+    avatarUrl: metadataText(userMetadata, ['avatar_url', 'picture']) || '',
     createdAt: user.created_at,
     lastLoginAt: new Date().toISOString()
   }
@@ -149,10 +181,6 @@ export function getMockUser(): UserProfile | null {
 }
 
 export async function loginWithProvider(provider: 'line' | 'google') {
-  if (provider === 'line') {
-    throw new Error('LINE 登入正在準備中，請先使用 Google 登入。')
-  }
-
   if (!hasSupabaseBrowserConfig()) {
     throw new Error('Supabase 登入尚未設定完成')
   }
@@ -160,11 +188,14 @@ export async function loginWithProvider(provider: 'line' | 'google') {
   const supabase = getSupabaseBrowserClient()
   const currentPath = `${window.location.pathname}${window.location.search}`
   const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(currentPath || '/account')}`
+  type OAuthProvider = Parameters<typeof supabase.auth.signInWithOAuth>[0]['provider']
+  const oauthProvider = provider === 'line' ? 'custom:line' : 'google'
 
   const { error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
+    provider: oauthProvider as OAuthProvider,
     options: {
-      redirectTo
+      redirectTo,
+      ...(provider === 'line' ? { scopes: 'openid profile email' } : {})
     }
   })
 

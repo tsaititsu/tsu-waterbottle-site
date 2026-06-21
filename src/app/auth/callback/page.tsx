@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { refreshAuthUser } from '@/lib/mockAuth'
 import { getSupabaseBrowserClient } from '@/lib/supabase/client'
 
 function AuthCallbackContent() {
@@ -15,7 +16,12 @@ function AuthCallbackContent() {
     async function finishLogin() {
       try {
         const supabase = getSupabaseBrowserClient()
+        const oauthError = searchParams.get('error_description') || searchParams.get('error')
         const code = searchParams.get('code')
+
+        if (oauthError) {
+          throw new Error(oauthError)
+        }
 
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code)
@@ -43,6 +49,8 @@ function AuthCallbackContent() {
           }
         }
 
+        await refreshAuthUser()
+
         if (!cancelled) {
           const next = searchParams.get('next') || '/account'
           router.replace(next.startsWith('/') ? next : '/account')
@@ -50,7 +58,15 @@ function AuthCallbackContent() {
         }
       } catch (error) {
         if (!cancelled) {
-          setMessage(error instanceof Error ? `登入失敗：${error.message}` : '登入失敗，請回首頁重新登入。')
+          const errorMessage = error instanceof Error ? error.message : ''
+          const friendlyMessage =
+            errorMessage.includes('code verifier') || errorMessage.includes('auth code')
+              ? '登入狀態已過期，請回首頁重新按一次登入。'
+              : errorMessage
+                ? `登入失敗：${errorMessage}`
+                : '登入失敗，請回首頁重新登入。'
+
+          setMessage(friendlyMessage)
         }
       }
     }

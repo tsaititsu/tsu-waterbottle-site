@@ -1,15 +1,50 @@
 import { NextResponse } from 'next/server'
+import type { User } from '@supabase/supabase-js'
 import { getSupabaseAdmin, hasSupabaseAdminConfig } from '@/lib/supabase/admin'
 
-type UserMetadata = Record<string, unknown>
+type MetadataRecord = Record<string, unknown>
 
-function metadataText(metadata: UserMetadata, keys: string[]) {
+type SupabaseIdentity = {
+  id?: string | null
+  provider?: string | null
+  identity_data?: MetadataRecord | null
+}
+
+function metadataText(metadata: MetadataRecord | null | undefined, keys: string[]) {
+  if (!metadata) return null
+
   for (const key of keys) {
     const value = metadata[key]
     if (typeof value === 'string' && value.trim()) return value
   }
 
   return null
+}
+
+function identityList(user: Pick<User, 'identities'>) {
+  return Array.isArray(user.identities) ? (user.identities as SupabaseIdentity[]) : []
+}
+
+function isLineProvider(value: unknown) {
+  return value === 'line' || value === 'custom:line'
+}
+
+function providerFromUser(user: User): 'line' | 'google' {
+  const appMetadata = (user.app_metadata ?? {}) as MetadataRecord
+  const providers = Array.isArray(appMetadata.providers) ? appMetadata.providers : []
+
+  if (isLineProvider(appMetadata.provider) || providers.some(isLineProvider)) return 'line'
+  return identityList(user).some((identity) => isLineProvider(identity.provider)) ? 'line' : 'google'
+}
+
+function lineUserIdFromUser(user: User) {
+  const userMetadata = (user.user_metadata ?? {}) as MetadataRecord
+  const metadataId = metadataText(userMetadata, ['line_user_id', 'provider_id', 'sub', 'user_id', 'userId'])
+
+  if (metadataId) return metadataId
+
+  const lineIdentity = identityList(user).find((identity) => isLineProvider(identity.provider))
+  return metadataText(lineIdentity?.identity_data, ['provider_id', 'sub', 'user_id', 'userId']) ?? lineIdentity?.id ?? user.id
 }
 
 export async function POST(req: Request) {
@@ -32,16 +67,14 @@ export async function POST(req: Request) {
   }
 
   const user = data.user
-  const userMetadata = (user.user_metadata ?? {}) as UserMetadata
-  const appMetadata = (user.app_metadata ?? {}) as UserMetadata
-  const provider = appMetadata.provider === 'line' ? 'line' : 'google'
+  const userMetadata = (user.user_metadata ?? {}) as MetadataRecord
+  const provider = providerFromUser(user)
   const displayName =
-    metadataText(userMetadata, ['full_name', 'name', 'display_name']) ??
+    metadataText(userMetadata, ['full_name', 'name', 'display_name', 'preferred_username']) ??
     user.email ??
     (provider === 'line' ? 'LINE 會員' : 'Google 會員')
   const avatarUrl = metadataText(userMetadata, ['avatar_url', 'picture'])
-  const lineUserId =
-    provider === 'line' ? metadataText(userMetadata, ['provider_id', 'sub']) ?? user.id : null
+  const lineUserId = provider === 'line' ? lineUserIdFromUser(user) : null
 
   const { error: upsertError } = await supabase.from('profiles').upsert(
     {
