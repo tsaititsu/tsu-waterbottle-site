@@ -8,6 +8,8 @@ export type { UserProfile } from './auth/types'
 
 const LEGACY_USER_KEY = 'waterbottle_mock_user'
 const AUTH_CHANGE_EVENT = 'waterbottle-auth-change'
+const LINE_OAUTH_PROVIDER =
+  process.env.NEXT_PUBLIC_SUPABASE_LINE_PROVIDER?.trim() || 'custom:line'
 
 let cachedUser: UserProfile | null = null
 let initialized = false
@@ -42,7 +44,10 @@ function identityList(user: Pick<User, 'identities'>) {
 }
 
 function isLineProvider(value: unknown) {
-  return value === 'line' || value === 'custom:line'
+  return (
+    typeof value === 'string' &&
+    ['line', 'custom:line', LINE_OAUTH_PROVIDER].includes(value)
+  )
 }
 
 function providerFromUser(user: User): UserProfile['provider'] {
@@ -189,13 +194,13 @@ export async function loginWithProvider(provider: 'line' | 'google') {
   const currentPath = `${window.location.pathname}${window.location.search}`
   const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(currentPath || '/account')}`
   type OAuthProvider = Parameters<typeof supabase.auth.signInWithOAuth>[0]['provider']
-  const oauthProvider = provider === 'line' ? 'custom:line' : 'google'
+  const oauthProvider = provider === 'line' ? LINE_OAUTH_PROVIDER : 'google'
 
   const { error } = await supabase.auth.signInWithOAuth({
     provider: oauthProvider as OAuthProvider,
     options: {
       redirectTo,
-      ...(provider === 'line' ? { scopes: 'openid profile email' } : {})
+      ...(provider === 'line' ? { scopes: 'openid profile' } : {})
     }
   })
 

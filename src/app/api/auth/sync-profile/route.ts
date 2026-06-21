@@ -10,6 +10,11 @@ type SupabaseIdentity = {
   identity_data?: MetadataRecord | null
 }
 
+const LINE_OAUTH_PROVIDER =
+  process.env.SUPABASE_LINE_PROVIDER?.trim() ||
+  process.env.NEXT_PUBLIC_SUPABASE_LINE_PROVIDER?.trim() ||
+  'custom:line'
+
 function metadataText(metadata: MetadataRecord | null | undefined, keys: string[]) {
   if (!metadata) return null
 
@@ -26,7 +31,10 @@ function identityList(user: Pick<User, 'identities'>) {
 }
 
 function isLineProvider(value: unknown) {
-  return value === 'line' || value === 'custom:line'
+  return (
+    typeof value === 'string' &&
+    ['line', 'custom:line', LINE_OAUTH_PROVIDER].includes(value)
+  )
 }
 
 function providerFromUser(user: User): 'line' | 'google' {
