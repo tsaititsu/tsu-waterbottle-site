@@ -8,8 +8,6 @@ export type { UserProfile } from './auth/types'
 
 const LEGACY_USER_KEY = 'waterbottle_mock_user'
 const AUTH_CHANGE_EVENT = 'waterbottle-auth-change'
-const LINE_OAUTH_PROVIDER =
-  process.env.NEXT_PUBLIC_SUPABASE_LINE_PROVIDER?.trim() || 'custom:line'
 
 let cachedUser: UserProfile | null = null
 let initialized = false
@@ -46,7 +44,7 @@ function identityList(user: Pick<User, 'identities'>) {
 function isLineProvider(value: unknown) {
   return (
     typeof value === 'string' &&
-    ['line', 'custom:line', LINE_OAUTH_PROVIDER].includes(value)
+    ['line', 'custom:line'].includes(value)
   )
 }
 
@@ -101,6 +99,20 @@ function getLegacyMockUser(): UserProfile | null {
   }
 }
 
+async function fetchLineSessionUser() {
+  if (typeof window === 'undefined') return null
+
+  try {
+    const response = await fetch('/api/auth/line/session', { cache: 'no-store' })
+    if (!response.ok) return null
+
+    const data = (await response.json()) as { user?: UserProfile | null }
+    return data.user ?? null
+  } catch {
+    return null
+  }
+}
+
 async function syncProfileToServer() {
   if (typeof window === 'undefined' || !hasSupabaseBrowserConfig()) return
 
@@ -133,19 +145,26 @@ async function syncProfileToServer() {
 }
 
 export async function refreshAuthUser() {
-  if (typeof window === 'undefined' || !hasSupabaseBrowserConfig()) return cachedUser
+  if (typeof window === 'undefined') return cachedUser
 
-  try {
-    const supabase = getSupabaseBrowserClient()
-    const { data } = await supabase.auth.getUser()
-    cachedUser = data.user ? profileFromSupabaseUser(data.user) : null
-    if (cachedUser) {
-      void syncProfileToServer()
-    } else {
-      syncedProfileUserIds.clear()
+  if (hasSupabaseBrowserConfig()) {
+    try {
+      const supabase = getSupabaseBrowserClient()
+      const { data } = await supabase.auth.getUser()
+
+      if (data.user) {
+        cachedUser = profileFromSupabaseUser(data.user)
+        void syncProfileToServer()
+        notifyAuthChange()
+        return cachedUser
+      }
+    } catch {
+      // Continue to the direct LINE session below.
     }
-  } catch {
-    cachedUser = null
+  }
+
+  cachedUser = await fetchLineSessionUser()
+  if (!cachedUser) {
     syncedProfileUserIds.clear()
   }
 
@@ -162,21 +181,25 @@ export async function getAuthAccessToken() {
 }
 
 function ensureAuthListener() {
-  if (initialized || typeof window === 'undefined' || !hasSupabaseBrowserConfig()) return
+  if (initialized || typeof window === 'undefined') return
   initialized = true
 
-  const supabase = getSupabaseBrowserClient()
-  const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-    cachedUser = session?.user ? profileFromSupabaseUser(session.user) : null
-    if (cachedUser) {
-      void syncProfileToServer()
-    } else {
-      syncedProfileUserIds.clear()
-    }
-    notifyAuthChange()
-  })
-  // Keep one shared auth listener for the whole tab; pages mount/unmount independently.
-  void data.subscription
+  if (hasSupabaseBrowserConfig()) {
+    const supabase = getSupabaseBrowserClient()
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        cachedUser = profileFromSupabaseUser(session.user)
+        void syncProfileToServer()
+        notifyAuthChange()
+        return
+      }
+
+      void refreshAuthUser()
+    })
+    // Keep one shared auth listener for the whole tab; pages mount/unmount independently.
+    void data.subscription
+  }
+
   void refreshAuthUser()
 }
 
@@ -186,22 +209,28 @@ export function getMockUser(): UserProfile | null {
 }
 
 export async function loginWithProvider(provider: 'line' | 'google') {
+  const currentPath = `${window.location.pathname}${window.location.search}`
+  const next = encodeURIComponent(currentPath || '/account')
+
+  if (provider === 'line') {
+    if (hasSupabaseBrowserConfig()) {
+      await getSupabaseBrowserClient().auth.signOut()
+    }
+
+    window.location.assign(`/api/auth/line/start?next=${next}`)
+    return
+  }
+
   if (!hasSupabaseBrowserConfig()) {
     throw new Error('Supabase 登入尚未設定完成')
   }
 
   const supabase = getSupabaseBrowserClient()
-  const currentPath = `${window.location.pathname}${window.location.search}`
-  const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(currentPath || '/account')}`
-  type OAuthProvider = Parameters<typeof supabase.auth.signInWithOAuth>[0]['provider']
-  const oauthProvider = provider === 'line' ? LINE_OAUTH_PROVIDER : 'google'
+  const redirectTo = `${window.location.origin}/auth/callback?next=${next}`
 
   const { error } = await supabase.auth.signInWithOAuth({
-    provider: oauthProvider as OAuthProvider,
-    options: {
-      redirectTo,
-      ...(provider === 'line' ? { scopes: 'openid profile' } : {})
-    }
+    provider: 'google',
+    options: { redirectTo },
   })
 
   if (error) throw error
@@ -213,6 +242,12 @@ export function logoutMockUser() {
   cachedUser = null
   syncedProfileUserIds.clear()
   notifyAuthChange()
+
+  void fetch('/api/auth/line/logout', { method: 'POST' }).finally(() => {
+    cachedUser = null
+    syncedProfileUserIds.clear()
+    notifyAuthChange()
+  })
 
   if (hasSupabaseBrowserConfig()) {
     void getSupabaseBrowserClient().auth.signOut().finally(() => {
