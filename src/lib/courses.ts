@@ -36,7 +36,7 @@ export const courseCatalog: CourseInfo[] = [
   {
     id: 'advanced',
     title: '進階班',
-    subtitle: '四宮實戰應用',
+    subtitle: '進階的解盤技巧',
     description: '學習夫妻宮、官祿宮、財帛宮、僕役宮、田宅宮、暗合連動與進階解盤技巧。',
     price: 9800,
     level: 2,
@@ -55,7 +55,7 @@ export const courseCatalog: CourseInfo[] = [
   {
     id: 'master',
     title: '高階班',
-    subtitle: '飛化與占卜實戰',
+    subtitle: '飛化與占卜技巧',
     description: '學習福德宮、疾厄宮、高階占卜技巧、飛化技巧與實戰案例拆解。',
     price: 9800,
     level: 3,
