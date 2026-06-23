@@ -29,7 +29,7 @@ export default function AiChartResultPage() {
 
   const downloadReport = () => {
     const content = [
-      record?.title ?? '命盤分析｜個性分析',
+      record?.title ?? '紫微命盤完整分析｜完整解析命盤個性分析',
       record?.chartInput ? `陽曆：${record.chartInput.solarDate}` : '',
       payload ? `農曆：${payload.chart.birthInfo.lunarDate}` : '',
       payload ? `五行局：${payload.chart.fiveElementsClass}` : '',
@@ -53,7 +53,7 @@ export default function AiChartResultPage() {
           <div>
             <p className="text-sm font-semibold text-darkGold">紫微命盤分析結果</p>
             <h1 className="mt-2 font-serifTC text-3xl font-semibold text-deepPurple md:text-4xl">
-              {record?.title ?? '命盤分析｜個性分析'}
+              {record?.title ?? '紫微命盤完整分析｜完整解析命盤個性分析'}
             </h1>
             <p className="mt-3 text-textMuted">
               {record?.createdAt ? new Date(record.createdAt).toLocaleString('zh-TW') : '已完成分析'}

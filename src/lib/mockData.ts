@@ -47,8 +47,8 @@ export const pricingPlans = [
     itemType: 'ai-divination',
     title: '紫微牌卡占卜單次',
     description: '針對單一問題提供指引與建議',
-    price: 199,
-    priceLabel: 'NT$199 / 次',
+    price: 50,
+    priceLabel: 'NT$50 / 次',
     cta: '立即占卜',
     href: '/ai-divination',
     featured: false,
@@ -57,9 +57,9 @@ export const pricingPlans = [
   {
     itemType: 'ai-chart',
     title: '紫微命盤完整分析',
-    description: '完整解析命盤格局與人生方向',
-    price: 699,
-    priceLabel: 'NT$699 / 份',
+    description: '完整解析命盤個性分析',
+    price: 100,
+    priceLabel: 'NT$100 / 份',
     cta: '立即分析',
     href: '/ai-chart',
     featured: true,
@@ -69,8 +69,8 @@ export const pricingPlans = [
     itemType: 'booking',
     title: '水瓶先生論命',
     description: '老師一對一深度諮詢 60 分鐘',
-    price: 2880,
-    priceLabel: 'NT$2,880 / 次',
+    price: 3600,
+    priceLabel: 'NT$3,600 / 1 小時',
     cta: '立即預約',
     href: '/booking',
     featured: false,
@@ -88,14 +88,9 @@ export const accountStats = [
 ]
 
 export const courseItems = [
-  '紫微斗數初階班',
-  '十四主星解讀課',
-  '十二宮位應用課',
-  '四化飛星課',
-  '流年大限課',
-  '夫妻宮專題',
-  '疾厄宮專題',
-  '占卜實戰課'
+  '初級班｜小白專區',
+  '進階班｜進階的解盤技巧',
+  '高階班｜飛化與占卜技巧'
 ]
 
 export const bookingSlots = [

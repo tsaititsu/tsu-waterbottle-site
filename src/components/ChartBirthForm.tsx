@@ -26,7 +26,7 @@ const timeOptions = [
 const birthOrders = ['第二胎', '第三胎', '第四胎']
 
 const analysisPlans = [
-  { title: '命盤分析｜個性分析', amount: 100 }
+  { title: '紫微命盤完整分析｜完整解析命盤個性分析', amount: 100 }
 ]
 
 type ChartInputResult = { input: ChartInput } | { error: string }

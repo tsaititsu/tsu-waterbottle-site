@@ -25,7 +25,7 @@ export async function POST(req: Request) {
       customerName: 'Mock Customer',
       customerEmail: 'customer@example.com',
       planName: '60分鐘完整命盤',
-      amount: 2880,
+      amount: 3600,
       startTimeText: '2026/07/01 19:00',
       endTimeText: '2026/07/01 20:00'
     })
