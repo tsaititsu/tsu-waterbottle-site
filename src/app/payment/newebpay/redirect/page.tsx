@@ -25,6 +25,10 @@ type PaymentRow = {
   merchant_order_no: string | null
 }
 
+function isSupportedNewebPayItemType(itemType: string) {
+  return itemType === 'course' || itemType === 'newebpay_test'
+}
+
 async function getServerSupabaseClient() {
   if (!supabaseUrl || !supabaseAnonKey) return null
 
@@ -102,8 +106,8 @@ export default async function NewebPayRedirectPage({ searchParams }: RedirectPag
     return <ErrorState title="付款方式不正確" message="這筆付款不是藍新金流付款。" />
   }
 
-  if (payment.item_type !== 'course') {
-    return <ErrorState title="付款項目不正確" message="這筆付款不是課程付款。" />
+  if (!isSupportedNewebPayItemType(payment.item_type)) {
+    return <ErrorState title="付款項目不正確" message="這筆付款不是可支援的藍新付款項目。" />
   }
 
   if (payment.status !== 'pending') {
@@ -125,7 +129,7 @@ export default async function NewebPayRedirectPage({ searchParams }: RedirectPag
         email: user.email,
         notifyUrl: `${config.siteUrl}/api/payments/newebpay/notify`,
         returnUrl: `${config.siteUrl}/api/payments/newebpay/return`,
-        clientBackUrl: `${config.siteUrl}/account/courses`,
+        clientBackUrl: payment.item_type === 'course' ? `${config.siteUrl}/account/courses` : `${config.siteUrl}/payment/newebpay/test`,
       },
       config,
     )

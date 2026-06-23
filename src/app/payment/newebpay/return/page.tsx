@@ -13,6 +13,7 @@ type ReturnPageProps = {
 type PaymentRow = {
   id: string
   item_name: string
+  item_type: string
   amount_twd: number
   status: string
   failure_reason: string | null
@@ -67,14 +68,16 @@ function ResultCard({
 }
 
 function renderPaymentStatus(payment: PaymentRow) {
+  const isCoursePayment = payment.item_type === 'course'
+
   if (payment.status === 'paid') {
     return (
       <ResultCard
         title="付款成功"
-        message="你的課程已開通，可以到「我的課程」查看。"
+        message={isCoursePayment ? '你的課程已開通，可以到「我的課程」查看。' : '1 元藍新測試付款已完成，這筆測試不會開通課程。'}
         detail={`${payment.item_name}｜NT$${payment.amount_twd.toLocaleString('zh-TW')}`}
-        actionHref="/account/courses"
-        actionLabel="查看我的課程"
+        actionHref={isCoursePayment ? '/account/courses' : '/payment/newebpay/test'}
+        actionLabel={isCoursePayment ? '查看我的課程' : '返回測試頁'}
       />
     )
   }
@@ -83,10 +86,10 @@ function renderPaymentStatus(payment: PaymentRow) {
     return (
       <ResultCard
         title="付款失敗"
-        message="這筆付款沒有完成，請重新回到課程頁購買。"
+        message={isCoursePayment ? '這筆付款沒有完成，請重新回到課程頁購買。' : '這筆 1 元測試付款沒有完成，請回到測試頁重新測試。'}
         detail={payment.failure_reason}
-        actionHref="/courses"
-        actionLabel="返回課程頁"
+        actionHref={isCoursePayment ? '/courses' : '/payment/newebpay/test'}
+        actionLabel={isCoursePayment ? '返回課程頁' : '返回測試頁'}
       />
     )
   }
@@ -94,10 +97,10 @@ function renderPaymentStatus(payment: PaymentRow) {
   return (
     <ResultCard
       title="付款確認中"
-      message="系統正在等待藍新金流通知。若你已完成付款，通常稍後就會開通。"
+      message={isCoursePayment ? '系統正在等待藍新金流通知。若你已完成付款，通常稍後就會開通。' : '系統正在等待藍新金流通知。若你已完成付款，通常稍後就會更新測試付款狀態。'}
       detail={`${payment.item_name}｜目前狀態：${payment.status}`}
-      actionHref="/account/courses"
-      actionLabel="查看我的課程"
+      actionHref={isCoursePayment ? '/account/courses' : '/payment/newebpay/test'}
+      actionLabel={isCoursePayment ? '查看我的課程' : '返回測試頁'}
     />
   )
 }
@@ -158,11 +161,11 @@ export default async function NewebPayReturnPage({ searchParams }: ReturnPagePro
   const admin = getSupabaseAdmin()
   const { data: payment, error } = await admin
     .from('payments')
-    .select('id,item_name,amount_twd,status,failure_reason,merchant_order_no')
+    .select('id,item_name,item_type,amount_twd,status,failure_reason,merchant_order_no')
     .eq('merchant_order_no', merchantOrderNo)
     .eq('user_id', user.id)
     .eq('provider', 'newebpay')
-    .eq('item_type', 'course')
+    .in('item_type', ['course', 'newebpay_test'])
     .maybeSingle<PaymentRow>()
 
   if (error || !payment) {

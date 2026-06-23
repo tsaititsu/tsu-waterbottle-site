@@ -5,6 +5,10 @@ import { getSupabaseAdmin, hasSupabaseAdminConfig } from '@/lib/supabase/admin'
 
 export const runtime = 'nodejs'
 
+const testPaymentItemType = 'newebpay_test'
+const testPaymentItemId = 'test_1_twd'
+const testPaymentAmount = 1
+
 type JsonRecord = Record<string, unknown>
 
 type PaymentRow = {
@@ -52,6 +56,18 @@ function getResultRecord(root: JsonRecord) {
 
 function isSuccessfulStatus(status: string) {
   return status.toUpperCase() === 'SUCCESS'
+}
+
+function isSupportedPaymentItem(payment: PaymentRow) {
+  if (payment.item_type === 'course') {
+    return Boolean(payment.item_id && isCourseId(payment.item_id) && payment.amount_twd === 9800)
+  }
+
+  if (payment.item_type === testPaymentItemType) {
+    return payment.item_id === testPaymentItemId && payment.amount_twd === testPaymentAmount
+  }
+
+  return false
 }
 
 function createNotifyPayload(root: JsonRecord, metadata: JsonRecord) {
@@ -107,6 +123,11 @@ async function ensureCoursePurchase(payment: PaymentRow) {
 
   if (error && error.code !== '23505') throw new Error(error.message)
   return false
+}
+
+async function hasCoursePurchase(payment: PaymentRow) {
+  if (!payment.user_id || !payment.item_id) return false
+  return Boolean(await getCoursePurchase(payment.user_id, payment.item_id))
 }
 
 export async function POST(request: Request) {
@@ -177,7 +198,6 @@ export async function POST(request: Request) {
     .select('id,user_id,provider,item_type,item_id,amount_twd,status,merchant_order_no')
     .eq('merchant_order_no', merchantOrderNo)
     .eq('provider', 'newebpay')
-    .eq('item_type', 'course')
     .maybeSingle<PaymentRow>()
 
   if (paymentError) {
@@ -190,11 +210,9 @@ export async function POST(request: Request) {
 
   const validationErrors: string[] = []
   if (payment.provider !== 'newebpay') validationErrors.push('invalid provider')
-  if (payment.item_type !== 'course') validationErrors.push('invalid item_type')
-  if (!payment.item_id || !isCourseId(payment.item_id)) validationErrors.push('invalid item_id')
+  if (!isSupportedPaymentItem(payment)) validationErrors.push('invalid payment item')
   if (payment.status !== 'pending' && payment.status !== 'paid') validationErrors.push('invalid payment status')
   if (payment.amount_twd !== amount) validationErrors.push('amount mismatch')
-  if (payment.amount_twd !== 9800) validationErrors.push('invalid course amount')
   if (payment.merchant_order_no !== merchantOrderNo) validationErrors.push('merchant_order_no mismatch')
   if (!payment.user_id) validationErrors.push('missing user_id')
 
@@ -210,8 +228,7 @@ export async function POST(request: Request) {
   }
 
   if (payment.status === 'paid') {
-    const existingPurchase = await getCoursePurchase(payment.user_id as string, payment.item_id as string)
-    if (existingPurchase) {
+    if (payment.item_type !== 'course' || await hasCoursePurchase(payment)) {
       return NextResponse.json({ ok: true, idempotent: true })
     }
   }
@@ -232,6 +249,10 @@ export async function POST(request: Request) {
 
   if (updateError) {
     return jsonError(updateError.message, 500)
+  }
+
+  if (payment.item_type !== 'course') {
+    return NextResponse.json({ ok: true })
   }
 
   const wasAlreadyPurchased = await ensureCoursePurchase(payment)
