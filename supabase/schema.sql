@@ -129,6 +129,36 @@ create table if not exists public.course_purchases (
   unique(user_id, course_id)
 );
 
+alter table public.payments
+add column if not exists item_id text;
+
+alter table public.payments
+add column if not exists merchant_order_no text;
+
+alter table public.payments
+add column if not exists provider_trade_no text;
+
+alter table public.payments
+add column if not exists notify_received_at timestamptz;
+
+alter table public.payments
+add column if not exists failure_reason text;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'course_purchases_payment_id_fkey'
+  ) then
+    alter table public.course_purchases
+    add constraint course_purchases_payment_id_fkey
+    foreign key (payment_id)
+    references public.payments(id)
+    on delete set null;
+  end if;
+end $$;
+
 create table if not exists public.course_modules (
   id uuid primary key default gen_random_uuid(),
   course_id text not null references public.courses(id) on delete cascade,
@@ -293,6 +323,10 @@ for each row execute function public.touch_updated_at();
 create index if not exists bookings_user_id_created_at_idx on public.bookings(user_id, created_at desc);
 create index if not exists bookings_starts_at_idx on public.bookings(starts_at);
 create index if not exists bookings_status_idx on public.bookings(status);
+create unique index if not exists payments_merchant_order_no_unique on public.payments(merchant_order_no) where merchant_order_no is not null;
+create index if not exists payments_user_item_idx on public.payments(user_id, item_type, item_id);
+create index if not exists payments_status_idx on public.payments(status);
+create index if not exists payments_provider_trade_no_idx on public.payments(provider_trade_no);
 create index if not exists courses_level_idx on public.courses(level);
 create index if not exists course_purchases_user_id_idx on public.course_purchases(user_id);
 create index if not exists course_purchases_course_id_idx on public.course_purchases(course_id);

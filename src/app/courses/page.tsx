@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useState } from 'react'
 import { LoginModal } from '@/components/LoginModal'
 import { PageHero } from '@/components/PageHero'
@@ -24,7 +25,16 @@ type PurchaseState = {
   courseId: CourseId | null
 }
 
+function getCoursePaymentErrorMessage(status: number, fallback?: string) {
+  if (status === 401) return '請先登入會員後再購買課程'
+  if (status === 403) return '請先完成前一階段課程購買'
+  if (status === 409) return '你已經購買過這門課程'
+  if (status >= 500) return '建立付款單失敗，請稍後再試'
+  return fallback ?? '建立付款單失敗，請稍後再試'
+}
+
 export default function CoursesPage() {
+  const router = useRouter()
   const [courses, setCourses] = useState<CourseInfo[]>(courseCatalog)
   const [user, setUser] = useState<UserProfile | null>(null)
   const [purchasedCourseIds, setPurchasedCourseIds] = useState<CourseId[]>([])
@@ -109,7 +119,7 @@ export default function CoursesPage() {
     setPurchasingCourseId(course.id)
 
     try {
-      const response = await fetch('/api/courses/purchase', {
+      const response = await fetch('/api/payments/newebpay/course/start', {
         method: 'POST',
         headers: {
           authorization: `Bearer ${accessToken}`,
@@ -117,15 +127,25 @@ export default function CoursesPage() {
         },
         body: JSON.stringify({ courseId: course.id }),
       })
-      const data = (await response.json()) as { message?: string }
+      const data = (await response.json().catch(() => null)) as { paymentId?: string; message?: string } | null
 
       if (!response.ok) {
-        setPurchaseState({ message: data.message ?? '課程購買失敗，請稍後再試。', courseId: course.id })
+        if (response.status === 401) setLoginOpen(true)
+        if (response.status === 409) void loadPurchases()
+
+        setPurchaseState({
+          message: getCoursePaymentErrorMessage(response.status, data?.message),
+          courseId: course.id,
+        })
         return
       }
 
-      await loadPurchases()
-      setPurchaseState({ message: `${course.title} 已完成 mock 付款並建立購買紀錄。`, courseId: course.id })
+      if (!data?.paymentId) {
+        setPurchaseState({ message: '建立付款單失敗，請稍後再試', courseId: course.id })
+        return
+      }
+
+      router.push(`/payment/newebpay/redirect?paymentId=${encodeURIComponent(data.paymentId)}`)
     } finally {
       setPurchasingCourseId(null)
     }
@@ -202,7 +222,7 @@ export default function CoursesPage() {
                       disabled={!canBuy || isPurchasing}
                       onClick={() => void purchaseCourse(course)}
                     >
-                      {isPurchasing ? '處理中...' : `立即購買 ${formatCoursePrice(course.price)}`}
+                      {isPurchasing ? '建立付款單中...' : `立即購買 ${formatCoursePrice(course.price)}`}
                     </button>
                   )}
 
