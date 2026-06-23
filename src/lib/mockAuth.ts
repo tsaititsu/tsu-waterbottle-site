@@ -1,6 +1,6 @@
 'use client'
 
-import type { User } from '@supabase/supabase-js'
+import { createClient, type AuthChangeEvent, type Session, type User } from '@supabase/supabase-js'
 import type { UserProfile } from './auth/types'
 import { getSupabaseBrowserClient, hasSupabaseBrowserConfig } from './supabase/client'
 
@@ -8,6 +8,11 @@ export type { UserProfile } from './auth/types'
 
 const LEGACY_USER_KEY = 'waterbottle_mock_user'
 const AUTH_CHANGE_EVENT = 'waterbottle-auth-change'
+const LINE_PKCE_COOKIE = 'waterbottle_line_pkce_code_verifier'
+const LINE_OAUTH_PROVIDER =
+  process.env.NEXT_PUBLIC_SUPABASE_LINE_PROVIDER?.trim() || 'custom:line-oauth'
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
 let cachedUser: UserProfile | null = null
 let initialized = false
@@ -44,7 +49,7 @@ function identityList(user: Pick<User, 'identities'>) {
 function isLineProvider(value: unknown) {
   return (
     typeof value === 'string' &&
-    ['line', 'custom:line'].includes(value)
+    ['line', 'custom:line-oauth', 'custom:line', LINE_OAUTH_PROVIDER].includes(value)
   )
 }
 
@@ -97,6 +102,59 @@ function getLegacyMockUser(): UserProfile | null {
     window.localStorage.removeItem(LEGACY_USER_KEY)
     return null
   }
+}
+
+function setLinePkceCookie(value: string) {
+  const secure = window.location.protocol === 'https:' ? '; Secure' : ''
+  document.cookie = `${LINE_PKCE_COOKIE}=${encodeURIComponent(value)}; Path=/; Max-Age=600; SameSite=Lax${secure}`
+}
+
+function clearLinePkceCookie() {
+  document.cookie = `${LINE_PKCE_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`
+}
+
+function getLineOAuthClient() {
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error('Supabase 登入尚未設定完成')
+  }
+
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      flowType: 'pkce',
+      persistSession: true,
+      storage: {
+        getItem(key: string) {
+          return window.localStorage.getItem(key)
+        },
+        setItem(key: string, value: string) {
+          window.localStorage.setItem(key, value)
+          if (key.endsWith('-code-verifier')) setLinePkceCookie(value)
+        },
+        removeItem(key: string) {
+          window.localStorage.removeItem(key)
+          if (key.endsWith('-code-verifier')) clearLinePkceCookie()
+        },
+      },
+    },
+  })
+}
+
+export function loginWithLine() {
+  const currentPath = `${window.location.pathname}${window.location.search}`
+  const next = encodeURIComponent(currentPath || '/account')
+  const supabase = getLineOAuthClient()
+  type OAuthProvider = Parameters<typeof supabase.auth.signInWithOAuth>[0]['provider']
+  const redirectTo = `${window.location.origin}/auth/callback?next=${next}`
+
+  return supabase.auth.signInWithOAuth({
+    provider: LINE_OAUTH_PROVIDER as OAuthProvider,
+    options: {
+      redirectTo,
+      scopes: 'openid profile',
+    },
+  })
 }
 
 async function fetchLineSessionUser() {
@@ -186,7 +244,7 @@ function ensureAuthListener() {
 
   if (hasSupabaseBrowserConfig()) {
     const supabase = getSupabaseBrowserClient()
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
       if (session?.user) {
         cachedUser = profileFromSupabaseUser(session.user)
         void syncProfileToServer()
@@ -213,11 +271,9 @@ export async function loginWithProvider(provider: 'line' | 'google') {
   const next = encodeURIComponent(currentPath || '/account')
 
   if (provider === 'line') {
-    if (hasSupabaseBrowserConfig()) {
-      await getSupabaseBrowserClient().auth.signOut()
-    }
+    const { error } = await loginWithLine()
 
-    window.location.assign(`/api/auth/line/start?next=${next}`)
+    if (error) throw error
     return
   }
 

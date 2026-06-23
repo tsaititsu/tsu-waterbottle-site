@@ -13,7 +13,7 @@ type SupabaseIdentity = {
 const LINE_OAUTH_PROVIDER =
   process.env.SUPABASE_LINE_PROVIDER?.trim() ||
   process.env.NEXT_PUBLIC_SUPABASE_LINE_PROVIDER?.trim() ||
-  'custom:line'
+  'custom:line-oauth'
 
 function metadataText(metadata: MetadataRecord | null | undefined, keys: string[]) {
   if (!metadata) return null
@@ -33,7 +33,7 @@ function identityList(user: Pick<User, 'identities'>) {
 function isLineProvider(value: unknown) {
   return (
     typeof value === 'string' &&
-    ['line', 'custom:line', LINE_OAUTH_PROVIDER].includes(value)
+    (['custom:line-oauth', 'custom:line', LINE_OAUTH_PROVIDER].includes(value) || value.includes('line'))
   )
 }
 
@@ -46,13 +46,15 @@ function providerFromUser(user: User): 'line' | 'google' {
 }
 
 function lineUserIdFromUser(user: User) {
+  const lineIdentity = identityList(user).find((identity) => identity.provider?.includes('line'))
+  const identitySub = metadataText(lineIdentity?.identity_data, ['sub'])
+
+  if (identitySub) return identitySub
+
   const userMetadata = (user.user_metadata ?? {}) as MetadataRecord
   const metadataId = metadataText(userMetadata, ['line_user_id', 'provider_id', 'sub', 'user_id', 'userId'])
 
-  if (metadataId) return metadataId
-
-  const lineIdentity = identityList(user).find((identity) => isLineProvider(identity.provider))
-  return metadataText(lineIdentity?.identity_data, ['provider_id', 'sub', 'user_id', 'userId']) ?? lineIdentity?.id ?? user.id
+  return metadataId ?? lineIdentity?.id ?? user.id
 }
 
 export async function POST(req: Request) {
