@@ -5,22 +5,48 @@ import { useEffect, useState } from 'react'
 import { LoginModal } from '@/components/LoginModal'
 import { PageHero } from '@/components/PageHero'
 import { accountStats } from '@/lib/mockData'
-import { getMockUser, subscribeAuthChange, type UserProfile } from '@/lib/mockAuth'
-import { getPaymentRecords, hasJoinedWaitlist, type PaymentRecord } from '@/lib/mockPayment'
+import { getAuthAccessToken, getMockUser, subscribeAuthChange, type UserProfile } from '@/lib/mockAuth'
+import { getPaymentRecords, type PaymentRecord } from '@/lib/mockPayment'
+import type { CourseId } from '@/lib/courses'
 
 export default function AccountPage() {
   const [user, setUser] = useState<UserProfile | null>(null)
   const [payments, setPayments] = useState<PaymentRecord[]>([])
   const [loginOpen, setLoginOpen] = useState(false)
-  const [joinedWaitlist, setJoinedWaitlist] = useState(false)
+  const [purchasedCourseIds, setPurchasedCourseIds] = useState<CourseId[]>([])
 
   useEffect(() => {
+    async function loadCoursePurchases(nextUser: UserProfile | null) {
+      if (!nextUser) {
+        setPurchasedCourseIds([])
+        return
+      }
+
+      const accessToken = await getAuthAccessToken()
+      if (!accessToken) {
+        setPurchasedCourseIds([])
+        return
+      }
+
+      const response = await fetch('/api/account/course-purchases', {
+        headers: { authorization: `Bearer ${accessToken}` },
+      })
+
+      if (!response.ok) {
+        setPurchasedCourseIds([])
+        return
+      }
+
+      const data = (await response.json()) as { courseIds?: CourseId[] }
+      setPurchasedCourseIds(data.courseIds ?? [])
+    }
+
     const sync = () => {
       const nextUser = getMockUser()
       setUser(nextUser)
       setPayments(getPaymentRecords())
-      setJoinedWaitlist(hasJoinedWaitlist())
       setLoginOpen(!nextUser)
+      void loadCoursePurchases(nextUser)
     }
 
     sync()
@@ -51,8 +77,13 @@ export default function AccountPage() {
               <article key={stat.title} className="rounded-2xl border border-borderSoft bg-white p-5 shadow-soft">
                 <h3 className="font-serifTC text-xl font-semibold text-deepPurple">{stat.title}</h3>
                 <p className="mt-3 text-textMuted">
-                  {stat.title === '我的課程' && joinedWaitlist ? '已加入候補名單' : stat.value}
+                  {stat.title === '我的課程' ? `已購買 ${purchasedCourseIds.length} / 3 門課` : stat.value}
                 </p>
+                {stat.title === '我的課程' ? (
+                  <Link className="focus-ring mt-4 inline-flex rounded-lg border border-deepPurple bg-white px-4 py-2 text-sm font-semibold text-deepPurple" href="/account/courses">
+                    查看我的課程
+                  </Link>
+                ) : null}
               </article>
             ))}
           </div>
