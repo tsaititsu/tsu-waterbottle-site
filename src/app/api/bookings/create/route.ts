@@ -6,6 +6,23 @@ import { createSupabaseBooking } from '@/lib/supabase/bookings'
 export async function POST(req: Request) {
   const enableDebugErrors = process.env.NEXT_PUBLIC_ENABLE_DEBUG_ERRORS === 'true'
 
+  const buildDebugPayload = (error: unknown) => {
+    if (!(error instanceof Error)) {
+      return {
+        message: typeof error === 'string' ? error : '未知錯誤',
+        stack: error ? `${String(error)}` : undefined
+      }
+    }
+
+    return {
+      message: error.message,
+      stack: error.stack,
+      code: (error as { code?: string }).code,
+      details: (error as { details?: string }).details,
+      hint: (error as { hint?: string }).hint
+    }
+  }
+
   try {
     const body = await req.json()
     const userId = await getUserIdFromRequest(req)
@@ -37,6 +54,7 @@ export async function POST(req: Request) {
       code?: string
       details?: string
       hint?: string
+      stack?: string
     }
     console.error('建立預約失敗', {
       message: err?.message,
@@ -51,13 +69,10 @@ export async function POST(req: Request) {
       ...(enableDebugErrors
         ? {
             debug: {
-              message: err?.message ?? 'Unknown error',
-              code: err?.code,
-              details: err?.details,
-              hint: err?.hint
+              ...buildDebugPayload(err)
             }
           }
-        : null)
+        : {})
     }
 
     return NextResponse.json(body, { status: 500 })
