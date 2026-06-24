@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BookOpen, CalendarCheck, FileText, LogOut, Menu, Sparkles, UserRound, X } from 'lucide-react'
+import { BookOpen, CalendarCheck, FileText, LogOut, Menu, ShoppingCart, Sparkles, UserRound, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import {
   getMockUser,
@@ -12,6 +12,7 @@ import {
   type UserProfile
 } from '@/lib/mockAuth'
 import { LogoMark } from './LogoMark'
+import { useCart } from './CartContext'
 
 const navItems = [
   { label: '首頁', href: '/' },
@@ -30,6 +31,7 @@ export function Header() {
   const [loginMessage, setLoginMessage] = useState('')
   const [loadingProvider, setLoadingProvider] = useState<'line' | 'google' | ''>('')
   const [user, setUser] = useState<UserProfile | null>(null)
+  const { totalQuantity } = useCart()
 
   useEffect(() => {
     const sync = () => setUser(getMockUser())
@@ -192,7 +194,24 @@ export function Header() {
           ))}
         </nav>
 
-        <div ref={accountMenuRef} className="relative hidden lg:block">
+        <div className="hidden items-center gap-3 lg:flex">
+          <span className="inline-flex rounded-full border border-[#f0d8a6] bg-[#fff9eb] px-4 py-2 text-xs font-semibold tracking-wide text-darkGold">
+            歡迎使用 LINE Pay
+          </span>
+
+          <Link
+            href="/cart"
+            aria-label="購物車"
+            className="relative grid h-12 w-12 place-items-center rounded-full bg-[#0d0d11] text-white transition hover:scale-105"
+          >
+            <ShoppingCart size={22} strokeWidth={2.4} />
+            {totalQuantity > 0 ? (
+              <span className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[#ff3d3d] px-1.5 text-xs font-semibold text-white">
+                {totalQuantity}
+              </span>
+            ) : null}
+          </Link>
+
           <button
             type="button"
             onClick={() => setAccountMenuOpen((open) => !open)}
@@ -222,6 +241,9 @@ export function Header() {
                 {item.label}
               </Link>
             ))}
+            <Link href="/cart" className="rounded-lg px-3 py-3 text-sm font-medium hover:bg-softPurple" onClick={() => setMenuOpen(false)}>
+              購物車
+            </Link>
             {mobileAuthActions}
           </div>
         </div>

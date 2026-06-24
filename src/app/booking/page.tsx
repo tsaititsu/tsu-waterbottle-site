@@ -1,5 +1,6 @@
 import { BookingForm } from '@/components/BookingForm'
 import { PageHero } from '@/components/PageHero'
+import { AddConsultationToCartButton } from '@/components/AddConsultationToCartButton'
 
 const serviceRows = [
   '服務名稱：水瓶先生論命',
@@ -37,6 +38,7 @@ export default function BookingPage() {
               ))}
             </div>
           </section>
+          <AddConsultationToCartButton />
           <BookingForm />
         </div>
       </section>

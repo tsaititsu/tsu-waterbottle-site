@@ -4,6 +4,7 @@ import './globals.css'
 import '@/features/ziwei-chart/package/ziwei-chart-package.css'
 import { Footer } from '@/components/Footer'
 import { FloatingLineButton } from '@/components/FloatingLineButton'
+import { CartProvider } from '@/components/CartContext'
 import { Header } from '@/components/Header'
 import { MobileBottomNav } from '@/components/MobileBottomNav'
 
@@ -42,11 +43,13 @@ export default function RootLayout({
   return (
     <html lang="zh-Hant" data-scroll-behavior="smooth">
       <body className="font-sansTC text-textDark">
-        <Header />
-        <main className="pb-20 md:pb-0">{children}</main>
-        <Footer />
-        <FloatingLineButton />
-        <MobileBottomNav />
+        <CartProvider>
+          <Header />
+          <main className="pb-20 md:pb-0">{children}</main>
+          <Footer />
+          <FloatingLineButton />
+          <MobileBottomNav />
+        </CartProvider>
       </body>
     </html>
   )

@@ -1,6 +1,8 @@
 'use client'
 
-import { MessageCircle, ShieldCheck, Sparkles } from 'lucide-react'
+import { MessageCircle, ShieldCheck, ShoppingCart, Sparkles } from 'lucide-react'
+import { useState } from 'react'
+import { useCart } from '@/components/CartContext'
 
 const DEFAULT_ZIWEI_CARD_URL = 'https://ziwei-card.vercel.app'
 
@@ -29,6 +31,8 @@ export function DivinationEntryModule({
   source
 }: DivinationEntryModuleProps) {
   const readingUrl = buildDivinationUrl({ baseUrl, campaign, source })
+  const { addItem } = useCart()
+  const [message, setMessage] = useState('')
 
   return (
     <section className={`rounded-2xl border border-gold/50 bg-softPurple p-6 shadow-soft ${className}`}>
@@ -46,14 +50,36 @@ export function DivinationEntryModule({
           </p>
         </div>
 
-        <a
-          className="focus-ring inline-flex min-h-14 items-center justify-center rounded-xl bg-deepPurple px-6 py-3 text-base font-semibold text-white transition hover:bg-purpleMain"
-          href={readingUrl}
-          rel="noopener noreferrer"
-          target="_blank"
-        >
-          前往占卜
-        </a>
+        <div className="grid gap-3 md:min-w-[210px]">
+          <a
+            className="focus-ring inline-flex min-h-14 items-center justify-center rounded-xl bg-deepPurple px-6 py-3 text-base font-semibold text-white transition hover:bg-purpleMain"
+            href={readingUrl}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            前往占卜
+          </a>
+
+          <button
+            type="button"
+            className="focus-ring inline-flex min-h-14 items-center justify-center gap-2 rounded-xl border border-[#d9b8ec] bg-white px-6 py-3 text-base font-semibold text-deepPurple transition hover:bg-softPurple"
+            onClick={() => {
+              addItem({
+                id: 'ai_divination_single',
+                type: 'divination',
+                itemName: '紫微牌卡占卜單次',
+                amount: 50,
+                quantity: 1
+              })
+              setMessage('已加入購物車')
+            }}
+          >
+            <ShoppingCart size={20} />
+            加入購物車
+          </button>
+
+          {message ? <p className="text-sm font-semibold text-deepPurple">{message}</p> : null}
+        </div>
       </div>
 
       <div className="mt-6 grid gap-3 text-sm leading-6 text-textMuted md:grid-cols-3">
