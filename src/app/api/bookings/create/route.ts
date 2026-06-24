@@ -4,6 +4,8 @@ import { getUserIdFromRequest } from '@/lib/supabase/auth'
 import { createSupabaseBooking } from '@/lib/supabase/bookings'
 
 export async function POST(req: Request) {
+  const enableDebugErrors = process.env.NEXT_PUBLIC_ENABLE_DEBUG_ERRORS === 'true'
+
   try {
     const body = await req.json()
     const userId = await getUserIdFromRequest(req)
@@ -30,7 +32,34 @@ export async function POST(req: Request) {
       mockCheckoutUrl: `/booking/checkout?bookingId=${bookingId}`
     })
   } catch (error) {
-    console.error(error)
-    return NextResponse.json({ ok: false, message: '建立預約失敗' }, { status: 500 })
+    const err = error as {
+      message?: string
+      code?: string
+      details?: string
+      hint?: string
+    }
+    console.error('建立預約失敗', {
+      message: err?.message,
+      code: err?.code,
+      details: err?.details,
+      hint: err?.hint
+    })
+
+    const body = {
+      ok: false,
+      message: '建立預約失敗',
+      ...(enableDebugErrors
+        ? {
+            debug: {
+              message: err?.message ?? 'Unknown error',
+              code: err?.code,
+              details: err?.details,
+              hint: err?.hint
+            }
+          }
+        : null)
+    }
+
+    return NextResponse.json(body, { status: 500 })
   }
 }

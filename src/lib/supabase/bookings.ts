@@ -116,7 +116,9 @@ export async function createSupabaseBooking(input: BookingFormInput) {
     .select('*')
     .single()
 
-  if (error) throw new Error(error.message)
+  if (error) {
+    throw error
+  }
   return mapBookingRow(data as BookingRow)
 }
 
