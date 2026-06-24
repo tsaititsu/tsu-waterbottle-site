@@ -25,12 +25,40 @@ type PurchaseState = {
   courseId: CourseId | null
 }
 
+const courseServiceRows = [
+  { label: '課程型態', value: '預錄課程、線上直播或混合制，依各課程實際安排為準。' },
+  { label: '上課方式', value: '直播課程以 Zoom 進行；預錄課程於會員中心觀看。' },
+  { label: '是否預約制', value: '是。直播或實作相關時段需依網站公告或客服協助預約；預錄內容不需預約。' },
+  { label: '最長可預約時間', value: '可預約未來 90 天內之課程或實作時段。' },
+  { label: '是否訂閱制', value: '否。' },
+  { label: '是否儲值式', value: '否。' },
+  { label: '觀看期限', value: '購買後可永久觀看已開放之預錄課程內容。' },
+  { label: '購買後取得', value: '會員中心課程觀看權限與對應課程內容。' },
+]
+
 function getCoursePaymentErrorMessage(status: number, fallback?: string) {
   if (status === 401) return '請先登入會員後再購買課程'
   if (status === 403) return '請先完成前一階段課程購買'
   if (status === 409) return '你已經購買過這門課程'
   if (status >= 500) return '建立付款單失敗，請稍後再試'
   return fallback ?? '建立付款單失敗，請稍後再試'
+}
+
+const courseServiceDetails: Record<
+  CourseId,
+  {
+    rows: { label: string; value: string }[]
+  }
+> = {
+  basic: {
+    rows: courseServiceRows,
+  },
+  advanced: {
+    rows: courseServiceRows,
+  },
+  master: {
+    rows: courseServiceRows,
+  },
 }
 
 export default function CoursesPage() {
@@ -233,6 +261,44 @@ export default function CoursesPage() {
               </article>
             )
           })}
+        </div>
+      </section>
+      <section className="bg-softPurple py-12 md:py-16">
+        <div className="section-shell">
+          <div className="max-w-3xl">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-darkGold">Course Notice</p>
+            <h2 className="mt-3 font-serifTC text-3xl font-semibold text-deepPurple">課程服務說明</h2>
+            <p className="mt-3 leading-8 text-textMuted">
+              以下資訊供購買前確認。各課程實際直播、實作或預錄內容安排，依網站公告與會員中心已開放內容為準。
+            </p>
+          </div>
+          <div className="mt-8 grid gap-6 lg:grid-cols-3">
+            {courses.map((course) => (
+              <article key={course.id} className="rounded-2xl border border-borderSoft bg-white p-6 shadow-soft">
+                <p className="text-sm font-semibold text-darkGold">第 {course.level} 階段</p>
+                <h3 className="mt-2 font-serifTC text-2xl font-semibold text-deepPurple">{course.title}</h3>
+                <p className="mt-1 font-semibold text-textDark">{course.subtitle}</p>
+                <dl className="mt-5 grid gap-3 text-sm">
+                  {courseServiceDetails[course.id].rows.map((row) => (
+                    <div key={row.label} className="grid gap-1 rounded-xl bg-softPurple px-4 py-3">
+                      <dt className="font-semibold text-deepPurple">{row.label}</dt>
+                      <dd className="leading-6 text-textMuted">{row.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <div className="mt-5">
+                  <p className="font-semibold text-deepPurple">課程內容</p>
+                  <ul className="mt-3 grid gap-2 text-sm text-textMuted">
+                    {course.contents.map((content) => (
+                      <li key={content} className="rounded-lg border border-borderSoft px-3 py-2">
+                        {content}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </article>
+            ))}
+          </div>
         </div>
       </section>
       <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} onSuccess={() => {

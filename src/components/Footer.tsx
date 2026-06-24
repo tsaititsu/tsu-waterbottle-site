@@ -4,7 +4,7 @@ import { LogoMark } from './LogoMark'
 export function Footer() {
   return (
     <footer className="border-t border-borderSoft bg-white">
-      <div className="section-shell grid gap-8 py-10 md:grid-cols-[1.4fr_1fr_1fr]">
+      <div className="section-shell grid gap-8 py-10 md:grid-cols-[1.4fr_1fr_1fr_1.2fr]">
         <div>
           <LogoMark />
           <p className="mt-4 max-w-md leading-7 text-textMuted">
@@ -26,6 +26,24 @@ export function Footer() {
             <Link href="/account">會員中心</Link>
             <Link href="/payment/success">付款成功示意</Link>
             <Link href="/payment/fail">付款失敗示意</Link>
+          </div>
+        </div>
+        <div>
+          <h3 className="font-semibold text-deepPurple">消費資訊</h3>
+          <div className="mt-3 grid gap-2 text-sm text-textMuted">
+            <Link href="/terms">服務條款</Link>
+            <Link href="/privacy">隱私權政策</Link>
+            <Link href="/refund-policy">退款政策</Link>
+            <Link href="/consumer-rights">消費者權益</Link>
+            <Link href="/contact">聯絡我們</Link>
+          </div>
+          <div className="mt-5 grid gap-1 text-sm leading-6 text-textMuted">
+            <p>客服信箱：water.bottle.fortune.teller@gmail.com</p>
+            <p>客服 LINE：https://lin.ee/6Tpje1P</p>
+            <p>客服時間：09:00–19:00</p>
+            <p>營業人名稱：水瓶先生工作室</p>
+            <p>統一編號：61010005</p>
+            <p>商業登記地址：彰化縣田尾鄉饒平村東平巷167號1樓</p>
           </div>
         </div>
       </div>

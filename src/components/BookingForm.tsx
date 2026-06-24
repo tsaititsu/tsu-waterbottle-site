@@ -80,7 +80,7 @@ export function BookingForm() {
       return null
     }
     if (!customerName.trim() || !customerEmail.trim() || !birthDate || !birthTime || isBirthTimeAccurate === null || !question.trim()) {
-      setFormError('請填寫姓名、Email、出生年月日、出生時間狀態、出生時間與想詢問的問題。')
+      setFormError('姓名、Email、出生年月日、出生時間狀態、出生時間與想詢問的問題皆為必填欄位。')
       return null
     }
     if (!startTime || !endTime) {
