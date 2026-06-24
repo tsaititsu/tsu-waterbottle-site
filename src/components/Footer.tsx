@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { LogoMark } from './LogoMark'
 
+const lineSupportUrl = 'https://lin.ee/6Tpje1P'
+
 export function Footer() {
   return (
     <footer className="border-t border-borderSoft bg-white">
@@ -39,7 +41,12 @@ export function Footer() {
           </div>
           <div className="mt-5 grid gap-1 text-sm leading-6 text-textMuted">
             <p>客服信箱：water.bottle.fortune.teller@gmail.com</p>
-            <p>客服 LINE：https://lin.ee/6Tpje1P</p>
+            <p>
+              客服 LINE：
+              <a className="font-semibold text-deepPurple underline underline-offset-4" href={lineSupportUrl} rel="noopener noreferrer" target="_blank">
+                {lineSupportUrl}
+              </a>
+            </p>
             <p>客服時間：09:00–19:00</p>
             <p>營業人名稱：水瓶先生工作室</p>
             <p>統一編號：61010005</p>

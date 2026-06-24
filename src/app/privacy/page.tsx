@@ -1,4 +1,5 @@
 import { PageHero } from '@/components/PageHero'
+import { LineSupportText } from '@/components/LineSupportText'
 
 const sections = [
   {
@@ -54,7 +55,7 @@ export default function PrivacyPage() {
               <ul className="mt-4 grid gap-3 leading-7 text-textMuted">
                 {section.items.map((item) => (
                   <li key={item} className="rounded-xl bg-softPurple px-4 py-3">
-                    {item}
+                    <LineSupportText text={item} />
                   </li>
                 ))}
               </ul>

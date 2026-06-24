@@ -1,13 +1,14 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { LoginModal } from '@/components/LoginModal'
 import { PageHero } from '@/components/PageHero'
 import { getAuthAccessToken, getMockUser, subscribeAuthChange, type UserProfile } from '@/lib/mockAuth'
 import { getUserBookingRecords, subscribeBookingChange, updateBookingRecord, type BookingRecord } from '@/lib/mockBooking'
 
 const cancellationLimitHours = 24
+const lineSupportUrl = 'https://lin.ee/6Tpje1P'
 
 function formatDateTimeText(value: string) {
   return new Date(value).toLocaleString('zh-TW', {
@@ -44,7 +45,7 @@ export default function AccountBookingsPage() {
   const [bookings, setBookings] = useState<BookingRecord[]>([])
   const [loginOpen, setLoginOpen] = useState(false)
   const [cancelingId, setCancelingId] = useState('')
-  const [statusMessage, setStatusMessage] = useState('')
+  const [statusMessage, setStatusMessage] = useState<ReactNode>('')
 
   useEffect(() => {
     let cancelled = false
@@ -86,7 +87,15 @@ export default function AccountBookingsPage() {
 
   async function cancelBooking(booking: BookingRecord) {
     if (!canCancelBooking(booking)) {
-      setStatusMessage(`距離預約開始 ${cancellationLimitHours} 小時內不可自行取消，請私訊官方 LINE 協助。`)
+      setStatusMessage(
+        <>
+          距離預約開始 {cancellationLimitHours} 小時內不可自行取消，請私訊
+          <a className="underline underline-offset-4" href={lineSupportUrl} rel="noopener noreferrer" target="_blank">
+            官方 LINE
+          </a>
+          協助。
+        </>
+      )
       return
     }
 
@@ -235,7 +244,10 @@ export default function AccountBookingsPage() {
                     </button>
                   ) : (
                     <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-textMuted ring-1 ring-borderSoft">
-                      24 小時內請私訊官方 LINE
+                      24 小時內請私訊
+                      <a className="text-deepPurple underline underline-offset-4" href={lineSupportUrl} rel="noopener noreferrer" target="_blank">
+                        官方 LINE
+                      </a>
                     </span>
                   )}
                 </div>

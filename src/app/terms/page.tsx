@@ -1,4 +1,5 @@
 import { PageHero } from '@/components/PageHero'
+import { LineSupportText } from '@/components/LineSupportText'
 
 const sections = [
   {
@@ -56,7 +57,9 @@ export default function TermsPage() {
           {sections.map((section) => (
             <section key={section.title} className="rounded-2xl border border-borderSoft bg-white p-6 shadow-soft">
               <h2 className="font-serifTC text-2xl font-semibold text-deepPurple">{section.title}</h2>
-              <p className="mt-3 leading-8 text-textMuted">{section.body}</p>
+              <p className="mt-3 leading-8 text-textMuted">
+                <LineSupportText text={section.body} />
+              </p>
             </section>
           ))}
         </div>

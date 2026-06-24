@@ -231,10 +231,11 @@ export function BookingForm() {
           <p className="text-sm leading-6 text-textMuted">
             目前每日開放 13:00-14:00、15:00-16:00、17:00-18:00。24 小時內不開放預約。
             <br />
-            備註：另有其他時間需求，請私訊官方 LINE：
-            <a className="font-semibold text-deepPurple underline underline-offset-4" href={officialLineUrl} target="_blank" rel="noreferrer">
-              {officialLineUrl}
+            備註：另有其他時間需求，請私訊
+            <a className="font-semibold text-deepPurple underline underline-offset-4" href={officialLineUrl} target="_blank" rel="noopener noreferrer">
+              官方 LINE
             </a>
+            。
           </p>
         </div>
 
