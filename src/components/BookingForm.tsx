@@ -10,6 +10,20 @@ import { hasBookingConflict, savePendingBooking, type BookingFormInput } from '@
 
 const availableSlots = ['13:00', '15:00', '17:00']
 const officialLineUrl = 'https://lin.ee/6Tpje1P'
+const serviceNoticeRows = [
+  '服務名稱：水瓶先生論命',
+  '服務型態：一對一線上紫微斗數諮詢',
+  '服務時間：60 分鐘',
+  '價格：NT$3,600 / 1 小時',
+  '諮詢方式：LINE 通話或 Zoom',
+  '預約方式：付款後依網站可預約時段完成預約，或由客服協助確認時段。',
+  '最長可預約時間：可預約未來 90 天內之諮詢時段。',
+  '是否訂閱制：否。',
+  '是否儲值式：否。',
+  '改期：如需更改預約時間，請最晚於預約時間前一天告知，以便為您妥善安排。',
+  '取消：預約時間三天前取消，將全額退費；若於預約時間三天內取消，恕不退費，但可更改時間，請提前告知。',
+  '遲到：為保障其他客戶權益，請務必準時赴約，遲到時間將照常計算，不另行補償。',
+]
 
 function toDatetimeLocal(date: string, time: string) {
   return `${date}T${time}:00+08:00`
@@ -275,7 +289,6 @@ export function BookingForm() {
             <select className="focus-ring rounded-lg border border-borderSoft bg-white px-4 py-3" onChange={(event) => setGender(event.target.value as BookingFormInput['gender'])} value={gender}>
               <option value="female">女</option>
               <option value="male">男</option>
-              <option value="other">其他 / 不透露</option>
             </select>
           </label>
           <label className="grid gap-2">
@@ -428,22 +441,15 @@ export function BookingForm() {
               <span className="ml-2 hidden text-sm font-sansTC text-textMuted group-open:inline">收合內容</span>
             </summary>
             <div className="mt-5 grid gap-5 text-sm leading-7 text-textMuted">
-              <section>
-                <h3 className="font-semibold text-textDark">關於改期或取消</h3>
-                <ol className="mt-2 grid list-decimal gap-2 pl-5">
-                  <li>改期：如需更改預約時間，請最晚於預約時間前一天告知，以便為您妥善安排。</li>
-                  <li>取消：預約時間三天前取消，將全額退費；若是預約時間三天內則不予退費，但可更改時間，請提前告知。</li>
-                  <li>遲到：為保障其他客戶權益，請務必準時赴約，遲到時間將照常計算，不另行補償。</li>
-                </ol>
-              </section>
-              <section>
-                <h3 className="font-semibold text-textDark">關於紫微諮詢服務性質</h3>
-                <ol className="mt-2 grid list-decimal gap-2 pl-5">
-                  <li>有關任何資訊或諮詢服務，提到包括對解讀、心靈、療癒、健康、飲食、關係、家庭、財富、收入、運勢、未來發展等方面的建議，都旨在探討潛在可能性，不保證結果，亦不具任何醫療或治療效果。</li>
-                  <li>諮詢結果僅供參考和協助，無法取代專業的醫療建議和診斷。若您有任何健康或心理需求，請務必諮詢國家核可的專業醫師。</li>
-                  <li>請務必提供正確的出生時間及出生地，若因提供錯誤資訊導致解讀失準，恕不負責。</li>
-                </ol>
-              </section>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-darkGold">SERVICE NOTICE</p>
+              <p className="text-lg font-semibold text-deepPurple">真人論命服務說明</p>
+              <div className="grid gap-3">
+                {serviceNoticeRows.map((row) => (
+                  <p key={row} className="rounded-xl bg-white px-4 py-3">
+                    {row}
+                  </p>
+                ))}
+              </div>
             </div>
           </details>
 
@@ -472,12 +478,14 @@ export function BookingForm() {
         <div className="rounded-2xl border border-[#bfe8cb] bg-[#f1fff5] p-5">
           <p className="text-sm font-semibold text-[#078c3f]">官方 LINE 預約提醒</p>
           <p className="mt-2 leading-7 text-textMuted">
-            預約完成後，請加入水瓶先生官方 LINE：
-            <a className="font-semibold text-deepPurple underline underline-offset-4" href={officialLineUrl} rel="noopener noreferrer" target="_blank">
+            官方 LINE 預約提醒
+            <br />
+            水瓶先生官方 LINE：
+            <a className="ml-1 font-semibold text-deepPurple underline underline-offset-4" href={officialLineUrl} rel="noopener noreferrer" target="_blank">
               {officialLineUrl}
             </a>
-            ，並主動回覆「已預約＋姓名」，以利客服確認預約資訊與後續安排。
           </p>
+          <p className="mt-2 leading-7 text-textMuted">預約完成後，請加入官方 LINE 並主動回覆「已預約＋姓名」，以利客服確認預約資訊與後續安排。</p>
           <a
             className="focus-ring mt-4 inline-flex rounded-lg bg-[#06c755] px-5 py-3 text-sm font-semibold text-white shadow-soft transition hover:scale-[1.02]"
             href={officialLineUrl}
