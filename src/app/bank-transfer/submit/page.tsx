@@ -1,7 +1,7 @@
 'use client'
 
 import { Suspense, useEffect, useMemo, useState, type FormEvent } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { LoginModal } from '@/components/LoginModal'
 import { PageHero } from '@/components/PageHero'
 import { getAuthAccessToken, getMockUser, subscribeAuthChange, type UserProfile } from '@/lib/mockAuth'
@@ -41,6 +41,7 @@ function BankTransferSubmitContent() {
   const [errorMessage, setErrorMessage] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const searchParams = useSearchParams()
+  const router = useRouter()
   const [prefilledBookingId, setPrefilledBookingId] = useState('')
   const [isAmountPrefilled, setIsAmountPrefilled] = useState(false)
 
@@ -96,31 +97,40 @@ function BankTransferSubmitContent() {
 
   const submitTransfer = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+
+    if (isSubmitting) {
+      return
+    }
+
+    setIsSubmitting(true)
     setStatusMessage('')
     setErrorMessage('')
 
     if (!user) {
       setLoginOpen(true)
+      setIsSubmitting(false)
       return
     }
 
     if (!payerName.trim() || !payerPhone.trim() || !selectedItem.itemName || amountTwd <= 0) {
       setErrorMessage('請填寫姓名、電話、購買項目與金額。')
+      setIsSubmitting(false)
       return
     }
 
     if (!/^\d{5}$/.test(bankAccountLast5)) {
       setErrorMessage('您的匯款帳號後五碼必須是 5 位數字。')
+      setIsSubmitting(false)
       return
     }
 
     const accessToken = await getAuthAccessToken()
     if (!accessToken) {
       setLoginOpen(true)
+      setIsSubmitting(false)
       return
     }
 
-    setIsSubmitting(true)
     try {
         const response = await fetch('/api/bank-transfer/submit', {
         method: 'POST',
@@ -148,9 +158,7 @@ function BankTransferSubmitContent() {
         throw new Error(data?.message || '匯款回報送出失敗')
       }
 
-      setStatusMessage('已收到您的匯款回報。請加入水瓶先生官方 LINE，並回覆「已匯款＋姓名＋購買項目」。客服確認款項後，將為您開通服務或確認預約。')
-      setBankAccountLast5('')
-      setNote('')
+      router.push('/account/bookings?bankTransferSubmitted=1')
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : '匯款回報送出失敗，請稍後再試。')
     } finally {

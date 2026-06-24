@@ -85,6 +85,38 @@ export async function POST(request: Request) {
   }
 
   const supabase = getSupabaseAdmin()
+
+  let existingQuery = supabase
+    .from('bank_transfer_submissions')
+    .select('id, status')
+    .eq('user_id', userId)
+    .eq('item_type', itemType)
+    .in('status', ['pending_review', 'confirmed'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  existingQuery =
+    itemId === null
+      ? existingQuery.is('item_id', null)
+      : existingQuery.eq('item_id', itemId)
+
+  const { data: existingSubmission, error: existingError } = await existingQuery.maybeSingle()
+
+  if (existingError) {
+    return NextResponse.json({ ok: false, message: existingError.message }, { status: 500 })
+  }
+
+  if (existingSubmission) {
+    return NextResponse.json(
+      {
+        ok: true,
+        message: '已有待確認或已完成的匯款回報，請勿重複送出。',
+        submission: existingSubmission,
+      },
+      { status: 200 },
+    )
+  }
+
   const { data, error } = await supabase
     .from('bank_transfer_submissions')
     .insert({
