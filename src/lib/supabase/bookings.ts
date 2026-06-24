@@ -38,6 +38,14 @@ type BookingRow = {
   updated_at: string
 }
 
+type ConsultationPlanRow = {
+  id: string
+  name: string
+  duration_minutes: number | null
+  price_twd: number
+  is_active: boolean | null
+}
+
 function normalizeBirthTime(value: string) {
   return value.length === 5 ? `${value}:00` : value
 }
@@ -87,6 +95,30 @@ export async function createSupabaseBooking(input: BookingFormInput) {
   if (!plan) throw new Error('方案不存在')
 
   const supabase = getSupabaseAdmin()
+
+  const { data: planRecord, error: planLookupError } = await supabase
+    .from('consultation_plans')
+    .select('id,name,duration_minutes,price_twd,is_active')
+    .eq('id', input.planId)
+    .single<ConsultationPlanRow>()
+
+  console.info('consultation_plans 查詢結果', {
+    planId: input.planId,
+    found: !!planRecord,
+    isActive: planRecord?.is_active ?? null
+  })
+
+  if (planLookupError) {
+    console.error('consultation_plans 查詢失敗', {
+      message: planLookupError.message,
+      code: planLookupError.code,
+      details: planLookupError.details,
+      hint: planLookupError.hint,
+      planId: input.planId
+    })
+    throw planLookupError
+  }
+
   const { data, error } = await supabase
     .from('bookings')
     .insert({
