@@ -1,6 +1,9 @@
 import Link from 'next/link'
+import { shouldHideCoursesServices } from '@/lib/siteVisibility'
 
 export function CoursePreview() {
+  if (shouldHideCoursesServices()) return null
+
   return (
     <section className="bg-softPurple py-12 md:py-20">
       <div className="section-shell grid gap-8 rounded-[28px] border border-borderSoft bg-white p-7 shadow-soft md:grid-cols-[1fr_0.8fr] md:p-10">

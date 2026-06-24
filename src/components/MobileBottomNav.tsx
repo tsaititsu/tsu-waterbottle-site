@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { BookOpen, Home, MoonStar, Sparkles, UserRound } from 'lucide-react'
+import { shouldHideCoursesServices } from '@/lib/siteVisibility'
 
 const items = [
   { label: '首頁', href: '/', icon: Home },
@@ -12,13 +13,18 @@ const items = [
   { label: '我的', href: '/account', icon: UserRound }
 ]
 
+const visibleItems = items.filter((item) => {
+  if (item.label === '課程' && shouldHideCoursesServices()) return false
+  return true
+})
+
 export function MobileBottomNav() {
   const pathname = usePathname()
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-borderSoft bg-white/95 px-2 py-2 shadow-soft backdrop-blur md:hidden">
-      <div className="grid grid-cols-5">
-        {items.map((item) => {
+      <div className={`grid ${shouldHideCoursesServices() ? 'grid-cols-4' : 'grid-cols-5'}`}>
+        {visibleItems.map((item) => {
           const Icon = item.icon
           const active = pathname === item.href
           return (

@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { LogoMark } from './LogoMark'
+import { shouldHideConsultationServices, shouldHideCoursesServices } from '@/lib/siteVisibility'
 
 const lineSupportUrl = 'https://lin.ee/6Tpje1P'
 const supportEmail = 'water.bottle.fortune.teller@gmail.com'
@@ -16,8 +17,15 @@ const consumerLinks = [
   { href: '/privacy', label: '隱私權政策' },
   { href: '/refund-policy', label: '退款政策' },
   { href: '/consumer-rights', label: '消費者權益' },
+  { href: '/bank-transfer', label: '銀行匯款說明' },
   { href: '/contact', label: '聯絡我們' },
 ]
+
+const visibleServiceLinks = serviceLinks.filter((link) => {
+  if (link.label === '水瓶先生論命預約' && shouldHideConsultationServices()) return false
+  if (link.label === '紫微斗數課程' && shouldHideCoursesServices()) return false
+  return true
+})
 
 export function Footer() {
   return (
@@ -58,14 +66,14 @@ export function Footer() {
             </div>
           </section>
 
-          <nav aria-label="服務連結">
-            <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-darkGold">服務</h3>
-            <div className="mt-5 grid gap-3 text-sm text-textMuted">
-              {serviceLinks.map((link) => (
+        <nav aria-label="服務連結">
+          <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-darkGold">服務</h3>
+          <div className="mt-5 grid gap-3 text-sm text-textMuted">
+            {visibleServiceLinks.map((link) => (
                 <Link className="transition hover:text-deepPurple" href={link.href} key={link.href}>
                   {link.label}
                 </Link>
-              ))}
+            ))}
             </div>
           </nav>
 

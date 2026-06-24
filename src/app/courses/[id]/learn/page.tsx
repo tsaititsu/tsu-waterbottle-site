@@ -4,6 +4,7 @@ import { notFound, redirect } from 'next/navigation'
 import { createServerClient } from '@supabase/ssr'
 import { PageHero } from '@/components/PageHero'
 import { getCourseById, isCourseId, type CourseId } from '@/lib/courses'
+import { shouldHideCoursesServices } from '@/lib/siteVisibility'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -48,6 +49,10 @@ async function hasPurchasedCourse(courseId: CourseId) {
 }
 
 export default async function CourseLearnPage({ params }: LearnPageProps) {
+  if (shouldHideCoursesServices()) {
+    redirect('/')
+  }
+
   const { id } = await params
   if (!isCourseId(id)) notFound()
 

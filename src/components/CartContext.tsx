@@ -1,6 +1,7 @@
 'use client'
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { shouldHideConsultationServices, shouldHideCoursesServices } from '@/lib/siteVisibility'
 
 export type CartItemType = 'divination' | 'consultation' | 'course' | 'booking' | 'other'
 
@@ -36,6 +37,12 @@ const CartContext = createContext<CartContextValue | null>(null)
 
 const CART_STORAGE_KEY = 'waterbottle-offline-cart'
 
+function isVisibleCartItem(item: CartItem) {
+  if (shouldHideConsultationServices() && item.type === 'consultation') return false
+  if (shouldHideCoursesServices() && item.type === 'course') return false
+  return true
+}
+
 function normalizeCart(items: unknown): CartItem[] {
   if (!Array.isArray(items)) return []
   const parsed = items
@@ -59,6 +66,7 @@ function normalizeCart(items: unknown): CartItem[] {
       } as CartItem
     })
     .filter((value): value is CartItem => value !== null)
+    .filter(isVisibleCartItem)
 
   return parsed
 }
@@ -96,11 +104,24 @@ export function CartProvider({ children }: { children: ReactNode }) {
       const quantity = Math.max(1, Math.floor(item.quantity ?? 1))
       const normalizedId = item.id.trim()
       const normalizedName = item.itemName.trim()
+      const normalizedType = item.type
 
-      if (!normalizedId || !normalizedName || amount < 0) return current
+      const normalizedItem: CartItem = {
+        id: normalizedId,
+        type: normalizedType,
+        itemName: normalizedName,
+        amount,
+        quantity,
+        status: 'unpaid',
+      }
+
+      if (!normalizedItem.id || !normalizedItem.itemName || normalizedItem.amount < 0) return current
+      if (!isVisibleCartItem(normalizedItem)) return current
 
       const next = [...current]
-      const index = next.findIndex((row) => row.id === normalizedId && row.type === item.type && row.status === 'unpaid')
+      const index = next.findIndex(
+        (row) => row.id === normalizedItem.id && row.type === normalizedItem.type && row.status === normalizedItem.status
+      )
 
       if (index >= 0) {
         next[index] = {
@@ -113,14 +134,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
       return [
         ...next,
-        {
-          id: normalizedId,
-          type: item.type,
-          itemName: normalizedName,
-          amount,
-          quantity,
-          status: 'unpaid'
-        }
+        normalizedItem,
       ]
     })
   }, [])
@@ -129,13 +143,17 @@ export function CartProvider({ children }: { children: ReactNode }) {
     setItems((current) => current.filter((item) => item.id !== id || item.status !== 'unpaid'))
   }, [])
 
-  const value = useMemo(
+const value = useMemo(
     () => ({
-      items: items.filter((item) => item.status === 'unpaid'),
+      items: items.filter((item) => item.status === 'unpaid').filter(isVisibleCartItem),
       isLoaded,
-      totalQuantity: items.filter((item) => item.status === 'unpaid').reduce((total, item) => total + item.quantity, 0),
+      totalQuantity: items
+        .filter((item) => item.status === 'unpaid')
+        .filter(isVisibleCartItem)
+        .reduce((total, item) => total + item.quantity, 0),
       totalAmount: items
         .filter((item) => item.status === 'unpaid')
+        .filter(isVisibleCartItem)
         .reduce((total, item) => total + item.amount * item.quantity, 0),
       addItem,
       removeItem,

@@ -3,8 +3,13 @@
 import { useState } from 'react'
 import { ShoppingCart } from 'lucide-react'
 import { useCart } from '@/components/CartContext'
+import { shouldHideConsultationServices } from '@/lib/siteVisibility'
 
 export function AddConsultationToCartButton() {
+  if (shouldHideConsultationServices()) {
+    return null
+  }
+
   const { addItem } = useCart()
   const [message, setMessage] = useState('')
 

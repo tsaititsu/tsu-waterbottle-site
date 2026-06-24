@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { serviceCards } from '@/lib/mockData'
+import { shouldHideConsultationServices, shouldHideCoursesServices } from '@/lib/siteVisibility'
 
 function MiniChartIcon() {
   return (
@@ -13,6 +14,12 @@ function MiniChartIcon() {
 }
 
 export function ServiceCards() {
+  const visibleCards = serviceCards.filter((service) => {
+    if (service.title === '水瓶先生論命' && shouldHideConsultationServices()) return false
+    if (service.title === '紫微斗數課程' && shouldHideCoursesServices()) return false
+    return true
+  })
+
   return (
     <section className="bg-white py-12 md:py-16">
       <div className="section-shell">
@@ -23,7 +30,7 @@ export function ServiceCards() {
           </div>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-5">
-          {serviceCards.map((service) => {
+          {visibleCards.map((service) => {
             const Icon = service.icon
             const isChartService = service.title === '紫微命盤分析'
             return (

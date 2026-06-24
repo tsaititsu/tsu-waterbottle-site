@@ -1,8 +1,14 @@
 import { BookingForm } from '@/components/BookingForm'
 import { PageHero } from '@/components/PageHero'
 import { AddConsultationToCartButton } from '@/components/AddConsultationToCartButton'
+import { shouldHideConsultationServices } from '@/lib/siteVisibility'
+import { redirect } from 'next/navigation'
 
 export default function BookingPage() {
+  if (shouldHideConsultationServices()) {
+    redirect('/')
+  }
+
   return (
     <>
       <PageHero

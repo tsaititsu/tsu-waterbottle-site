@@ -11,6 +11,7 @@ import {
   subscribeAuthChange,
   type UserProfile
 } from '@/lib/mockAuth'
+import { shouldHideConsultationServices, shouldHideCoursesServices } from '@/lib/siteVisibility'
 import { LogoMark } from './LogoMark'
 import { useCart } from './CartContext'
 
@@ -22,6 +23,12 @@ const navItems = [
   { label: '紫微課程', href: '/courses' },
   { label: '關於我們', href: '/#about' }
 ]
+
+const visibleNavItems = navItems.filter((item) => {
+  if (item.label === '水瓶先生論命' && shouldHideConsultationServices()) return false
+  if (item.label === '紫微課程' && shouldHideCoursesServices()) return false
+  return true
+})
 
 export function Header() {
   const pathname = usePathname()
@@ -183,7 +190,7 @@ export function Header() {
         </Link>
 
         <nav className="hidden flex-1 items-center justify-center gap-12 text-lg font-semibold text-textDark lg:flex">
-          {navItems.map((item) => (
+          {visibleNavItems.map((item) => (
             <Link
               key={item.href}
               className={`relative py-2 ${pathname === item.href ? 'text-deepPurple' : 'hover:text-purpleMain'}`}
@@ -236,7 +243,7 @@ export function Header() {
       {menuOpen && (
         <div className="border-t border-borderSoft bg-white lg:hidden">
           <div className="section-shell grid gap-2 py-4">
-            {navItems.map((item) => (
+            {visibleNavItems.map((item) => (
               <Link key={item.href} className="rounded-lg px-3 py-3 text-sm font-medium hover:bg-softPurple" href={item.href} onClick={() => setMenuOpen(false)}>
                 {item.label}
               </Link>
