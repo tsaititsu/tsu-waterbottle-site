@@ -32,7 +32,7 @@ export default function CartPage() {
           {isLoaded && items.length === 0 ? (
             <div className="rounded-xl border border-[#eedec1] bg-softPurple p-6 text-center">
               <p className="font-semibold text-deepPurple">購物車目前沒有未付款項目</p>
-              <p className="mt-2 text-textMuted">可先在占卜或論命頁面加入服務。</p>
+              <p className="mt-2 text-textMuted">可先在其他未隱藏服務加入商品。</p>
             </div>
           ) : null}
 
