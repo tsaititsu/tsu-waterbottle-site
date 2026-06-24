@@ -1,6 +1,5 @@
 import { CoursePreview } from '@/components/CoursePreview'
 import { HeroSection } from '@/components/HeroSection'
-import { MemberBenefits } from '@/components/MemberBenefits'
 import { PricingSection } from '@/components/PricingSection'
 import { ProcessSteps } from '@/components/ProcessSteps'
 import { ServiceCards } from '@/components/ServiceCards'
@@ -13,7 +12,6 @@ export default function Home() {
       <ProcessSteps />
       <PricingSection />
       <CoursePreview />
-      <MemberBenefits />
     </>
   )
 }
