@@ -42,6 +42,7 @@ function padDatePart(value: string) {
 
 export function BookingForm() {
   const [planId, setPlanId] = useState(bookingPlans[0].id)
+  const [paymentMethod, setPaymentMethod] = useState<'bank-transfer' | 'newebpay-coming-soon'>('bank-transfer')
   const [bookingDate, setBookingDate] = useState(getTomorrowDate())
   const [bookingTime, setBookingTime] = useState(availableSlots[0])
   const [customerName, setCustomerName] = useState('')
@@ -146,6 +147,18 @@ export function BookingForm() {
       setFormError('預約資料暫存失敗，請確認是否已登入。')
       return false
     }
+
+    if (paymentMethod === 'bank-transfer') {
+      setFormError('')
+      window.location.href = `/bank-transfer/submit?itemType=booking&itemId=${encodeURIComponent(bookingId ?? '')}&itemName=${encodeURIComponent(selectedPlan.name)}&amountTwd=${encodeURIComponent(String(selectedPlan.price))}`
+      return false
+    }
+
+    if (paymentMethod === 'newebpay-coming-soon') {
+      setFormError('藍新線上付款功能目前尚未開放，請先使用銀行匯款。')
+      return false
+    }
+
     setFormError('')
     return true
   }
@@ -367,6 +380,47 @@ export function BookingForm() {
         </div>
 
         <div className="rounded-2xl border border-borderSoft bg-softPurple p-5">
+          <p className="text-sm font-semibold text-deepPurple">選擇付款方式</p>
+          <div className="mt-4 grid gap-3">
+            <label className="cursor-pointer rounded-xl border border-borderSoft bg-white p-4">
+              <div className="flex items-start gap-3">
+                <input
+                  checked={paymentMethod === 'bank-transfer'}
+                  className="mt-1 h-4 w-4 accent-deepPurple"
+                  name="booking-payment-method"
+                  onChange={() => setPaymentMethod('bank-transfer')}
+                  type="radio"
+                />
+                <div>
+                  <p className="font-semibold text-textDark">銀行匯款｜人工確認</p>
+                  <p className="mt-1 text-sm text-textMuted">
+                    匯款完成後，請填寫匯款回報表單，並加入水瓶先生官方 LINE 回覆「已匯款＋姓名＋購買項目」。客服確認款項後，將協助確認預約。
+                  </p>
+                </div>
+              </div>
+            </label>
+            <label className="cursor-not-allowed rounded-xl border border-borderSoft bg-white p-4 opacity-70">
+              <div className="flex items-start gap-3">
+                <input
+                  checked={paymentMethod === 'newebpay-coming-soon'}
+                  className="mt-1 h-4 w-4 accent-deepPurple"
+                  disabled
+                  name="booking-payment-method"
+                  onChange={() => setPaymentMethod('newebpay-coming-soon')}
+                  type="radio"
+                />
+                <div>
+                  <p className="font-semibold text-textDark">藍新線上付款｜即將開放</p>
+                  <p className="mt-1 text-sm text-textMuted">
+                    真人論命線上刷卡付款建置中，目前請先使用銀行匯款完成預約付款。
+                  </p>
+                </div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-borderSoft bg-softPurple p-5">
           <details className="group">
             <summary className="cursor-pointer list-none font-serifTC text-xl font-semibold text-deepPurple">
               水瓶先生論命須知
@@ -443,7 +497,7 @@ export function BookingForm() {
           itemName={selectedPlan.name}
           itemType="booking"
         >
-          前往付款 NT${selectedPlan.price.toLocaleString()}
+          {paymentMethod === 'bank-transfer' ? '建立預約並填寫匯款回報' : `前往付款 NT${selectedPlan.price.toLocaleString()}`}
         </ActionButton>
       </form>
     </div>
