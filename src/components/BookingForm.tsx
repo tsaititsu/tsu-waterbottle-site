@@ -1,6 +1,7 @@
 'use client'
 
 import { CalendarDays, CheckCircle2 } from 'lucide-react'
+import Link from 'next/link'
 import { useRef, useState } from 'react'
 import { ActionButton } from './ActionButton'
 import { bookingPlans, getBookingPlan } from '@/lib/bookingPlans'
@@ -92,7 +93,7 @@ export function BookingForm() {
       return null
     }
     if (!hasAcceptedNotice) {
-      setFormError('請先閱讀並勾選同意水瓶先生論命須知事項。')
+      setFormError('請先勾選同意真人論命服務說明、退款政策、服務條款與預約相關規則。')
       return null
     }
 
@@ -392,15 +393,45 @@ export function BookingForm() {
             </div>
           </details>
 
-          <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-borderSoft bg-white p-4 text-sm font-semibold text-textDark">
+          <div className="mt-5 flex items-start gap-3 rounded-xl border border-borderSoft bg-white p-4 text-sm font-semibold leading-7 text-textDark">
             <input
+              id="booking-terms-consent"
               checked={hasAcceptedNotice}
               className="mt-1 h-5 w-5 accent-deepPurple"
               onChange={(event) => setHasAcceptedNotice(event.target.checked)}
               type="checkbox"
             />
-            <span>我已閱讀並同意遵守水瓶先生論命須知事項 *</span>
-          </label>
+            <p>
+              我已詳細閱讀並同意《真人論命服務說明》、
+              <Link className="text-deepPurple underline underline-offset-4" href="/refund-policy">
+                退款政策
+              </Link>
+              、
+              <Link className="text-deepPurple underline underline-offset-4" href="/terms">
+                服務條款
+              </Link>
+              ，並了解預約、改期、取消與遲到規則。
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-[#bfe8cb] bg-[#f1fff5] p-5">
+          <p className="text-sm font-semibold text-[#078c3f]">官方 LINE 預約提醒</p>
+          <p className="mt-2 leading-7 text-textMuted">
+            預約完成後，請加入水瓶先生官方 LINE：
+            <a className="font-semibold text-deepPurple underline underline-offset-4" href={officialLineUrl} rel="noopener noreferrer" target="_blank">
+              {officialLineUrl}
+            </a>
+            ，並主動回覆「已預約＋姓名」，以利客服確認預約資訊與後續安排。
+          </p>
+          <a
+            className="focus-ring mt-4 inline-flex rounded-lg bg-[#06c755] px-5 py-3 text-sm font-semibold text-white shadow-soft transition hover:scale-[1.02]"
+            href={officialLineUrl}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            加入官方 LINE
+          </a>
         </div>
 
         {formError && <p className="text-sm font-semibold text-deepPurple">{formError}</p>}
