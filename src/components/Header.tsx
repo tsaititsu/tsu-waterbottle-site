@@ -39,6 +39,8 @@ export function Header() {
   const [loadingProvider, setLoadingProvider] = useState<'line' | 'google' | ''>('')
   const [user, setUser] = useState<UserProfile | null>(null)
   const { totalQuantity } = useCart()
+  const hideConsultationServices = shouldHideConsultationServices()
+  const hideCoursesServices = shouldHideCoursesServices()
 
   useEffect(() => {
     const sync = () => setUser(getMockUser())
@@ -92,14 +94,18 @@ export function Header() {
           <UserRound size={22} />
           會員中心
         </Link>
-        <Link href="/account/courses" className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
-          <BookOpen size={22} />
-          我的課程
-        </Link>
-        <Link href="/account/bookings" className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
-          <CalendarCheck size={22} />
-          我的預約
-        </Link>
+        {!hideCoursesServices ? (
+          <Link href="/account/courses" className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
+            <BookOpen size={22} />
+            我的課程
+          </Link>
+        ) : null}
+        {!hideConsultationServices ? (
+          <Link href="/account/bookings" className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
+            <CalendarCheck size={22} />
+            我的預約
+          </Link>
+        ) : null}
         <Link href="/ai-chart" className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
           <FileText size={22} />
           命盤紀錄
@@ -153,9 +159,11 @@ export function Header() {
       <Link href="/account" className="rounded-xl border border-[#e8dff2] px-4 py-3 text-center font-semibold">
         會員中心
       </Link>
-      <Link href="/account/courses" className="rounded-xl border border-[#e8dff2] px-4 py-3 text-center font-semibold">
-        我的課程
-      </Link>
+      {!hideCoursesServices ? (
+        <Link href="/account/courses" className="rounded-xl border border-[#e8dff2] px-4 py-3 text-center font-semibold">
+          我的課程
+        </Link>
+      ) : null}
       <button type="button" onClick={handleLogout} className="rounded-xl bg-[#3d0d74] px-4 py-3 font-semibold text-white">
         登出
       </button>
