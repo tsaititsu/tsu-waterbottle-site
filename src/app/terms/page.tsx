@@ -36,11 +36,11 @@ const sections = [
   },
   {
     title: '爭議處理',
-    body: '若對訂單、付款、服務交付或退款有疑問，請提供訂單資料與問題內容，透過客服信箱 water.bottle.fortune.teller@gmail.com 或客服 LINE https://lin.ee/6Tpje1P 聯繫我們。客服時間：09:00–19:00。',
+    body: '若對訂單、付款、服務交付或退款有疑問，請提供訂單資料與問題內容，透過客服信箱 water.bottle.fortune.teller@gmail.com 或客服 LINE https://lin.ee/6Tpje1P 聯繫我們。客服時間：09:00–18:00。',
   },
   {
     title: '聯絡方式',
-    body: '客服信箱：water.bottle.fortune.teller@gmail.com。客服 LINE：https://lin.ee/6Tpje1P。客服時間：09:00–19:00。',
+    body: '客服信箱：water.bottle.fortune.teller@gmail.com。客服 LINE：https://lin.ee/6Tpje1P。客服時間：09:00–18:00。',
   },
   {
     title: '營業人資訊',

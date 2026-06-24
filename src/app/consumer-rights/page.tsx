@@ -20,7 +20,7 @@ const sections = [
   },
   {
     title: '客服聯絡方式',
-    body: '客服信箱：water.bottle.fortune.teller@gmail.com；客服 LINE：https://lin.ee/6Tpje1P；客服時間：09:00–19:00。',
+    body: '客服信箱：water.bottle.fortune.teller@gmail.com；客服 LINE：https://lin.ee/6Tpje1P；客服時間：09:00–18:00。',
   },
   {
     title: '爭議處理方式',

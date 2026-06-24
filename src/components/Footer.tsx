@@ -54,7 +54,7 @@ export function Footer() {
                   加入 LINE 官方帳號
                 </a>
               </p>
-              <p>客服時間：09:00–19:00</p>
+              <p>客服時間：09:00–18:00</p>
             </div>
           </section>
 

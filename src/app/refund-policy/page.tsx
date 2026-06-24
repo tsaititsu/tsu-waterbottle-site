@@ -20,7 +20,7 @@ const sections = [
   },
   {
     title: '退款申請方式',
-    body: '退款或改期申請請透過客服信箱 water.bottle.fortune.teller@gmail.com 或客服 LINE https://lin.ee/6Tpje1P 聯繫我們。客服時間：09:00–19:00。請提供會員帳號、訂單編號、付款時間、服務名稱與申請原因。',
+    body: '退款或改期申請請透過客服信箱 water.bottle.fortune.teller@gmail.com 或客服 LINE https://lin.ee/6Tpje1P 聯繫我們。客服時間：09:00–18:00。請提供會員帳號、訂單編號、付款時間、服務名稱與申請原因。',
   },
   {
     title: '退款處理時間',
