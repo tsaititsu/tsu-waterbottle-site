@@ -5,6 +5,15 @@ import { ShoppingCart, Sparkles } from 'lucide-react'
 import { useCart } from '@/components/CartContext'
 import { spiritualProducts, type SpiritualProduct } from '@/lib/spiritualProducts'
 
+const careNotes = [
+  '符咒請保持乾淨、乾燥，避免碰水、受潮或沾染髒污。',
+  '請勿任意揉折、撕毀或放置於不潔之處。',
+  '若需要對折，請以印章朝外的方式整齊對折，不可亂折。',
+  '隨身攜帶型符咒，建議放在皮夾、包包內層或乾淨的夾鏈袋中。',
+  '若符咒破損、受潮或不慎弄髒，建議先停止使用，並與客服聯繫確認後續處理方式。',
+  '使用火化類符咒時，請注意通風與用火安全，並遠離易燃物。',
+]
+
 function ProductImage({ product }: { product: SpiritualProduct }) {
   const [hasError, setHasError] = useState(false)
 
@@ -53,8 +62,24 @@ function ProductCard({ product }: { product: SpiritualProduct }) {
         </div>
 
         <h2 className="mt-4 font-serifTC text-2xl font-semibold text-deepPurple">{product.name}</h2>
-        <p className="mt-2 text-sm leading-7 text-textMuted">{product.description}</p>
-        {product.note ? <p className="mt-2 text-sm font-semibold text-darkGold">{product.note}</p> : null}
+        <div className="mt-3 grid gap-3 text-sm leading-7 text-textMuted">
+          <p>
+            <span className="font-semibold text-deepPurple">祈願方向：</span>
+            {product.description}
+          </p>
+          {product.usage ? (
+            <p>
+              <span className="font-semibold text-deepPurple">使用建議：</span>
+              {product.usage}
+            </p>
+          ) : null}
+          {product.note ? (
+            <p>
+              <span className="font-semibold text-darkGold">注意事項：</span>
+              {product.note}
+            </p>
+          ) : null}
+        </div>
 
         <div className="mt-auto pt-5">
           <p className="font-serifTC text-2xl font-semibold text-textDark">NT${product.priceTwd.toLocaleString('zh-TW')}</p>
@@ -91,7 +116,33 @@ export default function SpiritualProductsPage() {
       </section>
 
       <section className="py-10 md:py-14">
-        <div className="section-shell">
+        <div className="section-shell grid gap-8">
+          <section className="rounded-2xl border border-borderSoft bg-softPurple p-6 md:p-8">
+            <div className="grid gap-8 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+              <div>
+                <p className="text-sm font-semibold text-darkGold">符咒介紹</p>
+                <h2 className="mt-2 font-serifTC text-2xl font-semibold text-deepPurple">民俗祈福用品說明</h2>
+                <p className="mt-4 leading-8 text-textMuted">
+                  所有符咒皆由水瓶先生親手製作，完成後會前往雲林北港武德宮過爐。符咒屬於民俗信仰與祈福用品，主要用於安定心念、加強祈願方向與作為日常提醒，不保證特定結果，亦不具醫療、治療或替代專業建議之效果。
+                </p>
+              </div>
+
+              <div>
+                <p className="text-sm font-semibold text-darkGold">符咒保存與使用注意事項</p>
+                <ol className="mt-4 grid gap-3 leading-7 text-textMuted">
+                  {careNotes.map((note, index) => (
+                    <li key={note} className="flex gap-3">
+                      <span className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-xs font-semibold text-deepPurple">
+                        {index + 1}
+                      </span>
+                      <span>{note}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            </div>
+          </section>
+
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {spiritualProducts.map((product) => (
               <ProductCard key={product.slug} product={product} />
