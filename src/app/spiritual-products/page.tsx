@@ -35,24 +35,11 @@ function ProductImage({ product }: { product: SpiritualProduct }) {
   )
 }
 
-function ProductCard({
-  product,
-  purchaseNoticeAccepted,
-  onRequirePurchaseNotice,
-}: {
-  product: SpiritualProduct
-  purchaseNoticeAccepted: boolean
-  onRequirePurchaseNotice: () => void
-}) {
+function ProductCard({ product }: { product: SpiritualProduct }) {
   const { addItem } = useCart()
   const [added, setAdded] = useState(false)
 
   const handleAddToCart = () => {
-    if (!purchaseNoticeAccepted) {
-      onRequirePurchaseNotice()
-      return
-    }
-
     addItem({
       type: 'spiritual_product',
       id: product.slug,
@@ -111,13 +98,6 @@ function ProductCard({
 }
 
 export default function SpiritualProductsPage() {
-  const [purchaseNoticeAccepted, setPurchaseNoticeAccepted] = useState(false)
-  const [purchaseNoticeMessage, setPurchaseNoticeMessage] = useState('')
-
-  const requirePurchaseNotice = () => {
-    setPurchaseNoticeMessage('請先勾選同意開運商品購買須知後，再加入購物車。')
-  }
-
   return (
     <div className="bg-white">
       <section className="bg-gradient-to-b from-[#faf7ff] to-white py-12 md:py-16">
@@ -238,29 +218,6 @@ export default function SpiritualProductsPage() {
           </section>
 
           <section className="rounded-2xl border border-borderSoft bg-softPurple p-6 md:p-8">
-            <div className="rounded-xl bg-white px-4 py-4">
-              <div className="flex items-start gap-3">
-                <input
-                  id="spiritual-products-purchase-notice"
-                  type="checkbox"
-                  checked={purchaseNoticeAccepted}
-                  onChange={(event) => {
-                    setPurchaseNoticeAccepted(event.target.checked)
-                    if (event.target.checked) setPurchaseNoticeMessage('')
-                  }}
-                  className="mt-1 size-4 rounded border-borderSoft text-deepPurple focus:ring-deepPurple"
-                />
-                <label htmlFor="spiritual-products-purchase-notice" className="text-sm leading-7 text-textMuted">
-                  我已詳細閱讀並了解《開運商品購買須知》與《開運商品退換貨政策》，並知道此類商品屬民俗信仰與祈福用品，不保證特定結果，亦不具醫療或治療效果。
-                </label>
-              </div>
-              {purchaseNoticeMessage ? (
-                <p className="mt-3 rounded-lg bg-softPurple px-4 py-3 text-sm font-semibold text-deepPurple">{purchaseNoticeMessage}</p>
-              ) : null}
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-borderSoft bg-softPurple p-6 md:p-8">
             <div className="grid gap-8 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
               <div>
                 <p className="text-sm font-semibold text-darkGold">符咒介紹</p>
@@ -288,12 +245,7 @@ export default function SpiritualProductsPage() {
 
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {spiritualProducts.map((product) => (
-              <ProductCard
-                key={product.slug}
-                product={product}
-                purchaseNoticeAccepted={purchaseNoticeAccepted}
-                onRequirePurchaseNotice={requirePurchaseNotice}
-              />
+              <ProductCard key={product.slug} product={product} />
             ))}
           </div>
         </div>
