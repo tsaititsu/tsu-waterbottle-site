@@ -8,6 +8,34 @@ import { useEffect, useRef, useState } from "react"
 type PreviewPosition = "upright" | "reversed"
 type DrawMode = "manual" | "auto"
 
+type DivinationInterpretation = {
+  summary: string
+  cardMessage: string
+  situationAnalysis: string
+  advice: string
+  reminder: string
+}
+
+type InterpretApiResponse =
+  | {
+      ok: true
+      interpretation: DivinationInterpretation
+      card: {
+        id: string
+        name: string
+        image: string
+        reversedImage: string
+        huaqi: string
+        element: string
+        core: string
+      }
+      position: PreviewPosition
+    }
+  | {
+      ok: false
+      error: string
+    }
+
 type DivinationDrawPreviewProps = {
   question?: string
   drawMode?: DrawMode | null
@@ -46,9 +74,12 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
   const [pendingPosition, setPendingPosition] = useState<PreviewPosition | null>(null)
   const [confirmedCard, setConfirmedCard] = useState<ZiweiCard | null>(null)
   const [confirmedPosition, setConfirmedPosition] = useState<PreviewPosition | null>(null)
+  const [interpretation, setInterpretation] = useState<DivinationInterpretation | null>(null)
+  const [isInterpreting, setIsInterpreting] = useState(false)
   const [message, setMessage] = useState(initialMessage)
   const [errorMessage, setErrorMessage] = useState("")
   const shuffleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const interpretRequestRef = useRef(0)
 
   const hasResultPreview = Boolean(confirmedCard && confirmedPosition)
   const pendingCard = pendingIndex === null ? null : ziweiCards[pendingIndex]
@@ -83,6 +114,9 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
     setPendingPosition(null)
     setConfirmedCard(null)
     setConfirmedPosition(null)
+    setInterpretation(null)
+    setIsInterpreting(false)
+    interpretRequestRef.current += 1
     setErrorMessage("")
     setMessage(initialMessage)
   }, [question, drawMode])
@@ -93,18 +127,21 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
       return
     }
 
-    if (shuffling) return
+    if (shuffling || isInterpreting) return
 
     if (shuffleTimerRef.current) {
       clearTimeout(shuffleTimerRef.current)
     }
 
+    interpretRequestRef.current += 1
     setStarted(true)
     setShuffling(true)
     setPendingIndex(null)
     setPendingPosition(null)
     setConfirmedCard(null)
     setConfirmedPosition(null)
+    setInterpretation(null)
+    setIsInterpreting(false)
     setErrorMessage("")
     setMessage(shufflingMessage)
 
@@ -115,23 +152,25 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
   }
 
   function pickCard(index: number) {
-    if (!canDraw || !isManualMode || !started || shuffling || hasResultPreview) return
+    if (!canDraw || !isManualMode || !started || shuffling || isInterpreting || hasResultPreview) return
 
     setPendingIndex(index)
     setPendingPosition(getRandomPosition())
     setConfirmedCard(null)
     setConfirmedPosition(null)
+    setInterpretation(null)
     setErrorMessage("")
     setMessage(pendingMessage)
   }
 
   function changeCard() {
-    if (!canDraw || shuffling) return
+    if (!canDraw || shuffling || isInterpreting) return
 
     setPendingIndex(null)
     setPendingPosition(null)
     setConfirmedCard(null)
     setConfirmedPosition(null)
+    setInterpretation(null)
     setErrorMessage("")
     setMessage(readyMessage)
   }
@@ -142,18 +181,21 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
       return
     }
 
-    if (shuffling) return
+    if (shuffling || isInterpreting) return
 
     if (shuffleTimerRef.current) {
       clearTimeout(shuffleTimerRef.current)
     }
 
+    interpretRequestRef.current += 1
     setStarted(true)
     setShuffling(true)
     setPendingIndex(null)
     setPendingPosition(null)
     setConfirmedCard(null)
     setConfirmedPosition(null)
+    setInterpretation(null)
+    setIsInterpreting(false)
     setErrorMessage("")
     setMessage(autoShufflingMessage)
 
@@ -167,16 +209,64 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
     }, drawDelayMs)
   }
 
-  function confirmCard() {
+  async function confirmCard() {
+    if (!trimmedQuestion || !drawMode) {
+      setErrorMessage(blockedMessage)
+      return
+    }
+
     if (!pendingCard || !pendingPosition) {
       setErrorMessage("請先選一張牌。")
       return
     }
 
-    setConfirmedCard(pendingCard)
-    setConfirmedPosition(pendingPosition)
+    if (isInterpreting) return
+
+    const requestId = interpretRequestRef.current + 1
+    interpretRequestRef.current = requestId
+    setIsInterpreting(true)
+    setInterpretation(null)
     setErrorMessage("")
-    setMessage(resultReadyMessage)
+    setMessage("產生牌義預覽中...")
+
+    try {
+      const response = await fetch("/api/divination/interpret", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: trimmedQuestion,
+          drawMode,
+          cardId: pendingCard.id,
+          position: pendingPosition,
+        }),
+      })
+      const data = (await response.json()) as InterpretApiResponse
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.ok === false ? data.error : "解讀預覽產生失敗")
+      }
+
+      if (interpretRequestRef.current !== requestId) return
+
+      setConfirmedCard(pendingCard)
+      setConfirmedPosition(pendingPosition)
+      setInterpretation(data.interpretation)
+      setErrorMessage("")
+      setMessage(resultReadyMessage)
+    } catch (error) {
+      if (interpretRequestRef.current !== requestId) return
+
+      console.error(error)
+      setConfirmedCard(null)
+      setConfirmedPosition(null)
+      setInterpretation(null)
+      setErrorMessage("解讀預覽產生失敗，請稍後再試。")
+      setMessage(pendingMessage)
+    } finally {
+      if (interpretRequestRef.current === requestId) {
+        setIsInterpreting(false)
+      }
+    }
   }
 
   return (
@@ -250,12 +340,12 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
                   key={card.id}
                   type="button"
                   onClick={() => pickCard(index)}
-                  disabled={shuffling || hasResultPreview}
+                  disabled={shuffling || isInterpreting || hasResultPreview}
                   className={`group h-32 rounded-2xl border p-2 transition duration-200 sm:h-36 ${
                     isPending
                       ? "border-[#f1cf72] bg-[#251704] shadow-[0_0_24px_rgba(241,207,114,0.35)]"
                       : "border-[#8c6a2d]/80 bg-[#0b090d] hover:-translate-y-1 hover:border-[#f1cf72]"
-                  } ${shuffling || hasResultPreview ? "cursor-default opacity-80" : ""}`}
+                  } ${shuffling || isInterpreting || hasResultPreview ? "cursor-default opacity-80" : ""}`}
                   aria-label={`選擇第 ${index + 1} 張牌：${card.name}`}
                 >
                   <span className="relative block h-full overflow-hidden rounded-xl border border-[#d5ad4a]/50 bg-[radial-gradient(circle_at_30%_20%,#5b3a96_0%,#1b1128_38%,#050505_76%)] transition group-hover:border-[#f1cf72]">
@@ -309,14 +399,16 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
               <button
                 type="button"
                 onClick={confirmCard}
-                className="rounded-full border border-[#f1cf72] bg-[#201508] px-5 py-3 font-semibold text-[#f4d77d] transition hover:bg-[#2f210c]"
+                disabled={isInterpreting}
+                className="rounded-full border border-[#f1cf72] bg-[#201508] px-5 py-3 font-semibold text-[#f4d77d] transition hover:bg-[#2f210c] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                就是這張，開始解讀
+                {isInterpreting ? "產生牌義預覽中..." : "就是這張，開始解讀"}
               </button>
               <button
                 type="button"
                 onClick={isAutoMode ? startAutoDraw : changeCard}
-                className="rounded-full border border-[#0b8f74] px-5 py-3 font-semibold text-[#bff9df] transition hover:bg-[#06251d]"
+                disabled={isInterpreting}
+                className="rounded-full border border-[#0b8f74] px-5 py-3 font-semibold text-[#bff9df] transition hover:bg-[#06251d] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isAutoMode ? "重新自動抽牌" : "換一張"}
               </button>
@@ -330,6 +422,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
             drawMode={drawMode}
             card={confirmedCard}
             position={confirmedPosition}
+            interpretation={interpretation ?? undefined}
           />
         ) : null}
 
@@ -337,7 +430,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
           <button
             type="button"
             onClick={isAutoMode ? startAutoDraw : startShuffle}
-            disabled={shuffling}
+            disabled={shuffling || isInterpreting}
             className="w-full max-w-sm rounded-full border border-[#f1cf72] bg-[#1b1206] px-8 py-4 text-lg font-semibold text-[#f4d77d] transition hover:bg-[#2b1d0a] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isAutoMode
