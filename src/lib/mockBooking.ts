@@ -7,6 +7,7 @@ export type BookingStatus = 'pending_payment' | 'paid' | 'confirmed' | 'cancelle
 
 export type BookingFormInput = {
   userId?: string
+  slotId?: string
   planId: string
   startTime: string
   endTime: string

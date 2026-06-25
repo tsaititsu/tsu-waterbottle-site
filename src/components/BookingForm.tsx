@@ -2,49 +2,32 @@
 
 import { CalendarDays, CheckCircle2 } from 'lucide-react'
 import Link from 'next/link'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ActionButton } from './ActionButton'
 import { bookingPlans, getBookingPlan } from '@/lib/bookingPlans'
 import { getAuthAccessToken, getMockUser } from '@/lib/mockAuth'
-import { hasBookingConflict, savePendingBooking, type BookingFormInput } from '@/lib/mockBooking'
+import { savePendingBooking, type BookingFormInput } from '@/lib/mockBooking'
 
-const availableSlots = ['13:00', '15:00', '17:00']
 const officialLineUrl = 'https://lin.ee/6Tpje1P'
-
-function toDatetimeLocal(date: string, time: string) {
-  return `${date}T${time}:00+08:00`
-}
-
-function addMinutes(dateTime: string, minutes: number) {
-  const date = new Date(dateTime)
-  date.setMinutes(date.getMinutes() + minutes)
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
-  const hh = String(date.getHours()).padStart(2, '0')
-  const mm = String(date.getMinutes()).padStart(2, '0')
-  return `${y}-${m}-${d}T${hh}:${mm}:00+08:00`
-}
-
-function getTomorrowDate() {
-  const cursor = new Date()
-  cursor.setDate(cursor.getDate() + 1)
-  return `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`
-}
-
-function slotLabel(slot: string, durationMinutes: number) {
-  return `${slot}-${addMinutes(toDatetimeLocal('2026-01-01', slot), durationMinutes).slice(11, 16)}`
-}
 
 function padDatePart(value: string) {
   return value.padStart(2, '0')
 }
 
+type PublicBookingSlot = {
+  id: string
+  startAt: string
+  endAt: string
+  label: string
+}
+
 export function BookingForm() {
   const [planId, setPlanId] = useState(bookingPlans[0].id)
   const [paymentMethod, setPaymentMethod] = useState<'bank-transfer' | 'newebpay-coming-soon'>('bank-transfer')
-  const [bookingDate, setBookingDate] = useState(getTomorrowDate())
-  const [bookingTime, setBookingTime] = useState(availableSlots[0])
+  const [bookingSlots, setBookingSlots] = useState<PublicBookingSlot[]>([])
+  const [selectedSlotId, setSelectedSlotId] = useState('')
+  const [bookingSlotsLoading, setBookingSlotsLoading] = useState(true)
+  const [bookingSlotsError, setBookingSlotsError] = useState('')
   const [customerName, setCustomerName] = useState('')
   const [customerEmail, setCustomerEmail] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
@@ -63,17 +46,47 @@ export function BookingForm() {
   const birthDateInputRef = useRef<HTMLInputElement | null>(null)
 
   const selectedPlan = getBookingPlan(planId) ?? bookingPlans[0]
-  const startTime = bookingDate && bookingTime ? toDatetimeLocal(bookingDate, bookingTime) : ''
-  const endTime = startTime ? addMinutes(startTime, selectedPlan.durationMinutes) : ''
+  const selectedBookingSlot = bookingSlots.find((slot) => slot.id === selectedSlotId) ?? null
+  const startTime = selectedBookingSlot?.startAt ?? ''
+  const endTime = selectedBookingSlot?.endAt ?? ''
   const birthDate = birthYear && birthMonth && birthDay ? `${birthYear}-${padDatePart(birthMonth)}-${padDatePart(birthDay)}` : ''
 
-  const slotOptions = availableSlots.map((slot) => {
-    const start = bookingDate ? toDatetimeLocal(bookingDate, slot) : ''
-    const end = start ? addMinutes(start, selectedPlan.durationMinutes) : ''
-    const tooSoon = start ? new Date(start).getTime() < Date.now() + 24 * 60 * 60 * 1000 : false
-    const conflicted = start && end ? hasBookingConflict(start, end) : false
-    return { slot, disabled: tooSoon || conflicted }
-  })
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadBookingSlots() {
+      setBookingSlotsLoading(true)
+      setBookingSlotsError('')
+
+      try {
+        const response = await fetch('/api/booking-slots', { cache: 'no-store' })
+        const data = (await response.json().catch(() => null)) as { ok?: boolean; slots?: PublicBookingSlot[]; error?: string } | null
+
+        if (!response.ok || data?.ok === false) {
+          throw new Error(data?.error ?? '讀取可預約時段失敗。')
+        }
+
+        if (cancelled) return
+
+        const slots = data?.slots ?? []
+        setBookingSlots(slots)
+        setSelectedSlotId((current) => (current && slots.some((slot) => slot.id === current) ? current : slots[0]?.id ?? ''))
+      } catch (error) {
+        if (cancelled) return
+        setBookingSlots([])
+        setSelectedSlotId('')
+        setBookingSlotsError(error instanceof Error ? error.message : '讀取可預約時段失敗。')
+      } finally {
+        if (!cancelled) setBookingSlotsLoading(false)
+      }
+    }
+
+    void loadBookingSlots()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const buildInput = (): BookingFormInput | null => {
     const user = getMockUser()
@@ -85,12 +98,8 @@ export function BookingForm() {
       setFormError('姓名、Email、出生年月日、出生時間狀態、出生時間與想詢問的問題皆為必填欄位。')
       return null
     }
-    if (!startTime || !endTime) {
-      setFormError('請選擇預約日期與時間。')
-      return null
-    }
-    if (hasBookingConflict(startTime, endTime)) {
-      setFormError('這個時段已被預約，請選擇其他時間。')
+    if (!selectedBookingSlot || !startTime || !endTime) {
+      setFormError('請選擇預約時段。')
       return null
     }
     if (!hasAcceptedNotice) {
@@ -100,6 +109,7 @@ export function BookingForm() {
 
     return {
       userId: user.id,
+      slotId: selectedBookingSlot.id,
       planId,
       startTime,
       endTime,
@@ -218,32 +228,32 @@ export function BookingForm() {
         <div className="grid gap-4 rounded-2xl border border-borderSoft bg-softPurple p-4">
           <div className="flex items-center gap-2 text-sm font-semibold text-deepPurple">
             <CalendarDays size={18} />
-            選擇日期與時間
+            選擇預約時段
           </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="grid gap-2">
-              <span className="text-sm font-semibold text-textDark">預約日期</span>
-              <input
-                className="focus-ring rounded-lg border border-borderSoft bg-white px-4 py-3"
-                min={getTomorrowDate()}
-                onChange={(event) => setBookingDate(event.target.value)}
-                type="date"
-                value={bookingDate}
-              />
-            </label>
-            <label className="grid gap-2">
-              <span className="text-sm font-semibold text-textDark">預約時間</span>
-              <select className="focus-ring rounded-lg border border-borderSoft bg-white px-4 py-3" onChange={(event) => setBookingTime(event.target.value)} value={bookingTime}>
-                {slotOptions.map(({ slot, disabled }) => (
-                  <option disabled={disabled} key={slot} value={slot}>
-                    {slotLabel(slot, selectedPlan.durationMinutes)}{disabled ? '（不可預約）' : ''}
+          <label className="grid gap-2">
+            <span className="text-sm font-semibold text-textDark">可預約時段</span>
+            <select
+              className="focus-ring rounded-lg border border-borderSoft bg-white px-4 py-3"
+              disabled={bookingSlotsLoading || bookingSlots.length === 0}
+              onChange={(event) => setSelectedSlotId(event.target.value)}
+              value={selectedSlotId}
+            >
+              {bookingSlotsLoading ? (
+                <option value="">讀取可預約時段中...</option>
+              ) : bookingSlots.length > 0 ? (
+                bookingSlots.map((slot) => (
+                  <option key={slot.id} value={slot.id}>
+                    {slot.label}
                   </option>
-                ))}
+                ))
+              ) : (
+                <option value="">目前沒有可預約時段</option>
+              )}
               </select>
-            </label>
-          </div>
+          </label>
+          {bookingSlotsError ? <p className="text-sm font-semibold text-deepPurple">{bookingSlotsError}</p> : null}
           <p className="text-sm leading-6 text-textMuted">
-            目前每日開放 13:00-14:00、15:00-16:00、17:00-18:00。24 小時內不開放預約。
+            目前僅顯示後台已開放且尚未過期的時段。
             <br />
             備註：另有其他時間需求，請私訊
             <a className="font-semibold text-deepPurple underline underline-offset-4" href={officialLineUrl} target="_blank" rel="noopener noreferrer">
