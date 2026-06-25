@@ -99,7 +99,8 @@ export function ChartBirthForm() {
   const [editingCategory, setEditingCategory] = useState('')
   const [editingValue, setEditingValue] = useState('')
   const [selectedBirthOrder, setSelectedBirthOrder] = useState('')
-  const [selectedPlan, setSelectedPlan] = useState(analysisPlans[0])
+  const selectedPlan = analysisPlans[0]
+  const [hasAcceptedPaidNotice, setHasAcceptedPaidNotice] = useState(false)
   const [birthYear, setBirthYear] = useState('')
   const [birthMonth, setBirthMonth] = useState('')
   const [birthDay, setBirthDay] = useState('')
@@ -321,7 +322,11 @@ export function ChartBirthForm() {
       return false
     }
     if (!chartPayload || !chartInput || JSON.stringify(result.input) !== JSON.stringify(chartInput)) {
-      setFormError('請先用目前填寫的資料產生命盤，再選擇付費解讀。')
+      setFormError('請先用目前填寫的資料產生命盤，再進行付款。')
+      return false
+    }
+    if (!hasAcceptedPaidNotice) {
+      setFormError('請先閱讀並勾選同意 AI 命盤分析服務說明、付款與退款規則及服務條款。')
       return false
     }
 
@@ -573,7 +578,7 @@ export function ChartBirthForm() {
           <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
             <div>
               <h3 className="font-serifTC text-2xl font-semibold text-deepPurple">完整命盤</h3>
-              <p className="mt-1 text-sm text-textMuted">命盤已產生，可以先確認命盤，再選擇是否付費解讀。</p>
+              <p className="mt-1 text-sm text-textMuted">命盤已產生，可以先確認命盤，再決定是否購買完整分析。</p>
             </div>
             <p className="text-sm font-semibold text-darkGold">陽曆 {chartPayload.chart.birthInfo.solarDate}</p>
           </div>
@@ -603,31 +608,74 @@ export function ChartBirthForm() {
 
       {chartPayload && (
         <div className="grid gap-3 rounded-xl border border-borderSoft bg-softPurple/55 p-4">
-          <label className="grid gap-2">
-            <span className="text-sm font-semibold text-deepPurple">付費解讀項目</span>
-            <select
-              className="focus-ring rounded-lg border border-borderSoft bg-white px-4 py-3 font-semibold text-textDark"
-              onChange={(event) => {
-                const plan = analysisPlans.find((item) => item.title === event.target.value)
-                if (plan) setSelectedPlan(plan)
-              }}
-              value={selectedPlan.title}
-            >
-              {analysisPlans.map((plan) => (
-                <option key={plan.title} value={plan.title}>
-                  {plan.title}　NT${plan.amount}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div>
+            <p className="font-serifTC text-lg font-semibold text-deepPurple">AI 命盤分析同意確認</p>
+            <p className="mt-1 text-sm text-textMuted">紫微命盤完整分析｜NT${selectedPlan.amount} / 份</p>
+          </div>
+
+          <details className="group rounded-xl border border-borderSoft bg-white p-4">
+            <summary className="cursor-pointer list-none">
+              <div className="flex items-start gap-3 text-sm leading-7 text-textMuted">
+                <input
+                  checked={hasAcceptedPaidNotice}
+                  className="mt-1 size-4 rounded border-borderSoft text-deepPurple focus:ring-deepPurple"
+                  onChange={(event) => {
+                    setHasAcceptedPaidNotice(event.target.checked)
+                    if (event.target.checked) setFormError('')
+                  }}
+                  onClick={(event) => event.stopPropagation()}
+                  type="checkbox"
+                />
+                <span>
+                  我已詳細閱讀並同意《AI 命盤分析服務說明》、《付款與退款規則》及《服務條款》，並了解此服務為付款後產生命盤分析結果之數位內容服務。
+                  <span className="ml-1 font-semibold text-darkGold underline underline-offset-4 group-open:hidden">點我查看</span>
+                  <span className="ml-1 hidden font-semibold text-darkGold underline underline-offset-4 group-open:inline">收合內容</span>
+                </span>
+              </div>
+            </summary>
+
+            <div className="mt-4 max-h-72 space-y-5 overflow-y-auto rounded-lg bg-softPurple/60 p-4 text-sm leading-7 text-textMuted">
+              <div>
+                <p className="font-semibold text-deepPurple">AI 命盤分析服務說明</p>
+                <ul className="mt-2 grid gap-1">
+                  <li>服務名稱：紫微命盤完整分析</li>
+                  <li>價格：NT$100 / 份</li>
+                  <li>服務內容：完整解析命盤個性分析</li>
+                  <li>交付方式：付款後於網站產生命盤分析結果</li>
+                </ul>
+              </div>
+
+              <div>
+                <p className="font-semibold text-deepPurple">付款與退款規則</p>
+                <ul className="mt-2 grid gap-2">
+                  <li>本服務為數位內容服務。</li>
+                  <li>使用者完成付款後，系統會依照使用者填寫的出生資料產生命盤分析結果。</li>
+                  <li>付款完成並產生分析結果後，因服務已開始提供，原則上不接受取消或退款。</li>
+                  <li>若因系統異常導致付款成功但沒有產生分析結果，可聯繫水瓶先生官方 LINE 協助處理。</li>
+                  <li>若使用者填錯出生資料、日期、時間、性別或其他欄位，導致分析結果不符合期待，恕不提供退款。</li>
+                  <li>使用者送出付款前，應自行確認填寫資料正確。</li>
+                </ul>
+              </div>
+
+              <div>
+                <p className="font-semibold text-deepPurple">服務條款</p>
+                <ul className="mt-2 grid gap-2">
+                  <li>AI 命盤分析內容僅供命理參考，不作為醫療、法律、投資、重大人生決策之唯一依據。</li>
+                  <li>使用者應自行判斷與承擔實際行動結果。</li>
+                  <li>若有命盤資料、付款或系統問題，可聯繫水瓶先生官方 LINE。</li>
+                </ul>
+              </div>
+            </div>
+          </details>
+
           <ActionButton
             amount={selectedPlan.amount}
-            className="focus-ring w-full rounded-lg bg-deepPurple px-4 py-3 font-semibold text-white"
+            className="focus-ring inline-flex w-full justify-center rounded-xl bg-deepPurple px-5 py-3 font-semibold text-white sm:w-auto"
             itemName={selectedPlan.title}
             itemType="ai-chart"
             beforeStart={preparePaidInterpretation}
           >
-            付費解讀
+            前往付款 NT${selectedPlan.amount}
           </ActionButton>
         </div>
       )}
