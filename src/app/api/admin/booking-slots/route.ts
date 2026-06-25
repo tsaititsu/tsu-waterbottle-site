@@ -32,16 +32,22 @@ export async function GET(request: Request) {
     const auth = await requireAuthenticatedUser(request)
     if ('error' in auth) return auth.error
 
-    const now = new Date()
-    const until = new Date(now)
-    until.setDate(until.getDate() + 90)
+    const url = new URL(request.url)
+    const scope = url.searchParams.get('scope') ?? 'all'
 
-    const { data, error } = await auth.supabase
+    let query = auth.supabase
       .from('consultation_availability_slots')
       .select(SLOT_COLUMNS)
-      .gte('start_at', now.toISOString())
-      .lte('start_at', until.toISOString())
       .order('start_at', { ascending: true })
+
+    if (scope === 'future') {
+      const now = new Date()
+      const until = new Date(now)
+      until.setDate(until.getDate() + 90)
+      query = query.gte('start_at', now.toISOString()).lte('start_at', until.toISOString())
+    }
+
+    const { data, error } = await query
 
     if (error) {
       console.error('Failed to list consultation availability slots', {
