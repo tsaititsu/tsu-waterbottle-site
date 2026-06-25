@@ -217,7 +217,12 @@ export function BookingForm() {
     }
 
     if (paymentMethod === 'newebpay-coming-soon') {
-      setFormError('藍新線上付款功能目前尚未開放，請先使用銀行匯款。')
+      setFormError('此付款方式尚未開放，請先使用銀行匯款。')
+      return false
+    }
+
+    if (paymentMethod === 'linepay-coming-soon') {
+      setFormError('此付款方式尚未開放，請先使用銀行匯款。')
       return false
     }
 
@@ -277,15 +282,15 @@ export function BookingForm() {
           </div>
         </div>
 
-        <div className="grid gap-4 rounded-2xl border border-borderSoft bg-softPurple p-4">
+        <div className="grid gap-4 rounded-2xl border border-borderSoft bg-softPurple p-5">
           <div className="flex items-center gap-2 text-sm font-semibold text-deepPurple">
             <CalendarDays size={18} />
             選擇預約時段
           </div>
-          <label className="grid gap-2">
+          <label className="grid w-full gap-2">
             <span className="text-sm font-semibold text-textDark">可預約時段</span>
             <select
-              className="focus-ring rounded-lg border border-borderSoft bg-white px-4 py-3"
+              className="focus-ring w-full rounded-lg border border-borderSoft bg-white px-4 py-3"
               disabled={bookingSlotsLoading || bookingSlots.length === 0}
               onChange={(event) => setSelectedSlotId(event.target.value)}
               value={selectedSlotId}
@@ -301,13 +306,13 @@ export function BookingForm() {
               ) : (
                 <option value="">目前沒有可預約時段</option>
               )}
-              </select>
+            </select>
           </label>
           {bookingSlotsError ? <p className="text-sm font-semibold text-deepPurple">{bookingSlotsError}</p> : null}
           <p className="text-sm leading-6 text-textMuted">
             目前僅顯示後台已開放且尚未過期的時段。
             <br />
-            備註：另有其他時間需求，請私訊
+            如有其他時間需求，請私訊
             <a className="font-semibold text-deepPurple underline underline-offset-4" href={officialLineUrl} target="_blank" rel="noopener noreferrer">
               官方 LINE
             </a>
@@ -436,91 +441,54 @@ export function BookingForm() {
           <textarea className="focus-ring min-h-20 rounded-lg border border-borderSoft px-4 py-3" onChange={(event) => setNote(event.target.value)} value={note} />
         </label>
 
-        <div className="rounded-xl border border-lightGold bg-white p-4 text-sm leading-6 text-textMuted">
-          第一版為 mock 付款。正式串接後，付款成功才會建立 Google Calendar 事件與寄出 Resend 確認信。
-        </div>
-
         <div className="rounded-2xl border border-borderSoft bg-softPurple p-5">
-          <p className="text-sm font-semibold text-deepPurple">選擇付款方式</p>
+          <label className="grid gap-2">
+            <span className="text-sm font-semibold text-deepPurple">選擇付款方式</span>
+            <select
+              className="focus-ring w-full rounded-lg border border-borderSoft bg-white px-4 py-3 font-semibold text-deepPurple"
+              onChange={(event) => setPaymentMethod(event.target.value as typeof paymentMethod)}
+              value={paymentMethod}
+            >
+              <option value="bank-transfer">銀行匯款｜人工確認</option>
+              <option disabled value="newebpay-coming-soon">
+                藍新線上付款｜即將開放
+              </option>
+              <option disabled value="linepay-coming-soon">
+                LINE Pay｜即將開放
+              </option>
+            </select>
+          </label>
           <div className="mt-4 grid gap-3">
-            <label className="cursor-pointer rounded-xl border border-borderSoft bg-white p-4">
-              <div className="flex items-start gap-3">
-                <input
-                  checked={paymentMethod === 'bank-transfer'}
-                  className="mt-1 h-4 w-4 accent-deepPurple"
-                  name="booking-payment-method"
-                  onChange={() => setPaymentMethod('bank-transfer')}
-                  type="radio"
-                />
-                <div>
-                  <p className="font-semibold text-textDark">銀行匯款｜人工確認</p>
-                  <p className="mt-1 text-sm text-textMuted">
-                    請先完成匯款，並填寫匯款帳號後五碼與聯絡電話。客服確認款項後，將協助確認預約。
-                  </p>
-                </div>
-              </div>
-            </label>
             {paymentMethod === 'bank-transfer' ? (
-              <div className="grid gap-4 rounded-xl border border-borderSoft bg-white p-4 md:grid-cols-2">
-                <label className="grid gap-2">
-                  <span className="text-sm font-semibold text-textDark">聯絡電話 *</span>
-                  <input
-                    className="focus-ring rounded-lg border border-borderSoft px-4 py-3"
-                    onChange={(event) => setBankTransferPhone(event.target.value)}
-                    placeholder="請填寫客服可聯繫的電話"
-                    value={bankTransferPhone || customerPhone}
-                  />
-                </label>
-                <label className="grid gap-2">
-                  <span className="text-sm font-semibold text-textDark">匯款帳號後五碼 *</span>
-                  <input
-                    className="focus-ring rounded-lg border border-borderSoft px-4 py-3"
-                    inputMode="numeric"
-                    maxLength={5}
-                    onChange={(event) => setBankTransferLast5(event.target.value.replace(/\D/g, '').slice(0, 5))}
-                    placeholder="請填寫您的匯款帳號後五碼"
-                    value={bankTransferLast5}
-                  />
-                  <span className="text-xs leading-5 text-textMuted">請填「您的匯款帳號後五碼」，不是本工作室收款帳號後五碼。</span>
-                </label>
-              </div>
+              <>
+                <p className="rounded-xl border border-borderSoft bg-white p-4 text-sm leading-6 text-textMuted">
+                  請先完成匯款，並填寫匯款帳號後五碼與聯絡電話。客服確認款項後，將協助確認預約。
+                </p>
+                <div className="grid gap-4 rounded-xl border border-borderSoft bg-white p-4 md:grid-cols-2">
+                  <label className="grid gap-2">
+                    <span className="text-sm font-semibold text-textDark">聯絡電話 *</span>
+                    <input
+                      className="focus-ring rounded-lg border border-borderSoft px-4 py-3"
+                      onChange={(event) => setBankTransferPhone(event.target.value)}
+                      placeholder="請填寫客服可聯繫的電話"
+                      value={bankTransferPhone || customerPhone}
+                    />
+                  </label>
+                  <label className="grid gap-2">
+                    <span className="text-sm font-semibold text-textDark">匯款帳號後五碼 *</span>
+                    <input
+                      className="focus-ring rounded-lg border border-borderSoft px-4 py-3"
+                      inputMode="numeric"
+                      maxLength={5}
+                      onChange={(event) => setBankTransferLast5(event.target.value.replace(/\D/g, '').slice(0, 5))}
+                      placeholder="請填寫您的匯款帳號後五碼"
+                      value={bankTransferLast5}
+                    />
+                    <span className="text-xs leading-5 text-textMuted">請填「您的匯款帳號後五碼」，不是本工作室收款帳號後五碼。</span>
+                  </label>
+                </div>
+              </>
             ) : null}
-            <label className="cursor-not-allowed rounded-xl border border-borderSoft bg-white p-4 opacity-70">
-              <div className="flex items-start gap-3">
-                <input
-                  checked={paymentMethod === 'newebpay-coming-soon'}
-                  className="mt-1 h-4 w-4 accent-deepPurple"
-                  disabled
-                  name="booking-payment-method"
-                  onChange={() => setPaymentMethod('newebpay-coming-soon')}
-                  type="radio"
-                />
-                <div>
-                  <p className="font-semibold text-textDark">藍新線上付款｜即將開放</p>
-                  <p className="mt-1 text-sm text-textMuted">
-                    真人論命線上付款建置中，後續可支援信用卡、ATM 轉帳等付款方式。目前請先使用銀行匯款。
-                  </p>
-                </div>
-              </div>
-            </label>
-            <label className="cursor-not-allowed rounded-xl border border-borderSoft bg-white p-4 opacity-70">
-              <div className="flex items-start gap-3">
-                <input
-                  checked={paymentMethod === 'linepay-coming-soon'}
-                  className="mt-1 h-4 w-4 accent-deepPurple"
-                  disabled
-                  name="booking-payment-method"
-                  onChange={() => setPaymentMethod('linepay-coming-soon')}
-                  type="radio"
-                />
-                <div>
-                  <p className="font-semibold text-textDark">LINE Pay｜即將開放</p>
-                  <p className="mt-1 text-sm text-textMuted">
-                    LINE Pay 付款審核中，通過後會開放使用。
-                  </p>
-                </div>
-              </div>
-            </label>
           </div>
         </div>
 
