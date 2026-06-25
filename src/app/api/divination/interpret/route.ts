@@ -1,17 +1,16 @@
 import { NextResponse } from "next/server"
 import { ziweiCards } from "@/lib/divination/cards"
+import type {
+  DivinationCardSummary,
+  DivinationDrawMode,
+  DivinationInterpretRequest,
+  DivinationInterpretResponse,
+  DivinationInterpretation,
+  DivinationMockPaymentGate,
+  DivinationPosition,
+} from "@/lib/divination/types"
 
-type DrawMode = "manual" | "auto"
-type Position = "upright" | "reversed"
-
-type RequestBody = {
-  readingId?: unknown
-  question?: unknown
-  drawMode?: unknown
-  cardId?: unknown
-  position?: unknown
-  mockPaymentGate?: unknown
-}
+type RequestBody = Partial<Record<keyof DivinationInterpretRequest, unknown>>
 
 type MockPaymentGate = {
   mode?: unknown
@@ -23,10 +22,10 @@ type MockPaymentGate = {
   currency?: unknown
 }
 
-const drawModes = new Set<DrawMode>(["manual", "auto"])
-const positions = new Set<Position>(["upright", "reversed"])
+const drawModes = new Set<DivinationDrawMode>(["manual", "auto"])
+const positions = new Set<DivinationPosition>(["upright", "reversed"])
 
-const positionLabels: Record<Position, string> = {
+const positionLabels: Record<DivinationPosition, string> = {
   upright: "正位",
   reversed: "反位",
 }
@@ -82,7 +81,7 @@ export async function POST(request: Request) {
     return jsonError("請先填寫占卜問題。")
   }
 
-  if (!drawModes.has(drawMode as DrawMode)) {
+  if (!drawModes.has(drawMode as DivinationDrawMode)) {
     return jsonError("抽牌方式不正確。")
   }
 
@@ -90,7 +89,7 @@ export async function POST(request: Request) {
     return jsonError("缺少牌卡資料。")
   }
 
-  if (!positions.has(position as Position)) {
+  if (!positions.has(position as DivinationPosition)) {
     return jsonError("正反位資料不正確。")
   }
 
@@ -104,41 +103,45 @@ export async function POST(request: Request) {
     return jsonError("找不到這張紫微牌卡。")
   }
 
-  const safeDrawMode = drawMode as DrawMode
-  const safePosition = position as Position
+  const safeDrawMode = drawMode as DivinationDrawMode
+  const safePosition = position as DivinationPosition
   const meaning =
     safePosition === "reversed" ? selectedCard.reversedMeaning : selectedCard.uprightMeaning
   const advice =
     safePosition === "reversed" ? selectedCard.advice.reversed : selectedCard.advice.upright
   const positionLabel = positionLabels[safePosition]
-
-  return NextResponse.json({
+  const interpretation = {
+    summary: `${selectedCard.name}${positionLabel}代表此問題的核心訊號是：${selectedCard.core}`,
+    cardMessage: meaning,
+    situationAnalysis: `你詢問的是「${question}」。目前此版本先依牌卡基礎牌義整理，不代表正式 AI 深度解讀。`,
+    advice,
+    reminder: "此為牌義預覽版，尚未接入正式 AI 深度解讀。",
+  } satisfies DivinationInterpretation
+  const card = {
+    id: selectedCard.id,
+    name: selectedCard.name,
+    image: selectedCard.image,
+    reversedImage: selectedCard.reversedImage,
+    huaqi: selectedCard.huaqi,
+    element: selectedCard.element,
+    core: selectedCard.core,
+  } satisfies DivinationCardSummary
+  const paymentGate = {
+    mode: "mock",
+    paymentId: getTrimmedString(mockPaymentGate?.paymentId),
+    status: "mock_paid",
+    itemType: "ai_divination",
+    amountTwd: 50,
+    currency: "TWD",
+  } satisfies DivinationMockPaymentGate
+  const response = {
     ok: true,
-    interpretation: {
-      summary: `${selectedCard.name}${positionLabel}代表此問題的核心訊號是：${selectedCard.core}`,
-      cardMessage: meaning,
-      situationAnalysis: `你詢問的是「${question}」。目前此版本先依牌卡基礎牌義整理，不代表正式 AI 深度解讀。`,
-      advice,
-      reminder: "此為牌義預覽版，尚未接入正式 AI 深度解讀。",
-    },
-    card: {
-      id: selectedCard.id,
-      name: selectedCard.name,
-      image: selectedCard.image,
-      reversedImage: selectedCard.reversedImage,
-      huaqi: selectedCard.huaqi,
-      element: selectedCard.element,
-      core: selectedCard.core,
-    },
+    interpretation,
+    card,
     position: safePosition,
     drawMode: safeDrawMode,
-    paymentGate: {
-      mode: "mock",
-      paymentId: getTrimmedString(mockPaymentGate?.paymentId),
-      status: "mock_paid",
-      itemType: "ai_divination",
-      amountTwd: 50,
-      currency: "TWD",
-    },
-  })
+    paymentGate,
+  } satisfies DivinationInterpretResponse
+
+  return NextResponse.json(response)
 }

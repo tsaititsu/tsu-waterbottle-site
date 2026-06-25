@@ -1,44 +1,30 @@
 "use client"
 
 import type { ZiweiCard } from "@/lib/divination/cards"
+import type {
+  DivinationDrawMode,
+  DivinationInterpretation,
+  DivinationMockPaymentGate,
+  DivinationPosition,
+} from "@/lib/divination/types"
 import Image from "next/image"
-
-type DrawMode = "manual" | "auto"
-type PreviewPosition = "upright" | "reversed"
-
-type DivinationInterpretation = {
-  summary: string
-  cardMessage: string
-  situationAnalysis: string
-  advice: string
-  reminder: string
-}
-
-type MockPaymentGate = {
-  mode?: string
-  paymentId?: string
-  status?: string
-  itemType?: string
-  amountTwd?: number
-  currency?: string
-}
 
 type DivinationResultPreviewProps = {
   question: string
-  drawMode: DrawMode | null
+  drawMode: DivinationDrawMode | null
   card: ZiweiCard
-  position: PreviewPosition
+  position: DivinationPosition
   readingId?: string
-  paymentGate?: MockPaymentGate
+  paymentGate?: DivinationMockPaymentGate
   interpretation?: DivinationInterpretation
 }
 
-const drawModeLabels: Record<DrawMode, string> = {
+const drawModeLabels: Record<DivinationDrawMode, string> = {
   manual: "手動抽牌",
   auto: "自動抽牌",
 }
 
-const positionLabels: Record<PreviewPosition, string> = {
+const positionLabels: Record<DivinationPosition, string> = {
   upright: "正位",
   reversed: "反位",
 }

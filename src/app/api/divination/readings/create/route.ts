@@ -1,18 +1,18 @@
 import { NextResponse } from "next/server"
 import { ziweiCards } from "@/lib/divination/cards"
+import type {
+  CreateDivinationReadingRequest,
+  CreateDivinationReadingResponse,
+  DivinationDrawMode,
+  DivinationMockPaymentGate,
+  DivinationPosition,
+  DivinationReadingPreview,
+} from "@/lib/divination/types"
 
-type DrawMode = "manual" | "auto"
-type Position = "upright" | "reversed"
+type RequestBody = Partial<Record<keyof CreateDivinationReadingRequest, unknown>>
 
-type RequestBody = {
-  question?: unknown
-  drawMode?: unknown
-  cardId?: unknown
-  position?: unknown
-}
-
-const drawModes = new Set<DrawMode>(["manual", "auto"])
-const positions = new Set<Position>(["upright", "reversed"])
+const drawModes = new Set<DivinationDrawMode>(["manual", "auto"])
+const positions = new Set<DivinationPosition>(["upright", "reversed"])
 
 function jsonError(error: string, status = 400) {
   return NextResponse.json({ ok: false, error }, { status })
@@ -46,7 +46,7 @@ export async function POST(request: Request) {
     return jsonError("請先填寫占卜問題。")
   }
 
-  if (!drawModes.has(drawMode as DrawMode)) {
+  if (!drawModes.has(drawMode as DivinationDrawMode)) {
     return jsonError("抽牌方式不正確。")
   }
 
@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     return jsonError("缺少牌卡資料。")
   }
 
-  if (!positions.has(position as Position)) {
+  if (!positions.has(position as DivinationPosition)) {
     return jsonError("正反位資料不正確。")
   }
 
@@ -66,29 +66,32 @@ export async function POST(request: Request) {
 
   const readingId = createMockReadingId()
   const mockPaymentId = `mock_pay_${readingId}`
-
-  return NextResponse.json({
+  const reading = {
+    id: readingId,
+    question,
+    drawMode: drawMode as DivinationDrawMode,
+    cardId: selectedCard.id,
+    cardName: selectedCard.name,
+    position: position as DivinationPosition,
+    status: "mock_created",
+    createdAt: new Date().toISOString(),
+  } satisfies DivinationReadingPreview
+  const mockPaymentGate = {
+    mode: "mock",
+    paymentId: mockPaymentId,
+    provider: "mock",
+    status: "mock_paid",
+    itemType: "ai_divination",
+    itemName: "紫微牌卡 AI 深度解讀",
+    amountTwd: 50,
+    currency: "TWD",
+  } satisfies DivinationMockPaymentGate
+  const response = {
     ok: true,
-    reading: {
-      id: readingId,
-      question,
-      drawMode: drawMode as DrawMode,
-      cardId: selectedCard.id,
-      cardName: selectedCard.name,
-      position: position as Position,
-      status: "mock_created",
-      createdAt: new Date().toISOString(),
-    },
-    // Mock payment gate only. 正式版必須改為查 payments + divination_readings。
-    mockPaymentGate: {
-      mode: "mock",
-      paymentId: mockPaymentId,
-      provider: "mock",
-      status: "mock_paid",
-      itemType: "ai_divination",
-      itemName: "紫微牌卡 AI 深度解讀",
-      amountTwd: 50,
-      currency: "TWD",
-    },
-  })
+    reading,
+    mockPaymentGate,
+  } satisfies CreateDivinationReadingResponse
+
+  // Mock payment gate only. 正式版必須改為查 payments + divination_readings。
+  return NextResponse.json(response)
 }

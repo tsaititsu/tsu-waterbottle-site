@@ -2,75 +2,20 @@
 
 import { DivinationResultPreview } from "@/components/divination/DivinationResultPreview"
 import { ziweiCards, type ZiweiCard } from "@/lib/divination/cards"
+import type {
+  CreateDivinationReadingResponse,
+  DivinationDrawMode,
+  DivinationInterpretResponse,
+  DivinationInterpretation,
+  DivinationMockPaymentGate,
+  DivinationPosition,
+} from "@/lib/divination/types"
 import Image from "next/image"
 import { useEffect, useRef, useState } from "react"
 
-type PreviewPosition = "upright" | "reversed"
-type DrawMode = "manual" | "auto"
-
-type DivinationInterpretation = {
-  summary: string
-  cardMessage: string
-  situationAnalysis: string
-  advice: string
-  reminder: string
-}
-
-type MockPaymentGate = {
-  mode: "mock"
-  paymentId: string
-  provider?: "mock"
-  status: "mock_paid"
-  itemType: "ai_divination"
-  itemName?: string
-  amountTwd: 50
-  currency: "TWD"
-}
-
-type InterpretApiResponse =
-  | {
-      ok: true
-      interpretation: DivinationInterpretation
-      card: {
-        id: string
-        name: string
-        image: string
-        reversedImage: string
-        huaqi: string
-        element: string
-        core: string
-      }
-      position: PreviewPosition
-      paymentGate: MockPaymentGate
-    }
-  | {
-      ok: false
-      error: string
-    }
-
-type CreateReadingApiResponse =
-  | {
-      ok: true
-      reading: {
-        id: string
-        question: string
-        drawMode: DrawMode
-        cardId: string
-        cardName: string
-        position: PreviewPosition
-        status: "mock_created"
-        createdAt: string
-      }
-      mockPaymentGate?: MockPaymentGate
-    }
-  | {
-      ok: false
-      error: string
-    }
-
 type DivinationDrawPreviewProps = {
   question?: string
-  drawMode?: DrawMode | null
+  drawMode?: DivinationDrawMode | null
 }
 
 const initialMessage = "請先依照抽牌方式開始抽牌。"
@@ -81,17 +26,17 @@ const pendingMessage = "你選到一張牌。請確認是不是這張。"
 const resultReadyMessage = "已產生牌義解讀預覽。"
 const blockedMessage = "請先在上方填寫問題，並選擇手動抽牌或自動抽牌。"
 
-const positionLabels: Record<PreviewPosition, string> = {
+const positionLabels: Record<DivinationPosition, string> = {
   upright: "正位",
   reversed: "反位",
 }
 
-const drawModeLabels: Record<DrawMode, string> = {
+const drawModeLabels: Record<DivinationDrawMode, string> = {
   manual: "手動抽牌",
   auto: "自動抽牌",
 }
 
-function getRandomPosition(): PreviewPosition {
+function getRandomPosition(): DivinationPosition {
   return Math.random() < 0.5 ? "upright" : "reversed"
 }
 
@@ -103,11 +48,12 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
   const [started, setStarted] = useState(false)
   const [shuffling, setShuffling] = useState(false)
   const [pendingIndex, setPendingIndex] = useState<number | null>(null)
-  const [pendingPosition, setPendingPosition] = useState<PreviewPosition | null>(null)
+  const [pendingPosition, setPendingPosition] = useState<DivinationPosition | null>(null)
   const [confirmedCard, setConfirmedCard] = useState<ZiweiCard | null>(null)
-  const [confirmedPosition, setConfirmedPosition] = useState<PreviewPosition | null>(null)
+  const [confirmedPosition, setConfirmedPosition] = useState<DivinationPosition | null>(null)
   const [confirmedReadingId, setConfirmedReadingId] = useState("")
-  const [confirmedPaymentGate, setConfirmedPaymentGate] = useState<MockPaymentGate | null>(null)
+  const [confirmedPaymentGate, setConfirmedPaymentGate] =
+    useState<DivinationMockPaymentGate | null>(null)
   const [interpretation, setInterpretation] = useState<DivinationInterpretation | null>(null)
   const [isInterpreting, setIsInterpreting] = useState(false)
   const [message, setMessage] = useState(initialMessage)
@@ -286,7 +232,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
           position: pendingPosition,
         }),
       })
-      const createData = (await createResponse.json()) as CreateReadingApiResponse
+      const createData = (await createResponse.json()) as CreateDivinationReadingResponse
 
       if (!createResponse.ok || !createData.ok) {
         throw new Error(createData.ok === false ? createData.error : "建立占卜紀錄預覽失敗")
@@ -308,7 +254,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
           mockPaymentGate: createData.mockPaymentGate,
         }),
       })
-      const interpretData = (await interpretResponse.json()) as InterpretApiResponse
+      const interpretData = (await interpretResponse.json()) as DivinationInterpretResponse
 
       if (!interpretResponse.ok || !interpretData.ok) {
         const gateError =
