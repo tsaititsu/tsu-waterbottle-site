@@ -142,37 +142,36 @@ function ProductCard({ product }: { product: SpiritualProduct }) {
 
             <div className="mt-3 grid gap-2">
               <details className="group rounded-xl border border-borderSoft bg-white p-3">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-                  <span className="text-sm font-semibold text-deepPurple">開運商品購買須知</span>
-                  <span className="shrink-0 rounded-full bg-softPurple px-3 py-1 text-xs font-semibold text-darkGold group-open:bg-lightGold">點我查看</span>
+                <summary className="cursor-pointer list-none">
+                  <div className="flex items-start gap-3 text-xs leading-6 text-textMuted">
+                    <input
+                      checked={hasAcceptedNotice}
+                      className="mt-1 size-4 rounded border-borderSoft text-deepPurple focus:ring-deepPurple"
+                      onChange={(event) => {
+                        setHasAcceptedNotice(event.target.checked)
+                        if (event.target.checked) setNoticeError('')
+                      }}
+                      onClick={(event) => event.stopPropagation()}
+                      type="checkbox"
+                    />
+                    <span>
+                      我已詳細閱讀並同意《開運商品購買須知》與《開運商品退換貨政策》。
+                      <span className="ml-1 font-semibold text-darkGold underline underline-offset-4 group-open:hidden">點我查看</span>
+                      <span className="ml-1 hidden font-semibold text-darkGold underline underline-offset-4 group-open:inline">收合內容</span>
+                    </span>
+                  </div>
                 </summary>
-                <div className="mt-3 max-h-44 overflow-y-auto pr-1">
-                  <PurchaseNoticeContent />
+                <div className="mt-3 max-h-64 space-y-4 overflow-y-auto rounded-lg bg-softPurple/60 p-3">
+                  <div>
+                    <p className="mb-2 text-sm font-semibold text-deepPurple">開運商品購買須知</p>
+                    <PurchaseNoticeContent />
+                  </div>
+                  <div>
+                    <p className="mb-2 text-sm font-semibold text-deepPurple">開運商品退換貨政策</p>
+                    <RefundPolicyContent />
+                  </div>
                 </div>
               </details>
-
-              <details className="group rounded-xl border border-borderSoft bg-white p-3">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-                  <span className="text-sm font-semibold text-deepPurple">開運商品退換貨政策</span>
-                  <span className="shrink-0 rounded-full bg-softPurple px-3 py-1 text-xs font-semibold text-darkGold group-open:bg-lightGold">點我查看</span>
-                </summary>
-                <div className="mt-3 max-h-44 overflow-y-auto pr-1">
-                  <RefundPolicyContent />
-                </div>
-              </details>
-
-              <label className="flex items-start gap-3 rounded-xl border border-borderSoft bg-white p-3 text-xs leading-6 text-textMuted">
-                <input
-                  checked={hasAcceptedNotice}
-                  className="mt-1 size-4 rounded border-borderSoft text-deepPurple focus:ring-deepPurple"
-                  onChange={(event) => {
-                    setHasAcceptedNotice(event.target.checked)
-                    if (event.target.checked) setNoticeError('')
-                  }}
-                  type="checkbox"
-                />
-                <span>我已詳細閱讀並同意《開運商品購買須知》與《開運商品退換貨政策》。</span>
-              </label>
 
               {noticeError ? <p className="text-xs font-semibold text-deepPurple">{noticeError}</p> : null}
             </div>
