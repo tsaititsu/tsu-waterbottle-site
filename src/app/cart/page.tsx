@@ -13,19 +13,90 @@ const typeLabel: Record<string, string> = {
   other: '其他'
 }
 
+const postOfficeShippingStorageKey = 'waterbottle-post-office-shipping-info'
+
+type PostOfficeShippingInfo = {
+  recipientName: string
+  recipientPhone: string
+  postalCode: string
+  city: string
+  district: string
+  address: string
+  note: string
+}
+
+const emptyPostOfficeShippingInfo: PostOfficeShippingInfo = {
+  recipientName: '',
+  recipientPhone: '',
+  postalCode: '',
+  city: '',
+  district: '',
+  address: '',
+  note: '',
+}
+
 export default function CartPage() {
   const { items, isLoaded, removeItem, totalAmount, totalQuantity } = useCart()
   const [spiritualProductsAccepted, setSpiritualProductsAccepted] = useState(false)
+  const [postOfficeShippingInfo, setPostOfficeShippingInfo] = useState<PostOfficeShippingInfo>(emptyPostOfficeShippingInfo)
   const [checkoutError, setCheckoutError] = useState('')
 
   const formattedTotal = useMemo(() => `NT$${totalAmount.toLocaleString('zh-TW')}`, [totalAmount])
   const hasSpiritualProduct = items.some((item) => item.type === 'spiritual_product')
 
-  const handleCheckoutClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (!hasSpiritualProduct || spiritualProductsAccepted) return
+  const updatePostOfficeShippingInfo = (key: keyof PostOfficeShippingInfo, value: string) => {
+    setPostOfficeShippingInfo((current) => ({
+      ...current,
+      [key]: value,
+    }))
+    setCheckoutError('')
+  }
 
-    event.preventDefault()
-    setCheckoutError('請先勾選同意開運商品購買須知與退換貨政策，再前往結帳。')
+  const getTrimmedShippingInfo = () => ({
+    recipientName: postOfficeShippingInfo.recipientName.trim(),
+    recipientPhone: postOfficeShippingInfo.recipientPhone.trim(),
+    postalCode: postOfficeShippingInfo.postalCode.trim(),
+    city: postOfficeShippingInfo.city.trim(),
+    district: postOfficeShippingInfo.district.trim(),
+    address: postOfficeShippingInfo.address.trim(),
+    note: postOfficeShippingInfo.note.trim(),
+  })
+
+  const handleCheckoutClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!hasSpiritualProduct) return
+
+    const shippingInfo = getTrimmedShippingInfo()
+    const isShippingInfoComplete =
+      Boolean(shippingInfo.recipientName) &&
+      Boolean(shippingInfo.recipientPhone) &&
+      Boolean(shippingInfo.postalCode) &&
+      Boolean(shippingInfo.city) &&
+      Boolean(shippingInfo.district) &&
+      Boolean(shippingInfo.address)
+
+    if (!isShippingInfoComplete) {
+      event.preventDefault()
+      setCheckoutError('請完整填寫郵局寄送資料。')
+      return
+    }
+
+    if (!spiritualProductsAccepted) {
+      event.preventDefault()
+      setCheckoutError('請先勾選同意開運商品購買須知與退換貨政策，再前往結帳。')
+      return
+    }
+
+    try {
+      window.localStorage.setItem(
+        postOfficeShippingStorageKey,
+        JSON.stringify({
+          shipping_method: 'post_office',
+          shipping_info: shippingInfo,
+        }),
+      )
+    } catch {
+      // If local storage is unavailable, keep the current checkout path unchanged.
+    }
   }
 
   return (
@@ -89,6 +160,73 @@ export default function CartPage() {
                   <p className="font-serifTC text-xl font-semibold text-deepPurple">開運商品購買確認</p>
 
                   <div className="mt-4 grid gap-4">
+                    <div className="rounded-xl border border-borderSoft bg-white p-4">
+                      <p className="font-serifTC text-xl font-semibold text-deepPurple">郵局寄送資料</p>
+                      <p className="mt-2 text-sm leading-6 text-textMuted">
+                        開運商品為實體商品，請填寫收件資料。訂單成立後，水瓶先生會依此資料安排郵局寄送。
+                      </p>
+
+                      <div className="mt-4 grid gap-4 md:grid-cols-2">
+                        <label className="grid gap-2">
+                          <span className="text-sm font-semibold text-textDark">收件人姓名 *</span>
+                          <input
+                            className="focus-ring rounded-lg border border-borderSoft px-4 py-3"
+                            onChange={(event) => updatePostOfficeShippingInfo('recipientName', event.target.value)}
+                            value={postOfficeShippingInfo.recipientName}
+                          />
+                        </label>
+                        <label className="grid gap-2">
+                          <span className="text-sm font-semibold text-textDark">收件人電話 *</span>
+                          <input
+                            className="focus-ring rounded-lg border border-borderSoft px-4 py-3"
+                            onChange={(event) => updatePostOfficeShippingInfo('recipientPhone', event.target.value)}
+                            value={postOfficeShippingInfo.recipientPhone}
+                          />
+                        </label>
+                        <label className="grid gap-2">
+                          <span className="text-sm font-semibold text-textDark">郵遞區號 *</span>
+                          <input
+                            className="focus-ring rounded-lg border border-borderSoft px-4 py-3"
+                            inputMode="numeric"
+                            onChange={(event) => updatePostOfficeShippingInfo('postalCode', event.target.value)}
+                            value={postOfficeShippingInfo.postalCode}
+                          />
+                        </label>
+                        <label className="grid gap-2">
+                          <span className="text-sm font-semibold text-textDark">縣市 *</span>
+                          <input
+                            className="focus-ring rounded-lg border border-borderSoft px-4 py-3"
+                            onChange={(event) => updatePostOfficeShippingInfo('city', event.target.value)}
+                            value={postOfficeShippingInfo.city}
+                          />
+                        </label>
+                        <label className="grid gap-2">
+                          <span className="text-sm font-semibold text-textDark">區域 *</span>
+                          <input
+                            className="focus-ring rounded-lg border border-borderSoft px-4 py-3"
+                            onChange={(event) => updatePostOfficeShippingInfo('district', event.target.value)}
+                            value={postOfficeShippingInfo.district}
+                          />
+                        </label>
+                        <label className="grid gap-2">
+                          <span className="text-sm font-semibold text-textDark">詳細地址 *</span>
+                          <input
+                            className="focus-ring rounded-lg border border-borderSoft px-4 py-3"
+                            onChange={(event) => updatePostOfficeShippingInfo('address', event.target.value)}
+                            value={postOfficeShippingInfo.address}
+                          />
+                        </label>
+                        <label className="grid gap-2 md:col-span-2">
+                          <span className="text-sm font-semibold text-textDark">備註</span>
+                          <textarea
+                            className="focus-ring min-h-24 rounded-lg border border-borderSoft px-4 py-3"
+                            onChange={(event) => updatePostOfficeShippingInfo('note', event.target.value)}
+                            value={postOfficeShippingInfo.note}
+                          />
+                        </label>
+                      </div>
+                    </div>
+
                     <details className="rounded-xl border border-borderSoft bg-white p-4">
                       <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
                         <span className="font-semibold text-deepPurple">開運商品購買須知</span>
