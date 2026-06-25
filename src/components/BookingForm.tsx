@@ -138,7 +138,7 @@ export function BookingForm() {
     const payerPhone = bankTransferPhone.trim() || customerPhone.trim()
     if (paymentMethod === 'bank-transfer') {
       if (!payerPhone) {
-        setFormError('請填寫銀行匯款聯絡電話。')
+        setFormError('請填寫郵局匯款聯絡電話。')
         return false
       }
 
@@ -217,12 +217,12 @@ export function BookingForm() {
     }
 
     if (paymentMethod === 'newebpay-coming-soon') {
-      setFormError('此付款方式尚未開放，請先使用銀行匯款。')
+      setFormError('此付款方式尚未開放，請先使用郵局匯款。')
       return false
     }
 
     if (paymentMethod === 'linepay-coming-soon') {
-      setFormError('此付款方式尚未開放，請先使用銀行匯款。')
+      setFormError('此付款方式尚未開放，請先使用郵局匯款。')
       return false
     }
 
@@ -449,7 +449,7 @@ export function BookingForm() {
               onChange={(event) => setPaymentMethod(event.target.value as typeof paymentMethod)}
               value={paymentMethod}
             >
-              <option value="bank-transfer">銀行匯款｜人工確認</option>
+              <option value="bank-transfer">郵局匯款｜需至水瓶先生官方 LINE 核對開通</option>
               <option disabled value="newebpay-coming-soon">
                 藍新線上付款｜即將開放
               </option>
@@ -461,11 +461,30 @@ export function BookingForm() {
           <div className="mt-4 grid gap-3">
             {paymentMethod === 'bank-transfer' ? (
               <>
-                <p className="rounded-xl border border-borderSoft bg-white p-4 text-sm leading-6 text-textMuted">
-                  請先完成匯款，並填寫匯款帳號後五碼與聯絡電話。客服確認款項後，將協助確認預約。
-                </p>
-                <div className="grid gap-4 rounded-xl border border-borderSoft bg-white p-4 md:grid-cols-2">
-                  <label className="grid gap-2">
+                <div className="rounded-xl border border-borderSoft bg-white p-4 text-sm leading-6 text-textMuted">
+                  <p>
+                    請先完成郵局匯款，並填寫聯絡電話與您的匯款帳號後五碼。完成後請至水瓶先生官方 LINE 回覆「已匯款＋姓名＋購買項目」，客服核對款項後，將協助開通與確認預約。
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-deepPurple/15 bg-white p-4 shadow-soft">
+                  <p className="text-sm font-semibold text-darkGold">郵局匯款資訊</p>
+                  <div className="mt-3 grid gap-2 text-sm leading-6 text-textMuted sm:grid-cols-2">
+                    <p>銀行名稱：中華郵政</p>
+                    <p>銀行代碼：700</p>
+                    <p>分行／郵局：田尾郵局</p>
+                    <p>戶名：蔡題簇</p>
+                    <p>局號：0081359</p>
+                    <p>帳號：0146512</p>
+                    <p className="font-semibold text-deepPurple sm:col-span-2">轉帳帳號：00813590146512</p>
+                  </div>
+                  <p className="mt-3 rounded-lg bg-softPurple px-3 py-2 text-xs leading-5 text-textMuted">
+                    郵局帳號為「局號＋帳號」，轉帳時請輸入完整 14 碼：00813590146512。
+                  </p>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="grid gap-3 rounded-xl border border-borderSoft bg-white p-4">
                     <span className="text-sm font-semibold text-textDark">聯絡電話 *</span>
                     <input
                       className="focus-ring rounded-lg border border-borderSoft px-4 py-3"
@@ -473,8 +492,9 @@ export function BookingForm() {
                       placeholder="請填寫客服可聯繫的電話"
                       value={bankTransferPhone || customerPhone}
                     />
+                    <span className="text-xs leading-5 text-textMuted">若需要核對款項或預約資訊，客服會以此電話聯繫。</span>
                   </label>
-                  <label className="grid gap-2">
+                  <label className="grid gap-3 rounded-xl border border-borderSoft bg-white p-4">
                     <span className="text-sm font-semibold text-textDark">匯款帳號後五碼 *</span>
                     <input
                       className="focus-ring rounded-lg border border-borderSoft px-4 py-3"
