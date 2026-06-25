@@ -25,40 +25,12 @@ type PurchaseState = {
   courseId: CourseId | null
 }
 
-const courseServiceRows = [
-  { label: '課程型態', value: '預錄課程、線上直播或混合制，依各課程實際安排為準。' },
-  { label: '上課方式', value: '直播課程以 Zoom 進行；預錄課程於會員中心觀看。' },
-  { label: '是否預約制', value: '是。直播或實作相關時段需依網站公告或客服協助預約；預錄內容不需預約。' },
-  { label: '最長可預約時間', value: '可預約未來 90 天內之課程或實作時段。' },
-  { label: '是否訂閱制', value: '否。' },
-  { label: '是否儲值式', value: '否。' },
-  { label: '觀看期限', value: '購買後可永久觀看已開放之預錄課程內容。' },
-  { label: '購買後取得', value: '會員中心課程觀看權限與對應課程內容。' },
-]
-
 function getCoursePaymentErrorMessage(status: number, fallback?: string) {
   if (status === 401) return '請先登入會員後再購買課程'
   if (status === 403) return '請先完成前一階段課程購買'
   if (status === 409) return '你已經購買過這門課程'
   if (status >= 500) return '建立付款單失敗，請稍後再試'
   return fallback ?? '建立付款單失敗，請稍後再試'
-}
-
-const courseServiceDetails: Record<
-  CourseId,
-  {
-    rows: { label: string; value: string }[]
-  }
-> = {
-  basic: {
-    rows: courseServiceRows,
-  },
-  advanced: {
-    rows: courseServiceRows,
-  },
-  master: {
-    rows: courseServiceRows,
-  },
 }
 
 export default function CoursesPageClient() {
@@ -69,6 +41,7 @@ export default function CoursesPageClient() {
   const [loginOpen, setLoginOpen] = useState(false)
   const [purchasingCourseId, setPurchasingCourseId] = useState<CourseId | null>(null)
   const [purchaseState, setPurchaseState] = useState<PurchaseState>({ message: '', courseId: null })
+  const [courseTermsAccepted, setCourseTermsAccepted] = useState(false)
 
   const loadPurchases = useCallback(async () => {
     const nextUser = getMockUser()
@@ -138,6 +111,14 @@ export default function CoursesPageClient() {
       return
     }
 
+    if (!courseTermsAccepted) {
+      setPurchaseState({
+        message: '請先勾選同意紫微課程服務說明、退款政策與服務條款。',
+        courseId: course.id,
+      })
+      return
+    }
+
     const accessToken = await getAuthAccessToken()
     if (!accessToken) {
       setLoginOpen(true)
@@ -187,7 +168,73 @@ export default function CoursesPageClient() {
         description="依序從基礎觀念、四宮實戰到飛化與占卜應用，完成前一階段後解鎖下一階段。"
       />
       <section className="bg-white py-12 md:py-16">
-        <div className="section-shell grid gap-6 lg:grid-cols-3">
+        <div className="section-shell">
+          <div className="mb-8 rounded-2xl border border-borderSoft bg-softPurple p-5 md:p-6">
+            <details className="group">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4">
+                <span className="font-serifTC text-2xl font-semibold text-deepPurple">紫微課程購買須知</span>
+                <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-darkGold shadow-sm transition group-open:bg-lightGold">
+                  點我查看
+                </span>
+              </summary>
+              <div className="mt-5 space-y-5 leading-8 text-textMuted">
+                <div>
+                  <h2 className="font-serifTC text-xl font-semibold text-deepPurple">紫微課程服務說明</h2>
+                  <p className="mt-2">本課程為線上課程商品，購買後可於水瓶先生網站會員中心觀看已開放之課程內容。</p>
+                </div>
+
+                <div>
+                  <h3 className="font-semibold text-deepPurple">課程型態</h3>
+                  <p className="mt-1">本課程以預錄課程為主，部分課程日後可能增加補充內容或實作示範，實際開放內容依課程頁面公告為準。</p>
+                </div>
+
+                <div>
+                  <h3 className="font-semibold text-deepPurple">觀看方式</h3>
+                  <p className="mt-1">購買成功後，請登入會員中心觀看課程內容。課程影片與教材皆以水瓶先生網站內觀看為主，不需要另外預約。</p>
+                </div>
+
+                <div>
+                  <h3 className="font-semibold text-deepPurple">觀看期限</h3>
+                  <p className="mt-1">購買後可長期觀看已開放之預錄課程內容。若後續有新增內容，依各課程實際開放安排為準。</p>
+                </div>
+
+                <div>
+                  <h3 className="font-semibold text-deepPurple">購買提醒</h3>
+                  <p className="mt-1">購買前請先確認課程名稱、課程內容、價格與購買條件。部分進階課程需先購買前一階段課程，才能解鎖購買。</p>
+                </div>
+
+                <div>
+                  <h3 className="font-semibold text-deepPurple">服務性質</h3>
+                  <p className="mt-1">課程內容為紫微斗數教學與命理學習用途，僅供學習與參考，不保證任何特定結果，也不具醫療、法律、投資或其他專業建議效果。</p>
+                </div>
+              </div>
+            </details>
+
+            <div className="mt-5 rounded-xl bg-white px-4 py-4">
+              <div className="flex items-start gap-3">
+                <input
+                  id="course-terms-accepted"
+                  type="checkbox"
+                  checked={courseTermsAccepted}
+                  onChange={(event) => setCourseTermsAccepted(event.target.checked)}
+                  className="mt-1 size-4 rounded border-borderSoft text-deepPurple focus:ring-deepPurple"
+                />
+                <label htmlFor="course-terms-accepted" className="text-sm leading-7 text-textMuted">
+                  我已詳細閱讀並同意《紫微課程服務說明》、
+                  <Link className="font-semibold text-deepPurple underline-offset-4 hover:underline" href="/refund-policy">
+                    退款政策
+                  </Link>
+                  、
+                  <Link className="font-semibold text-deepPurple underline-offset-4 hover:underline" href="/terms">
+                    服務條款
+                  </Link>
+                  ，並了解課程為線上課程商品，購買後可於水瓶先生網站會員中心觀看。
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-3">
           {courses.map((course) => {
             const purchased = purchasedCourseIds.includes(course.id)
             const lockedReason = user ? getCourseLockedReason(course.id, purchasedCourseIds) : null
@@ -261,43 +308,6 @@ export default function CoursesPageClient() {
               </article>
             )
           })}
-        </div>
-      </section>
-      <section className="bg-softPurple py-12 md:py-16">
-        <div className="section-shell">
-          <div className="max-w-3xl">
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-darkGold">Course Notice</p>
-            <h2 className="mt-3 font-serifTC text-3xl font-semibold text-deepPurple">課程服務說明</h2>
-            <p className="mt-3 leading-8 text-textMuted">
-              以下資訊供購買前確認。各課程實際直播、實作或預錄內容安排，依網站公告與會員中心已開放內容為準。
-            </p>
-          </div>
-          <div className="mt-8 grid gap-6 lg:grid-cols-3">
-            {courses.map((course) => (
-              <article key={course.id} className="rounded-2xl border border-borderSoft bg-white p-6 shadow-soft">
-                <p className="text-sm font-semibold text-darkGold">第 {course.level} 階段</p>
-                <h3 className="mt-2 font-serifTC text-2xl font-semibold text-deepPurple">{course.title}</h3>
-                <p className="mt-1 font-semibold text-textDark">{course.subtitle}</p>
-                <dl className="mt-5 grid gap-3 text-sm">
-                  {courseServiceDetails[course.id].rows.map((row) => (
-                    <div key={row.label} className="grid gap-1 rounded-xl bg-softPurple px-4 py-3">
-                      <dt className="font-semibold text-deepPurple">{row.label}</dt>
-                      <dd className="leading-6 text-textMuted">{row.value}</dd>
-                    </div>
-                  ))}
-                </dl>
-                <div className="mt-5">
-                  <p className="font-semibold text-deepPurple">課程內容</p>
-                  <ul className="mt-3 grid gap-2 text-sm text-textMuted">
-                    {course.contents.map((content) => (
-                      <li key={content} className="rounded-lg border border-borderSoft px-3 py-2">
-                        {content}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </article>
-            ))}
           </div>
         </div>
       </section>
@@ -308,4 +318,3 @@ export default function CoursesPageClient() {
     </>
   )
 }
-
