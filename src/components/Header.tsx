@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { BookOpen, CalendarCheck, FileText, LogOut, Menu, ShoppingCart, Sparkles, UserRound, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -32,6 +32,7 @@ const visibleNavItems = navItems.filter((item) => {
 
 export function Header() {
   const pathname = usePathname()
+  const router = useRouter()
   const [menuOpen, setMenuOpen] = useState(false)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const accountMenuRef = useRef<HTMLDivElement | null>(null)
@@ -81,6 +82,7 @@ export function Header() {
     logoutMockUser()
     setAccountMenuOpen(false)
     setMenuOpen(false)
+    router.push('/')
   }
 
   const accountMenu = user ? (
@@ -90,27 +92,27 @@ export function Header() {
         {user.googleEmail ? <p className="mt-1 text-sm text-white/60">{user.googleEmail}</p> : null}
       </div>
       <nav className="grid py-3 text-lg font-semibold">
-        <Link href="/account" className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
+        <Link href="/account" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
           <UserRound size={22} />
           會員中心
         </Link>
         {!hideCoursesServices ? (
-          <Link href="/account/courses" className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
+          <Link href="/account/courses" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
             <BookOpen size={22} />
             我的課程
           </Link>
         ) : null}
         {!hideConsultationServices ? (
-          <Link href="/account/bookings" className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
+          <Link href="/account/bookings" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
             <CalendarCheck size={22} />
             我的預約
           </Link>
         ) : null}
-        <Link href="/ai-chart" className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
+        <Link href="/ai-chart" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
           <FileText size={22} />
           命盤紀錄
         </Link>
-        <Link href="/ai-divination" className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
+        <Link href="/ai-divination" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
           <Sparkles size={22} />
           紫微牌卡占卜
         </Link>
@@ -209,7 +211,7 @@ export function Header() {
           ))}
         </nav>
 
-        <div className="hidden items-center gap-3 lg:flex">
+        <div ref={accountMenuRef} className="relative hidden items-center gap-3 lg:flex">
           <span className="inline-flex rounded-full border border-[#f0d8a6] bg-[#fff9eb] px-4 py-2 text-xs font-semibold tracking-wide text-darkGold">
             歡迎使用 LINE Pay
           </span>
