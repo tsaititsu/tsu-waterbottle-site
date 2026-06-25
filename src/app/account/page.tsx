@@ -8,16 +8,24 @@ import { accountStats } from '@/lib/mockData'
 import { getAuthAccessToken, getMockUser, subscribeAuthChange, type UserProfile } from '@/lib/mockAuth'
 import { getPaymentRecords, type PaymentRecord } from '@/lib/mockPayment'
 import type { CourseId } from '@/lib/courses'
+import { shouldHideConsultationServices, shouldHideCoursesServices } from '@/lib/siteVisibility'
 
 export default function AccountPage() {
   const [user, setUser] = useState<UserProfile | null>(null)
   const [payments, setPayments] = useState<PaymentRecord[]>([])
   const [loginOpen, setLoginOpen] = useState(false)
   const [purchasedCourseIds, setPurchasedCourseIds] = useState<CourseId[]>([])
+  const hideConsultationServices = shouldHideConsultationServices()
+  const hideCoursesServices = shouldHideCoursesServices()
+  const visiblePayments = payments.filter((payment) => {
+    if (payment.itemType === 'course' && hideCoursesServices) return false
+    if (payment.itemType === 'booking' && hideConsultationServices) return false
+    return true
+  })
 
   useEffect(() => {
     async function loadCoursePurchases(nextUser: UserProfile | null) {
-      if (!nextUser) {
+      if (!nextUser || hideCoursesServices) {
         setPurchasedCourseIds([])
         return
       }
@@ -58,7 +66,7 @@ export default function AccountPage() {
       <PageHero
         eyebrow="Member Center"
         title="會員中心"
-        description="集中保存命盤、AI分析報告、占卜紀錄、真人預約、課程與付款紀錄。"
+        description={hideConsultationServices || hideCoursesServices ? '集中保存命盤、AI分析報告、占卜紀錄與付款紀錄。' : '集中保存命盤、AI分析報告、占卜紀錄、真人預約、課程與付款紀錄。'}
       />
       <section className="bg-white py-12 md:py-16">
         <div className="section-shell grid gap-8">
@@ -73,33 +81,41 @@ export default function AccountPage() {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {accountStats.map((stat) => (
-              <article key={stat.title} className="rounded-2xl border border-borderSoft bg-white p-5 shadow-soft">
-                <h3 className="font-serifTC text-xl font-semibold text-deepPurple">{stat.title}</h3>
-                <p className="mt-3 text-textMuted">
-                  {stat.title === '我的課程' ? `已購買 ${purchasedCourseIds.length} / 3 門課` : stat.value}
-                </p>
-                {stat.title === '我的課程' ? (
-                  <Link className="focus-ring mt-4 inline-flex rounded-lg border border-deepPurple bg-white px-4 py-2 text-sm font-semibold text-deepPurple" href="/account/courses">
-                    查看我的課程
-                  </Link>
-                ) : null}
-              </article>
-            ))}
+            {accountStats
+              .filter((stat) => {
+                if (stat.title === '我的課程' && hideCoursesServices) return false
+                if (stat.title === '真人預約' && hideConsultationServices) return false
+                return true
+              })
+              .map((stat) => (
+                <article key={stat.title} className="rounded-2xl border border-borderSoft bg-white p-5 shadow-soft">
+                  <h3 className="font-serifTC text-xl font-semibold text-deepPurple">{stat.title}</h3>
+                  <p className="mt-3 text-textMuted">
+                    {stat.title === '我的課程' ? `已購買 ${purchasedCourseIds.length} / 3 門課` : stat.value}
+                  </p>
+                  {stat.title === '我的課程' ? (
+                    <Link className="focus-ring mt-4 inline-flex rounded-lg border border-deepPurple bg-white px-4 py-2 text-sm font-semibold text-deepPurple" href="/account/courses">
+                      查看我的課程
+                    </Link>
+                  ) : null}
+                </article>
+              ))}
           </div>
 
           <div className="rounded-2xl border border-borderSoft bg-white p-6 shadow-soft">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h2 className="font-serifTC text-2xl font-semibold text-deepPurple">付款紀錄</h2>
-              <Link className="focus-ring w-fit rounded-lg border border-deepPurple bg-white px-4 py-2 text-sm font-semibold text-deepPurple" href="/account/bookings">
-                查看我的預約
-              </Link>
+              {!hideConsultationServices ? (
+                <Link className="focus-ring w-fit rounded-lg border border-deepPurple bg-white px-4 py-2 text-sm font-semibold text-deepPurple" href="/account/bookings">
+                  查看我的預約
+                </Link>
+              ) : null}
             </div>
             <div className="mt-5 grid gap-3">
-              {payments.length === 0 ? (
+              {visiblePayments.length === 0 ? (
                 <p className="text-textMuted">目前尚無付款紀錄。完成 mock 付款後會顯示在這裡。</p>
               ) : (
-                payments.map((payment) => (
+                visiblePayments.map((payment) => (
                   <div key={payment.id} className="grid gap-2 rounded-xl border border-borderSoft bg-softPurple p-4 md:grid-cols-[1fr_auto_auto_auto] md:items-center">
                     <div>
                       <p className="font-semibold text-deepPurple">{payment.itemName}</p>
