@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { listDefaultBookingSlots } from '@/lib/defaultBookingSlots'
 import { getSupabaseAdmin } from '@/lib/supabase/admin'
 
 async function requireAuthenticatedUser(request: Request) {
@@ -76,6 +77,20 @@ function taipeiPartsFromIso(value: string) {
   }
 }
 
+function slotKey(startAt: string, endAt: string) {
+  return `${startAt}|${endAt}`
+}
+
+function isWithinCloseWindow(slot: { start_at: string; end_at: string }, allDay: boolean, closeStartMinutes: number, closeEndMinutes: number) {
+  if (allDay) return true
+
+  const start = taipeiPartsFromIso(slot.start_at)
+  const end = taipeiPartsFromIso(slot.end_at)
+  if (start.date !== end.date) return false
+
+  return start.minutes < closeEndMinutes && end.minutes > closeStartMinutes
+}
+
 export async function PATCH(request: Request) {
   try {
     const auth = await requireAuthenticatedUser(request)
@@ -117,10 +132,9 @@ export async function PATCH(request: Request) {
     const rangeEnd = taipeiInputToIso(addDays(dateTo, 1).value, '00:00')
     const { data: candidates, error: selectError } = await auth.supabase
       .from('consultation_availability_slots')
-      .select('id,start_at,end_at')
+      .select('id,start_at,end_at,is_available')
       .gte('start_at', rangeStart)
       .lt('start_at', rangeEnd)
-      .eq('is_available', true)
 
     if (selectError) {
       console.error('Failed to find consultation slots for bulk close', {
@@ -134,17 +148,31 @@ export async function PATCH(request: Request) {
 
     const closeStartMinutes = allDay ? 0 : timeToMinutes(startTime)
     const closeEndMinutes = allDay ? 24 * 60 : timeToMinutes(endTime)
+    const existingSlots = candidates ?? []
+    const existingKeys = new Set(existingSlots.map((slot) => slotKey(slot.start_at, slot.end_at)))
     const idsToUpdate = (candidates ?? [])
-      .filter((slot) => {
-        if (allDay) return true
-        const start = taipeiPartsFromIso(slot.start_at)
-        const end = taipeiPartsFromIso(slot.end_at)
-        if (start.date !== end.date) return false
-        return start.minutes < closeEndMinutes && end.minutes > closeStartMinutes
-      })
+      .filter((slot) => slot.is_available)
+      .filter((slot) => isWithinCloseWindow(slot, allDay, closeStartMinutes, closeEndMinutes))
       .map((slot) => slot.id)
+    const defaultClosedSlots = listDefaultBookingSlots()
+      .filter((slot) => slot.startAt >= rangeStart && slot.startAt < rangeEnd)
+      .filter((slot) =>
+        isWithinCloseWindow(
+          { start_at: slot.startAt, end_at: slot.endAt },
+          allDay,
+          closeStartMinutes,
+          closeEndMinutes,
+        ),
+      )
+      .filter((slot) => !existingKeys.has(slotKey(slot.startAt, slot.endAt)))
+      .map((slot) => ({
+        start_at: slot.startAt,
+        end_at: slot.endAt,
+        is_available: false,
+        note: note ?? '不開放',
+      }))
 
-    if (idsToUpdate.length === 0) {
+    if (idsToUpdate.length === 0 && defaultClosedSlots.length === 0) {
       return NextResponse.json({
         ok: true,
         updatedCount: 0,
@@ -155,23 +183,48 @@ export async function PATCH(request: Request) {
     const updates: { is_available: boolean; note?: string } = { is_available: false }
     if (note) updates.note = note
 
-    const { data, error } = await auth.supabase
-      .from('consultation_availability_slots')
-      .update(updates)
-      .in('id', idsToUpdate)
-      .select('id')
+    let updatedCount = 0
 
-    if (error) {
-      console.error('Failed to bulk close consultation slots', {
-        code: error.code,
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-      })
-      return NextResponse.json({ ok: false, error: '批次關閉時段失敗。' }, { status: 500 })
+    if (idsToUpdate.length > 0) {
+      const { data, error } = await auth.supabase
+        .from('consultation_availability_slots')
+        .update(updates)
+        .in('id', idsToUpdate)
+        .select('id')
+
+      if (error) {
+        console.error('Failed to bulk close consultation slots', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+        })
+        return NextResponse.json({ ok: false, error: '批次關閉時段失敗。' }, { status: 500 })
+      }
+
+      updatedCount += data?.length ?? 0
     }
 
-    return NextResponse.json({ ok: true, updatedCount: data?.length ?? 0 })
+    if (defaultClosedSlots.length > 0) {
+      const { data, error } = await auth.supabase
+        .from('consultation_availability_slots')
+        .insert(defaultClosedSlots)
+        .select('id')
+
+      if (error) {
+        console.error('Failed to create default consultation slot close markers', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+        })
+        return NextResponse.json({ ok: false, error: '批次關閉時段失敗。' }, { status: 500 })
+      }
+
+      updatedCount += data?.length ?? 0
+    }
+
+    return NextResponse.json({ ok: true, updatedCount })
   } catch (error) {
     console.error('Unexpected booking slots bulk close error', error)
     return NextResponse.json({ ok: false, error: '批次關閉時段失敗。' }, { status: 500 })
