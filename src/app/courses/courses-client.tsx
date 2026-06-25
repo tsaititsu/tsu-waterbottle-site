@@ -33,6 +33,85 @@ function getCoursePaymentErrorMessage(status: number, fallback?: string) {
   return fallback ?? '建立付款單失敗，請稍後再試'
 }
 
+function CoursePurchaseNotice({
+  courseId,
+  accepted,
+  onAcceptedChange,
+}: {
+  courseId: CourseId
+  accepted: boolean
+  onAcceptedChange: (courseId: CourseId, accepted: boolean) => void
+}) {
+  const inputId = `course-terms-accepted-${courseId}`
+
+  return (
+    <div className="rounded-xl border border-borderSoft bg-softPurple p-4">
+      <details className="group">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+          <span className="font-serifTC text-lg font-semibold text-deepPurple">紫微課程購買須知</span>
+          <span className="shrink-0 rounded-full bg-white px-3 py-1 text-xs font-semibold text-darkGold shadow-sm transition group-open:bg-lightGold">
+            點我查看
+          </span>
+        </summary>
+        <div className="mt-4 space-y-4 text-sm leading-7 text-textMuted">
+          <div>
+            <h3 className="font-serifTC text-base font-semibold text-deepPurple">紫微課程服務說明</h3>
+            <p className="mt-1">本課程為線上課程商品，購買後可於水瓶先生網站會員中心觀看已開放之課程內容。</p>
+          </div>
+
+          <div>
+            <h4 className="font-semibold text-deepPurple">課程型態</h4>
+            <p className="mt-1">本課程以預錄課程為主，部分課程日後可能增加補充內容或實作示範，實際開放內容依課程頁面公告為準。</p>
+          </div>
+
+          <div>
+            <h4 className="font-semibold text-deepPurple">觀看方式</h4>
+            <p className="mt-1">購買成功後，請登入會員中心觀看課程內容。課程影片與教材皆以水瓶先生網站內觀看為主，不需要另外預約。</p>
+          </div>
+
+          <div>
+            <h4 className="font-semibold text-deepPurple">觀看期限</h4>
+            <p className="mt-1">購買後可長期觀看已開放之預錄課程內容；若後續有新增內容，依各課程實際開放安排為準。</p>
+          </div>
+
+          <div>
+            <h4 className="font-semibold text-deepPurple">購買提醒</h4>
+            <p className="mt-1">購買前請先確認課程名稱、課程內容、價格與購買條件。部分進階課程需先購買前一階段課程，才能解鎖購買。</p>
+          </div>
+
+          <div>
+            <h4 className="font-semibold text-deepPurple">服務性質</h4>
+            <p className="mt-1">課程內容為紫微斗數教學與命理學習用途，僅供學習與參考，不保證任何特定結果，也不具醫療、法律、投資或其他專業建議效果。</p>
+          </div>
+        </div>
+      </details>
+
+      <div className="mt-4 rounded-lg bg-white px-3 py-3">
+        <div className="flex items-start gap-3">
+          <input
+            id={inputId}
+            type="checkbox"
+            checked={accepted}
+            onChange={(event) => onAcceptedChange(courseId, event.target.checked)}
+            className="mt-1 size-4 rounded border-borderSoft text-deepPurple focus:ring-deepPurple"
+          />
+          <label htmlFor={inputId} className="text-sm leading-7 text-textMuted">
+            我已詳細閱讀並同意《紫微課程服務說明》、
+            <Link className="font-semibold text-deepPurple underline-offset-4 hover:underline" href="/refund-policy">
+              退款政策
+            </Link>
+            、
+            <Link className="font-semibold text-deepPurple underline-offset-4 hover:underline" href="/terms">
+              服務條款
+            </Link>
+            ，並了解課程為線上課程商品，購買後可於水瓶先生網站會員中心觀看。
+          </label>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function CoursesPageClient() {
   const router = useRouter()
   const [courses, setCourses] = useState<CourseInfo[]>(courseCatalog)
@@ -41,7 +120,7 @@ export default function CoursesPageClient() {
   const [loginOpen, setLoginOpen] = useState(false)
   const [purchasingCourseId, setPurchasingCourseId] = useState<CourseId | null>(null)
   const [purchaseState, setPurchaseState] = useState<PurchaseState>({ message: '', courseId: null })
-  const [courseTermsAccepted, setCourseTermsAccepted] = useState(false)
+  const [acceptedCourseTerms, setAcceptedCourseTerms] = useState<Partial<Record<CourseId, boolean>>>({})
 
   const loadPurchases = useCallback(async () => {
     const nextUser = getMockUser()
@@ -111,7 +190,7 @@ export default function CoursesPageClient() {
       return
     }
 
-    if (!courseTermsAccepted) {
+    if (!acceptedCourseTerms[course.id]) {
       setPurchaseState({
         message: '請先勾選同意紫微課程服務說明、退款政策與服務條款。',
         courseId: course.id,
@@ -168,73 +247,7 @@ export default function CoursesPageClient() {
         description="依序從基礎觀念、四宮實戰到飛化與占卜應用，完成前一階段後解鎖下一階段。"
       />
       <section className="bg-white py-12 md:py-16">
-        <div className="section-shell">
-          <div className="mb-8 rounded-2xl border border-borderSoft bg-softPurple p-5 md:p-6">
-            <details className="group">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-4">
-                <span className="font-serifTC text-2xl font-semibold text-deepPurple">紫微課程購買須知</span>
-                <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-darkGold shadow-sm transition group-open:bg-lightGold">
-                  點我查看
-                </span>
-              </summary>
-              <div className="mt-5 space-y-5 leading-8 text-textMuted">
-                <div>
-                  <h2 className="font-serifTC text-xl font-semibold text-deepPurple">紫微課程服務說明</h2>
-                  <p className="mt-2">本課程為線上課程商品，購買後可於水瓶先生網站會員中心觀看已開放之課程內容。</p>
-                </div>
-
-                <div>
-                  <h3 className="font-semibold text-deepPurple">課程型態</h3>
-                  <p className="mt-1">本課程以預錄課程為主，部分課程日後可能增加補充內容或實作示範，實際開放內容依課程頁面公告為準。</p>
-                </div>
-
-                <div>
-                  <h3 className="font-semibold text-deepPurple">觀看方式</h3>
-                  <p className="mt-1">購買成功後，請登入會員中心觀看課程內容。課程影片與教材皆以水瓶先生網站內觀看為主，不需要另外預約。</p>
-                </div>
-
-                <div>
-                  <h3 className="font-semibold text-deepPurple">觀看期限</h3>
-                  <p className="mt-1">購買後可長期觀看已開放之預錄課程內容。若後續有新增內容，依各課程實際開放安排為準。</p>
-                </div>
-
-                <div>
-                  <h3 className="font-semibold text-deepPurple">購買提醒</h3>
-                  <p className="mt-1">購買前請先確認課程名稱、課程內容、價格與購買條件。部分進階課程需先購買前一階段課程，才能解鎖購買。</p>
-                </div>
-
-                <div>
-                  <h3 className="font-semibold text-deepPurple">服務性質</h3>
-                  <p className="mt-1">課程內容為紫微斗數教學與命理學習用途，僅供學習與參考，不保證任何特定結果，也不具醫療、法律、投資或其他專業建議效果。</p>
-                </div>
-              </div>
-            </details>
-
-            <div className="mt-5 rounded-xl bg-white px-4 py-4">
-              <div className="flex items-start gap-3">
-                <input
-                  id="course-terms-accepted"
-                  type="checkbox"
-                  checked={courseTermsAccepted}
-                  onChange={(event) => setCourseTermsAccepted(event.target.checked)}
-                  className="mt-1 size-4 rounded border-borderSoft text-deepPurple focus:ring-deepPurple"
-                />
-                <label htmlFor="course-terms-accepted" className="text-sm leading-7 text-textMuted">
-                  我已詳細閱讀並同意《紫微課程服務說明》、
-                  <Link className="font-semibold text-deepPurple underline-offset-4 hover:underline" href="/refund-policy">
-                    退款政策
-                  </Link>
-                  、
-                  <Link className="font-semibold text-deepPurple underline-offset-4 hover:underline" href="/terms">
-                    服務條款
-                  </Link>
-                  ，並了解課程為線上課程商品，購買後可於水瓶先生網站會員中心觀看。
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-6 lg:grid-cols-3">
+        <div className="section-shell grid gap-6 lg:grid-cols-3">
           {courses.map((course) => {
             const purchased = purchasedCourseIds.includes(course.id)
             const lockedReason = user ? getCourseLockedReason(course.id, purchasedCourseIds) : null
@@ -269,6 +282,16 @@ export default function CoursesPageClient() {
                 </p>
 
                 <div className="mt-auto pt-6">
+                  <div className="mb-4">
+                    <CoursePurchaseNotice
+                      courseId={course.id}
+                      accepted={Boolean(acceptedCourseTerms[course.id])}
+                      onAcceptedChange={(courseId, accepted) =>
+                        setAcceptedCourseTerms((current) => ({ ...current, [courseId]: accepted }))
+                      }
+                    />
+                  </div>
+
                   {!user ? (
                     <button
                       type="button"
@@ -308,7 +331,6 @@ export default function CoursesPageClient() {
               </article>
             )
           })}
-          </div>
         </div>
       </section>
       <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} onSuccess={() => {
