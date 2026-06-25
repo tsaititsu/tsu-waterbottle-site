@@ -1,4 +1,4 @@
-export const LINE_PAY_REVIEW_MODE = true
+export const LINE_PAY_REVIEW_MODE = false
 
 export const hiddenServices = {
   consultation: LINE_PAY_REVIEW_MODE,
