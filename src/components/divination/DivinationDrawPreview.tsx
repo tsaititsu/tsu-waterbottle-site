@@ -4,16 +4,28 @@ import { ziweiCards } from "@/lib/divination/cards"
 import Image from "next/image"
 import { useEffect, useRef, useState } from "react"
 
+type PreviewPosition = "upright" | "reversed"
+
 const initialMessage = "請先開始洗牌。"
 const shufflingMessage = "洗牌中..."
 const readyMessage = "洗牌完成，請憑直覺點選一張牌。"
 const pendingMessage = "你選到一張牌。請確認是不是這張。"
 const previewMessage = "本機開發預覽：正式解讀流程將在下一階段接入。"
 
+const positionLabels: Record<PreviewPosition, string> = {
+  upright: "正位",
+  reversed: "反位",
+}
+
+function getRandomPosition(): PreviewPosition {
+  return Math.random() < 0.5 ? "upright" : "reversed"
+}
+
 export function DivinationDrawPreview() {
   const [started, setStarted] = useState(false)
   const [shuffling, setShuffling] = useState(false)
   const [pendingIndex, setPendingIndex] = useState<number | null>(null)
+  const [pendingPosition, setPendingPosition] = useState<PreviewPosition | null>(null)
   const [message, setMessage] = useState(initialMessage)
   const [errorMessage, setErrorMessage] = useState("")
   const shuffleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -39,6 +51,7 @@ export function DivinationDrawPreview() {
     setStarted(true)
     setShuffling(true)
     setPendingIndex(null)
+    setPendingPosition(null)
     setErrorMessage("")
     setMessage(shufflingMessage)
 
@@ -52,6 +65,7 @@ export function DivinationDrawPreview() {
     if (!started || shuffling || isPreviewComplete) return
 
     setPendingIndex(index)
+    setPendingPosition(getRandomPosition())
     setErrorMessage("")
     setMessage(pendingMessage)
   }
@@ -60,6 +74,7 @@ export function DivinationDrawPreview() {
     if (shuffling) return
 
     setPendingIndex(null)
+    setPendingPosition(null)
     setErrorMessage("")
     setMessage(readyMessage)
   }
@@ -155,8 +170,22 @@ export function DivinationDrawPreview() {
           <div className="grid w-full max-w-xl gap-3 rounded-2xl border border-[#0b8f74] bg-[#041d17] p-4 text-[#bff9df]">
             <p className="text-lg font-semibold">是不是這張牌？</p>
             <div className="grid gap-2 rounded-2xl border border-[#0b8f74]/70 bg-[#02120e] p-4 leading-7">
+              {pendingCard ? (
+                <div className="mb-3 flex justify-center">
+                  <Image
+                    src={pendingCard.image}
+                    alt={pendingCard.name}
+                    width={360}
+                    height={560}
+                    className="w-full max-w-[180px] rounded-2xl border border-[#f1cf72] object-cover shadow-[0_18px_36px_rgba(0,0,0,0.36)]"
+                  />
+                </div>
+              ) : null}
               <p>你選到：{pendingCard?.name ?? "紫微牌卡"}</p>
-              <p>正反位：本機預覽暫不顯示</p>
+              <p>正反位：{pendingPosition ? positionLabels[pendingPosition] : "本機預覽暫不顯示"}</p>
+              {pendingPosition === "reversed" ? (
+                <p className="text-sm leading-6 text-[#d9c68e]">目前以正位圖預覽反位。</p>
+              ) : null}
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <button
