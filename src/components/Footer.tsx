@@ -32,7 +32,7 @@ export function Footer() {
     <footer className="border-t border-[#eadff5] bg-[#fbf8ff]">
       <div className="mx-auto max-w-7xl px-5 py-12 md:px-8 md:py-14">
         <div className="grid gap-9 lg:grid-cols-[1.55fr_0.75fr_0.75fr]">
-          <section>
+          <section id="about-us" className="scroll-mt-28">
             <div className="flex items-center gap-4">
               <div className="rounded-2xl border border-[#eadff5] bg-white p-2 shadow-soft">
                 <LogoMark compact />

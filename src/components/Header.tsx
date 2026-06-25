@@ -22,7 +22,7 @@ const navItems = [
   { label: '開運商品', href: '/spiritual-products' },
   { label: '水瓶先生論命', href: '/booking' },
   { label: '紫微課程', href: '/courses' },
-  { label: '關於我們', href: '/#about' }
+  { label: '關於我們', href: '/#about-us' }
 ]
 
 const visibleNavItems = navItems.filter((item) => {
