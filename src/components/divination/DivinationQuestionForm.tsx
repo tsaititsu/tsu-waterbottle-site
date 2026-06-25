@@ -2,6 +2,15 @@
 
 import { useState } from 'react'
 
+type DrawMode = 'manual' | 'auto'
+
+type DivinationQuestionFormProps = {
+  onQuestionSubmit?: (payload: {
+    question: string
+    mode: DrawMode
+  }) => void
+}
+
 const questionPlaceholder = `請問一個具體問題。
 
 建議可以寫出：
@@ -15,20 +24,26 @@ const questionPlaceholder = `請問一個具體問題。
 我現在這份工作，接下來半年適不適合繼續做？
 我最近遇到的合作邀約，是否值得投入時間？`
 
-export function DivinationQuestionForm() {
+export function DivinationQuestionForm({ onQuestionSubmit }: DivinationQuestionFormProps) {
   const [question, setQuestion] = useState('')
   const [message, setMessage] = useState('')
   const [messageType, setMessageType] = useState<'error' | 'info'>('info')
 
-  const handlePreviewDraw = () => {
-    if (!question.trim()) {
+  const handlePreviewDraw = (mode: DrawMode) => {
+    const trimmedQuestion = question.trim()
+
+    if (!trimmedQuestion) {
       setMessageType('error')
       setMessage('請先填寫占卜問題。')
       return
     }
 
+    onQuestionSubmit?.({
+      question: trimmedQuestion,
+      mode,
+    })
     setMessageType('info')
-    setMessage('本機開發預覽：正式抽牌流程將在下一階段接入。')
+    setMessage('本機開發預覽：已送出問題，可往下進行抽牌預覽。')
   }
 
   return (
@@ -61,14 +76,14 @@ export function DivinationQuestionForm() {
         <div className="mt-6 grid gap-3 sm:grid-cols-2">
           <button
             type="button"
-            onClick={handlePreviewDraw}
+            onClick={() => handlePreviewDraw('manual')}
             className="focus-ring min-h-14 rounded-full border border-[#8c6a2b] bg-[#111] px-8 py-3 text-sm font-semibold tracking-[0.16em] text-[#d8c18a] transition hover:scale-[1.01] hover:bg-[#1b1408]"
           >
             手動抽牌
           </button>
           <button
             type="button"
-            onClick={handlePreviewDraw}
+            onClick={() => handlePreviewDraw('auto')}
             className="focus-ring min-h-14 rounded-full border border-[#d7ad55] bg-[#1b1408] px-8 py-3 text-sm font-semibold tracking-[0.16em] text-[#f5d27a] shadow-[0_0_25px_rgba(215,173,85,0.22)] transition hover:scale-[1.01] hover:bg-[#241a0a]"
           >
             自動抽牌

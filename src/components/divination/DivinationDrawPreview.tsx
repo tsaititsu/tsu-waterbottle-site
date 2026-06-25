@@ -5,6 +5,12 @@ import Image from "next/image"
 import { useEffect, useRef, useState } from "react"
 
 type PreviewPosition = "upright" | "reversed"
+type DrawMode = "manual" | "auto"
+
+type DivinationDrawPreviewProps = {
+  question?: string
+  drawMode?: DrawMode | null
+}
 
 const initialMessage = "請先開始洗牌。"
 const shufflingMessage = "洗牌中..."
@@ -17,11 +23,16 @@ const positionLabels: Record<PreviewPosition, string> = {
   reversed: "反位",
 }
 
+const drawModeLabels: Record<DrawMode, string> = {
+  manual: "手動抽牌",
+  auto: "自動抽牌",
+}
+
 function getRandomPosition(): PreviewPosition {
   return Math.random() < 0.5 ? "upright" : "reversed"
 }
 
-export function DivinationDrawPreview() {
+export function DivinationDrawPreview({ question, drawMode = null }: DivinationDrawPreviewProps) {
   const [started, setStarted] = useState(false)
   const [shuffling, setShuffling] = useState(false)
   const [pendingIndex, setPendingIndex] = useState<number | null>(null)
@@ -32,6 +43,8 @@ export function DivinationDrawPreview() {
 
   const isPreviewComplete = message === previewMessage
   const pendingCard = pendingIndex === null ? null : ziweiCards[pendingIndex]
+  const displayQuestion = question?.trim() || "請先在上方填寫問題並選擇抽牌方式。"
+  const displayDrawMode = drawMode ? drawModeLabels[drawMode] : "尚未選擇"
   const pendingCardImage = pendingCard
     ? pendingPosition === "reversed"
       ? pendingCard.reversedImage
@@ -45,6 +58,19 @@ export function DivinationDrawPreview() {
       }
     }
   }, [])
+
+  useEffect(() => {
+    if (shuffleTimerRef.current) {
+      clearTimeout(shuffleTimerRef.current)
+    }
+
+    setStarted(false)
+    setShuffling(false)
+    setPendingIndex(null)
+    setPendingPosition(null)
+    setErrorMessage("")
+    setMessage(initialMessage)
+  }, [question, drawMode])
 
   function startShuffle() {
     if (shuffling) return
@@ -108,8 +134,9 @@ export function DivinationDrawPreview() {
         </div>
       </div>
 
-      <div className="mt-6 rounded-2xl border border-[#8c6a2d]/80 bg-[#120f09] px-5 py-4 text-[#f4d77d]">
-        目前問題：本機開發預覽問題
+      <div className="mt-6 grid gap-2 rounded-2xl border border-[#8c6a2d]/80 bg-[#120f09] px-5 py-4 text-[#f4d77d]">
+        <p>本次問題：{displayQuestion}</p>
+        <p>抽牌方式：{displayDrawMode}</p>
       </div>
 
       <div className="mt-8 grid justify-items-center gap-6">
