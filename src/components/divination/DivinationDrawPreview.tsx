@@ -32,6 +32,11 @@ export function DivinationDrawPreview() {
 
   const isPreviewComplete = message === previewMessage
   const pendingCard = pendingIndex === null ? null : ziweiCards[pendingIndex]
+  const pendingCardImage = pendingCard
+    ? pendingPosition === "reversed"
+      ? pendingCard.reversedImage
+      : pendingCard.image
+    : null
 
   useEffect(() => {
     return () => {
@@ -170,10 +175,10 @@ export function DivinationDrawPreview() {
           <div className="grid w-full max-w-xl gap-3 rounded-2xl border border-[#0b8f74] bg-[#041d17] p-4 text-[#bff9df]">
             <p className="text-lg font-semibold">是不是這張牌？</p>
             <div className="grid gap-2 rounded-2xl border border-[#0b8f74]/70 bg-[#02120e] p-4 leading-7">
-              {pendingCard ? (
+              {pendingCard && pendingCardImage ? (
                 <div className="mb-3 flex justify-center">
                   <Image
-                    src={pendingCard.image}
+                    src={pendingCardImage}
                     alt={pendingCard.name}
                     width={360}
                     height={560}
@@ -184,7 +189,7 @@ export function DivinationDrawPreview() {
               <p>你選到：{pendingCard?.name ?? "紫微牌卡"}</p>
               <p>正反位：{pendingPosition ? positionLabels[pendingPosition] : "本機預覽暫不顯示"}</p>
               {pendingPosition === "reversed" ? (
-                <p className="text-sm leading-6 text-[#d9c68e]">目前以正位圖預覽反位。</p>
+                <p className="text-sm leading-6 text-[#d9c68e]">已顯示反位牌面。</p>
               ) : null}
             </div>
             <div className="grid gap-3 sm:grid-cols-2">

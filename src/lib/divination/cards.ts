@@ -7,6 +7,7 @@ export type ZiweiCard = {
   id: string;
   name: string;
   image: string;
+  reversedImage: string;
   huaqi: string;
   element: string;
   core: string;
@@ -27,6 +28,7 @@ export const ziweiCards: ZiweiCard[] = [
     id: "ziwei",
     name: "紫微星",
     image: "/cards/ziwei.png",
+    reversedImage: "/cards/ziwei-reversed.png",
     huaqi: "尊",
     element: "陰土",
     core:
@@ -88,6 +90,7 @@ export const ziweiCards: ZiweiCard[] = [
     id: "tianji",
     name: "天機星",
     image: "/cards/tianji.png",
+    reversedImage: "/cards/tianji-reversed.png",
     huaqi: "善",
     element: "陰木",
     core:
@@ -149,6 +152,7 @@ export const ziweiCards: ZiweiCard[] = [
     id: "taiyang",
     name: "太陽星",
     image: "/cards/taiyang.png",
+    reversedImage: "/cards/taiyang-reversed.png",
     huaqi: "貴",
     element: "陽火",
     core:
@@ -210,6 +214,7 @@ export const ziweiCards: ZiweiCard[] = [
     id: "wuqu",
     name: "武曲星",
     image: "/cards/wuqu.png",
+    reversedImage: "/cards/wuqu-reversed.png",
     huaqi: "財",
     element: "陰金",
     core:
@@ -271,6 +276,7 @@ export const ziweiCards: ZiweiCard[] = [
     id: "tiantong",
     name: "天同星",
     image: "/cards/tiantong.png",
+    reversedImage: "/cards/tiantong-reversed.png",
     huaqi: "福",
     element: "陽水",
     core:
@@ -332,6 +338,7 @@ export const ziweiCards: ZiweiCard[] = [
     id: "lianzhen",
     name: "廉貞星",
     image: "/cards/lianzhen.png",
+    reversedImage: "/cards/lianzhen-reversed.png",
     huaqi: "囚",
     element: "陰火",
     core:
@@ -393,6 +400,7 @@ export const ziweiCards: ZiweiCard[] = [
     id: "tianfu",
     name: "天府星",
     image: "/cards/tianfu.png",
+    reversedImage: "/cards/tianfu-reversed.png",
     huaqi: "權",
     element: "陽土",
     core:
@@ -454,6 +462,7 @@ export const ziweiCards: ZiweiCard[] = [
     id: "taiyin",
     name: "太陰星",
     image: "/cards/taiyin.png",
+    reversedImage: "/cards/taiyin-reversed.png",
     huaqi: "富",
     element: "陰水",
     core:
@@ -515,6 +524,7 @@ export const ziweiCards: ZiweiCard[] = [
     id: "tanlang",
     name: "貪狼星",
     image: "/cards/tanlang.png",
+    reversedImage: "/cards/tanlang-reversed.png",
     huaqi: "桃花",
     element: "陰水陽木",
     core:
@@ -576,6 +586,7 @@ export const ziweiCards: ZiweiCard[] = [
     id: "jumen",
     name: "巨門星",
     image: "/cards/jumen.png",
+    reversedImage: "/cards/jumen-reversed.png",
     huaqi: "暗",
     element: "陰水",
     core:
@@ -637,6 +648,7 @@ export const ziweiCards: ZiweiCard[] = [
     id: "tianxiang",
     name: "天相星",
     image: "/cards/tianxiang.png",
+    reversedImage: "/cards/tianxiang-reversed.png",
     huaqi: "印",
     element: "陽水",
     core:
@@ -698,6 +710,7 @@ export const ziweiCards: ZiweiCard[] = [
     id: "tianliang",
     name: "天梁星",
     image: "/cards/tianliang.png",
+    reversedImage: "/cards/tianliang-reversed.png",
     huaqi: "蔭",
     element: "陽土",
     core:
@@ -759,6 +772,7 @@ export const ziweiCards: ZiweiCard[] = [
     id: "qisha",
     name: "七殺星",
     image: "/cards/qisha.png",
+    reversedImage: "/cards/qisha-reversed.png",
     huaqi: "殺",
     element: "陰火陽金",
     core:
@@ -820,6 +834,7 @@ export const ziweiCards: ZiweiCard[] = [
     id: "pojun",
     name: "破軍星",
     image: "/cards/pojun.png",
+    reversedImage: "/cards/pojun-reversed.png",
     huaqi: "耗",
     element: "陰水陰金",
     core:
