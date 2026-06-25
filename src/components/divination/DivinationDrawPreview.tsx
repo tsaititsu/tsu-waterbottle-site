@@ -1,9 +1,8 @@
 "use client"
 
+import { ziweiCards } from "@/lib/divination/cards"
 import Image from "next/image"
 import { useEffect, useRef, useState } from "react"
-
-const cardIndexes = Array.from({ length: 14 }, (_, index) => index)
 
 const initialMessage = "請先開始洗牌。"
 const shufflingMessage = "洗牌中..."
@@ -20,6 +19,7 @@ export function DivinationDrawPreview() {
   const shuffleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const isPreviewComplete = message === previewMessage
+  const pendingCard = pendingIndex === null ? null : ziweiCards[pendingIndex]
 
   useEffect(() => {
     return () => {
@@ -109,12 +109,12 @@ export function DivinationDrawPreview() {
               shuffling ? "animate-pulse" : ""
             }`}
           >
-            {cardIndexes.map((index) => {
+            {ziweiCards.map((card, index) => {
               const isPending = pendingIndex === index
 
               return (
                 <button
-                  key={index}
+                  key={card.id}
                   type="button"
                   onClick={() => pickCard(index)}
                   disabled={shuffling || isPreviewComplete}
@@ -123,7 +123,7 @@ export function DivinationDrawPreview() {
                       ? "border-[#f1cf72] bg-[#251704] shadow-[0_0_24px_rgba(241,207,114,0.35)]"
                       : "border-[#8c6a2d]/80 bg-[#0b090d] hover:-translate-y-1 hover:border-[#f1cf72]"
                   } ${shuffling || isPreviewComplete ? "cursor-default opacity-80" : ""}`}
-                  aria-label={`選擇第 ${index + 1} 張牌`}
+                  aria-label={`選擇第 ${index + 1} 張牌：${card.name}`}
                 >
                   <span className="relative block h-full overflow-hidden rounded-xl border border-[#d5ad4a]/50 bg-[radial-gradient(circle_at_30%_20%,#5b3a96_0%,#1b1128_38%,#050505_76%)] transition group-hover:border-[#f1cf72]">
                     <Image
@@ -154,6 +154,10 @@ export function DivinationDrawPreview() {
         {pendingIndex !== null && !isPreviewComplete ? (
           <div className="grid w-full max-w-xl gap-3 rounded-2xl border border-[#0b8f74] bg-[#041d17] p-4 text-[#bff9df]">
             <p className="text-lg font-semibold">是不是這張牌？</p>
+            <div className="grid gap-2 rounded-2xl border border-[#0b8f74]/70 bg-[#02120e] p-4 leading-7">
+              <p>你選到：{pendingCard?.name ?? "紫微牌卡"}</p>
+              <p>正反位：本機預覽暫不顯示</p>
+            </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <button
                 type="button"
