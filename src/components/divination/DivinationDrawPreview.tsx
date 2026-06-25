@@ -14,9 +14,11 @@ type DivinationDrawPreviewProps = {
 
 const initialMessage = "請先開始洗牌。"
 const shufflingMessage = "洗牌中..."
+const autoShufflingMessage = "系統正在為你洗牌與抽牌..."
 const readyMessage = "洗牌完成，請憑直覺點選一張牌。"
 const pendingMessage = "你選到一張牌。請確認是不是這張。"
 const previewMessage = "本機開發預覽：正式解讀流程將在下一階段接入。"
+const blockedMessage = "請先在上方填寫問題，並選擇手動抽牌或自動抽牌。"
 
 const positionLabels: Record<PreviewPosition, string> = {
   upright: "正位",
@@ -32,6 +34,10 @@ function getRandomPosition(): PreviewPosition {
   return Math.random() < 0.5 ? "upright" : "reversed"
 }
 
+function getRandomCardIndex() {
+  return Math.floor(Math.random() * ziweiCards.length)
+}
+
 export function DivinationDrawPreview({ question, drawMode = null }: DivinationDrawPreviewProps) {
   const [started, setStarted] = useState(false)
   const [shuffling, setShuffling] = useState(false)
@@ -43,7 +49,11 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
 
   const isPreviewComplete = message === previewMessage
   const pendingCard = pendingIndex === null ? null : ziweiCards[pendingIndex]
-  const displayQuestion = question?.trim() || "請先在上方填寫問題並選擇抽牌方式。"
+  const trimmedQuestion = question?.trim() ?? ""
+  const canDraw = Boolean(trimmedQuestion && drawMode)
+  const isManualMode = drawMode === "manual"
+  const isAutoMode = drawMode === "auto"
+  const displayQuestion = trimmedQuestion || "請先在上方填寫問題並選擇抽牌方式。"
   const displayDrawMode = drawMode ? drawModeLabels[drawMode] : "尚未選擇"
   const pendingCardImage = pendingCard
     ? pendingPosition === "reversed"
@@ -73,6 +83,11 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
   }, [question, drawMode])
 
   function startShuffle() {
+    if (!canDraw || !isManualMode) {
+      setErrorMessage(blockedMessage)
+      return
+    }
+
     if (shuffling) return
 
     if (shuffleTimerRef.current) {
@@ -93,7 +108,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
   }
 
   function pickCard(index: number) {
-    if (!started || shuffling || isPreviewComplete) return
+    if (!canDraw || !isManualMode || !started || shuffling || isPreviewComplete) return
 
     setPendingIndex(index)
     setPendingPosition(getRandomPosition())
@@ -102,12 +117,41 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
   }
 
   function changeCard() {
-    if (shuffling) return
+    if (!canDraw || shuffling) return
 
     setPendingIndex(null)
     setPendingPosition(null)
     setErrorMessage("")
     setMessage(readyMessage)
+  }
+
+  function startAutoDraw() {
+    if (!canDraw || !isAutoMode) {
+      setErrorMessage(blockedMessage)
+      return
+    }
+
+    if (shuffling) return
+
+    if (shuffleTimerRef.current) {
+      clearTimeout(shuffleTimerRef.current)
+    }
+
+    setStarted(true)
+    setShuffling(true)
+    setPendingIndex(null)
+    setPendingPosition(null)
+    setErrorMessage("")
+    setMessage(autoShufflingMessage)
+
+    const drawDelayMs = 800 + Math.floor(Math.random() * 401)
+
+    shuffleTimerRef.current = setTimeout(() => {
+      setPendingIndex(getRandomCardIndex())
+      setPendingPosition(getRandomPosition())
+      setShuffling(false)
+      setMessage(pendingMessage)
+    }, drawDelayMs)
   }
 
   function confirmCard() {
@@ -140,7 +184,36 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
       </div>
 
       <div className="mt-8 grid justify-items-center gap-6">
-        {!started ? (
+        {!canDraw ? (
+          <div className="grid justify-items-center gap-4">
+            <div className="relative h-44 w-28 overflow-hidden rounded-2xl border border-[#f1cf72] bg-[radial-gradient(circle_at_30%_20%,#5b3a96_0%,#201230_34%,#09070d_72%)] shadow-[0_18px_40px_rgba(122,82,190,0.22)]">
+              <Image
+                src="/cards/back.png"
+                alt="紫微牌卡牌背"
+                fill
+                sizes="112px"
+                className="object-cover"
+              />
+            </div>
+            <p className="max-w-xl text-center leading-7 text-[#ffdf9b]">{blockedMessage}</p>
+          </div>
+        ) : isAutoMode ? (
+          <div className="grid justify-items-center gap-4">
+            <div
+              className={`relative h-44 w-28 overflow-hidden rounded-2xl border border-[#f1cf72] bg-[radial-gradient(circle_at_30%_20%,#5b3a96_0%,#201230_34%,#09070d_72%)] shadow-[0_18px_40px_rgba(122,82,190,0.22)] ${
+                shuffling ? "animate-pulse" : ""
+              }`}
+            >
+              <Image
+                src="/cards/back.png"
+                alt="紫微牌卡牌背"
+                fill
+                sizes="112px"
+                className="object-cover"
+              />
+            </div>
+          </div>
+        ) : !started ? (
           <div className="relative h-44 w-28 overflow-hidden rounded-2xl border border-[#f1cf72] bg-[radial-gradient(circle_at_30%_20%,#5b3a96_0%,#201230_34%,#09070d_72%)] shadow-[0_18px_40px_rgba(122,82,190,0.22)]">
             <Image
               src="/cards/back.png"
@@ -229,23 +302,35 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
               </button>
               <button
                 type="button"
-                onClick={changeCard}
+                onClick={isAutoMode ? startAutoDraw : changeCard}
                 className="rounded-full border border-[#0b8f74] px-5 py-3 font-semibold text-[#bff9df] transition hover:bg-[#06251d]"
               >
-                換一張
+                {isAutoMode ? "重新自動抽牌" : "換一張"}
               </button>
             </div>
           </div>
         ) : null}
 
-        <button
-          type="button"
-          onClick={startShuffle}
-          disabled={shuffling}
-          className="w-full max-w-sm rounded-full border border-[#f1cf72] bg-[#1b1206] px-8 py-4 text-lg font-semibold text-[#f4d77d] transition hover:bg-[#2b1d0a] disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {shuffling ? "洗牌中..." : started ? "重新洗牌" : "開始洗牌"}
-        </button>
+        {canDraw ? (
+          <button
+            type="button"
+            onClick={isAutoMode ? startAutoDraw : startShuffle}
+            disabled={shuffling}
+            className="w-full max-w-sm rounded-full border border-[#f1cf72] bg-[#1b1206] px-8 py-4 text-lg font-semibold text-[#f4d77d] transition hover:bg-[#2b1d0a] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isAutoMode
+              ? shuffling
+                ? "自動抽牌中..."
+                : pendingIndex !== null
+                  ? "重新自動抽牌"
+                  : "開始自動抽牌"
+              : shuffling
+                ? "洗牌中..."
+                : started
+                  ? "重新洗牌"
+                  : "開始洗牌"}
+          </button>
+        ) : null}
       </div>
     </section>
   )
