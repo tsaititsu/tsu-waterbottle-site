@@ -9,6 +9,7 @@ const typeLabel: Record<string, string> = {
   consultation: '論命',
   course: '課程',
   booking: '論命',
+  spiritual_product: '開運商品',
   other: '其他'
 }
 

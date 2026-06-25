@@ -19,6 +19,7 @@ const navItems = [
   { label: '首頁', href: '/' },
   { label: '紫微命盤分析', href: '/ai-chart' },
   { label: '紫微牌卡占卜', href: '/ai-divination' },
+  { label: '開運商品', href: '/spiritual-products' },
   { label: '水瓶先生論命', href: '/booking' },
   { label: '紫微課程', href: '/courses' },
   { label: '關於我們', href: '/#about' }

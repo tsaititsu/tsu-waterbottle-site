@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { shouldHideConsultationServices, shouldHideCoursesServices } from '@/lib/siteVisibility'
 
-export type CartItemType = 'divination' | 'consultation' | 'course' | 'booking' | 'other'
+export type CartItemType = 'divination' | 'consultation' | 'course' | 'booking' | 'spiritual_product' | 'other'
 
 export type CartItemStatus = 'unpaid' | 'paid'
 
@@ -54,7 +54,7 @@ function normalizeCart(items: unknown): CartItem[] {
 
       if (!raw.id || typeof raw.id !== 'string') return null
       if (!raw.itemName || typeof raw.itemName !== 'string') return null
-      if (type !== 'divination' && type !== 'consultation' && type !== 'course' && type !== 'booking' && type !== 'other') return null
+      if (type !== 'divination' && type !== 'consultation' && type !== 'course' && type !== 'booking' && type !== 'spiritual_product' && type !== 'other') return null
 
       return {
         id: raw.id,
@@ -143,7 +143,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     setItems((current) => current.filter((item) => item.id !== id || item.status !== 'unpaid'))
   }, [])
 
-const value = useMemo(
+  const value = useMemo(
     () => ({
       items: items.filter((item) => item.status === 'unpaid').filter(isVisibleCartItem),
       isLoaded,
