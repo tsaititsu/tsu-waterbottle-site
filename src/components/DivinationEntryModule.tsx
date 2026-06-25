@@ -1,8 +1,7 @@
 'use client'
 
-import { MessageCircle, ShieldCheck, ShoppingCart, Sparkles } from 'lucide-react'
+import { MessageCircle, ShieldCheck, Sparkles } from 'lucide-react'
 import { useState } from 'react'
-import { useCart } from '@/components/CartContext'
 
 const DEFAULT_ZIWEI_CARD_URL = 'https://ziwei-card.vercel.app'
 
@@ -31,11 +30,10 @@ export function DivinationEntryModule({
   source
 }: DivinationEntryModuleProps) {
   const readingUrl = buildDivinationUrl({ baseUrl, campaign, source })
-  const { addItem } = useCart()
   const [message, setMessage] = useState('')
   const [hasAcceptedNotice, setHasAcceptedNotice] = useState(false)
 
-  const noticeError = '請先閱讀並勾選同意 AI 占卜服務說明、付款與退款規則及服務條款。'
+  const noticeError = '請先閱讀並勾選同意 AI 占卜服務說明、點數與每日免費規則及服務條款。'
 
   const validateNotice = () => {
     if (hasAcceptedNotice) {
@@ -77,7 +75,7 @@ export function DivinationEntryModule({
                     type="checkbox"
                   />
                   <span>
-                    我已詳細閱讀並同意《AI 占卜服務說明》、《付款與退款規則》及《服務條款》，並了解此服務為付款後產生占卜結果之數位內容服務。
+                    我已詳細閱讀並同意《AI 占卜服務說明》、《點數與每日免費規則》及《服務條款》，並了解占卜目前會在水瓶先生紫微牌卡系統中完成。
                     <span className="ml-1 font-semibold text-darkGold underline underline-offset-4 group-open:hidden">點我查看</span>
                     <span className="ml-1 hidden font-semibold text-darkGold underline underline-offset-4 group-open:inline">收合內容</span>
                   </span>
@@ -88,22 +86,19 @@ export function DivinationEntryModule({
                 <div>
                   <p className="font-semibold text-deepPurple">AI 占卜服務說明</p>
                   <ul className="mt-2 grid gap-1">
-                    <li>服務名稱：紫微牌卡占卜單次</li>
-                    <li>價格：NT$50 / 次</li>
-                    <li>服務內容：針對單一問題提供牌卡指引與文字解析</li>
-                    <li>交付方式：付款後於網站產生占卜結果</li>
+                    <li>占卜會在水瓶先生紫微牌卡系統中完成。</li>
+                    <li>正式網站目前只作為占卜入口，不直接產生占卜結果。</li>
+                    <li>LINE 登入、抽牌、解讀、紀錄與問題回報，會以紫微牌卡系統內顯示為準。</li>
                   </ul>
                 </div>
 
                 <div>
-                  <p className="font-semibold text-deepPurple">付款與退款規則</p>
+                  <p className="font-semibold text-deepPurple">點數與每日免費規則</p>
                   <ul className="mt-2 grid gap-2">
-                    <li>本服務為數位內容服務。</li>
-                    <li>使用者完成付款後，系統會依照使用者提問與抽牌結果產生占卜解讀。</li>
-                    <li>付款完成並產生占卜結果後，因服務已開始提供，原則上不接受取消或退款。</li>
-                    <li>若因系統異常導致付款成功但沒有產生占卜結果，可聯繫水瓶先生官方 LINE 協助處理。</li>
-                    <li>若使用者提問內容不清楚、問題方向不明確，或因個人理解不同導致結果不符合期待，恕不提供退款。</li>
-                    <li>使用者送出付款前，應自行確認提問內容與服務項目。</li>
+                    <li>每日免費、點數餘額與每次占卜扣點規則，以紫微牌卡系統內顯示為準。</li>
+                    <li>若今日免費已使用，再次占卜會依紫微牌卡系統目前規則扣點。</li>
+                    <li>正式網站目前不直接販售或自動補入紫微牌卡系統點數。</li>
+                    <li>若遇到點數、登入或不能占卜問題，請在紫微牌卡系統內回報或聯繫水瓶先生協助處理。</li>
                   </ul>
                 </div>
 
@@ -134,26 +129,6 @@ export function DivinationEntryModule({
           >
             前往占卜
           </a>
-
-          <button
-            type="button"
-            className="focus-ring inline-flex min-h-14 items-center justify-center gap-2 rounded-xl border border-[#d9b8ec] bg-white px-6 py-3 text-base font-semibold text-deepPurple transition hover:bg-softPurple"
-            onClick={() => {
-              if (!validateNotice()) return
-
-              addItem({
-                id: 'ai_divination_single',
-                type: 'divination',
-                itemName: '紫微牌卡占卜單次',
-                amount: 50,
-                quantity: 1
-              })
-              setMessage('已加入購物車')
-            }}
-          >
-            <ShoppingCart size={20} />
-            加入購物車
-          </button>
 
           {message ? <p className="text-sm font-semibold text-deepPurple">{message}</p> : null}
         </div>

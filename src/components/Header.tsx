@@ -11,7 +11,11 @@ import {
   subscribeAuthChange,
   type UserProfile
 } from '@/lib/mockAuth'
-import { shouldHideConsultationServices, shouldHideCoursesServices } from '@/lib/siteVisibility'
+import {
+  shouldHideAiDivinationServices,
+  shouldHideConsultationServices,
+  shouldHideCoursesServices
+} from '@/lib/siteVisibility'
 import { LogoMark } from './LogoMark'
 import { useCart } from './CartContext'
 
@@ -26,6 +30,7 @@ const navItems = [
 ]
 
 const visibleNavItems = navItems.filter((item) => {
+  if (item.label === '紫微牌卡占卜' && shouldHideAiDivinationServices()) return false
   if (item.label === '水瓶先生論命' && shouldHideConsultationServices()) return false
   if (item.label === '紫微課程' && shouldHideCoursesServices()) return false
   return true
@@ -41,6 +46,7 @@ export function Header() {
   const [loadingProvider, setLoadingProvider] = useState<'line' | 'google' | ''>('')
   const [user, setUser] = useState<UserProfile | null>(null)
   const { totalQuantity } = useCart()
+  const hideAiDivinationServices = shouldHideAiDivinationServices()
   const hideConsultationServices = shouldHideConsultationServices()
   const hideCoursesServices = shouldHideCoursesServices()
 
@@ -113,10 +119,12 @@ export function Header() {
           <FileText size={22} />
           命盤紀錄
         </Link>
-        <Link href="/ai-divination" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
-          <Sparkles size={22} />
-          紫微牌卡占卜
-        </Link>
+        {!hideAiDivinationServices ? (
+          <Link href="/ai-divination" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
+            <Sparkles size={22} />
+            紫微牌卡占卜
+          </Link>
+        ) : null}
       </nav>
       <button
         type="button"

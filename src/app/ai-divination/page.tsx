@@ -1,7 +1,13 @@
 import { DivinationEntryModule } from '@/components/DivinationEntryModule'
 import { PageHero } from '@/components/PageHero'
+import { shouldHideAiDivinationServices } from '@/lib/siteVisibility'
+import { redirect } from 'next/navigation'
 
 export default function AiDivinationPage() {
+  if (shouldHideAiDivinationServices()) {
+    redirect('/')
+  }
+
   return (
     <>
       <PageHero
