@@ -213,10 +213,6 @@ export function Header() {
         </nav>
 
         <div ref={accountMenuRef} className="relative hidden items-center gap-3 lg:flex">
-          <span className="inline-flex rounded-full border border-[#f0d8a6] bg-[#fff9eb] px-4 py-2 text-xs font-semibold tracking-wide text-darkGold">
-            歡迎使用 LINE Pay
-          </span>
-
           <Link
             href="/cart"
             aria-label="購物車"
