@@ -1,6 +1,7 @@
 "use client"
 
-import { ziweiCards } from "@/lib/divination/cards"
+import { DivinationResultPreview } from "@/components/divination/DivinationResultPreview"
+import { ziweiCards, type ZiweiCard } from "@/lib/divination/cards"
 import Image from "next/image"
 import { useEffect, useRef, useState } from "react"
 
@@ -17,7 +18,7 @@ const shufflingMessage = "洗牌中..."
 const autoShufflingMessage = "系統正在為你洗牌與抽牌..."
 const readyMessage = "洗牌完成，請憑直覺點選一張牌。"
 const pendingMessage = "你選到一張牌。請確認是不是這張。"
-const previewMessage = "本機開發預覽：正式解讀流程將在下一階段接入。"
+const resultReadyMessage = "已產生本機解讀預覽。"
 const blockedMessage = "請先在上方填寫問題，並選擇手動抽牌或自動抽牌。"
 
 const positionLabels: Record<PreviewPosition, string> = {
@@ -43,11 +44,13 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
   const [shuffling, setShuffling] = useState(false)
   const [pendingIndex, setPendingIndex] = useState<number | null>(null)
   const [pendingPosition, setPendingPosition] = useState<PreviewPosition | null>(null)
+  const [confirmedCard, setConfirmedCard] = useState<ZiweiCard | null>(null)
+  const [confirmedPosition, setConfirmedPosition] = useState<PreviewPosition | null>(null)
   const [message, setMessage] = useState(initialMessage)
   const [errorMessage, setErrorMessage] = useState("")
   const shuffleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const isPreviewComplete = message === previewMessage
+  const hasResultPreview = Boolean(confirmedCard && confirmedPosition)
   const pendingCard = pendingIndex === null ? null : ziweiCards[pendingIndex]
   const trimmedQuestion = question?.trim() ?? ""
   const canDraw = Boolean(trimmedQuestion && drawMode)
@@ -78,6 +81,8 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
     setShuffling(false)
     setPendingIndex(null)
     setPendingPosition(null)
+    setConfirmedCard(null)
+    setConfirmedPosition(null)
     setErrorMessage("")
     setMessage(initialMessage)
   }, [question, drawMode])
@@ -98,6 +103,8 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
     setShuffling(true)
     setPendingIndex(null)
     setPendingPosition(null)
+    setConfirmedCard(null)
+    setConfirmedPosition(null)
     setErrorMessage("")
     setMessage(shufflingMessage)
 
@@ -108,10 +115,12 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
   }
 
   function pickCard(index: number) {
-    if (!canDraw || !isManualMode || !started || shuffling || isPreviewComplete) return
+    if (!canDraw || !isManualMode || !started || shuffling || hasResultPreview) return
 
     setPendingIndex(index)
     setPendingPosition(getRandomPosition())
+    setConfirmedCard(null)
+    setConfirmedPosition(null)
     setErrorMessage("")
     setMessage(pendingMessage)
   }
@@ -121,6 +130,8 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
 
     setPendingIndex(null)
     setPendingPosition(null)
+    setConfirmedCard(null)
+    setConfirmedPosition(null)
     setErrorMessage("")
     setMessage(readyMessage)
   }
@@ -141,6 +152,8 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
     setShuffling(true)
     setPendingIndex(null)
     setPendingPosition(null)
+    setConfirmedCard(null)
+    setConfirmedPosition(null)
     setErrorMessage("")
     setMessage(autoShufflingMessage)
 
@@ -155,13 +168,15 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
   }
 
   function confirmCard() {
-    if (pendingIndex === null) {
+    if (!pendingCard || !pendingPosition) {
       setErrorMessage("請先選一張牌。")
       return
     }
 
+    setConfirmedCard(pendingCard)
+    setConfirmedPosition(pendingPosition)
     setErrorMessage("")
-    setMessage(previewMessage)
+    setMessage(resultReadyMessage)
   }
 
   return (
@@ -237,12 +252,12 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
                   key={card.id}
                   type="button"
                   onClick={() => pickCard(index)}
-                  disabled={shuffling || isPreviewComplete}
+                  disabled={shuffling || hasResultPreview}
                   className={`group h-32 rounded-2xl border p-2 transition duration-200 sm:h-36 ${
                     isPending
                       ? "border-[#f1cf72] bg-[#251704] shadow-[0_0_24px_rgba(241,207,114,0.35)]"
                       : "border-[#8c6a2d]/80 bg-[#0b090d] hover:-translate-y-1 hover:border-[#f1cf72]"
-                  } ${shuffling || isPreviewComplete ? "cursor-default opacity-80" : ""}`}
+                  } ${shuffling || hasResultPreview ? "cursor-default opacity-80" : ""}`}
                   aria-label={`選擇第 ${index + 1} 張牌：${card.name}`}
                 >
                   <span className="relative block h-full overflow-hidden rounded-xl border border-[#d5ad4a]/50 bg-[radial-gradient(circle_at_30%_20%,#5b3a96_0%,#1b1128_38%,#050505_76%)] transition group-hover:border-[#f1cf72]">
@@ -263,7 +278,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
 
         <p
           className={`text-center leading-7 ${
-            isPreviewComplete ? "text-[#8af0c0]" : "text-[#f4d77d]"
+            hasResultPreview ? "text-[#8af0c0]" : "text-[#f4d77d]"
           }`}
         >
           {message}
@@ -271,7 +286,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
 
         {errorMessage ? <p className="text-center text-[#ff9aa8]">{errorMessage}</p> : null}
 
-        {pendingIndex !== null && !isPreviewComplete ? (
+        {pendingIndex !== null && !hasResultPreview ? (
           <div className="grid w-full max-w-xl gap-3 rounded-2xl border border-[#0b8f74] bg-[#041d17] p-4 text-[#bff9df]">
             <p className="text-lg font-semibold">是不是這張牌？</p>
             <div className="grid gap-2 rounded-2xl border border-[#0b8f74]/70 bg-[#02120e] p-4 leading-7">
@@ -309,6 +324,15 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
               </button>
             </div>
           </div>
+        ) : null}
+
+        {confirmedCard && confirmedPosition ? (
+          <DivinationResultPreview
+            question={trimmedQuestion}
+            drawMode={drawMode}
+            card={confirmedCard}
+            position={confirmedPosition}
+          />
         ) : null}
 
         {canDraw ? (
