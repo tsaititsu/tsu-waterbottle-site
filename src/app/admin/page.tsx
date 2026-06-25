@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { BarChart3, Boxes, CreditCard, Landmark, ScrollText } from 'lucide-react'
+import { BarChart3, Boxes, CalendarClock, CreditCard, Landmark, ScrollText } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { getMockUser, subscribeAuthChange, type UserProfile } from '@/lib/mockAuth'
 
@@ -12,6 +12,7 @@ const adminNavItems = [
   { label: '訂單管理', description: '查看商品與服務訂單狀態', icon: CreditCard },
   { label: '占卜紀錄', description: '檢視占卜服務紀錄與客戶查詢', icon: ScrollText },
   { label: '匯款回報', description: '人工核對銀行匯款回報資料', icon: Landmark },
+  { label: '預約時段', description: '手動開放或關閉論命可預約時段', icon: CalendarClock, href: '/admin/booking-slots' },
 ]
 
 const overviewCards = [
@@ -70,14 +71,14 @@ export default function AdminPage() {
             {adminNavItems.map((item, index) => {
               const Icon = item.icon
               return (
-                <a
+                <Link
                   key={item.label}
-                  href={`#admin-section-${index}`}
+                  href={item.href ?? `#admin-section-${index}`}
                   className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-textDark transition hover:bg-softPurple hover:text-deepPurple"
                 >
                   <Icon size={18} />
                   {item.label}
-                </a>
+                </Link>
               )
             })}
           </nav>
