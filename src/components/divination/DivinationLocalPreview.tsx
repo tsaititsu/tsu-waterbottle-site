@@ -21,25 +21,32 @@ export function DivinationLocalPreview() {
   }
 
   return (
-    <>
+    <section className="grid gap-6">
+      <div>
+        <p className="text-sm font-semibold tracking-[0.18em] text-darkGold">紫微牌卡占卜流程體驗</p>
+        <h2 className="mt-2 font-serifTC text-3xl font-semibold text-textDark">開始你的紫微牌卡占卜</h2>
+        <p className="mt-3 max-w-3xl leading-7 text-textMuted">
+          請先寫下你想詢問的問題，再選擇手動抽牌或自動抽牌。目前先提供牌卡基礎牌義預覽，正式 AI 深度解讀將於後續開放。
+        </p>
+      </div>
       <section className="grid gap-4">
         <div>
-          <p className="text-sm font-semibold tracking-[0.18em] text-darkGold">本機開發預覽</p>
+          <p className="text-sm font-semibold tracking-[0.18em] text-darkGold">第一步</p>
           <p className="mt-2 leading-7 text-textMuted">
-            以下為正式網站內建占卜流程預覽，尚未連接付款、抽牌與 AI 解讀。
+            填寫一個清楚的問題，選擇你想要的抽牌方式。
           </p>
         </div>
         <DivinationQuestionForm onQuestionSubmit={handleQuestionSubmit} />
       </section>
       <section className="grid gap-4">
         <div>
-          <p className="text-sm font-semibold tracking-[0.18em] text-darkGold">抽牌流程預覽</p>
+          <p className="text-sm font-semibold tracking-[0.18em] text-darkGold">第二步</p>
           <p className="mt-2 leading-7 text-textMuted">
-            以下為正式網站內建抽牌流程預覽，尚未連接付款、牌義與 AI 解讀。
+            依照你選擇的方式抽出一張紫微牌卡，先查看牌卡基礎牌義。
           </p>
         </div>
         <DivinationDrawPreview question={question} drawMode={drawMode} />
       </section>
-    </>
+    </section>
   )
 }

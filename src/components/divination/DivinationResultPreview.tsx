@@ -37,7 +37,7 @@ export function DivinationResultPreview({
     <section className="w-full rounded-[2rem] border border-[#8c6a2d] bg-[#080706] p-5 text-[#f4d77d] shadow-[0_18px_48px_rgba(0,0,0,0.32)] md:p-6">
       <div className="grid gap-5 lg:grid-cols-[minmax(0,220px)_1fr]">
         <div className="grid justify-items-center gap-3">
-          <p className="text-sm font-semibold tracking-[0.2em] text-[#b7964b]">本機解讀預覽</p>
+          <p className="text-sm font-semibold tracking-[0.2em] text-[#b7964b]">牌義解讀預覽</p>
           <Image
             src={cardImage}
             alt={card.name}
@@ -46,7 +46,7 @@ export function DivinationResultPreview({
             className="w-full max-w-[180px] rounded-2xl border border-[#f1cf72] object-cover shadow-[0_18px_36px_rgba(0,0,0,0.36)]"
           />
           <p className="rounded-full border border-[#0b8f74] px-4 py-2 text-sm text-[#bff9df]">
-            此區目前為本機牌義預覽，尚未接入 AI 生成解讀。
+            此區先提供牌卡基礎牌義，尚未接入正式 AI 深度解讀。
           </p>
         </div>
 

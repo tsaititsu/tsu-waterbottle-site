@@ -43,7 +43,7 @@ export function DivinationQuestionForm({ onQuestionSubmit }: DivinationQuestionF
       mode,
     })
     setMessageType('info')
-    setMessage('本機開發預覽：已送出問題，可往下進行抽牌預覽。')
+    setMessage('問題已送出，請往下進行抽牌。')
   }
 
   return (
@@ -74,20 +74,26 @@ export function DivinationQuestionForm({ onQuestionSubmit }: DivinationQuestionF
         </div>
 
         <div className="mt-6 grid gap-3 sm:grid-cols-2">
-          <button
-            type="button"
-            onClick={() => handlePreviewDraw('manual')}
-            className="focus-ring min-h-14 rounded-full border border-[#8c6a2b] bg-[#111] px-8 py-3 text-sm font-semibold tracking-[0.16em] text-[#d8c18a] transition hover:scale-[1.01] hover:bg-[#1b1408]"
-          >
-            手動抽牌
-          </button>
-          <button
-            type="button"
-            onClick={() => handlePreviewDraw('auto')}
-            className="focus-ring min-h-14 rounded-full border border-[#d7ad55] bg-[#1b1408] px-8 py-3 text-sm font-semibold tracking-[0.16em] text-[#f5d27a] shadow-[0_0_25px_rgba(215,173,85,0.22)] transition hover:scale-[1.01] hover:bg-[#241a0a]"
-          >
-            自動抽牌
-          </button>
+          <div className="grid gap-2">
+            <button
+              type="button"
+              onClick={() => handlePreviewDraw('manual')}
+              className="focus-ring min-h-14 rounded-full border border-[#8c6a2b] bg-[#111] px-8 py-3 text-sm font-semibold tracking-[0.16em] text-[#d8c18a] transition hover:scale-[1.01] hover:bg-[#1b1408]"
+            >
+              手動抽牌
+            </button>
+            <p className="text-sm leading-6 text-[#bda870]">手動抽牌：由你親自選牌。</p>
+          </div>
+          <div className="grid gap-2">
+            <button
+              type="button"
+              onClick={() => handlePreviewDraw('auto')}
+              className="focus-ring min-h-14 rounded-full border border-[#d7ad55] bg-[#1b1408] px-8 py-3 text-sm font-semibold tracking-[0.16em] text-[#f5d27a] shadow-[0_0_25px_rgba(215,173,85,0.22)] transition hover:scale-[1.01] hover:bg-[#241a0a]"
+            >
+              自動抽牌
+            </button>
+            <p className="text-sm leading-6 text-[#bda870]">自動抽牌：由系統為你隨機抽牌。</p>
+          </div>
         </div>
 
         {message ? (

@@ -13,12 +13,12 @@ type DivinationDrawPreviewProps = {
   drawMode?: DrawMode | null
 }
 
-const initialMessage = "請先開始洗牌。"
+const initialMessage = "請先依照抽牌方式開始抽牌。"
 const shufflingMessage = "洗牌中..."
 const autoShufflingMessage = "系統正在為你洗牌與抽牌..."
 const readyMessage = "洗牌完成，請憑直覺點選一張牌。"
 const pendingMessage = "你選到一張牌。請確認是不是這張。"
-const resultReadyMessage = "已產生本機解讀預覽。"
+const resultReadyMessage = "已產生牌義解讀預覽。"
 const blockedMessage = "請先在上方填寫問題，並選擇手動抽牌或自動抽牌。"
 
 const positionLabels: Record<PreviewPosition, string> = {
@@ -182,13 +182,11 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
   return (
     <section className="overflow-hidden rounded-[2rem] border border-[#8c6a2d] bg-[#050505] p-6 text-[#f4d77d] shadow-[0_24px_70px_rgba(0,0,0,0.28)] md:p-8">
       <div className="grid gap-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#b7964b]">
-          Divination Preview
-        </p>
+        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#b7964b]">抽牌區</p>
         <div className="grid gap-2">
           <h3 className="text-2xl font-semibold tracking-[0.08em] md:text-3xl">抽一張紫微牌卡</h3>
           <p className="leading-7 text-[#d9c68e]">
-            請在心中默念問題，洗牌後憑直覺選一張牌。
+            {isAutoMode ? "系統會為你隨機抽出一張牌。" : "請先洗牌，再憑直覺選擇一張牌。"}
           </p>
         </div>
       </div>
