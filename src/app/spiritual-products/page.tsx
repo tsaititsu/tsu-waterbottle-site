@@ -35,11 +35,60 @@ function ProductImage({ product }: { product: SpiritualProduct }) {
   )
 }
 
+function PurchaseNoticeContent() {
+  return (
+    <div className="space-y-3 text-xs leading-6 text-textMuted">
+      <p>以下商品為民俗信仰與祈福用品，僅供參考與心靈支持，不保證特定結果，亦不具醫療或治療效果。</p>
+      <div>
+        <p className="font-semibold text-deepPurple">商品使用與保存提醒</p>
+        <ol className="mt-2 grid gap-1.5">
+          <li>1. 符咒商品請保持乾燥、乾淨，避免碰水、受潮、髒污或任意折損。</li>
+          <li>2. 若需對折，請以印章朝外的方式整齊對折。</li>
+          <li>3. 商品用途屬民俗信仰祈福與心靈支持，無法取代醫療、法律、投資或其他專業建議。</li>
+          <li>4. 購買前請確認商品名稱、價格、用途、有效期限與注意事項。</li>
+          <li>5. 聚寶盆價格僅包含開光手法，不包含聚寶盆本體、符咒及相關材料費用，材料費需另計。</li>
+        </ol>
+      </div>
+    </div>
+  )
+}
+
+function RefundPolicyContent() {
+  return (
+    <div className="space-y-3 text-xs leading-6 text-textMuted">
+      <p>為保障雙方權益，收到商品後請先確認外包裝是否完整，並建議開箱時全程錄影，作為缺件、毀損、寄錯或運送異常時的判斷依據。</p>
+      <div>
+        <p className="font-semibold text-deepPurple">可申請退換貨情形</p>
+        <p className="mt-1">商品寄錯、缺件、運送過程明顯毀損，或商品與訂單內容明顯不符，請於收到商品後 7 日內與客服聯繫，並提供訂單資料、照片與開箱錄影。</p>
+      </div>
+      <div>
+        <p className="font-semibold text-deepPurple">不可退換貨情形</p>
+        <p className="mt-1">商品已使用、配戴、燒化、安置、碰水、受潮、髒污、破損、任意折損、保存不當，或已依個人需求處理、開光、過爐、安置或完成客製化程序者，恕不接受退換。</p>
+      </div>
+      <div>
+        <p className="font-semibold text-deepPurple">聚寶盆注意事項</p>
+        <p className="mt-1">聚寶盆標示價格僅包含開光手法，不包含聚寶盆本體、符咒及相關材料費用。材料費、器物費與其他客製需求，將依實際準備內容另行確認。</p>
+      </div>
+      <div>
+        <p className="font-semibold text-deepPurple">開箱錄影提醒</p>
+        <p className="mt-1">建議從未拆封外包裝開始拍攝，拍到包裹單號、外箱狀態、拆封過程、商品本體、配件、說明資料與全部內容物，影片請保持連續不要剪接。</p>
+      </div>
+    </div>
+  )
+}
+
 function ProductCard({ product }: { product: SpiritualProduct }) {
   const { addItem } = useCart()
   const [added, setAdded] = useState(false)
+  const [hasAcceptedNotice, setHasAcceptedNotice] = useState(false)
+  const [noticeError, setNoticeError] = useState('')
 
   const handleAddToCart = () => {
+    if (!hasAcceptedNotice) {
+      setNoticeError('請先閱讀並勾選同意開運商品須知與退換貨政策。')
+      return
+    }
+
     addItem({
       type: 'spiritual_product',
       id: product.slug,
@@ -47,6 +96,7 @@ function ProductCard({ product }: { product: SpiritualProduct }) {
       amount: product.priceTwd,
       quantity: 1,
     })
+    setNoticeError('')
     setAdded(true)
     window.setTimeout(() => setAdded(false), 1800)
   }
@@ -83,6 +133,51 @@ function ProductCard({ product }: { product: SpiritualProduct }) {
 
         <div className="mt-auto pt-5">
           <p className="font-serifTC text-2xl font-semibold text-textDark">NT${product.priceTwd.toLocaleString('zh-TW')}</p>
+
+          <div className="mt-4 rounded-2xl border border-borderSoft bg-softPurple p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="font-serifTC text-lg font-semibold text-deepPurple">開運商品須知</p>
+              <p className="text-xs font-semibold text-darkGold">請先閱讀並勾選</p>
+            </div>
+
+            <div className="mt-3 grid gap-2">
+              <details className="group rounded-xl border border-borderSoft bg-white p-3">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+                  <span className="text-sm font-semibold text-deepPurple">開運商品購買須知</span>
+                  <span className="shrink-0 rounded-full bg-softPurple px-3 py-1 text-xs font-semibold text-darkGold group-open:bg-lightGold">點我查看</span>
+                </summary>
+                <div className="mt-3 max-h-44 overflow-y-auto pr-1">
+                  <PurchaseNoticeContent />
+                </div>
+              </details>
+
+              <details className="group rounded-xl border border-borderSoft bg-white p-3">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+                  <span className="text-sm font-semibold text-deepPurple">開運商品退換貨政策</span>
+                  <span className="shrink-0 rounded-full bg-softPurple px-3 py-1 text-xs font-semibold text-darkGold group-open:bg-lightGold">點我查看</span>
+                </summary>
+                <div className="mt-3 max-h-44 overflow-y-auto pr-1">
+                  <RefundPolicyContent />
+                </div>
+              </details>
+
+              <label className="flex items-start gap-3 rounded-xl border border-borderSoft bg-white p-3 text-xs leading-6 text-textMuted">
+                <input
+                  checked={hasAcceptedNotice}
+                  className="mt-1 size-4 rounded border-borderSoft text-deepPurple focus:ring-deepPurple"
+                  onChange={(event) => {
+                    setHasAcceptedNotice(event.target.checked)
+                    if (event.target.checked) setNoticeError('')
+                  }}
+                  type="checkbox"
+                />
+                <span>我已詳細閱讀並同意《開運商品購買須知》與《開運商品退換貨政策》。</span>
+              </label>
+
+              {noticeError ? <p className="text-xs font-semibold text-deepPurple">{noticeError}</p> : null}
+            </div>
+          </div>
+
           <button
             type="button"
             onClick={handleAddToCart}
@@ -117,106 +212,6 @@ export default function SpiritualProductsPage() {
 
       <section className="py-10 md:py-14">
         <div className="section-shell grid gap-8">
-          <section className="rounded-2xl border border-borderSoft bg-softPurple p-6 md:p-8">
-            <details className="group">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-4">
-                <span className="font-serifTC text-2xl font-semibold text-deepPurple">開運商品購買須知</span>
-                <span className="shrink-0 rounded-full bg-white px-3 py-1 text-sm font-semibold text-darkGold shadow-sm transition group-open:bg-lightGold">
-                  點我查看
-                </span>
-              </summary>
-
-              <div className="mt-5 space-y-5 leading-8 text-textMuted">
-                <p>以下商品為民俗信仰與祈福用品，僅供參考與心靈支持，不保證特定結果，亦不具醫療或治療效果。</p>
-
-                <div>
-                  <h2 className="font-serifTC text-xl font-semibold text-deepPurple">商品使用與保存提醒</h2>
-                  <ol className="mt-3 grid gap-3">
-                    <li>1. 符咒商品請保持乾燥、乾淨，避免碰水、受潮、髒污或任意折損。</li>
-                    <li>2. 若需對折，請以印章朝外的方式整齊對折。</li>
-                    <li>3. 商品用途屬民俗信仰祈福與心靈支持，無法取代醫療、法律、投資或其他專業建議。</li>
-                    <li>4. 購買前請確認商品名稱、價格、用途、有效期限與注意事項。</li>
-                    <li>5. 聚寶盆價格僅包含開光手法，不包含聚寶盆本體、符咒及相關材料費用，材料費需另計。</li>
-                  </ol>
-                </div>
-              </div>
-            </details>
-          </section>
-
-          <section className="rounded-2xl border border-borderSoft bg-softPurple p-6 md:p-8">
-            <details className="group">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-4">
-                <span className="font-serifTC text-2xl font-semibold text-deepPurple">開運商品退換貨政策</span>
-                <span className="shrink-0 rounded-full bg-white px-3 py-1 text-sm font-semibold text-darkGold shadow-sm transition group-open:bg-lightGold">
-                  點我查看
-                </span>
-              </summary>
-
-              <div className="mt-5 space-y-6 leading-8 text-textMuted">
-                <div>
-                  <h2 className="font-serifTC text-xl font-semibold text-deepPurple">開運商品退換貨政策</h2>
-                  <p className="mt-2">
-                    為保障雙方權益，收到商品後，請先確認外包裝是否完整，並建議於開箱時全程錄影。開箱錄影主要用於確認商品是否有缺件、毀損、寄錯或運送過程異常，若後續需要申請退換貨，可作為雙方判斷依據。
-                  </p>
-                </div>
-
-                <div>
-                  <h3 className="font-semibold text-deepPurple">一、可申請退換貨情形</h3>
-                  <p className="mt-1">收到商品後，如有以下情形，請於收到商品後 7 日內與客服聯繫：</p>
-                  <ol className="mt-3 grid gap-2">
-                    <li>1. 商品寄錯。</li>
-                    <li>2. 商品缺件。</li>
-                    <li>3. 商品於運送過程中明顯毀損。</li>
-                    <li>4. 商品與訂單內容明顯不符。</li>
-                  </ol>
-                  <p className="mt-3">申請時請提供訂單資料、商品照片、外包裝照片及開箱錄影，以利客服協助確認。</p>
-                </div>
-
-                <div>
-                  <h3 className="font-semibold text-deepPurple">二、不可退換貨情形</h3>
-                  <p className="mt-1">以下情形恕無法接受退換貨：</p>
-                  <ol className="mt-3 grid gap-2">
-                    <li>1. 商品已使用、配戴、燒化、安置或完成相關使用程序。</li>
-                    <li>2. 符咒已碰水、受潮、髒污、破損、任意折損或保存不當。</li>
-                    <li>3. 商品包裝、配件、說明資料、贈品不完整。</li>
-                    <li>4. 因個人保存不當、使用方式不當或人為因素造成商品損壞。</li>
-                    <li>5. 聚寶盆、符咒或其他民俗祈福用品若已依個人需求處理、開光、過爐、安置或完成客製化程序，恕不接受退換。</li>
-                    <li>6. 五雷壓煞符等火化使用類商品，一經燒化或使用後，恕不接受退換。</li>
-                  </ol>
-                </div>
-
-                <div>
-                  <h3 className="font-semibold text-deepPurple">三、聚寶盆注意事項</h3>
-                  <p className="mt-1">
-                    聚寶盆標示價格僅包含開光手法，不包含聚寶盆本體、符咒及相關材料費用。材料費、器物費與其他客製需求，將依實際準備內容另行確認。
-                  </p>
-                  <p className="mt-3">
-                    若聚寶盆已依個人需求準備材料、安排開光或完成相關處理流程，除商品本身有寄錯、缺件或運送毀損等可歸責情形外，恕不接受取消或退換。
-                  </p>
-                </div>
-
-                <div>
-                  <h3 className="font-semibold text-deepPurple">四、開箱錄影提醒</h3>
-                  <p className="mt-1">建議開箱錄影時注意以下事項：</p>
-                  <ol className="mt-3 grid gap-2">
-                    <li>1. 從未拆封的外包裝開始拍攝。</li>
-                    <li>2. 拍到包裹單號、外箱狀態與拆封過程。</li>
-                    <li>3. 拍到商品本體、配件、說明資料與全部內容物。</li>
-                    <li>4. 影片請保持連續，不要中途剪接。</li>
-                    <li>5. 若發現商品異常，請先停止使用並保留完整包裝，再聯繫客服。</li>
-                  </ol>
-                </div>
-
-                <div>
-                  <h3 className="font-semibold text-deepPurple">五、服務性質提醒</h3>
-                  <p className="mt-1">
-                    開運商品屬民俗信仰與祈福用品，僅供參考與心靈支持，不保證特定結果，亦不具醫療、治療、法律、投資或其他專業建議效果。購買前請先確認商品名稱、價格、用途、有效期限與注意事項。
-                  </p>
-                </div>
-              </div>
-            </details>
-          </section>
-
           <section className="rounded-2xl border border-borderSoft bg-softPurple p-6 md:p-8">
             <div className="grid gap-8 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
               <div>
