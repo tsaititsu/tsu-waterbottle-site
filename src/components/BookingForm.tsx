@@ -9,6 +9,7 @@ import { getAuthAccessToken, getMockUser } from '@/lib/mockAuth'
 import { savePendingBooking, type BookingFormInput } from '@/lib/mockBooking'
 
 const officialLineUrl = 'https://lin.ee/6Tpje1P'
+const bankAccountLast5Pattern = /^\d{5}$/
 
 function padDatePart(value: string) {
   return value.padStart(2, '0')
@@ -23,11 +24,14 @@ type PublicBookingSlot = {
 
 export function BookingForm() {
   const [planId, setPlanId] = useState(bookingPlans[0].id)
-  const [paymentMethod, setPaymentMethod] = useState<'bank-transfer' | 'newebpay-coming-soon'>('bank-transfer')
+  const [paymentMethod, setPaymentMethod] = useState<'bank-transfer' | 'newebpay-coming-soon' | 'linepay-coming-soon'>('bank-transfer')
   const [bookingSlots, setBookingSlots] = useState<PublicBookingSlot[]>([])
   const [selectedSlotId, setSelectedSlotId] = useState('')
   const [bookingSlotsLoading, setBookingSlotsLoading] = useState(true)
   const [bookingSlotsError, setBookingSlotsError] = useState('')
+  const [bankTransferPhone, setBankTransferPhone] = useState('')
+  const [bankTransferLast5, setBankTransferLast5] = useState('')
+  const [bankTransferFallbackUrl, setBankTransferFallbackUrl] = useState('')
   const [customerName, setCustomerName] = useState('')
   const [customerEmail, setCustomerEmail] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
@@ -131,8 +135,22 @@ export function BookingForm() {
     const input = buildInput()
     if (!input) return false
 
+    const payerPhone = bankTransferPhone.trim() || customerPhone.trim()
+    if (paymentMethod === 'bank-transfer') {
+      if (!payerPhone) {
+        setFormError('請填寫銀行匯款聯絡電話。')
+        return false
+      }
+
+      if (!bankAccountLast5Pattern.test(bankTransferLast5.trim())) {
+        setFormError('匯款帳號後五碼必須是 5 碼數字。')
+        return false
+      }
+    }
+
     let bookingId: string | undefined
     try {
+      setBankTransferFallbackUrl('')
       const accessToken = await getAuthAccessToken()
       const response = await fetch('/api/bookings/create', {
         method: 'POST',
@@ -159,8 +177,42 @@ export function BookingForm() {
     }
 
     if (paymentMethod === 'bank-transfer') {
+      const fallbackUrl = `/bank-transfer/submit?itemType=booking&itemId=${encodeURIComponent(bookingId ?? '')}&itemName=${encodeURIComponent(selectedPlan.name)}&amountTwd=${encodeURIComponent(String(selectedPlan.price))}`
+
+      try {
+        const accessToken = await getAuthAccessToken()
+        const response = await fetch('/api/bank-transfer/submit', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
+          },
+          body: JSON.stringify({
+            itemType: 'booking',
+            itemId: bookingId,
+            itemName: selectedPlan.name,
+            amountTwd: selectedPlan.price,
+            payerName: customerName.trim(),
+            payerPhone,
+            payerEmail: customerEmail.trim(),
+            lineDisplayName: lineDisplayName.trim() || undefined,
+            bankAccountLast5: bankTransferLast5.trim(),
+            note: '真人論命銀行匯款回報'
+          })
+        })
+        const data = await response.json().catch(() => ({}))
+
+        if (!response.ok || data.ok === false) {
+          throw new Error(data.message || '匯款回報送出失敗')
+        }
+      } catch {
+        setBankTransferFallbackUrl(fallbackUrl)
+        setFormError('預約已建立，但匯款回報送出失敗。請前往匯款回報頁補填資料，或聯繫客服協助。')
+        return false
+      }
+
       setFormError('')
-      window.location.href = `/bank-transfer/submit?itemType=booking&itemId=${encodeURIComponent(bookingId ?? '')}&itemName=${encodeURIComponent(selectedPlan.name)}&amountTwd=${encodeURIComponent(String(selectedPlan.price))}`
+      window.location.href = '/account/bookings?bankTransferSubmitted=1'
       return false
     }
 
@@ -403,11 +455,36 @@ export function BookingForm() {
                 <div>
                   <p className="font-semibold text-textDark">銀行匯款｜人工確認</p>
                   <p className="mt-1 text-sm text-textMuted">
-                    匯款完成後，請填寫匯款回報表單，並加入水瓶先生官方 LINE 回覆「已匯款＋姓名＋購買項目」。客服確認款項後，將協助確認預約。
+                    請先完成匯款，並填寫匯款帳號後五碼與聯絡電話。客服確認款項後，將協助確認預約。
                   </p>
                 </div>
               </div>
             </label>
+            {paymentMethod === 'bank-transfer' ? (
+              <div className="grid gap-4 rounded-xl border border-borderSoft bg-white p-4 md:grid-cols-2">
+                <label className="grid gap-2">
+                  <span className="text-sm font-semibold text-textDark">聯絡電話 *</span>
+                  <input
+                    className="focus-ring rounded-lg border border-borderSoft px-4 py-3"
+                    onChange={(event) => setBankTransferPhone(event.target.value)}
+                    placeholder="請填寫客服可聯繫的電話"
+                    value={bankTransferPhone || customerPhone}
+                  />
+                </label>
+                <label className="grid gap-2">
+                  <span className="text-sm font-semibold text-textDark">匯款帳號後五碼 *</span>
+                  <input
+                    className="focus-ring rounded-lg border border-borderSoft px-4 py-3"
+                    inputMode="numeric"
+                    maxLength={5}
+                    onChange={(event) => setBankTransferLast5(event.target.value.replace(/\D/g, '').slice(0, 5))}
+                    placeholder="請填寫您的匯款帳號後五碼"
+                    value={bankTransferLast5}
+                  />
+                  <span className="text-xs leading-5 text-textMuted">請填「您的匯款帳號後五碼」，不是本工作室收款帳號後五碼。</span>
+                </label>
+              </div>
+            ) : null}
             <label className="cursor-not-allowed rounded-xl border border-borderSoft bg-white p-4 opacity-70">
               <div className="flex items-start gap-3">
                 <input
@@ -421,7 +498,25 @@ export function BookingForm() {
                 <div>
                   <p className="font-semibold text-textDark">藍新線上付款｜即將開放</p>
                   <p className="mt-1 text-sm text-textMuted">
-                    真人論命線上刷卡付款建置中，目前請先使用銀行匯款完成預約付款。
+                    真人論命線上付款建置中，後續可支援信用卡、ATM 轉帳等付款方式。目前請先使用銀行匯款。
+                  </p>
+                </div>
+              </div>
+            </label>
+            <label className="cursor-not-allowed rounded-xl border border-borderSoft bg-white p-4 opacity-70">
+              <div className="flex items-start gap-3">
+                <input
+                  checked={paymentMethod === 'linepay-coming-soon'}
+                  className="mt-1 h-4 w-4 accent-deepPurple"
+                  disabled
+                  name="booking-payment-method"
+                  onChange={() => setPaymentMethod('linepay-coming-soon')}
+                  type="radio"
+                />
+                <div>
+                  <p className="font-semibold text-textDark">LINE Pay｜即將開放</p>
+                  <p className="mt-1 text-sm text-textMuted">
+                    LINE Pay 付款審核中，通過後會開放使用。
                   </p>
                 </div>
               </div>
@@ -510,7 +605,16 @@ export function BookingForm() {
           </div>
         </div>
 
-        {formError && <p className="text-sm font-semibold text-deepPurple">{formError}</p>}
+        {formError && (
+          <div className="grid gap-2 text-sm font-semibold text-deepPurple">
+            <p>{formError}</p>
+            {bankTransferFallbackUrl ? (
+              <Link className="underline underline-offset-4" href={bankTransferFallbackUrl}>
+                前往匯款回報頁補填資料
+              </Link>
+            ) : null}
+          </div>
+        )}
 
         <ActionButton
           amount={selectedPlan.price}
@@ -518,8 +622,9 @@ export function BookingForm() {
           className="focus-ring w-full rounded-lg bg-deepPurple px-4 py-3 font-semibold text-white"
           itemName={selectedPlan.name}
           itemType="booking"
+          loadingText="送出中..."
         >
-          {paymentMethod === 'bank-transfer' ? '建立預約並填寫匯款回報' : `前往付款 NT${selectedPlan.price.toLocaleString()}`}
+          {paymentMethod === 'bank-transfer' ? '建立預約並送出匯款回報' : `前往付款 NT${selectedPlan.price.toLocaleString()}`}
         </ActionButton>
       </form>
     </div>

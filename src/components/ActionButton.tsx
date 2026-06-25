@@ -14,9 +14,10 @@ type ActionButtonProps = {
   amount: number
   className?: string
   beforeStart?: () => boolean | Promise<boolean>
+  loadingText?: string
 }
 
-export function ActionButton({ children, itemType, itemName, amount, className = '', beforeStart }: ActionButtonProps) {
+export function ActionButton({ children, itemType, itemName, amount, className = '', beforeStart, loadingText = '準備中...' }: ActionButtonProps) {
   const router = useRouter()
   const [loginOpen, setLoginOpen] = useState(false)
   const [paymentOpen, setPaymentOpen] = useState(false)
@@ -61,7 +62,7 @@ export function ActionButton({ children, itemType, itemName, amount, className =
   return (
     <>
       <button type="button" className={className} disabled={starting} onClick={() => void start()}>
-        {starting ? '準備中...' : children}
+        {starting ? loadingText : children}
       </button>
       <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} onSuccess={continueAfterLogin} />
       <PaymentConfirmModal open={paymentOpen} title={itemName} amount={amount} onClose={() => setPaymentOpen(false)} onConfirm={confirm} />
