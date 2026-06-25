@@ -36,6 +36,25 @@ type InterpretApiResponse =
       error: string
     }
 
+type CreateReadingApiResponse =
+  | {
+      ok: true
+      reading: {
+        id: string
+        question: string
+        drawMode: DrawMode
+        cardId: string
+        cardName: string
+        position: PreviewPosition
+        status: "mock_created"
+        createdAt: string
+      }
+    }
+  | {
+      ok: false
+      error: string
+    }
+
 type DivinationDrawPreviewProps = {
   question?: string
   drawMode?: DrawMode | null
@@ -74,6 +93,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
   const [pendingPosition, setPendingPosition] = useState<PreviewPosition | null>(null)
   const [confirmedCard, setConfirmedCard] = useState<ZiweiCard | null>(null)
   const [confirmedPosition, setConfirmedPosition] = useState<PreviewPosition | null>(null)
+  const [confirmedReadingId, setConfirmedReadingId] = useState("")
   const [interpretation, setInterpretation] = useState<DivinationInterpretation | null>(null)
   const [isInterpreting, setIsInterpreting] = useState(false)
   const [message, setMessage] = useState(initialMessage)
@@ -114,6 +134,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
     setPendingPosition(null)
     setConfirmedCard(null)
     setConfirmedPosition(null)
+    setConfirmedReadingId("")
     setInterpretation(null)
     setIsInterpreting(false)
     interpretRequestRef.current += 1
@@ -140,6 +161,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
     setPendingPosition(null)
     setConfirmedCard(null)
     setConfirmedPosition(null)
+    setConfirmedReadingId("")
     setInterpretation(null)
     setIsInterpreting(false)
     setErrorMessage("")
@@ -158,6 +180,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
     setPendingPosition(getRandomPosition())
     setConfirmedCard(null)
     setConfirmedPosition(null)
+    setConfirmedReadingId("")
     setInterpretation(null)
     setErrorMessage("")
     setMessage(pendingMessage)
@@ -170,6 +193,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
     setPendingPosition(null)
     setConfirmedCard(null)
     setConfirmedPosition(null)
+    setConfirmedReadingId("")
     setInterpretation(null)
     setErrorMessage("")
     setMessage(readyMessage)
@@ -194,6 +218,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
     setPendingPosition(null)
     setConfirmedCard(null)
     setConfirmedPosition(null)
+    setConfirmedReadingId("")
     setInterpretation(null)
     setIsInterpreting(false)
     setErrorMessage("")
@@ -225,12 +250,13 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
     const requestId = interpretRequestRef.current + 1
     interpretRequestRef.current = requestId
     setIsInterpreting(true)
+    setConfirmedReadingId("")
     setInterpretation(null)
     setErrorMessage("")
-    setMessage("產生牌義預覽中...")
+    setMessage("建立占卜紀錄與產生牌義預覽中...")
 
     try {
-      const response = await fetch("/api/divination/interpret", {
+      const createResponse = await fetch("/api/divination/readings/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -240,17 +266,34 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
           position: pendingPosition,
         }),
       })
-      const data = (await response.json()) as InterpretApiResponse
+      const createData = (await createResponse.json()) as CreateReadingApiResponse
 
-      if (!response.ok || !data.ok) {
-        throw new Error(data.ok === false ? data.error : "解讀預覽產生失敗")
+      if (!createResponse.ok || !createData.ok) {
+        throw new Error(createData.ok === false ? createData.error : "建立占卜紀錄預覽失敗")
+      }
+
+      const interpretResponse = await fetch("/api/divination/interpret", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: trimmedQuestion,
+          drawMode,
+          cardId: pendingCard.id,
+          position: pendingPosition,
+        }),
+      })
+      const interpretData = (await interpretResponse.json()) as InterpretApiResponse
+
+      if (!interpretResponse.ok || !interpretData.ok) {
+        throw new Error(interpretData.ok === false ? interpretData.error : "解讀預覽產生失敗")
       }
 
       if (interpretRequestRef.current !== requestId) return
 
       setConfirmedCard(pendingCard)
       setConfirmedPosition(pendingPosition)
-      setInterpretation(data.interpretation)
+      setConfirmedReadingId(createData.reading.id)
+      setInterpretation(interpretData.interpretation)
       setErrorMessage("")
       setMessage(resultReadyMessage)
     } catch (error) {
@@ -259,8 +302,13 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
       console.error(error)
       setConfirmedCard(null)
       setConfirmedPosition(null)
+      setConfirmedReadingId("")
       setInterpretation(null)
-      setErrorMessage("解讀預覽產生失敗，請稍後再試。")
+      setErrorMessage(
+        error instanceof Error && error.message.includes("建立占卜紀錄")
+          ? "建立占卜紀錄預覽失敗，請稍後再試。"
+          : "解讀預覽產生失敗，請稍後再試。"
+      )
       setMessage(pendingMessage)
     } finally {
       if (interpretRequestRef.current === requestId) {
@@ -402,7 +450,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
                 disabled={isInterpreting}
                 className="rounded-full border border-[#f1cf72] bg-[#201508] px-5 py-3 font-semibold text-[#f4d77d] transition hover:bg-[#2f210c] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {isInterpreting ? "產生牌義預覽中..." : "就是這張，開始解讀"}
+                {isInterpreting ? "建立占卜紀錄與產生牌義預覽中..." : "就是這張，開始解讀"}
               </button>
               <button
                 type="button"
@@ -422,6 +470,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
             drawMode={drawMode}
             card={confirmedCard}
             position={confirmedPosition}
+            readingId={confirmedReadingId || undefined}
             interpretation={interpretation ?? undefined}
           />
         ) : null}

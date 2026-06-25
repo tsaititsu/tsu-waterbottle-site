@@ -19,6 +19,7 @@ type DivinationResultPreviewProps = {
   drawMode: DrawMode | null
   card: ZiweiCard
   position: PreviewPosition
+  readingId?: string
   interpretation?: DivinationInterpretation
 }
 
@@ -37,6 +38,7 @@ export function DivinationResultPreview({
   drawMode,
   card,
   position,
+  readingId,
   interpretation,
 }: DivinationResultPreviewProps) {
   const cardImage = position === "reversed" ? card.reversedImage : card.image
@@ -64,8 +66,14 @@ export function DivinationResultPreview({
           <div className="grid gap-2 rounded-2xl border border-[#0b8f74]/70 bg-[#02120e] p-4 leading-7 text-[#bff9df]">
             <p>本次問題：{question}</p>
             <p>抽牌方式：{drawMode ? drawModeLabels[drawMode] : "尚未選擇"}</p>
+            {readingId ? <p>占卜紀錄編號：{readingId}</p> : null}
             <p>抽到牌卡：{card.name}</p>
             <p>正反位：{positionLabels[position]}</p>
+            {readingId ? (
+              <p className="text-sm text-[#d9c68e]">
+                此區目前為流程預覽，尚未寫入正式占卜紀錄。
+              </p>
+            ) : null}
           </div>
 
           {interpretation ? (
