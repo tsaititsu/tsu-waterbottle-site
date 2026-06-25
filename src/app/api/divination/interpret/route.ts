@@ -5,10 +5,22 @@ type DrawMode = "manual" | "auto"
 type Position = "upright" | "reversed"
 
 type RequestBody = {
+  readingId?: unknown
   question?: unknown
   drawMode?: unknown
   cardId?: unknown
   position?: unknown
+  mockPaymentGate?: unknown
+}
+
+type MockPaymentGate = {
+  mode?: unknown
+  paymentId?: unknown
+  provider?: unknown
+  status?: unknown
+  itemType?: unknown
+  amountTwd?: unknown
+  currency?: unknown
 }
 
 const drawModes = new Set<DrawMode>(["manual", "auto"])
@@ -27,6 +39,30 @@ function getTrimmedString(value: unknown) {
   return typeof value === "string" ? value.trim() : ""
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function getMockPaymentGate(value: unknown): MockPaymentGate | null {
+  return isRecord(value) ? value : null
+}
+
+function isValidMockPaymentGate(value: unknown) {
+  const gate = getMockPaymentGate(value)
+
+  return Boolean(
+    gate &&
+      gate.mode === "mock" &&
+      gate.provider === "mock" &&
+      gate.status === "mock_paid" &&
+      gate.itemType === "ai_divination" &&
+      gate.amountTwd === 50 &&
+      gate.currency === "TWD" &&
+      typeof gate.paymentId === "string" &&
+      gate.paymentId.trim()
+  )
+}
+
 export async function POST(request: Request) {
   let body: RequestBody
 
@@ -40,6 +76,7 @@ export async function POST(request: Request) {
   const cardId = getTrimmedString(body.cardId)
   const drawMode = body.drawMode
   const position = body.position
+  const mockPaymentGate = getMockPaymentGate(body.mockPaymentGate)
 
   if (!question) {
     return jsonError("請先填寫占卜問題。")
@@ -55,6 +92,10 @@ export async function POST(request: Request) {
 
   if (!positions.has(position as Position)) {
     return jsonError("正反位資料不正確。")
+  }
+
+  if (!isValidMockPaymentGate(mockPaymentGate)) {
+    return jsonError("尚未通過付款 Gate，無法產生解讀。", 402)
   }
 
   const selectedCard = ziweiCards.find((card) => card.id === cardId)
@@ -91,5 +132,13 @@ export async function POST(request: Request) {
     },
     position: safePosition,
     drawMode: safeDrawMode,
+    paymentGate: {
+      mode: "mock",
+      paymentId: getTrimmedString(mockPaymentGate?.paymentId),
+      status: "mock_paid",
+      itemType: "ai_divination",
+      amountTwd: 50,
+      currency: "TWD",
+    },
   })
 }

@@ -16,6 +16,17 @@ type DivinationInterpretation = {
   reminder: string
 }
 
+type MockPaymentGate = {
+  mode: "mock"
+  paymentId: string
+  provider?: "mock"
+  status: "mock_paid"
+  itemType: "ai_divination"
+  itemName?: string
+  amountTwd: 50
+  currency: "TWD"
+}
+
 type InterpretApiResponse =
   | {
       ok: true
@@ -30,6 +41,7 @@ type InterpretApiResponse =
         core: string
       }
       position: PreviewPosition
+      paymentGate: MockPaymentGate
     }
   | {
       ok: false
@@ -49,6 +61,7 @@ type CreateReadingApiResponse =
         status: "mock_created"
         createdAt: string
       }
+      mockPaymentGate?: MockPaymentGate
     }
   | {
       ok: false
@@ -94,6 +107,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
   const [confirmedCard, setConfirmedCard] = useState<ZiweiCard | null>(null)
   const [confirmedPosition, setConfirmedPosition] = useState<PreviewPosition | null>(null)
   const [confirmedReadingId, setConfirmedReadingId] = useState("")
+  const [confirmedPaymentGate, setConfirmedPaymentGate] = useState<MockPaymentGate | null>(null)
   const [interpretation, setInterpretation] = useState<DivinationInterpretation | null>(null)
   const [isInterpreting, setIsInterpreting] = useState(false)
   const [message, setMessage] = useState(initialMessage)
@@ -135,6 +149,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
     setConfirmedCard(null)
     setConfirmedPosition(null)
     setConfirmedReadingId("")
+    setConfirmedPaymentGate(null)
     setInterpretation(null)
     setIsInterpreting(false)
     interpretRequestRef.current += 1
@@ -162,6 +177,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
     setConfirmedCard(null)
     setConfirmedPosition(null)
     setConfirmedReadingId("")
+    setConfirmedPaymentGate(null)
     setInterpretation(null)
     setIsInterpreting(false)
     setErrorMessage("")
@@ -181,6 +197,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
     setConfirmedCard(null)
     setConfirmedPosition(null)
     setConfirmedReadingId("")
+    setConfirmedPaymentGate(null)
     setInterpretation(null)
     setErrorMessage("")
     setMessage(pendingMessage)
@@ -194,6 +211,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
     setConfirmedCard(null)
     setConfirmedPosition(null)
     setConfirmedReadingId("")
+    setConfirmedPaymentGate(null)
     setInterpretation(null)
     setErrorMessage("")
     setMessage(readyMessage)
@@ -219,6 +237,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
     setConfirmedCard(null)
     setConfirmedPosition(null)
     setConfirmedReadingId("")
+    setConfirmedPaymentGate(null)
     setInterpretation(null)
     setIsInterpreting(false)
     setErrorMessage("")
@@ -251,9 +270,10 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
     interpretRequestRef.current = requestId
     setIsInterpreting(true)
     setConfirmedReadingId("")
+    setConfirmedPaymentGate(null)
     setInterpretation(null)
     setErrorMessage("")
-    setMessage("建立占卜紀錄與產生牌義預覽中...")
+    setMessage("建立占卜紀錄、檢查付款 Gate，並產生牌義預覽中...")
 
     try {
       const createResponse = await fetch("/api/divination/readings/create", {
@@ -272,20 +292,34 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
         throw new Error(createData.ok === false ? createData.error : "建立占卜紀錄預覽失敗")
       }
 
+      if (!createData.mockPaymentGate) {
+        throw new Error("付款 Gate 預覽建立失敗")
+      }
+
       const interpretResponse = await fetch("/api/divination/interpret", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          readingId: createData.reading.id,
           question: trimmedQuestion,
           drawMode,
           cardId: pendingCard.id,
           position: pendingPosition,
+          mockPaymentGate: createData.mockPaymentGate,
         }),
       })
       const interpretData = (await interpretResponse.json()) as InterpretApiResponse
 
       if (!interpretResponse.ok || !interpretData.ok) {
-        throw new Error(interpretData.ok === false ? interpretData.error : "解讀預覽產生失敗")
+        const gateError =
+          interpretResponse.status === 402 || interpretResponse.status === 403
+        throw new Error(
+          gateError
+            ? "尚未通過付款 Gate，無法產生解讀預覽。"
+            : interpretData.ok === false
+              ? interpretData.error
+              : "解讀預覽產生失敗"
+        )
       }
 
       if (interpretRequestRef.current !== requestId) return
@@ -293,6 +327,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
       setConfirmedCard(pendingCard)
       setConfirmedPosition(pendingPosition)
       setConfirmedReadingId(createData.reading.id)
+      setConfirmedPaymentGate(interpretData.paymentGate)
       setInterpretation(interpretData.interpretation)
       setErrorMessage("")
       setMessage(resultReadyMessage)
@@ -303,9 +338,14 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
       setConfirmedCard(null)
       setConfirmedPosition(null)
       setConfirmedReadingId("")
+      setConfirmedPaymentGate(null)
       setInterpretation(null)
       setErrorMessage(
-        error instanceof Error && error.message.includes("建立占卜紀錄")
+        error instanceof Error && error.message.includes("付款 Gate")
+          ? error.message.includes("尚未通過")
+            ? "尚未通過付款 Gate，無法產生解讀預覽。"
+            : "付款 Gate 預覽建立失敗，請稍後再試。"
+          : error instanceof Error && error.message.includes("建立占卜紀錄")
           ? "建立占卜紀錄預覽失敗，請稍後再試。"
           : "解讀預覽產生失敗，請稍後再試。"
       )
@@ -450,7 +490,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
                 disabled={isInterpreting}
                 className="rounded-full border border-[#f1cf72] bg-[#201508] px-5 py-3 font-semibold text-[#f4d77d] transition hover:bg-[#2f210c] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {isInterpreting ? "建立占卜紀錄與產生牌義預覽中..." : "就是這張，開始解讀"}
+                {isInterpreting ? "建立占卜紀錄、檢查付款 Gate，並產生牌義預覽中..." : "就是這張，開始解讀"}
               </button>
               <button
                 type="button"
@@ -471,6 +511,7 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
             card={confirmedCard}
             position={confirmedPosition}
             readingId={confirmedReadingId || undefined}
+            paymentGate={confirmedPaymentGate ?? undefined}
             interpretation={interpretation ?? undefined}
           />
         ) : null}

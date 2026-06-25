@@ -64,10 +64,13 @@ export async function POST(request: Request) {
     return jsonError("找不到這張紫微牌卡。")
   }
 
+  const readingId = createMockReadingId()
+  const mockPaymentId = `mock_pay_${readingId}`
+
   return NextResponse.json({
     ok: true,
     reading: {
-      id: createMockReadingId(),
+      id: readingId,
       question,
       drawMode: drawMode as DrawMode,
       cardId: selectedCard.id,
@@ -75,6 +78,17 @@ export async function POST(request: Request) {
       position: position as Position,
       status: "mock_created",
       createdAt: new Date().toISOString(),
+    },
+    // Mock payment gate only. 正式版必須改為查 payments + divination_readings。
+    mockPaymentGate: {
+      mode: "mock",
+      paymentId: mockPaymentId,
+      provider: "mock",
+      status: "mock_paid",
+      itemType: "ai_divination",
+      itemName: "紫微牌卡 AI 深度解讀",
+      amountTwd: 50,
+      currency: "TWD",
     },
   })
 }

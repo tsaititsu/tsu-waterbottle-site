@@ -14,12 +14,22 @@ type DivinationInterpretation = {
   reminder: string
 }
 
+type MockPaymentGate = {
+  mode?: string
+  paymentId?: string
+  status?: string
+  itemType?: string
+  amountTwd?: number
+  currency?: string
+}
+
 type DivinationResultPreviewProps = {
   question: string
   drawMode: DrawMode | null
   card: ZiweiCard
   position: PreviewPosition
   readingId?: string
+  paymentGate?: MockPaymentGate
   interpretation?: DivinationInterpretation
 }
 
@@ -39,6 +49,7 @@ export function DivinationResultPreview({
   card,
   position,
   readingId,
+  paymentGate,
   interpretation,
 }: DivinationResultPreviewProps) {
   const cardImage = position === "reversed" ? card.reversedImage : card.image
@@ -67,6 +78,20 @@ export function DivinationResultPreview({
             <p>本次問題：{question}</p>
             <p>抽牌方式：{drawMode ? drawModeLabels[drawMode] : "尚未選擇"}</p>
             {readingId ? <p>占卜紀錄編號：{readingId}</p> : null}
+            {paymentGate ? (
+              <>
+                <p>付款 Gate：Mock paid</p>
+                <p>付款項目：紫微牌卡 AI 深度解讀</p>
+                <p>
+                  金額：NT${paymentGate.amountTwd ?? 50}
+                  {paymentGate.currency ? ` ${paymentGate.currency}` : ""}
+                </p>
+                {paymentGate.paymentId ? <p>Mock payment id：{paymentGate.paymentId}</p> : null}
+                <p className="text-sm text-[#d9c68e]">
+                  目前為 mock payment gate，尚未接入正式 NewebPay 付款。
+                </p>
+              </>
+            ) : null}
             <p>抽到牌卡：{card.name}</p>
             <p>正反位：{positionLabels[position]}</p>
             {readingId ? (
