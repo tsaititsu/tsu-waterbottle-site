@@ -2,7 +2,7 @@
 
 import { CalendarDays, CheckCircle2 } from 'lucide-react'
 import Link from 'next/link'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ActionButton } from './ActionButton'
 import { bookingPlans, getBookingPlan } from '@/lib/bookingPlans'
 import { getAuthAccessToken, getMockUser } from '@/lib/mockAuth'
@@ -22,10 +22,47 @@ type PublicBookingSlot = {
   label: string
 }
 
+const taipeiDateInputFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Taipei',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+const taipeiDateLabelFormatter = new Intl.DateTimeFormat('zh-TW', {
+  timeZone: 'Asia/Taipei',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  weekday: 'short',
+})
+
+const taipeiTimeFormatter = new Intl.DateTimeFormat('zh-TW', {
+  timeZone: 'Asia/Taipei',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+})
+
+function getTaipeiDateValue(value: string) {
+  const parts = taipeiDateInputFormatter.formatToParts(new Date(value))
+  const lookup = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${lookup.year}-${lookup.month}-${lookup.day}`
+}
+
+function getTaipeiDateLabel(value: string) {
+  return taipeiDateLabelFormatter.format(new Date(`${value}T00:00:00+08:00`))
+}
+
+function getTaipeiTimeRange(slot: PublicBookingSlot) {
+  return `${taipeiTimeFormatter.format(new Date(slot.startAt))}–${taipeiTimeFormatter.format(new Date(slot.endAt))}`
+}
+
 export function BookingForm() {
   const [planId, setPlanId] = useState(bookingPlans[0].id)
   const [paymentMethod, setPaymentMethod] = useState<'bank-transfer' | 'newebpay-coming-soon' | 'linepay-coming-soon'>('bank-transfer')
   const [bookingSlots, setBookingSlots] = useState<PublicBookingSlot[]>([])
+  const [selectedBookingDate, setSelectedBookingDate] = useState('')
   const [selectedSlotId, setSelectedSlotId] = useState('')
   const [bookingSlotsLoading, setBookingSlotsLoading] = useState(true)
   const [bookingSlotsError, setBookingSlotsError] = useState('')
@@ -50,6 +87,22 @@ export function BookingForm() {
   const birthDateInputRef = useRef<HTMLInputElement | null>(null)
 
   const selectedPlan = getBookingPlan(planId) ?? bookingPlans[0]
+  const bookingDateOptions = useMemo(() => {
+    const dates = new Map<string, string>()
+
+    for (const slot of bookingSlots) {
+      const dateValue = getTaipeiDateValue(slot.startAt)
+      if (!dates.has(dateValue)) {
+        dates.set(dateValue, getTaipeiDateLabel(dateValue))
+      }
+    }
+
+    return Array.from(dates, ([value, label]) => ({ value, label }))
+  }, [bookingSlots])
+  const slotsForSelectedDate = useMemo(
+    () => bookingSlots.filter((slot) => getTaipeiDateValue(slot.startAt) === selectedBookingDate),
+    [bookingSlots, selectedBookingDate],
+  )
   const selectedBookingSlot = bookingSlots.find((slot) => slot.id === selectedSlotId) ?? null
   const startTime = selectedBookingSlot?.startAt ?? ''
   const endTime = selectedBookingSlot?.endAt ?? ''
@@ -74,10 +127,12 @@ export function BookingForm() {
 
         const slots = data?.slots ?? []
         setBookingSlots(slots)
-        setSelectedSlotId((current) => (current && slots.some((slot) => slot.id === current) ? current : slots[0]?.id ?? ''))
+        setSelectedBookingDate('')
+        setSelectedSlotId('')
       } catch (error) {
         if (cancelled) return
         setBookingSlots([])
+        setSelectedBookingDate('')
         setSelectedSlotId('')
         setBookingSlotsError(error instanceof Error ? error.message : '讀取可預約時段失敗。')
       } finally {
@@ -91,6 +146,12 @@ export function BookingForm() {
       cancelled = true
     }
   }, [])
+
+  const updateSelectedBookingDate = (dateValue: string) => {
+    setSelectedBookingDate(dateValue)
+    const firstSlot = bookingSlots.find((slot) => getTaipeiDateValue(slot.startAt) === dateValue)
+    setSelectedSlotId(firstSlot?.id ?? '')
+  }
 
   const buildInput = (): BookingFormInput | null => {
     const user = getMockUser()
@@ -287,27 +348,45 @@ export function BookingForm() {
             <CalendarDays size={18} />
             選擇預約時段
           </div>
-          <label className="grid w-full gap-2">
-            <span className="text-sm font-semibold text-textDark">可預約時段</span>
-            <select
-              className="focus-ring w-full rounded-lg border border-borderSoft bg-white px-4 py-3"
-              disabled={bookingSlotsLoading || bookingSlots.length === 0}
-              onChange={(event) => setSelectedSlotId(event.target.value)}
-              value={selectedSlotId}
-            >
-              {bookingSlotsLoading ? (
-                <option value="">讀取可預約時段中...</option>
-              ) : bookingSlots.length > 0 ? (
-                bookingSlots.map((slot) => (
-                  <option key={slot.id} value={slot.id}>
-                    {slot.label}
-                  </option>
-                ))
-              ) : (
-                <option value="">目前沒有可預約時段</option>
-              )}
-            </select>
-          </label>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="grid w-full gap-2">
+              <span className="text-sm font-semibold text-textDark">選擇日期</span>
+              <input
+                className="focus-ring h-14 w-full rounded-xl border border-borderSoft bg-white px-4 py-3 text-lg font-semibold text-textDark"
+                disabled={bookingSlotsLoading || bookingSlots.length === 0}
+                min={bookingDateOptions[0]?.value}
+                onChange={(event) => updateSelectedBookingDate(event.target.value)}
+                type="date"
+                value={selectedBookingDate}
+              />
+            </label>
+            <label className="grid w-full gap-2">
+              <span className="text-sm font-semibold text-textDark">選擇時間</span>
+              <select
+                className="focus-ring h-14 w-full rounded-xl border border-borderSoft bg-white px-4 py-3 text-lg font-semibold text-textDark"
+                disabled={bookingSlotsLoading || !selectedBookingDate || slotsForSelectedDate.length === 0}
+                onChange={(event) => setSelectedSlotId(event.target.value)}
+                value={selectedSlotId}
+              >
+                {bookingSlotsLoading ? (
+                  <option value="">讀取可預約時段中...</option>
+                ) : !selectedBookingDate ? (
+                  <option value="">請先選擇日期</option>
+                ) : slotsForSelectedDate.length > 0 ? (
+                  slotsForSelectedDate.map((slot) => (
+                    <option key={slot.id} value={slot.id}>
+                      {getTaipeiTimeRange(slot)}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">該日期沒有可預約時段</option>
+                )}
+              </select>
+            </label>
+          </div>
+          {!bookingSlotsLoading && bookingSlots.length === 0 ? (
+            <p className="text-sm font-semibold text-deepPurple">目前沒有可預約時段</p>
+          ) : null}
           {bookingSlotsError ? <p className="text-sm font-semibold text-deepPurple">{bookingSlotsError}</p> : null}
           <p className="text-sm leading-6 text-textMuted">
             目前僅顯示後台已開放且尚未過期的時段。
