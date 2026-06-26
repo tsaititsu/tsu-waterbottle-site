@@ -392,11 +392,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
     setInterpretation(null)
     setPaymentRequired(null)
     setErrorMessage("")
-    setMessage(
-      options?.auto
-        ? "已為你抽出牌卡，正在產生解讀……"
-        : "檢查每日免費次數，並產生牌義解讀中..."
-    )
+    setMessage(options?.mockPaid ? "支付與解讀中..." : "開始解讀中...")
 
     try {
       const interpretResponse = await fetch("/api/divination/interpret", {
@@ -476,7 +472,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
       return
     }
 
-    await interpretCard(pendingCard, pendingPosition)
+    await interpretCard(pendingCard, pendingPosition, { mockPaid: Boolean(paymentRequired) })
   }
 
   async function handleMockPaidInterpret() {
@@ -716,28 +712,6 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
             </p>
           ) : null}
 
-          {paymentRequired && pendingCard && pendingPosition && !hasResultPreview ? (
-            <div className="grid w-full max-w-2xl gap-3 rounded-2xl border border-darkGold/40 bg-lightGold/40 p-4 text-textDark">
-              <p className="text-sm font-semibold tracking-[0.16em] text-darkGold">
-                Payment Required
-              </p>
-              <h4 className="text-xl font-semibold text-deepPurple">今日免費占卜已使用</h4>
-              <p className="leading-7 text-textMuted">
-                {paymentRequired.message} 這裡先使用本機 mock paid 測試流程，不會接正式金流。
-              </p>
-              <button
-                type="button"
-                onClick={handleMockPaidInterpret}
-                disabled={isInterpreting || isMockPaying}
-                className="rounded-full bg-deepPurple px-5 py-3 font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isInterpreting || isMockPaying
-                  ? "支付確認中..."
-                  : `支付 NT$${paymentRequired.amountTwd} 開始解讀（本機測試）`}
-              </button>
-            </div>
-          ) : null}
-
           {pendingIndex !== null && !hasResultPreview && !isAutoMode ? (
             <div className="grid w-full max-w-2xl gap-4 rounded-2xl border border-purple-100 bg-purple-50/70 p-4 text-textDark">
               <p className="text-lg font-semibold text-deepPurple">是不是這張牌？</p>
@@ -784,14 +758,25 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                   }}
                 />
               ) : null}
+              {isManualMode && paymentRequired ? (
+                <p className="rounded-lg border border-darkGold/20 bg-lightGold/40 p-3 text-sm text-textDark">
+                  今日免費占卜已使用，本次解讀需 NT$50。
+                </p>
+              ) : null}
               <div className="grid gap-3 sm:grid-cols-2">
                 <button
                   type="button"
                   onClick={confirmCard}
-                  disabled={isInterpreting || Boolean(paymentRequired) || (isManualMode && !hasAcceptedTerms)}
+                  disabled={isInterpreting || (isManualMode && !hasAcceptedTerms)}
                   className="rounded-full bg-deepPurple px-5 py-3 font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {isInterpreting ? "檢查付款 Gate，並產生牌義預覽中..." : "就是這張，開始解讀"}
+                  {isInterpreting || isMockPaying
+                    ? paymentRequired
+                      ? "支付與解讀中..."
+                      : "開始解讀中..."
+                    : paymentRequired
+                      ? `支付 NT$${paymentRequired.amountTwd} 開始解讀（本機測試）`
+                      : "就是這張，開始解讀"}
                 </button>
                 <button
                   type="button"
@@ -802,6 +787,22 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                   {isAutoMode ? "重新自動抽牌" : "換一張"}
                 </button>
               </div>
+            </div>
+          ) : null}
+
+          {isAutoMode && pendingCard && pendingPosition && !hasResultPreview && paymentRequired ? (
+            <div className="grid w-full max-w-2xl gap-2 rounded-2xl border border-borderSoft bg-white p-4 text-textDark">
+              <p className="text-sm text-textMuted">今日免費占卜已使用，本次解讀需 NT$50。</p>
+              <button
+                type="button"
+                onClick={handleMockPaidInterpret}
+                disabled={isInterpreting || isMockPaying}
+                className="justify-self-start rounded-full bg-deepPurple px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isInterpreting || isMockPaying
+                  ? "支付與解讀中..."
+                  : `支付 NT$${paymentRequired.amountTwd} 開始解讀（本機測試）`}
+              </button>
             </div>
           ) : null}
 
