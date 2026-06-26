@@ -4,6 +4,7 @@ import { ziweiCards } from "@/lib/divination/cards"
 import {
   consumeLocalDivinationEntitlement,
   getLocalDivinationEntitlementStatus,
+  releaseLocalDivinationEntitlement,
 } from "@/lib/divination/localEntitlement"
 import type {
   DivinationCardSummary,
@@ -154,60 +155,73 @@ async function createOpenAiInterpretation(input: {
 
   const model = process.env.OPENAI_MODEL || fallbackOpenAiModel
   const prompt = buildDivinationPrompt(input)
-  const response = await fetch(openAiResponsesUrl, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      input: [
-        {
-          role: "system",
-          content: prompt.instructions,
-        },
-        {
-          role: "user",
-          content: prompt.input,
-        },
-      ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "divination_interpretation",
-          strict: true,
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            required: ["summary", "cardMessage", "situationAnalysis", "advice", "reminder"],
-            properties: {
-              summary: {
-                type: "string",
-                description: "一句話總結，不要太長。",
-              },
-              cardMessage: {
-                type: "string",
-                description: "說明這張牌與正反位帶來的核心訊息。",
-              },
-              situationAnalysis: {
-                type: "string",
-                description: "針對使用者問題分析目前狀態。",
-              },
-              advice: {
-                type: "string",
-                description: "給具體建議，至少 2～4 點，可以用自然段或條列。",
-              },
-              reminder: {
-                type: "string",
-                description: "溫和提醒，不恐嚇、不絕對化。",
+  let response: Response
+
+  try {
+    response = await fetch(openAiResponsesUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        input: [
+          {
+            role: "system",
+            content: prompt.instructions,
+          },
+          {
+            role: "user",
+            content: prompt.input,
+          },
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "divination_interpretation",
+            strict: true,
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["summary", "cardMessage", "situationAnalysis", "advice", "reminder"],
+              properties: {
+                summary: {
+                  type: "string",
+                  description: "一句話總結，不要太長。",
+                },
+                cardMessage: {
+                  type: "string",
+                  description: "說明這張牌與正反位帶來的核心訊息。",
+                },
+                situationAnalysis: {
+                  type: "string",
+                  description: "針對使用者問題分析目前狀態。",
+                },
+                advice: {
+                  type: "string",
+                  description: "給具體建議，至少 2～4 點，可以用自然段或條列。",
+                },
+                reminder: {
+                  type: "string",
+                  description: "溫和提醒，不恐嚇、不絕對化。",
+                },
               },
             },
           },
         },
-      },
-    }),
-  })
+      }),
+    })
+  } catch (error) {
+    console.error("OpenAI divination request failed:", error)
+
+    return {
+      ok: false as const,
+      status: 502,
+      error: "OPENAI_REQUEST_FAILED",
+      message: "解讀產生失敗，請稍後再試。",
+    }
+  }
 
   if (!response.ok) {
     console.error("OpenAI divination request failed:", {
@@ -321,6 +335,14 @@ export async function POST(request: Request) {
   })
 
   if (!openAiResult.ok) {
+    if (
+      openAiResult.error === "OPENAI_API_KEY_MISSING" ||
+      openAiResult.error === "OPENAI_REQUEST_FAILED" ||
+      openAiResult.error === "OPENAI_RESPONSE_INVALID"
+    ) {
+      releaseLocalDivinationEntitlement(readingId)
+    }
+
     return NextResponse.json(
       {
         ok: false,

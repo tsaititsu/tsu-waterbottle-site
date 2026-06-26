@@ -28,9 +28,9 @@ export type DivinationReadingPreview = {
   id: string
   question: string
   drawMode: DivinationDrawMode
-  cardId: string
-  cardName: string
-  position: DivinationPosition
+  cardId?: string | null
+  cardName?: string | null
+  position?: DivinationPosition | null
   status: "mock_created" | "waiting_draw"
   createdAt: string
 }
@@ -38,8 +38,8 @@ export type DivinationReadingPreview = {
 export type CreateDivinationReadingRequest = {
   question: string
   drawMode: DivinationDrawMode
-  cardId: string
-  position: DivinationPosition
+  cardId?: string
+  position?: DivinationPosition
   localUserId?: string
   mockPaid?: boolean
 }

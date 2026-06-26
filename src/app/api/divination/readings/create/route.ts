@@ -53,17 +53,13 @@ export async function POST(request: Request) {
     return jsonError("抽牌方式不正確。")
   }
 
-  if (!cardId) {
-    return jsonError("缺少牌卡資料。")
-  }
-
-  if (!positions.has(position as DivinationPosition)) {
+  if (position && !positions.has(position as DivinationPosition)) {
     return jsonError("正反位資料不正確。")
   }
 
-  const selectedCard = ziweiCards.find((card) => card.id === cardId)
+  const selectedCard = cardId ? ziweiCards.find((card) => card.id === cardId) : null
 
-  if (!selectedCard) {
+  if (cardId && !selectedCard) {
     return jsonError("找不到這張紫微牌卡。")
   }
 
@@ -93,9 +89,9 @@ export async function POST(request: Request) {
     id: readingId,
     question,
     drawMode: drawMode as DivinationDrawMode,
-    cardId: selectedCard.id,
-    cardName: selectedCard.name,
-    position: position as DivinationPosition,
+    cardId: selectedCard?.id ?? null,
+    cardName: selectedCard?.name ?? null,
+    position: positions.has(position as DivinationPosition) ? (position as DivinationPosition) : null,
     status: "waiting_draw",
     createdAt: new Date().toISOString(),
   } satisfies DivinationReadingPreview

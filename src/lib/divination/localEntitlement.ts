@@ -110,11 +110,12 @@ export function reserveLocalDivinationEntitlement(input: ReserveInput): ReserveR
   const store = getStore()
   const user = getOrCreateUser(input.localUserId)
   const taiwanDate = getTaiwanDateKey()
+  const useMockPaid = input.mockPaid === true
   const freeUsed = user.lastFreeReadingDate === taiwanDate
   const freeReserved = hasReservedDailyFree(user.localUserId, taiwanDate)
   const canUseDailyFree = !freeUsed && !freeReserved
 
-  if (!canUseDailyFree && !input.mockPaid) {
+  if (!canUseDailyFree && !useMockPaid) {
     return {
       ok: false,
       error: "DAILY_FREE_USED",
@@ -124,7 +125,7 @@ export function reserveLocalDivinationEntitlement(input: ReserveInput): ReserveR
     }
   }
 
-  const type: LocalEntitlementType = canUseDailyFree ? "daily_free" : "mock_paid"
+  const type: LocalEntitlementType = useMockPaid ? "mock_paid" : "daily_free"
   const entitlement = {
     readingId: input.readingId,
     localUserId: user.localUserId,
@@ -176,5 +177,21 @@ export function consumeLocalDivinationEntitlement(readingId: string, entitlement
   entitlement.consumedAt = new Date().toISOString()
   getStore().reservations.set(readingId, entitlement)
 
+  return entitlement
+}
+
+export function releaseLocalDivinationEntitlement(readingId?: string) {
+  if (!readingId) return null
+
+  const store = getStore()
+  const entitlement = store.reservations.get(readingId)
+
+  if (!entitlement) return null
+
+  if (entitlement.status === "consumed") {
+    return entitlement
+  }
+
+  store.reservations.delete(readingId)
   return entitlement
 }
