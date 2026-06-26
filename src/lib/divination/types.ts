@@ -2,15 +2,26 @@ export type DivinationDrawMode = "manual" | "auto"
 
 export type DivinationPosition = "upright" | "reversed"
 
+export type DivinationEntitlementType = "daily_free" | "mock_paid"
+
+export type DivinationLocalEntitlement = {
+  type: DivinationEntitlementType
+  amountTwd: number
+  localUserId: string
+  taiwanDate: string
+  entitlementToken: string
+}
+
 export type DivinationMockPaymentGate = {
   mode: "mock"
   paymentId: string
   provider?: "mock"
-  status: "mock_paid"
+  status: DivinationEntitlementType
   itemType: "ai_divination"
   itemName?: "紫微牌卡 AI 深度解讀"
-  amountTwd: 50
+  amountTwd: number
   currency: "TWD"
+  entitlementToken?: string
 }
 
 export type DivinationReadingPreview = {
@@ -20,7 +31,7 @@ export type DivinationReadingPreview = {
   cardId: string
   cardName: string
   position: DivinationPosition
-  status: "mock_created"
+  status: "mock_created" | "waiting_draw"
   createdAt: string
 }
 
@@ -29,17 +40,32 @@ export type CreateDivinationReadingRequest = {
   drawMode: DivinationDrawMode
   cardId: string
   position: DivinationPosition
+  localUserId?: string
+  mockPaid?: boolean
+}
+
+export type DivinationReadingSession = {
+  readingId: string
+  question: string
+  drawMode: DivinationDrawMode
+  localUserId: string
+  entitlement?: DivinationLocalEntitlement
+  mockPaymentGate: DivinationMockPaymentGate
 }
 
 export type CreateDivinationReadingSuccessResponse = {
   ok: true
   reading: DivinationReadingPreview
+  entitlement?: DivinationLocalEntitlement
   mockPaymentGate: DivinationMockPaymentGate
 }
 
 export type DivinationErrorResponse = {
   ok: false
   error: string
+  message?: string
+  requiresPayment?: boolean
+  amountTwd?: number
 }
 
 export type CreateDivinationReadingResponse =

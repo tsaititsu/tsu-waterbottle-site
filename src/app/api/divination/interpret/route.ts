@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server"
 import { ziweiCards } from "@/lib/divination/cards"
+import {
+  consumeLocalDivinationEntitlement,
+  getLocalDivinationEntitlementStatus,
+} from "@/lib/divination/localEntitlement"
 import type {
   DivinationCardSummary,
   DivinationDrawMode,
@@ -20,6 +24,7 @@ type MockPaymentGate = {
   itemType?: unknown
   amountTwd?: unknown
   currency?: unknown
+  entitlementToken?: unknown
 }
 
 const drawModes = new Set<DivinationDrawMode>(["manual", "auto"])
@@ -52,13 +57,15 @@ function isValidMockPaymentGate(value: unknown) {
   return Boolean(
     gate &&
       gate.mode === "mock" &&
-      gate.provider === "mock" &&
-      gate.status === "mock_paid" &&
+      (gate.provider === undefined || gate.provider === "mock") &&
+      (gate.status === "daily_free" || gate.status === "mock_paid") &&
       gate.itemType === "ai_divination" &&
-      gate.amountTwd === 50 &&
+      (gate.amountTwd === 0 || gate.amountTwd === 50) &&
       gate.currency === "TWD" &&
       typeof gate.paymentId === "string" &&
-      gate.paymentId.trim()
+      gate.paymentId.trim() &&
+      typeof gate.entitlementToken === "string" &&
+      gate.entitlementToken.trim()
   )
 }
 
@@ -76,6 +83,8 @@ export async function POST(request: Request) {
   const drawMode = body.drawMode
   const position = body.position
   const mockPaymentGate = getMockPaymentGate(body.mockPaymentGate)
+  const readingId = getTrimmedString(body.readingId)
+  const entitlementToken = getTrimmedString(mockPaymentGate?.entitlementToken)
 
   if (!question) {
     return jsonError("請先填寫占卜問題。")
@@ -94,7 +103,27 @@ export async function POST(request: Request) {
   }
 
   if (!isValidMockPaymentGate(mockPaymentGate)) {
-    return jsonError("尚未通過付款 Gate，無法產生解讀。", 402)
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "ENTITLEMENT_REQUIRED",
+        message: "請先使用每日免費次數或完成 NT$50 單次占卜。",
+      },
+      { status: 402 }
+    )
+  }
+
+  const entitlement = getLocalDivinationEntitlementStatus(readingId, entitlementToken)
+
+  if (!entitlement || entitlement.status !== "reserved") {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "ENTITLEMENT_REQUIRED",
+        message: "請先使用每日免費次數或完成 NT$50 單次占卜。",
+      },
+      { status: 402 }
+    )
   }
 
   const selectedCard = ziweiCards.find((card) => card.id === cardId)
@@ -129,10 +158,13 @@ export async function POST(request: Request) {
   const paymentGate = {
     mode: "mock",
     paymentId: getTrimmedString(mockPaymentGate?.paymentId),
-    status: "mock_paid",
+    provider: "mock",
+    status: entitlement.type,
     itemType: "ai_divination",
-    amountTwd: 50,
+    itemName: "紫微牌卡 AI 深度解讀",
+    amountTwd: entitlement.amountTwd,
     currency: "TWD",
+    entitlementToken: entitlement.entitlementToken,
   } satisfies DivinationMockPaymentGate
   const response = {
     ok: true,
@@ -142,6 +174,8 @@ export async function POST(request: Request) {
     drawMode: safeDrawMode,
     paymentGate,
   } satisfies DivinationInterpretResponse
+
+  consumeLocalDivinationEntitlement(readingId, entitlementToken)
 
   return NextResponse.json(response)
 }
