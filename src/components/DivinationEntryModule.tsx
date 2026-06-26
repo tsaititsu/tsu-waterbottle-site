@@ -1,6 +1,6 @@
 'use client'
 
-import { MessageCircle, ShieldCheck, Sparkles } from 'lucide-react'
+import { Sparkles } from 'lucide-react'
 import { useState } from 'react'
 
 const DEFAULT_ZIWEI_CARD_URL = 'https://ziwei-card.vercel.app'
@@ -75,7 +75,7 @@ export function DivinationEntryModule({
                     type="checkbox"
                   />
                   <span>
-                    我已詳細閱讀並同意《AI 占卜服務說明》、《點數與每日免費規則》及《服務條款》，並了解占卜目前會在水瓶先生紫微牌卡系統中完成。
+                    我已詳細閱讀並同意《AI 占卜服務說明》、《點數與每日免費規則》及《服務條款》，並了解占卜前相關注意事項。
                     <span className="ml-1 font-semibold text-darkGold underline underline-offset-4 group-open:hidden">點我查看</span>
                     <span className="ml-1 hidden font-semibold text-darkGold underline underline-offset-4 group-open:inline">收合內容</span>
                   </span>
@@ -112,6 +112,15 @@ export function DivinationEntryModule({
                     <li>若有占卜資料、付款或系統問題，可聯繫水瓶先生官方 LINE。</li>
                   </ul>
                 </div>
+
+                <div>
+                  <p className="font-semibold text-deepPurple">補充說明</p>
+                  <ul className="mt-2 grid gap-2">
+                    <li>目前正式網站僅作為占卜入口與流程展示，不在正式網站存放舊占卜問題、解答、會員點數或 LINE Token。</li>
+                    <li>若遇到登入、扣點、每日免費或占卜紀錄相關問題，仍以原占卜系統內處理為主。</li>
+                    <li>目前不搬舊會員資料、不合併點數、不碰原扣點流程。</li>
+                  </ul>
+                </div>
               </div>
             </details>
           </div>
@@ -131,21 +140,6 @@ export function DivinationEntryModule({
           </a>
 
           {message ? <p className="text-sm font-semibold text-deepPurple">{message}</p> : null}
-        </div>
-      </div>
-
-      <div className="mt-6 grid gap-3 text-sm leading-6 text-textMuted md:grid-cols-3">
-        <div className="rounded-xl border border-borderSoft bg-white/75 p-4">
-          <ShieldCheck className="mb-3 text-deepPurple" size={22} />
-          不在正式網站存放占卜問題、解答、會員點數或 LINE Token。
-        </div>
-        <div className="rounded-xl border border-borderSoft bg-white/75 p-4">
-          <MessageCircle className="mb-3 text-deepPurple" size={22} />
-          客人遇到登入、扣點或占卜問題，仍回到占卜系統內處理。
-        </div>
-        <div className="rounded-xl border border-borderSoft bg-white/75 p-4">
-          <Sparkles className="mb-3 text-deepPurple" size={22} />
-          目前不搬功能、不合併資料、不碰扣點流程。
         </div>
       </div>
     </section>
