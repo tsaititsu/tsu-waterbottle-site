@@ -67,9 +67,9 @@ const spreadCardTransforms = [
 function getFanTransform(index: number) {
   const centerIndex = (ziweiCards.length - 1) / 2
   const offset = index - centerIndex
-  const x = offset * 66
-  const y = Math.pow(Math.abs(offset), 1.22) * 5 + 8
-  const angle = offset * 3.8
+  const x = offset * 58
+  const y = Math.pow(Math.abs(offset), 1.28) * 8 + 10
+  const angle = offset * 2.9
 
   return `translate(calc(-50% + ${x}px), ${y}px) rotate(${angle}deg)`
 }
@@ -504,8 +504,8 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
   }, [isAutoMode, canDraw, readingId, hasResultPreview])
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-borderSoft bg-softPurple p-5 shadow-soft md:p-6">
-      <div className="rounded-2xl border border-borderSoft bg-white p-5 md:p-6">
+    <section className="overflow-hidden rounded-2xl border border-borderSoft/80 bg-white p-5 shadow-[0_12px_32px_rgba(31,27,46,0.05)] md:p-6">
+      <div className="rounded-2xl bg-white">
         <div className="grid gap-3">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-darkGold">
             Draw
@@ -581,7 +581,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
               </p>
             </div>
           ) : !started ? (
-            <div className="grid justify-items-center gap-4 rounded-2xl border border-purple-100 bg-purple-50/60 px-5 py-5">
+            <div className="grid justify-items-center gap-4 px-4 py-4">
               <div className="relative h-[168px] w-[112px] overflow-hidden rounded-2xl border border-darkGold/60 bg-white shadow-[0_18px_42px_rgba(180,142,56,0.18)] sm:h-[210px] sm:w-[140px]">
                 <Image
                   src="/cards/back.png"
@@ -596,7 +596,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
               </p>
             </div>
           ) : shuffling ? (
-            <div className="grid justify-items-center gap-4 rounded-2xl border border-purple-100 bg-purple-50/60 px-5 py-5">
+            <div className="grid justify-items-center gap-4 px-4 py-4">
               <div className="relative h-40 w-56">
                 {shufflePreviewCards.map((card, index) => (
                   <div
@@ -665,16 +665,19 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                       onFocus={() => setHoveredCardIndex(index)}
                       onMouseEnter={() => setHoveredCardIndex(index)}
                       onMouseLeave={() => setHoveredCardIndex(null)}
-                      className={`group absolute left-1/2 top-12 h-32 w-20 scroll-mt-32 rounded-xl border border-borderSoft bg-white p-1.5 transition duration-300 hover:-translate-y-1 hover:border-darkGold hover:shadow-[0_18px_36px_rgba(180,142,56,0.2)] focus-visible:-translate-y-1 focus-visible:border-darkGold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-darkGold/40 ${
+                      className={`group absolute left-1/2 top-12 h-32 w-20 scroll-mt-32 rounded-xl border border-borderSoft bg-white p-1.5 transition-all duration-200 ease-out hover:-translate-y-3 hover:border-darkGold hover:shadow-[0_18px_42px_rgba(180,142,56,0.28)] focus-visible:-translate-y-3 focus-visible:border-darkGold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-darkGold/40 ${
                         shuffling || isInterpreting || hasResultPreview ? "cursor-default opacity-80" : ""
                       }`}
                       style={{
-                        transform: `${getFanTransform(index)}`,
-                        zIndex: hoveredCardIndex === index ? 200 : getFanZIndex(index),
+                        transform:
+                          hoveredCardIndex === index
+                            ? `${getFanTransform(index)} translateY(-14px)`
+                            : getFanTransform(index),
+                        zIndex: pendingIndex === index ? 260 : hoveredCardIndex === index ? 220 : getFanZIndex(index),
                       }}
                       aria-label={`選擇第 ${index + 1} 張牌`}
                     >
-                      <span className="pointer-events-none relative block h-full overflow-hidden rounded-lg border border-purple-100 bg-softPurple transition duration-300 group-hover:-translate-y-4 group-hover:scale-105 group-hover:border-darkGold group-focus-visible:-translate-y-4 group-focus-visible:scale-105">
+                      <span className="pointer-events-none relative block h-full overflow-hidden rounded-lg border border-purple-100 bg-softPurple transition duration-300 ease-out group-hover:-translate-y-4 group-hover:scale-105 group-hover:border-darkGold group-focus-visible:-translate-y-4 group-focus-visible:scale-105">
                         <Image
                           src="/cards/back.png"
                           alt=""
@@ -696,10 +699,12 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
           )}
 
           <p
-            className={`rounded-full px-4 py-2 text-center text-sm leading-6 ${
+            className={`px-4 py-2 text-center text-sm leading-6 ${
               hasResultPreview
-                ? "bg-[#eefaf4] text-[#16664f]"
-                : "bg-purple-50 text-textMuted"
+                ? "rounded-full bg-[#eefaf4] text-[#16664f]"
+                : isManualMode && (!started || shuffling)
+                  ? "text-textMuted"
+                  : "rounded-full bg-purple-50 text-textMuted"
             }`}
           >
             {message}
