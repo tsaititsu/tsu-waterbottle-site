@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { buildDivinationPrompt } from "@/lib/divination/buildDivinationPrompt"
 import { ziweiCards } from "@/lib/divination/cards"
 import {
   consumeLocalDivinationEntitlement,
@@ -30,10 +31,8 @@ type MockPaymentGate = {
 const drawModes = new Set<DivinationDrawMode>(["manual", "auto"])
 const positions = new Set<DivinationPosition>(["upright", "reversed"])
 
-const positionLabels: Record<DivinationPosition, string> = {
-  upright: "正位",
-  reversed: "反位",
-}
+const openAiResponsesUrl = "https://api.openai.com/v1/responses"
+const fallbackOpenAiModel = "gpt-4.1-mini"
 
 function jsonError(error: string, status = 400) {
   return NextResponse.json({ ok: false, error }, { status })
@@ -49,6 +48,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function getMockPaymentGate(value: unknown): MockPaymentGate | null {
   return isRecord(value) ? value : null
+}
+
+function isValidInterpretation(value: unknown): value is DivinationInterpretation {
+  if (!isRecord(value)) return false
+
+  return (
+    typeof value.summary === "string" &&
+    value.summary.trim().length > 0 &&
+    typeof value.cardMessage === "string" &&
+    value.cardMessage.trim().length > 0 &&
+    typeof value.situationAnalysis === "string" &&
+    value.situationAnalysis.trim().length > 0 &&
+    typeof value.advice === "string" &&
+    value.advice.trim().length > 0 &&
+    typeof value.reminder === "string" &&
+    value.reminder.trim().length > 0
+  )
+}
+
+function normalizeInterpretation(value: DivinationInterpretation): DivinationInterpretation {
+  return {
+    summary: value.summary.trim(),
+    cardMessage: value.cardMessage.trim(),
+    situationAnalysis: value.situationAnalysis.trim(),
+    advice: value.advice.trim(),
+    reminder: value.reminder.trim(),
+  }
 }
 
 function isValidMockPaymentGate(value: unknown) {
@@ -67,6 +93,152 @@ function isValidMockPaymentGate(value: unknown) {
       typeof gate.entitlementToken === "string" &&
       gate.entitlementToken.trim()
   )
+}
+
+function extractResponseText(value: unknown) {
+  if (!isRecord(value)) return ""
+
+  if (typeof value.output_text === "string") {
+    return value.output_text.trim()
+  }
+
+  const output = Array.isArray(value.output) ? value.output : []
+  const textParts: string[] = []
+
+  for (const item of output) {
+    if (!isRecord(item)) continue
+    const content = Array.isArray(item.content) ? item.content : []
+
+    for (const contentItem of content) {
+      if (!isRecord(contentItem)) continue
+
+      if (typeof contentItem.text === "string") {
+        textParts.push(contentItem.text)
+      }
+    }
+  }
+
+  return textParts.join("\n").trim()
+}
+
+function parseOpenAiInterpretation(text: string) {
+  try {
+    const parsed = JSON.parse(text)
+
+    if (!isValidInterpretation(parsed)) {
+      return null
+    }
+
+    return normalizeInterpretation(parsed)
+  } catch {
+    return null
+  }
+}
+
+async function createOpenAiInterpretation(input: {
+  question: string
+  drawMode: DivinationDrawMode
+  card: (typeof ziweiCards)[number]
+  position: DivinationPosition
+}) {
+  const apiKey = process.env.OPENAI_API_KEY
+
+  if (!apiKey) {
+    return {
+      ok: false as const,
+      status: 500,
+      error: "OPENAI_API_KEY_MISSING",
+      message: "尚未設定 OpenAI API Key。",
+    }
+  }
+
+  const model = process.env.OPENAI_MODEL || fallbackOpenAiModel
+  const prompt = buildDivinationPrompt(input)
+  const response = await fetch(openAiResponsesUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      input: [
+        {
+          role: "system",
+          content: prompt.instructions,
+        },
+        {
+          role: "user",
+          content: prompt.input,
+        },
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "divination_interpretation",
+          strict: true,
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            required: ["summary", "cardMessage", "situationAnalysis", "advice", "reminder"],
+            properties: {
+              summary: {
+                type: "string",
+                description: "一句話總結，不要太長。",
+              },
+              cardMessage: {
+                type: "string",
+                description: "說明這張牌與正反位帶來的核心訊息。",
+              },
+              situationAnalysis: {
+                type: "string",
+                description: "針對使用者問題分析目前狀態。",
+              },
+              advice: {
+                type: "string",
+                description: "給具體建議，至少 2～4 點，可以用自然段或條列。",
+              },
+              reminder: {
+                type: "string",
+                description: "溫和提醒，不恐嚇、不絕對化。",
+              },
+            },
+          },
+        },
+      },
+    }),
+  })
+
+  if (!response.ok) {
+    console.error("OpenAI divination request failed:", {
+      status: response.status,
+      statusText: response.statusText,
+    })
+
+    return {
+      ok: false as const,
+      status: 502,
+      error: "OPENAI_REQUEST_FAILED",
+      message: "解讀產生失敗，請稍後再試。",
+    }
+  }
+
+  const data = (await response.json()) as unknown
+  const interpretation = parseOpenAiInterpretation(extractResponseText(data))
+
+  if (!interpretation) {
+    return {
+      ok: false as const,
+      status: 502,
+      error: "OPENAI_RESPONSE_INVALID",
+      message: "解讀格式異常，請稍後再試。",
+    }
+  }
+
+  return {
+    ok: true as const,
+    interpretation,
+  }
 }
 
 export async function POST(request: Request) {
@@ -129,23 +301,36 @@ export async function POST(request: Request) {
   const selectedCard = ziweiCards.find((card) => card.id === cardId)
 
   if (!selectedCard) {
-    return jsonError("找不到這張紫微牌卡。")
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "INVALID_CARD",
+        message: "找不到這張紫微牌卡。",
+      },
+      { status: 400 }
+    )
   }
 
   const safeDrawMode = drawMode as DivinationDrawMode
   const safePosition = position as DivinationPosition
-  const meaning =
-    safePosition === "reversed" ? selectedCard.reversedMeaning : selectedCard.uprightMeaning
-  const advice =
-    safePosition === "reversed" ? selectedCard.advice.reversed : selectedCard.advice.upright
-  const positionLabel = positionLabels[safePosition]
-  const interpretation = {
-    summary: `${selectedCard.name}${positionLabel}代表此問題的核心訊號是：${selectedCard.core}`,
-    cardMessage: meaning,
-    situationAnalysis: `你詢問的是「${question}」。目前此版本先依牌卡基礎牌義整理，不代表正式 AI 深度解讀。`,
-    advice,
-    reminder: "此為牌義預覽版，尚未接入正式 AI 深度解讀。",
-  } satisfies DivinationInterpretation
+  const openAiResult = await createOpenAiInterpretation({
+    question,
+    drawMode: safeDrawMode,
+    card: selectedCard,
+    position: safePosition,
+  })
+
+  if (!openAiResult.ok) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: openAiResult.error,
+        message: openAiResult.message,
+      },
+      { status: openAiResult.status }
+    )
+  }
+
   const card = {
     id: selectedCard.id,
     name: selectedCard.name,
@@ -168,7 +353,7 @@ export async function POST(request: Request) {
   } satisfies DivinationMockPaymentGate
   const response = {
     ok: true,
-    interpretation,
+    interpretation: openAiResult.interpretation,
     card,
     position: safePosition,
     drawMode: safeDrawMode,
