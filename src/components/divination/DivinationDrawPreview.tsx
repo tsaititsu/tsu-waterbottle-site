@@ -36,6 +36,30 @@ const drawModeLabels: Record<DivinationDrawMode, string> = {
   auto: "自動抽牌",
 }
 
+const shufflePreviewCards = [
+  { rotate: "-rotate-12", translate: "-translate-x-8 translate-y-2" },
+  { rotate: "-rotate-3", translate: "-translate-x-3" },
+  { rotate: "rotate-3", translate: "translate-x-3 -translate-y-1" },
+  { rotate: "rotate-12", translate: "translate-x-8 translate-y-2" },
+]
+
+const spreadCardTransforms = [
+  "rotate-[-8deg] translate-y-3",
+  "rotate-[-6deg] translate-y-2",
+  "rotate-[-4deg] translate-y-1",
+  "rotate-[-2deg] translate-y-0.5",
+  "rotate-[-1deg]",
+  "rotate-0 -translate-y-0.5",
+  "rotate-[1deg] -translate-y-1",
+  "rotate-[1deg] -translate-y-1",
+  "rotate-0 -translate-y-0.5",
+  "rotate-[-1deg]",
+  "rotate-[2deg] translate-y-0.5",
+  "rotate-[4deg] translate-y-1",
+  "rotate-[6deg] translate-y-2",
+  "rotate-[8deg] translate-y-3",
+]
+
 function getRandomPosition(): DivinationPosition {
   return Math.random() < 0.5 ? "upright" : "reversed"
 }
@@ -347,19 +371,35 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
             </div>
           ) : isAutoMode ? (
             <div className="grid justify-items-center gap-3 rounded-2xl border border-purple-100 bg-purple-50/60 px-5 py-4">
-              <div
-                className={`relative h-32 w-20 overflow-hidden rounded-xl border border-darkGold/50 bg-white shadow-sm ${
-                  shuffling ? "animate-pulse" : ""
-                }`}
-              >
-                <Image
-                  src="/cards/back.png"
-                  alt="紫微牌卡牌背"
-                  fill
-                  sizes="80px"
-                  className="object-cover"
-                />
-              </div>
+              {shuffling ? (
+                <div className="relative h-28 w-32">
+                  {shufflePreviewCards.slice(0, 3).map((card, index) => (
+                    <div
+                      key={index}
+                      className={`absolute left-1/2 top-2 h-24 w-16 -translate-x-1/2 overflow-hidden rounded-xl border border-darkGold/50 bg-white shadow-sm ${card.rotate} ${card.translate} animate-pulse`}
+                    >
+                      <Image
+                        src="/cards/back.png"
+                        alt=""
+                        fill
+                        sizes="64px"
+                        className="object-cover"
+                      />
+                    </div>
+                  ))}
+                  <span className="sr-only">紫微牌卡洗牌中</span>
+                </div>
+              ) : (
+                <div className="relative h-32 w-20 overflow-hidden rounded-xl border border-darkGold/50 bg-white shadow-sm">
+                  <Image
+                    src="/cards/back.png"
+                    alt="紫微牌卡牌背"
+                    fill
+                    sizes="80px"
+                    className="object-cover"
+                  />
+                </div>
+              )}
               <p className="text-sm text-textMuted">
                 {shuffling ? "系統正在為你洗牌與抽牌。" : "自動抽牌會直接抽出一張牌。"}
               </p>
@@ -374,15 +414,33 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
                 className="object-cover"
               />
             </div>
-          ) : (
-            <div className="w-full overflow-x-auto pb-2">
-              <div
-                className={`grid min-w-[420px] grid-cols-7 gap-2 sm:min-w-0 ${
-                  shuffling ? "animate-pulse" : ""
-                }`}
-              >
+          ) : shuffling ? (
+            <div className="grid justify-items-center gap-3 rounded-2xl border border-purple-100 bg-purple-50/60 px-5 py-4">
+              <div className="relative h-32 w-40">
+                {shufflePreviewCards.map((card, index) => (
+                  <div
+                    key={index}
+                    className={`absolute left-1/2 top-3 h-28 w-20 -translate-x-1/2 overflow-hidden rounded-xl border border-darkGold/50 bg-white shadow-sm ${card.rotate} ${card.translate} animate-pulse`}
+                  >
+                    <Image
+                      src="/cards/back.png"
+                      alt=""
+                      fill
+                      sizes="80px"
+                      className="object-cover"
+                    />
+                  </div>
+                ))}
+                <span className="sr-only">紫微牌卡洗牌中</span>
+              </div>
+              <p className="text-sm text-textMuted">正在洗牌，請靜心感受問題……</p>
+            </div>
+          ) : pendingIndex === null ? (
+            <div className="w-full overflow-x-auto pb-4 pt-2">
+              <div className="flex min-w-max items-end justify-start gap-1 px-1 sm:justify-center sm:gap-2">
                 {ziweiCards.map((card, index) => {
                   const isPending = pendingIndex === index
+                  const spreadTransform = spreadCardTransforms[index] ?? ""
 
                   return (
                     <button
@@ -390,10 +448,10 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
                       type="button"
                       onClick={() => pickCard(index)}
                       disabled={shuffling || isInterpreting || hasResultPreview}
-                      className={`group h-24 rounded-xl border p-1.5 transition duration-200 sm:h-28 ${
+                      className={`group h-24 w-16 shrink-0 rounded-xl border p-1.5 transition duration-200 hover:-translate-y-1 focus-visible:-translate-y-1 sm:h-28 sm:w-[72px] ${spreadTransform} ${
                         isPending
                           ? "border-darkGold bg-[#fff8e8] shadow-[0_0_18px_rgba(180,142,56,0.25)]"
-                          : "border-borderSoft bg-white hover:-translate-y-0.5 hover:border-darkGold hover:shadow-sm"
+                          : "border-borderSoft bg-white hover:border-darkGold hover:shadow-sm"
                       } ${shuffling || isInterpreting || hasResultPreview ? "cursor-default opacity-80" : ""}`}
                       aria-label={`選擇第 ${index + 1} 張牌：${card.name}`}
                     >
@@ -411,6 +469,10 @@ export function DivinationDrawPreview({ question, drawMode = null }: DivinationD
                   )
                 })}
               </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-purple-100 bg-purple-50/60 px-4 py-3 text-sm text-textMuted">
+              已選出一張牌，請在下方確認。
             </div>
           )}
 
