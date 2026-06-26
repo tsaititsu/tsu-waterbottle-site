@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server"
 import { ziweiCards } from "@/lib/divination/cards"
-import { reserveLocalDivinationEntitlement } from "@/lib/divination/localEntitlement"
 import type {
   CreateDivinationReadingRequest,
   CreateDivinationReadingResponse,
   DivinationDrawMode,
-  DivinationMockPaymentGate,
   DivinationPosition,
   DivinationReadingPreview,
 } from "@/lib/divination/types"
@@ -41,7 +39,6 @@ export async function POST(request: Request) {
   const question = getTrimmedString(body.question)
   const cardId = getTrimmedString(body.cardId)
   const localUserId = getTrimmedString(body.localUserId)
-  const mockPaid = body.mockPaid === true
   const drawMode = body.drawMode
   const position = body.position
 
@@ -64,61 +61,22 @@ export async function POST(request: Request) {
   }
 
   const readingId = createMockReadingId()
-  const entitlementResult = reserveLocalDivinationEntitlement({
-    readingId,
-    localUserId,
-    mockPaid,
-  })
-
-  if (!entitlementResult.ok) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: entitlementResult.error,
-        message: entitlementResult.message,
-        requiresPayment: entitlementResult.requiresPayment,
-        amountTwd: entitlementResult.amountTwd,
-      },
-      { status: 402 }
-    )
-  }
-
-  const { entitlement } = entitlementResult
-  const mockPaymentId = `mock_pay_${readingId}`
   const reading = {
     id: readingId,
     question,
     drawMode: drawMode as DivinationDrawMode,
+    localUserId,
     cardId: selectedCard?.id ?? null,
     cardName: selectedCard?.name ?? null,
     position: positions.has(position as DivinationPosition) ? (position as DivinationPosition) : null,
     status: "waiting_draw",
     createdAt: new Date().toISOString(),
   } satisfies DivinationReadingPreview
-  const mockPaymentGate = {
-    mode: "mock",
-    paymentId: mockPaymentId,
-    provider: "mock",
-    status: entitlement.type,
-    itemType: "ai_divination",
-    itemName: "紫微牌卡 AI 深度解讀",
-    amountTwd: entitlement.amountTwd,
-    currency: "TWD",
-    entitlementToken: entitlement.entitlementToken,
-  } satisfies DivinationMockPaymentGate
   const response = {
     ok: true,
     reading,
-    entitlement: {
-      type: entitlement.type,
-      amountTwd: entitlement.amountTwd,
-      localUserId: entitlement.localUserId,
-      taiwanDate: entitlement.taiwanDate,
-      entitlementToken: entitlement.entitlementToken,
-    },
-    mockPaymentGate,
   } satisfies CreateDivinationReadingResponse
 
-  // Local development entitlement gate only. 正式版必須改為查正式 entitlement / payments。
+  // Local development only. Gate is checked when the user starts interpretation.
   return NextResponse.json(response)
 }

@@ -3,8 +3,8 @@ import { buildDivinationPrompt } from "@/lib/divination/buildDivinationPrompt"
 import { ziweiCards } from "@/lib/divination/cards"
 import {
   consumeLocalDivinationEntitlement,
-  getLocalDivinationEntitlementStatus,
   releaseLocalDivinationEntitlement,
+  reserveLocalDivinationEntitlement,
 } from "@/lib/divination/localEntitlement"
 import type {
   DivinationCardSummary,
@@ -17,17 +17,6 @@ import type {
 } from "@/lib/divination/types"
 
 type RequestBody = Partial<Record<keyof DivinationInterpretRequest, unknown>>
-
-type MockPaymentGate = {
-  mode?: unknown
-  paymentId?: unknown
-  provider?: unknown
-  status?: unknown
-  itemType?: unknown
-  amountTwd?: unknown
-  currency?: unknown
-  entitlementToken?: unknown
-}
 
 const drawModes = new Set<DivinationDrawMode>(["manual", "auto"])
 const positions = new Set<DivinationPosition>(["upright", "reversed"])
@@ -45,10 +34,6 @@ function getTrimmedString(value: unknown) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
-function getMockPaymentGate(value: unknown): MockPaymentGate | null {
-  return isRecord(value) ? value : null
 }
 
 function isValidInterpretation(value: unknown): value is DivinationInterpretation {
@@ -76,24 +61,6 @@ function normalizeInterpretation(value: DivinationInterpretation): DivinationInt
     advice: value.advice.trim(),
     reminder: value.reminder.trim(),
   }
-}
-
-function isValidMockPaymentGate(value: unknown) {
-  const gate = getMockPaymentGate(value)
-
-  return Boolean(
-    gate &&
-      gate.mode === "mock" &&
-      (gate.provider === undefined || gate.provider === "mock") &&
-      (gate.status === "daily_free" || gate.status === "mock_paid") &&
-      gate.itemType === "ai_divination" &&
-      (gate.amountTwd === 0 || gate.amountTwd === 50) &&
-      gate.currency === "TWD" &&
-      typeof gate.paymentId === "string" &&
-      gate.paymentId.trim() &&
-      typeof gate.entitlementToken === "string" &&
-      gate.entitlementToken.trim()
-  )
 }
 
 function extractResponseText(value: unknown) {
@@ -268,9 +235,9 @@ export async function POST(request: Request) {
   const cardId = getTrimmedString(body.cardId)
   const drawMode = body.drawMode
   const position = body.position
-  const mockPaymentGate = getMockPaymentGate(body.mockPaymentGate)
   const readingId = getTrimmedString(body.readingId)
-  const entitlementToken = getTrimmedString(mockPaymentGate?.entitlementToken)
+  const localUserId = getTrimmedString(body.localUserId)
+  const mockPaid = body.mockPaid === true
 
   if (!question) {
     return jsonError("請先填寫占卜問題。")
@@ -288,28 +255,8 @@ export async function POST(request: Request) {
     return jsonError("正反位資料不正確。")
   }
 
-  if (!isValidMockPaymentGate(mockPaymentGate)) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "ENTITLEMENT_REQUIRED",
-        message: "請先使用每日免費次數或完成 NT$50 單次占卜。",
-      },
-      { status: 402 }
-    )
-  }
-
-  const entitlement = getLocalDivinationEntitlementStatus(readingId, entitlementToken)
-
-  if (!entitlement || entitlement.status !== "reserved") {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "ENTITLEMENT_REQUIRED",
-        message: "請先使用每日免費次數或完成 NT$50 單次占卜。",
-      },
-      { status: 402 }
-    )
+  if (!readingId) {
+    return jsonError("缺少占卜紀錄。")
   }
 
   const selectedCard = ziweiCards.find((card) => card.id === cardId)
@@ -327,6 +274,26 @@ export async function POST(request: Request) {
 
   const safeDrawMode = drawMode as DivinationDrawMode
   const safePosition = position as DivinationPosition
+  const entitlementResult = reserveLocalDivinationEntitlement({
+    readingId,
+    localUserId,
+    mockPaid,
+  })
+
+  if (!entitlementResult.ok) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: entitlementResult.error,
+        message: entitlementResult.message,
+        requiresPayment: entitlementResult.requiresPayment,
+        amountTwd: entitlementResult.amountTwd,
+      },
+      { status: 402 }
+    )
+  }
+
+  const { entitlement } = entitlementResult
   const openAiResult = await createOpenAiInterpretation({
     question,
     drawMode: safeDrawMode,
@@ -364,7 +331,7 @@ export async function POST(request: Request) {
   } satisfies DivinationCardSummary
   const paymentGate = {
     mode: "mock",
-    paymentId: getTrimmedString(mockPaymentGate?.paymentId),
+    paymentId: `mock_pay_${readingId}`,
     provider: "mock",
     status: entitlement.type,
     itemType: "ai_divination",
@@ -382,7 +349,7 @@ export async function POST(request: Request) {
     paymentGate,
   } satisfies DivinationInterpretResponse
 
-  consumeLocalDivinationEntitlement(readingId, entitlementToken)
+  consumeLocalDivinationEntitlement(readingId, entitlement.entitlementToken)
 
   return NextResponse.json(response)
 }

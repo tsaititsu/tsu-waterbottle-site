@@ -28,6 +28,7 @@ export type DivinationReadingPreview = {
   id: string
   question: string
   drawMode: DivinationDrawMode
+  localUserId?: string
   cardId?: string | null
   cardName?: string | null
   position?: DivinationPosition | null
@@ -50,14 +51,14 @@ export type DivinationReadingSession = {
   drawMode: DivinationDrawMode
   localUserId: string
   entitlement?: DivinationLocalEntitlement
-  mockPaymentGate: DivinationMockPaymentGate
+  mockPaymentGate?: DivinationMockPaymentGate
 }
 
 export type CreateDivinationReadingSuccessResponse = {
   ok: true
   reading: DivinationReadingPreview
   entitlement?: DivinationLocalEntitlement
-  mockPaymentGate: DivinationMockPaymentGate
+  mockPaymentGate?: DivinationMockPaymentGate
 }
 
 export type DivinationErrorResponse = {
@@ -96,6 +97,8 @@ export type DivinationInterpretRequest = {
   drawMode: DivinationDrawMode
   cardId: string
   position: DivinationPosition
+  localUserId?: string
+  mockPaid?: boolean
   mockPaymentGate?: DivinationMockPaymentGate
 }
 

@@ -16,16 +16,7 @@ type QuestionSubmitPayload = {
   mode: DrawMode
 }
 
-type PaymentRequiredState = {
-  question: string
-  drawMode: DrawMode
-  message: string
-  amountTwd: number
-}
-
 const localUserStorageKey = "divination_local_user_id"
-const seedCardId = "ziwei"
-const seedPosition = "upright"
 
 function createLocalUserId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -50,15 +41,12 @@ function getLocalUserId() {
 
 export function DivinationLocalPreview() {
   const [readingSession, setReadingSession] = useState<DivinationReadingSession | null>(null)
-  const [paymentRequired, setPaymentRequired] = useState<PaymentRequiredState | null>(null)
   const [isCreatingReading, setIsCreatingReading] = useState(false)
-  const [isMockPaying, setIsMockPaying] = useState(false)
   const [errorMessage, setErrorMessage] = useState("")
 
   async function createReadingSession(input: {
     question: string
     drawMode: DrawMode
-    mockPaid?: boolean
   }) {
     const localUserId = getLocalUserId()
     const response = await fetch("/api/divination/readings/create", {
@@ -67,30 +55,12 @@ export function DivinationLocalPreview() {
       body: JSON.stringify({
         question: input.question,
         drawMode: input.drawMode,
-        cardId: seedCardId,
-        position: seedPosition,
         localUserId,
-        mockPaid: input.mockPaid === true,
       }),
     })
     const data = (await response.json()) as CreateDivinationReadingResponse
 
     if (!response.ok || !data.ok) {
-      if (
-        response.status === 402 &&
-        data.ok === false &&
-        data.error === "DAILY_FREE_USED" &&
-        data.requiresPayment
-      ) {
-        setPaymentRequired({
-          question: input.question,
-          drawMode: input.drawMode,
-          message: data.message || "今日免費占卜已使用，請使用 NT$50 單次占卜。",
-          amountTwd: data.amountTwd ?? 50,
-        })
-        return null
-      }
-
       throw new Error(
         data.ok === false ? data.message || data.error : "建立占卜紀錄失敗，請稍後再試。"
       )
@@ -101,15 +71,12 @@ export function DivinationLocalPreview() {
       question: input.question,
       drawMode: input.drawMode,
       localUserId,
-      entitlement: data.entitlement,
-      mockPaymentGate: data.mockPaymentGate,
     } satisfies DivinationReadingSession
   }
 
   async function handleQuestionSubmit(payload: QuestionSubmitPayload) {
     setIsCreatingReading(true)
     setErrorMessage("")
-    setPaymentRequired(null)
     setReadingSession(null)
 
     try {
@@ -127,32 +94,6 @@ export function DivinationLocalPreview() {
       )
     } finally {
       setIsCreatingReading(false)
-    }
-  }
-
-  async function handleMockPaidStart() {
-    if (!paymentRequired) return
-
-    setIsMockPaying(true)
-    setErrorMessage("")
-
-    try {
-      const session = await createReadingSession({
-        question: paymentRequired.question,
-        drawMode: paymentRequired.drawMode,
-        mockPaid: true,
-      })
-
-      if (session) {
-        setPaymentRequired(null)
-        setReadingSession(session)
-      }
-    } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "建立 NT$50 單次占卜失敗，請稍後再試。"
-      )
-    } finally {
-      setIsMockPaying(false)
     }
   }
 
@@ -182,32 +123,6 @@ export function DivinationLocalPreview() {
           <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-7 text-red-700">
             {errorMessage}
           </p>
-        ) : null}
-        {paymentRequired ? (
-          <div className="rounded-2xl border border-purple-100 bg-softPurple p-5 shadow-soft">
-            <div className="rounded-2xl border border-borderSoft bg-white p-5">
-              <p className="text-sm font-semibold tracking-[0.18em] text-darkGold">
-                Payment Required
-              </p>
-              <h3 className="mt-2 text-xl font-semibold text-deepPurple">
-                今日免費占卜已使用
-              </h3>
-              <p className="mt-3 leading-7 text-textMuted">
-                本次占卜需 NT${paymentRequired.amountTwd}。這裡先使用本機 mock paid
-                測試流程，不會接正式金流。
-              </p>
-              <button
-                type="button"
-                onClick={handleMockPaidStart}
-                disabled={isMockPaying}
-                className="mt-5 rounded-full bg-deepPurple px-6 py-3 text-sm font-semibold text-white transition hover:bg-purpleMain disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isMockPaying
-                  ? "建立 NT$50 單次占卜中..."
-                  : `使用 NT$${paymentRequired.amountTwd} 單次占卜（本機測試）`}
-              </button>
-            </div>
-          </div>
         ) : null}
       </section>
       {readingSession ? (

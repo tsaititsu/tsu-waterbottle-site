@@ -109,6 +109,15 @@ export function getTaiwanDateKey(date = new Date()) {
 export function reserveLocalDivinationEntitlement(input: ReserveInput): ReserveResult {
   const store = getStore()
   const user = getOrCreateUser(input.localUserId)
+  const existingEntitlement = store.reservations.get(input.readingId)
+
+  if (existingEntitlement) {
+    return {
+      ok: true,
+      entitlement: existingEntitlement,
+    }
+  }
+
   const taiwanDate = getTaiwanDateKey()
   const useMockPaid = input.mockPaid === true
   const freeUsed = user.lastFreeReadingDate === taiwanDate
@@ -119,7 +128,7 @@ export function reserveLocalDivinationEntitlement(input: ReserveInput): ReserveR
     return {
       ok: false,
       error: "DAILY_FREE_USED",
-      message: "今日免費占卜已使用，請使用 NT$50 單次占卜。",
+      message: "今日免費占卜已使用，本次解讀需 NT$50。",
       requiresPayment: true,
       amountTwd: READING_COST_TWD,
     }

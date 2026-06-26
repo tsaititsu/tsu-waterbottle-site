@@ -17,6 +17,11 @@ type DivinationDrawPreviewProps = {
   readingSession?: DivinationReadingSession | null
 }
 
+type PaymentRequiredState = {
+  message: string
+  amountTwd: number
+}
+
 const initialMessage = "請先依照抽牌方式開始抽牌。"
 const shufflingMessage = "洗牌中..."
 const autoShufflingMessage = "系統正在為你洗牌與抽牌..."
@@ -59,16 +64,20 @@ const spreadCardTransforms = [
   "rotate-[8deg] translate-y-3",
 ]
 
-const fanAngles = [-55, -46.5, -38, -29.5, -21, -12.5, -4, 4, 12.5, 21, 29.5, 38, 46.5, 55]
-
 function getFanTransform(index: number) {
-  const angle = fanAngles[index] ?? 0
-  const radius = 285
-  const yRadius = 110
-  const x = Math.sin((angle * Math.PI) / 180) * radius
-  const y = -Math.cos((angle * Math.PI) / 180) * yRadius + 110
+  const centerIndex = (ziweiCards.length - 1) / 2
+  const offset = index - centerIndex
+  const x = offset * 66
+  const y = Math.pow(Math.abs(offset), 1.22) * 5 + 8
+  const angle = offset * 3.8
 
-  return `translate(calc(-50% + ${x}px), ${y}px) rotate(${angle / 3}deg)`
+  return `translate(calc(-50% + ${x}px), ${y}px) rotate(${angle}deg)`
+}
+
+function getFanZIndex(index: number) {
+  const centerIndex = (ziweiCards.length - 1) / 2
+
+  return 100 - Math.round(Math.abs(index - centerIndex) * 4)
 }
 
 function getRandomPosition(): DivinationPosition {
@@ -77,6 +86,85 @@ function getRandomPosition(): DivinationPosition {
 
 function getRandomCardIndex() {
   return Math.floor(Math.random() * ziweiCards.length)
+}
+
+function DivinationConsentNotice({
+  checked,
+  onCheckedChange,
+}: {
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+}) {
+  return (
+    <div className="rounded-2xl border border-borderSoft bg-white p-4">
+      <details className="group">
+        <summary className="cursor-pointer list-none">
+          <div className="flex items-start gap-3 text-sm leading-7 text-textMuted">
+            <input
+              checked={checked}
+              className="mt-1 size-4 rounded border-borderSoft text-deepPurple focus:ring-deepPurple"
+              onChange={(event) => onCheckedChange(event.target.checked)}
+              onClick={(event) => event.stopPropagation()}
+              type="checkbox"
+            />
+            <span>
+              我已詳細閱讀並同意《AI 占卜服務說明》、《點數與每日免費規則》及《服務條款》，並了解占卜前相關注意事項。
+              <span className="ml-1 font-semibold text-darkGold underline underline-offset-4 group-open:hidden">
+                點我查看
+              </span>
+              <span className="ml-1 hidden font-semibold text-darkGold underline underline-offset-4 group-open:inline">
+                收合內容
+              </span>
+            </span>
+          </div>
+        </summary>
+
+        <div className="mt-4 max-h-72 space-y-5 overflow-y-auto rounded-lg bg-softPurple/60 p-4 text-sm leading-7 text-textMuted">
+          <div>
+            <p className="font-semibold text-deepPurple">AI 占卜服務說明</p>
+            <ul className="mt-2 grid gap-1">
+              <li>占卜會在水瓶先生紫微牌卡系統中完成。</li>
+              <li>正式網站目前作為占卜入口與流程展示。</li>
+              <li>抽牌、解讀、紀錄與問題回報，會以占卜流程內顯示為準。</li>
+            </ul>
+          </div>
+
+          <div>
+            <p className="font-semibold text-deepPurple">點數與每日免費規則</p>
+            <ul className="mt-2 grid gap-2">
+              <li>每日免費、點數餘額與每次占卜扣點規則，以系統內顯示為準。</li>
+              <li>若今日免費已使用，再次占卜會依目前流程顯示 NT$50 單次占卜提示。</li>
+              <li>若遇到點數、登入或不能占卜問題，請聯繫水瓶先生協助處理。</li>
+            </ul>
+          </div>
+
+          <div>
+            <p className="font-semibold text-deepPurple">服務條款</p>
+            <ul className="mt-2 grid gap-2">
+              <li>AI 占卜內容僅供命理與牌卡參考，不作為醫療、法律、投資、重大人生決策之唯一依據。</li>
+              <li>占卜結果不保證特定事件一定發生，也不保證感情、財務、工作或其他結果必然符合期待。</li>
+              <li>使用者應自行判斷與承擔實際行動結果。</li>
+              <li>占卜問題應以與使用者本人有實際關聯的人事物為主。</li>
+              <li>若有占卜資料、付款或系統問題，可聯繫水瓶先生官方 LINE。</li>
+            </ul>
+          </div>
+
+          <div>
+            <p className="font-semibold text-deepPurple">補充說明</p>
+            <ul className="mt-2 grid gap-2">
+              <li>目前正式網站僅作為占卜入口與流程展示，不在正式網站存放舊占卜問題、解答、會員點數或 LINE Token。</li>
+              <li>若遇到登入、扣點、每日免費或占卜紀錄相關問題，仍以原占卜系統內處理為主。</li>
+              <li>目前不搬舊會員資料、不合併點數、不碰原扣點流程。</li>
+            </ul>
+          </div>
+        </div>
+      </details>
+
+      <p className="mt-3 text-xs leading-6 text-textMuted">
+        勾選後即可開始解讀；若今日免費次數已用完，下一步將顯示支付 NT$50。
+      </p>
+    </div>
+  )
 }
 
 export function DivinationDrawPreview({ readingSession = null }: DivinationDrawPreviewProps) {
@@ -91,6 +179,10 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
     useState<DivinationMockPaymentGate | null>(null)
   const [interpretation, setInterpretation] = useState<DivinationInterpretation | null>(null)
   const [isInterpreting, setIsInterpreting] = useState(false)
+  const [isMockPaying, setIsMockPaying] = useState(false)
+  const [paymentRequired, setPaymentRequired] = useState<PaymentRequiredState | null>(null)
+  const [hasAcceptedTerms, setHasAcceptedTerms] = useState(false)
+  const [hoveredCardIndex, setHoveredCardIndex] = useState<number | null>(null)
   const [message, setMessage] = useState(initialMessage)
   const [errorMessage, setErrorMessage] = useState("")
   const shuffleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -103,8 +195,8 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
   const trimmedQuestion = readingSession?.question.trim() ?? ""
   const drawMode = readingSession?.drawMode ?? null
   const readingId = readingSession?.readingId ?? ""
-  const mockPaymentGate = readingSession?.mockPaymentGate ?? null
-  const canDraw = Boolean(trimmedQuestion && drawMode && readingId && mockPaymentGate)
+  const localUserId = readingSession?.localUserId ?? ""
+  const canDraw = Boolean(trimmedQuestion && drawMode && readingId)
   const isManualMode = drawMode === "manual"
   const isAutoMode = drawMode === "auto"
   const displayQuestion = trimmedQuestion || "請先在上方填寫問題並選擇抽牌方式。"
@@ -138,6 +230,10 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
     setConfirmedPaymentGate(null)
     setInterpretation(null)
     setIsInterpreting(false)
+    setIsMockPaying(false)
+    setPaymentRequired(null)
+    setHasAcceptedTerms(false)
+    setHoveredCardIndex(null)
     interpretRequestRef.current += 1
     autoStartedReadingIdRef.current = ""
     autoInterpretedReadingIdRef.current = ""
@@ -168,6 +264,10 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
     setConfirmedPaymentGate(null)
     setInterpretation(null)
     setIsInterpreting(false)
+    setIsMockPaying(false)
+    setPaymentRequired(null)
+    setHasAcceptedTerms(false)
+    setHoveredCardIndex(null)
     setErrorMessage("")
     setMessage("洗牌中，請先把注意力放在你的問題上……")
 
@@ -182,11 +282,14 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
 
     setPendingIndex(index)
     setPendingPosition(getRandomPosition())
+    setHasAcceptedTerms(false)
+    setHoveredCardIndex(null)
     setConfirmedCard(null)
     setConfirmedPosition(null)
     setConfirmedReadingId("")
     setConfirmedPaymentGate(null)
     setInterpretation(null)
+    setPaymentRequired(null)
     setErrorMessage("")
     setMessage(pendingMessage)
   }
@@ -196,11 +299,14 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
 
     setPendingIndex(null)
     setPendingPosition(null)
+    setHasAcceptedTerms(false)
+    setHoveredCardIndex(null)
     setConfirmedCard(null)
     setConfirmedPosition(null)
     setConfirmedReadingId("")
     setConfirmedPaymentGate(null)
     setInterpretation(null)
+    setPaymentRequired(null)
     setErrorMessage("")
     setMessage(readyMessage)
   }
@@ -231,6 +337,10 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
     setConfirmedPaymentGate(null)
     setInterpretation(null)
     setIsInterpreting(false)
+    setIsMockPaying(false)
+    setPaymentRequired(null)
+    setHasAcceptedTerms(false)
+    setHoveredCardIndex(null)
     setErrorMessage("")
     setMessage(autoShufflingMessage)
 
@@ -255,14 +365,14 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
   async function interpretCard(
     selectedCard: ZiweiCard,
     selectedPosition: DivinationPosition,
-    options?: { auto?: boolean }
+    options?: { auto?: boolean; mockPaid?: boolean }
   ) {
     if (!trimmedQuestion || !drawMode) {
       setErrorMessage(blockedMessage)
       return
     }
 
-    if (!readingId || !mockPaymentGate) {
+    if (!readingId) {
       setErrorMessage("請先建立占卜紀錄後再抽牌。")
       return
     }
@@ -280,8 +390,13 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
     setConfirmedReadingId("")
     setConfirmedPaymentGate(null)
     setInterpretation(null)
+    setPaymentRequired(null)
     setErrorMessage("")
-    setMessage(options?.auto ? "已為你抽出牌卡，正在產生解讀……" : "檢查付款 Gate，並產生牌義預覽中...")
+    setMessage(
+      options?.auto
+        ? "已為你抽出牌卡，正在產生解讀……"
+        : "檢查每日免費次數，並產生牌義解讀中..."
+    )
 
     try {
       const interpretResponse = await fetch("/api/divination/interpret", {
@@ -293,20 +408,32 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
           drawMode,
           cardId: selectedCard.id,
           position: selectedPosition,
-          mockPaymentGate,
+          localUserId,
+          mockPaid: options?.mockPaid === true,
         }),
       })
       const interpretData = (await interpretResponse.json()) as DivinationInterpretResponse
 
       if (!interpretResponse.ok || !interpretData.ok) {
-        const gateError =
-          interpretResponse.status === 402 || interpretResponse.status === 403
+        if (
+          interpretResponse.status === 402 &&
+          interpretData.ok === false &&
+          interpretData.error === "DAILY_FREE_USED" &&
+          interpretData.requiresPayment
+        ) {
+          if (interpretRequestRef.current !== requestId) return
+
+          setPaymentRequired({
+            message: interpretData.message || "今日免費占卜已使用，本次解讀需 NT$50。",
+            amountTwd: interpretData.amountTwd ?? 50,
+          })
+          setErrorMessage("")
+          setMessage("今日免費占卜已使用，本次解讀需 NT$50。")
+          return
+        }
+
         throw new Error(
-          gateError
-            ? "尚未通過付款 Gate，無法產生解讀預覽。"
-            : interpretData.ok === false
-              ? interpretData.error
-              : "解讀預覽產生失敗"
+          interpretData.ok === false ? interpretData.message || interpretData.error : "解讀預覽產生失敗"
         )
       }
 
@@ -317,6 +444,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
       setConfirmedReadingId(readingId)
       setConfirmedPaymentGate(interpretData.paymentGate)
       setInterpretation(interpretData.interpretation)
+      setPaymentRequired(null)
       setErrorMessage("")
       setMessage(resultReadyMessage)
     } catch (error) {
@@ -328,13 +456,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
       setConfirmedReadingId("")
       setConfirmedPaymentGate(null)
       setInterpretation(null)
-      setErrorMessage(
-        error instanceof Error && error.message.includes("付款 Gate")
-          ? error.message.includes("尚未通過")
-            ? "尚未通過付款 Gate，無法產生解讀預覽。"
-            : "付款 Gate 預覽建立失敗，請稍後再試。"
-          : "解讀預覽產生失敗，請稍後再試。"
-      )
+      setErrorMessage(error instanceof Error ? error.message : "解讀預覽產生失敗，請稍後再試。")
       setMessage(pendingMessage)
     } finally {
       if (interpretRequestRef.current === requestId) {
@@ -349,7 +471,29 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
       return
     }
 
+    if (isManualMode && !hasAcceptedTerms) {
+      setErrorMessage("請先閱讀並勾選同意 AI 占卜服務說明、點數與每日免費規則及服務條款。")
+      return
+    }
+
     await interpretCard(pendingCard, pendingPosition)
+  }
+
+  async function handleMockPaidInterpret() {
+    if (!pendingCard || !pendingPosition) {
+      setErrorMessage("請先選一張牌。")
+      return
+    }
+
+    if (isInterpreting || isMockPaying) return
+
+    setIsMockPaying(true)
+
+    try {
+      await interpretCard(pendingCard, pendingPosition, { mockPaid: true })
+    } finally {
+      setIsMockPaying(false)
+    }
   }
 
   useEffect(() => {
@@ -477,7 +621,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
             </div>
           ) : pendingIndex === null ? (
             <div className="w-full">
-              <div className="overflow-x-auto pb-4 pt-2 sm:hidden">
+              <div className="overflow-x-auto pb-4 pt-2 lg:hidden">
                 <div className="flex min-w-max items-end justify-start gap-1 px-1">
                   {ziweiCards.map((card, index) => {
                     const spreadTransform = spreadCardTransforms[index] ?? ""
@@ -509,7 +653,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                 </div>
               </div>
 
-              <div className="relative hidden h-[330px] w-full max-w-5xl sm:block">
+              <div className="relative hidden h-[340px] w-full max-w-5xl scroll-mt-32 lg:block">
                 {ziweiCards.map((card, index) => {
                   return (
                     <button
@@ -517,16 +661,20 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                       type="button"
                       onClick={() => pickCard(index)}
                       disabled={shuffling || isInterpreting || hasResultPreview}
-                      className={`group absolute left-1/2 top-8 h-32 w-20 rounded-xl border border-borderSoft bg-white p-1.5 transition duration-500 hover:border-darkGold hover:shadow-[0_18px_36px_rgba(180,142,56,0.2)] ${
+                      onBlur={() => setHoveredCardIndex(null)}
+                      onFocus={() => setHoveredCardIndex(index)}
+                      onMouseEnter={() => setHoveredCardIndex(index)}
+                      onMouseLeave={() => setHoveredCardIndex(null)}
+                      className={`group absolute left-1/2 top-12 h-32 w-20 scroll-mt-32 rounded-xl border border-borderSoft bg-white p-1.5 transition duration-300 hover:-translate-y-1 hover:border-darkGold hover:shadow-[0_18px_36px_rgba(180,142,56,0.2)] focus-visible:-translate-y-1 focus-visible:border-darkGold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-darkGold/40 ${
                         shuffling || isInterpreting || hasResultPreview ? "cursor-default opacity-80" : ""
                       }`}
                       style={{
                         transform: `${getFanTransform(index)}`,
-                        zIndex: index + 1,
+                        zIndex: hoveredCardIndex === index ? 200 : getFanZIndex(index),
                       }}
                       aria-label={`選擇第 ${index + 1} 張牌`}
                     >
-                      <span className="relative block h-full overflow-hidden rounded-lg border border-purple-100 bg-softPurple transition duration-300 group-hover:-translate-y-4 group-hover:scale-105 group-hover:border-darkGold group-focus-visible:-translate-y-4 group-focus-visible:scale-105">
+                      <span className="pointer-events-none relative block h-full overflow-hidden rounded-lg border border-purple-100 bg-softPurple transition duration-300 group-hover:-translate-y-4 group-hover:scale-105 group-hover:border-darkGold group-focus-visible:-translate-y-4 group-focus-visible:scale-105">
                         <Image
                           src="/cards/back.png"
                           alt=""
@@ -561,6 +709,28 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
             <p className="rounded-full border border-red-200 bg-red-50 px-4 py-2 text-center text-sm text-red-700">
               {errorMessage}
             </p>
+          ) : null}
+
+          {paymentRequired && pendingCard && pendingPosition && !hasResultPreview ? (
+            <div className="grid w-full max-w-2xl gap-3 rounded-2xl border border-darkGold/40 bg-lightGold/40 p-4 text-textDark">
+              <p className="text-sm font-semibold tracking-[0.16em] text-darkGold">
+                Payment Required
+              </p>
+              <h4 className="text-xl font-semibold text-deepPurple">今日免費占卜已使用</h4>
+              <p className="leading-7 text-textMuted">
+                {paymentRequired.message} 這裡先使用本機 mock paid 測試流程，不會接正式金流。
+              </p>
+              <button
+                type="button"
+                onClick={handleMockPaidInterpret}
+                disabled={isInterpreting || isMockPaying}
+                className="rounded-full bg-deepPurple px-5 py-3 font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isInterpreting || isMockPaying
+                  ? "支付確認中..."
+                  : `支付 NT$${paymentRequired.amountTwd} 開始解讀（本機測試）`}
+              </button>
+            </div>
           ) : null}
 
           {pendingIndex !== null && !hasResultPreview && !isAutoMode ? (
@@ -598,11 +768,22 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                   </div>
                 </div>
               )}
+              {isManualMode ? (
+                <DivinationConsentNotice
+                  checked={hasAcceptedTerms}
+                  onCheckedChange={(checked) => {
+                    setHasAcceptedTerms(checked)
+                    if (checked) {
+                      setErrorMessage("")
+                    }
+                  }}
+                />
+              ) : null}
               <div className="grid gap-3 sm:grid-cols-2">
                 <button
                   type="button"
                   onClick={confirmCard}
-                  disabled={isInterpreting}
+                  disabled={isInterpreting || Boolean(paymentRequired) || (isManualMode && !hasAcceptedTerms)}
                   className="rounded-full bg-deepPurple px-5 py-3 font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isInterpreting ? "檢查付款 Gate，並產生牌義預覽中..." : "就是這張，開始解讀"}
