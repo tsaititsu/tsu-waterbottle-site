@@ -530,7 +530,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
         <div className="mt-6 grid justify-items-center gap-5">
           {!canDraw ? (
             <div className="grid justify-items-center gap-4 rounded-2xl border border-borderSoft bg-white px-5 py-5">
-              <div className="relative h-32 w-20 overflow-hidden rounded-xl border border-darkGold/50 bg-softPurple shadow-sm">
+              <div className="relative h-32 w-20 overflow-hidden rounded-xl shadow-sm">
                 <Image
                   src="/cards/back.png"
                   alt="紫微牌卡牌背"
@@ -548,7 +548,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                   {shufflePreviewCards.slice(0, 3).map((card, index) => (
                     <div
                       key={index}
-                      className={`absolute left-1/2 top-2 h-24 w-16 -translate-x-1/2 overflow-hidden rounded-xl border border-darkGold/50 bg-white shadow-sm ${card.rotate} ${card.translate} animate-pulse`}
+                      className={`absolute left-1/2 top-2 h-24 w-16 -translate-x-1/2 overflow-hidden rounded-xl shadow-sm ${card.rotate} ${card.translate} animate-pulse`}
                     >
                       <Image
                         src="/cards/back.png"
@@ -562,7 +562,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                   <span className="sr-only">紫微牌卡洗牌中</span>
                 </div>
               ) : (
-                <div className="relative h-32 w-20 overflow-hidden rounded-xl border border-darkGold/50 bg-white shadow-sm">
+                <div className="relative h-32 w-20 overflow-hidden rounded-xl shadow-sm">
                   <Image
                     src="/cards/back.png"
                     alt="紫微牌卡牌背"
@@ -578,7 +578,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
             </div>
           ) : !started ? (
             <div className="grid justify-items-center gap-4 px-4 py-4">
-              <div className="relative h-[168px] w-[112px] overflow-hidden rounded-2xl border border-darkGold/60 bg-white shadow-[0_18px_42px_rgba(180,142,56,0.18)] sm:h-[210px] sm:w-[140px]">
+              <div className="relative h-[168px] w-[112px] overflow-hidden rounded-2xl shadow-[0_18px_42px_rgba(180,142,56,0.18)] sm:h-[210px] sm:w-[140px]">
                 <Image
                   src="/cards/back.png"
                   alt="紫微牌卡牌背"
@@ -597,7 +597,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                 {shufflePreviewCards.map((card, index) => (
                   <div
                     key={index}
-                    className={`absolute left-1/2 top-3 h-32 w-24 -translate-x-1/2 overflow-hidden rounded-2xl border border-darkGold/60 bg-white shadow-[0_18px_42px_rgba(180,142,56,0.22)] ${card.rotate} ${card.translate} ${card.scale} animate-pulse`}
+                    className={`absolute left-1/2 top-3 h-32 w-24 -translate-x-1/2 overflow-hidden rounded-2xl shadow-[0_18px_42px_rgba(180,142,56,0.22)] ${card.rotate} ${card.translate} ${card.scale} animate-pulse`}
                   >
                     <Image
                       src="/cards/back.png"
@@ -628,12 +628,12 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                         type="button"
                         onClick={() => pickCard(index)}
                         disabled={shuffling || isInterpreting || hasResultPreview}
-                        className={`group h-24 w-16 shrink-0 rounded-xl border border-borderSoft bg-white p-1.5 transition duration-200 hover:-translate-y-1 hover:border-darkGold hover:shadow-sm focus-visible:-translate-y-1 ${spreadTransform} ${
+                        className={`group h-24 w-16 shrink-0 rounded-xl bg-transparent p-0 transition duration-200 hover:-translate-y-1 hover:shadow-sm focus-visible:-translate-y-1 ${spreadTransform} ${
                           shuffling || isInterpreting || hasResultPreview ? "cursor-default opacity-80" : ""
                         }`}
                         aria-label={`選擇第 ${index + 1} 張牌`}
                       >
-                        <span className="relative block h-full overflow-hidden rounded-lg border border-purple-100 bg-softPurple transition group-hover:border-darkGold">
+                        <span className="relative block h-full overflow-hidden rounded-xl transition">
                           <Image
                             src="/cards/back.png"
                             alt=""
@@ -661,7 +661,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                       onFocus={() => setHoveredCardIndex(index)}
                       onMouseEnter={() => setHoveredCardIndex(index)}
                       onMouseLeave={() => setHoveredCardIndex(null)}
-                      className={`group absolute left-1/2 top-12 h-32 w-20 scroll-mt-32 rounded-xl border border-borderSoft bg-white p-1.5 transition-all duration-200 ease-out hover:-translate-y-3 hover:border-darkGold hover:shadow-[0_18px_42px_rgba(180,142,56,0.28)] focus-visible:-translate-y-3 focus-visible:border-darkGold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-darkGold/40 ${
+                      className={`group absolute left-1/2 top-12 h-32 w-20 scroll-mt-32 rounded-xl bg-transparent p-0 transition-all duration-200 ease-out hover:-translate-y-3 hover:shadow-[0_18px_42px_rgba(180,142,56,0.28)] focus-visible:-translate-y-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-darkGold/40 ${
                         shuffling || isInterpreting || hasResultPreview ? "cursor-default opacity-80" : ""
                       }`}
                       style={{
@@ -673,7 +673,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                       }}
                       aria-label={`選擇第 ${index + 1} 張牌`}
                     >
-                      <span className="pointer-events-none relative block h-full overflow-hidden rounded-lg border border-purple-100 bg-softPurple transition duration-300 ease-out group-hover:-translate-y-4 group-hover:scale-105 group-hover:border-darkGold group-focus-visible:-translate-y-4 group-focus-visible:scale-105">
+                      <span className="pointer-events-none relative block h-full overflow-hidden rounded-xl transition duration-300 ease-out group-hover:-translate-y-4 group-hover:scale-105 group-focus-visible:-translate-y-4 group-focus-visible:scale-105">
                         <Image
                           src="/cards/back.png"
                           alt=""
