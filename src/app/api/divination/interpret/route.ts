@@ -1,8 +1,16 @@
 import { NextResponse } from "next/server"
-import { buildDivinationPrompt } from "@/lib/divination/buildDivinationPrompt"
 import { ziweiCards } from "@/lib/divination/cards"
 import {
+  buildLegacyDraftPrompt,
+  buildLegacyReadingContext,
+  buildLegacyReviewPrompt,
+  buildLegacyStructuredInterpretation,
+  parseLegacyReviewResult,
+  reviewAnswer,
+} from "@/lib/divination/legacyReadingEngine"
+import {
   consumeLocalDivinationEntitlement,
+  READING_COST_TWD,
   releaseLocalDivinationEntitlement,
   reserveLocalDivinationEntitlement,
 } from "@/lib/divination/localEntitlement"
@@ -103,80 +111,30 @@ function parseOpenAiInterpretation(text: string) {
   }
 }
 
-async function createOpenAiInterpretation(input: {
-  question: string
-  drawMode: DivinationDrawMode
-  card: (typeof ziweiCards)[number]
-  position: DivinationPosition
+async function requestOpenAiText(input: {
+  apiKey: string
+  model: string
+  prompt: string
+  textFormat?: Record<string, unknown>
 }) {
-  const apiKey = process.env.OPENAI_API_KEY
-
-  if (!apiKey) {
-    return {
-      ok: false as const,
-      status: 500,
-      error: "OPENAI_API_KEY_MISSING",
-      message: "尚未設定 OpenAI API Key。",
-    }
-  }
-
-  const model = process.env.OPENAI_MODEL || fallbackOpenAiModel
-  const prompt = buildDivinationPrompt(input)
   let response: Response
 
   try {
     response = await fetch(openAiResponsesUrl, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${input.apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model,
+        model: input.model,
         input: [
           {
-            role: "system",
-            content: prompt.instructions,
-          },
-          {
             role: "user",
-            content: prompt.input,
+            content: input.prompt,
           },
         ],
-        text: {
-          format: {
-            type: "json_schema",
-            name: "divination_interpretation",
-            strict: true,
-            schema: {
-              type: "object",
-              additionalProperties: false,
-              required: ["summary", "cardMessage", "situationAnalysis", "advice", "reminder"],
-              properties: {
-                summary: {
-                  type: "string",
-                  description: "一句話總結，不要太長。",
-                },
-                cardMessage: {
-                  type: "string",
-                  description: "說明這張牌與正反位帶來的核心訊息。",
-                },
-                situationAnalysis: {
-                  type: "string",
-                  description: "針對使用者問題分析目前狀態。",
-                },
-                advice: {
-                  type: "string",
-                  description: "給具體建議，至少 2～4 點，可以用自然段或條列。",
-                },
-                reminder: {
-                  type: "string",
-                  description: "溫和提醒，不恐嚇、不絕對化。",
-                },
-              },
-            },
-          },
-        },
+        ...(input.textFormat ? { text: { format: input.textFormat } } : {}),
       }),
     })
   } catch (error) {
@@ -205,9 +163,9 @@ async function createOpenAiInterpretation(input: {
   }
 
   const data = (await response.json()) as unknown
-  const interpretation = parseOpenAiInterpretation(extractResponseText(data))
+  const text = extractResponseText(data)
 
-  if (!interpretation) {
+  if (!text) {
     return {
       ok: false as const,
       status: 502,
@@ -215,6 +173,83 @@ async function createOpenAiInterpretation(input: {
       message: "解讀格式異常，請稍後再試。",
     }
   }
+
+  return {
+    ok: true as const,
+    text,
+  }
+}
+
+async function createOpenAiInterpretation(input: {
+  question: string
+  drawMode: DivinationDrawMode
+  card: (typeof ziweiCards)[number]
+  position: DivinationPosition
+}) {
+  const apiKey = process.env.OPENAI_API_KEY
+
+  if (!apiKey) {
+    return {
+      ok: false as const,
+      status: 500,
+      error: "OPENAI_API_KEY_MISSING",
+      message: "尚未設定 OpenAI API Key。",
+    }
+  }
+
+  const model = process.env.OPENAI_MODEL || fallbackOpenAiModel
+  const legacyContext = buildLegacyReadingContext(input)
+  const draftResult = await requestOpenAiText({
+    apiKey,
+    model,
+    prompt: buildLegacyDraftPrompt(legacyContext),
+  })
+
+  if (!draftResult.ok) {
+    return draftResult
+  }
+
+  const draftAnswer = reviewAnswer(draftResult.text, legacyContext)
+  const reviewResult = await requestOpenAiText({
+    apiKey,
+    model,
+    prompt: buildLegacyReviewPrompt(legacyContext, draftAnswer),
+    textFormat: {
+      type: "json_schema",
+      name: "divination_review",
+      strict: true,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["finalAnswer", "changedMeaning", "safetyAdjusted", "issuesFixed"],
+        properties: {
+          finalAnswer: {
+            type: "string",
+            description: "整理後給使用者看的完整最終解讀。",
+          },
+          changedMeaning: {
+            type: "boolean",
+            description: "是否改動原本命理主結論。",
+          },
+          safetyAdjusted: {
+            type: "boolean",
+            description: "是否因安全規則調整語氣或內容。",
+          },
+          issuesFixed: {
+            type: "array",
+            items: { type: "string" },
+            description: "簡短列出有修正的問題。",
+          },
+        },
+      },
+    },
+  })
+  const reviewedAnswer =
+    reviewResult.ok && parseLegacyReviewResult(reviewResult.text)?.finalAnswer
+      ? parseLegacyReviewResult(reviewResult.text)?.finalAnswer
+      : draftAnswer
+  const finalAnswer = reviewAnswer(reviewedAnswer || draftAnswer, legacyContext)
+  const interpretation = buildLegacyStructuredInterpretation(finalAnswer, legacyContext)
 
   return {
     ok: true as const,
@@ -294,6 +329,20 @@ export async function POST(request: Request) {
   }
 
   const { entitlement } = entitlementResult
+
+  if (entitlement.type !== "mock_paid") {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "PAYMENT_REQUIRED",
+        message: "本次 AI 占卜解讀需 NT$50。",
+        requiresPayment: true,
+        amountTwd: READING_COST_TWD,
+      },
+      { status: 402 }
+    )
+  }
+
   const openAiResult = await createOpenAiInterpretation({
     question,
     drawMode: safeDrawMode,

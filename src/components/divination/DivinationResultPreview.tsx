@@ -39,6 +39,7 @@ export function DivinationResultPreview({
   const cardImage = position === "reversed" ? card.reversedImage : card.image
   const meaning = position === "reversed" ? card.reversedMeaning : card.uprightMeaning
   const advice = position === "reversed" ? card.advice.reversed : card.advice.upright
+  const finalAnswer = interpretation?.finalAnswer?.trim()
 
   return (
     <section className="w-full rounded-[2rem] border border-purple-100 bg-[#faf7ff] p-5 text-slate-700 shadow-[0_18px_48px_rgba(88,55,132,0.12)] md:p-6">
@@ -76,7 +77,12 @@ export function DivinationResultPreview({
             </div>
           </div>
 
-          {interpretation ? (
+          {finalAnswer ? (
+            <div className="grid gap-3 rounded-2xl border border-purple-100 bg-white p-5 leading-8 shadow-[0_10px_28px_rgba(88,55,132,0.08)]">
+              <p className="font-semibold text-[#4b2d73]">完整解讀</p>
+              <div className="grid gap-4 whitespace-pre-line text-[#3f3450]">{finalAnswer}</div>
+            </div>
+          ) : interpretation ? (
             <div className="grid gap-3">
               <div className="grid gap-2 rounded-2xl border border-purple-100 bg-white p-4 leading-7 shadow-[0_10px_28px_rgba(88,55,132,0.08)]">
                 <p className="font-semibold text-[#4b2d73]">牌卡解讀</p>

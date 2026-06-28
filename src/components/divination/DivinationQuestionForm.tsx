@@ -46,6 +46,9 @@ export function DivinationQuestionForm({ onQuestionSubmit }: DivinationQuestionF
         <p className="mt-3 leading-7 text-textMuted">
           請寫下一個清楚的問題，再選擇手動抽牌或自動抽牌。
         </p>
+        <p className="mt-2 text-sm leading-7 text-textMuted">
+          抽牌本身不收費，開始 AI 解讀時每次 NT$50。
+        </p>
 
         <div className="mt-6">
           <label htmlFor="divination-question-preview" className="block text-sm font-semibold text-textDark">

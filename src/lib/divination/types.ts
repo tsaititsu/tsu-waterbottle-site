@@ -74,6 +74,7 @@ export type CreateDivinationReadingResponse =
   | DivinationErrorResponse
 
 export type DivinationInterpretation = {
+  finalAnswer?: string
   summary: string
   cardMessage: string
   situationAnalysis: string

@@ -39,7 +39,7 @@ type ReserveResult =
     }
   | {
       ok: false
-      error: "DAILY_FREE_USED"
+      error: "PAYMENT_REQUIRED"
       message: string
       requiresPayment: true
       amountTwd: number
@@ -85,18 +85,6 @@ function getOrCreateUser(localUserId?: string) {
   return user
 }
 
-function hasReservedDailyFree(localUserId: string, taiwanDate: string) {
-  const store = getStore()
-
-  return Array.from(store.reservations.values()).some(
-    (reservation) =>
-      reservation.localUserId === localUserId &&
-      reservation.taiwanDate === taiwanDate &&
-      reservation.type === "daily_free" &&
-      reservation.status === "reserved"
-  )
-}
-
 export function getTaiwanDateKey(date = new Date()) {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: TIME_ZONE,
@@ -112,6 +100,23 @@ export function reserveLocalDivinationEntitlement(input: ReserveInput): ReserveR
   const existingEntitlement = store.reservations.get(input.readingId)
 
   if (existingEntitlement) {
+    if (input.mockPaid !== true && existingEntitlement.type !== "mock_paid") {
+      return {
+        ok: false,
+        error: "PAYMENT_REQUIRED",
+        message: "本次 AI 占卜解讀需 NT$50。",
+        requiresPayment: true,
+        amountTwd: READING_COST_TWD,
+      }
+    }
+
+    if (existingEntitlement.type === "daily_free") {
+      existingEntitlement.type = "mock_paid"
+      existingEntitlement.amountTwd = READING_COST_TWD
+      existingEntitlement.status = "reserved"
+      store.reservations.set(input.readingId, existingEntitlement)
+    }
+
     return {
       ok: true,
       entitlement: existingEntitlement,
@@ -120,26 +125,23 @@ export function reserveLocalDivinationEntitlement(input: ReserveInput): ReserveR
 
   const taiwanDate = getTaiwanDateKey()
   const useMockPaid = input.mockPaid === true
-  const freeUsed = user.lastFreeReadingDate === taiwanDate
-  const freeReserved = hasReservedDailyFree(user.localUserId, taiwanDate)
-  const canUseDailyFree = !freeUsed && !freeReserved
 
-  if (!canUseDailyFree && !useMockPaid) {
+  if (!useMockPaid) {
     return {
       ok: false,
-      error: "DAILY_FREE_USED",
-      message: "今日免費占卜已使用，本次解讀需 NT$50。",
+      error: "PAYMENT_REQUIRED",
+      message: "本次 AI 占卜解讀需 NT$50。",
       requiresPayment: true,
       amountTwd: READING_COST_TWD,
     }
   }
 
-  const type: LocalEntitlementType = useMockPaid ? "mock_paid" : "daily_free"
+  const type: LocalEntitlementType = "mock_paid"
   const entitlement = {
     readingId: input.readingId,
     localUserId: user.localUserId,
     type,
-    amountTwd: type === "daily_free" ? 0 : READING_COST_TWD,
+    amountTwd: READING_COST_TWD,
     taiwanDate,
     entitlementToken: randomUUID(),
     status: "reserved",
@@ -176,10 +178,8 @@ export function consumeLocalDivinationEntitlement(readingId: string, entitlement
     return entitlement
   }
 
-  const user = getOrCreateUser(entitlement.localUserId)
-
   if (entitlement.type === "daily_free") {
-    user.lastFreeReadingDate = entitlement.taiwanDate
+    return entitlement
   }
 
   entitlement.status = "consumed"

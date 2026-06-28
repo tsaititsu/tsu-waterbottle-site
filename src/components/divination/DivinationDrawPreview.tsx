@@ -108,7 +108,7 @@ function DivinationConsentNotice({
               type="checkbox"
             />
             <span>
-              我已詳細閱讀並同意《AI 占卜服務說明》、《點數與每日免費規則》及《服務條款》，並了解占卜前相關注意事項。
+              我已詳細閱讀並同意《AI 占卜服務說明》、《付費解讀規則》及《服務條款》，並了解占卜前相關注意事項。
               <span className="ml-1 font-semibold text-darkGold underline underline-offset-4 group-open:hidden">
                 點我查看
               </span>
@@ -130,11 +130,11 @@ function DivinationConsentNotice({
           </div>
 
           <div>
-            <p className="font-semibold text-deepPurple">點數與每日免費規則</p>
+            <p className="font-semibold text-deepPurple">付費解讀規則</p>
             <ul className="mt-2 grid gap-2">
-              <li>每日免費、點數餘額與每次占卜扣點規則，以系統內顯示為準。</li>
-              <li>若今日免費已使用，再次占卜會依目前流程顯示 NT$50 單次占卜提示。</li>
-              <li>若遇到點數、登入或不能占卜問題，請聯繫水瓶先生協助處理。</li>
+              <li>抽牌本身不收費；當你按下「開始解讀」並產生 AI 解讀時，本次服務費用為 NT$50。</li>
+              <li>本機測試階段會使用 mock paid 流程，不會連接正式金流。</li>
+              <li>正式上線後，將以正式付款流程完成付款後再產生 AI 解讀。</li>
             </ul>
           </div>
 
@@ -153,7 +153,7 @@ function DivinationConsentNotice({
             <p className="font-semibold text-deepPurple">補充說明</p>
             <ul className="mt-2 grid gap-2">
               <li>目前正式網站僅作為占卜入口與流程展示，不在正式網站存放舊占卜問題、解答、會員點數或 LINE Token。</li>
-              <li>若遇到登入、扣點、每日免費或占卜紀錄相關問題，仍以原占卜系統內處理為主。</li>
+                <li>若遇到登入、付款、占卜紀錄相關問題，仍以原占卜系統內處理為主。</li>
               <li>目前不搬舊會員資料、不合併點數、不碰原扣點流程。</li>
             </ul>
           </div>
@@ -161,7 +161,7 @@ function DivinationConsentNotice({
       </details>
 
       <p className="mt-3 text-xs leading-6 text-textMuted">
-        勾選後即可開始解讀；若今日免費次數已用完，下一步將顯示支付 NT$50。
+        勾選後即可進行付費解讀；本次 AI 解讀費用為 NT$50。
       </p>
     </div>
   )
@@ -414,17 +414,17 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
         if (
           interpretResponse.status === 402 &&
           interpretData.ok === false &&
-          interpretData.error === "DAILY_FREE_USED" &&
+          (interpretData.error === "DAILY_FREE_USED" || interpretData.error === "PAYMENT_REQUIRED") &&
           interpretData.requiresPayment
         ) {
           if (interpretRequestRef.current !== requestId) return
 
           setPaymentRequired({
-            message: interpretData.message || "今日免費占卜已使用，本次解讀需 NT$50。",
+            message: interpretData.message || "本次 AI 占卜解讀需 NT$50。",
             amountTwd: interpretData.amountTwd ?? 50,
           })
           setErrorMessage("")
-          setMessage("今日免費占卜已使用，本次解讀需 NT$50。")
+          setMessage("本次 AI 占卜解讀需 NT$50。")
           return
         }
 
@@ -468,7 +468,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
     }
 
     if (isManualMode && !hasAcceptedTerms) {
-      setErrorMessage("請先閱讀並勾選同意 AI 占卜服務說明、點數與每日免費規則及服務條款。")
+      setErrorMessage("請先閱讀並勾選同意 AI 占卜服務說明、付費解讀規則及服務條款。")
       return
     }
 
@@ -760,7 +760,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
               ) : null}
               {isManualMode && paymentRequired ? (
                 <p className="rounded-lg border border-darkGold/20 bg-lightGold/40 p-3 text-sm text-textDark">
-                  今日免費占卜已使用，本次解讀需 NT$50。
+                  本次 AI 占卜解讀需 NT$50。
                 </p>
               ) : null}
               <div className="grid gap-3 sm:grid-cols-2">
@@ -776,7 +776,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                       : "開始解讀中..."
                     : paymentRequired
                       ? `支付 NT$${paymentRequired.amountTwd} 開始解讀（本機測試）`
-                      : "就是這張，開始解讀"}
+                      : "支付 NT$50 開始解讀（本機測試）"}
                 </button>
                 <button
                   type="button"
@@ -792,7 +792,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
 
           {isAutoMode && pendingCard && pendingPosition && !hasResultPreview && paymentRequired ? (
             <div className="grid w-full max-w-2xl gap-2 rounded-2xl border border-borderSoft bg-white p-4 text-textDark">
-              <p className="text-sm text-textMuted">今日免費占卜已使用，本次解讀需 NT$50。</p>
+              <p className="text-sm text-textMuted">本次 AI 占卜解讀需 NT$50。</p>
               <button
                 type="button"
                 onClick={handleMockPaidInterpret}
