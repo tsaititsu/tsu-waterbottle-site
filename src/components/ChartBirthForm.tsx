@@ -1,7 +1,7 @@
 'use client'
 
 import { Check, Pencil, Plus, Trash2, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ActionButton } from './ActionButton'
 import { savePendingChartInput } from '@/lib/mockPayment'
 import { createZiweiGptPayload, type ChartInput, type ZiweiGptPayload } from '@/features/ziwei-chart/package'
@@ -48,6 +48,10 @@ type StoredChartState = {
   selectedCategory: string
   selectedChartId?: string
   charts: Record<string, StoredSavedChart[] | ChartInput>
+}
+
+type ChartBirthFormProps = {
+  resetKey?: string
 }
 
 const CHART_STORAGE_KEY = 'waterbottle-chart-categories'
@@ -115,7 +119,7 @@ function restoreSavedCharts(storedCharts: StoredChartState['charts']) {
   }, {})
 }
 
-export function ChartBirthForm() {
+export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
   const [gender, setGender] = useState<'female' | 'male'>('female')
   const [name, setName] = useState('')
   const [categories, setCategories] = useState(['自己'])
@@ -148,6 +152,25 @@ export function ChartBirthForm() {
     setName(input.name ?? '')
     setTimeIndex(input.timeIndex)
   }
+
+  const resetFormToBlank = useCallback(() => {
+    setGender('female')
+    setName('')
+    setSelectedCategory('自己')
+    setNewCategory('')
+    setEditingCategory('')
+    setEditingValue('')
+    setSelectedBirthOrder('')
+    setHasAcceptedPaidNotice(false)
+    setBirthYear('')
+    setBirthMonth('')
+    setBirthDay('')
+    setTimeIndex(0)
+    setFormError('')
+    setChartPayload(null)
+    setChartInput(null)
+    setSelectedChartId('')
+  }, [])
 
   const rerollRandomChart = () => {
     const random = randomDefaults()
@@ -211,6 +234,22 @@ export function ChartBirthForm() {
     setFormError('')
   }
 
+  const deleteSelectedSavedChart = () => {
+    if (!selectedChartId) return
+    const confirmed = window.confirm('確定要刪除這張命盤嗎？此動作只會刪除本機儲存資料。')
+    if (!confirmed) return
+
+    setChartsByCategory((current) => {
+      const existing = current[selectedCategory] ?? []
+      return {
+        ...current,
+        [selectedCategory]: existing.filter((item) => item.id !== selectedChartId)
+      }
+    })
+    setSelectedChartId('')
+    setFormError('')
+  }
+
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(CHART_STORAGE_KEY)
@@ -222,30 +261,21 @@ export function ChartBirthForm() {
       const stored = JSON.parse(raw) as StoredChartState
       const nextCategories = normalizeCategories(stored.categories ?? [])
       const nextCharts = restoreSavedCharts(stored.charts ?? {})
-      const nextSelectedCategory = nextCategories.includes(stored.selectedCategory) ? stored.selectedCategory : '自己'
-      const selectedList = nextCharts[nextSelectedCategory] ?? []
-      const selfList = nextCharts['自己'] ?? []
-      const saved = selectedList.find((item) => item.id === stored.selectedChartId) ?? selectedList[0] ?? selfList[0]
-      const savedCategory = saved
-        ? Object.entries(nextCharts).find(([, items]) => items.some((item) => item.id === saved.id))?.[0] ?? nextSelectedCategory
-        : nextSelectedCategory
 
       setCategories(nextCategories)
       setChartsByCategory(nextCharts)
-      setSelectedCategory(savedCategory)
-
-      if (saved) {
-        setSelectedChartId(saved.id)
-        setChartPayload(saved.payload)
-        setChartInput(saved.input)
-        applyChartToForm(saved.input)
-      }
+      setSelectedCategory('自己')
+      setSelectedChartId('')
     } catch {
       window.localStorage.removeItem(CHART_STORAGE_KEY)
     } finally {
       setHasLoadedSavedCharts(true)
     }
   }, [])
+
+  useEffect(() => {
+    resetFormToBlank()
+  }, [resetKey, resetFormToBlank])
 
   useEffect(() => {
     try {
@@ -567,25 +597,35 @@ export function ChartBirthForm() {
           </button>
         </div>
 
-        <label className="grid gap-2">
+        <div className="grid gap-2">
           <span className="text-sm font-semibold text-textDark">已儲存命盤</span>
-          <select
-            className="focus-ring rounded-lg border border-borderSoft bg-white px-4 py-3"
-            disabled={currentSavedCharts.length === 0}
-            onChange={(event) => chooseSavedChart(event.target.value)}
-            value={selectedChartId}
-          >
-            <option value="">{currentSavedCharts.length > 0 ? '請選擇已儲存命盤' : '此分類尚未儲存命盤'}</option>
-            {currentSavedCharts.map((saved) => (
-              <option key={saved.id} value={saved.id}>
-                {saved.label}
-              </option>
-            ))}
-          </select>
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+            <select
+              className="focus-ring rounded-lg border border-borderSoft bg-white px-4 py-3"
+              disabled={currentSavedCharts.length === 0}
+              onChange={(event) => chooseSavedChart(event.target.value)}
+              value={selectedChartId}
+            >
+              <option value="">{currentSavedCharts.length > 0 ? '請選擇已儲存命盤' : '此分類尚未儲存命盤'}</option>
+              {currentSavedCharts.map((saved) => (
+                <option key={saved.id} value={saved.id}>
+                  {saved.label}
+                </option>
+              ))}
+            </select>
+            <button
+              className="focus-ring rounded-lg border border-borderSoft bg-white px-4 py-3 text-sm font-semibold text-textMuted disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={!selectedChartId}
+              onClick={deleteSelectedSavedChart}
+              type="button"
+            >
+              刪除命盤
+            </button>
+          </div>
           <span className="text-xs text-textMuted">
             產生命盤後會儲存在目前分類；之後點分類，再從這裡選人。
           </span>
-        </label>
+        </div>
       </div>
 
       <div className="grid gap-2">

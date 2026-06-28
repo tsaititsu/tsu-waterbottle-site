@@ -1,7 +1,19 @@
 import { ChartBirthForm } from '@/components/ChartBirthForm'
 import { PageHero } from '@/components/PageHero'
 
-export default function AiChartPage() {
+type AiChartPageProps = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}
+
+function getSingleParam(value: string | string[] | undefined) {
+  if (Array.isArray(value)) return value[0] ?? ''
+  return value ?? ''
+}
+
+export default async function AiChartPage({ searchParams }: AiChartPageProps) {
+  const resolvedSearchParams = await searchParams
+  const resetKey = getSingleParam(resolvedSearchParams.reset)
+
   return (
     <>
       <PageHero
@@ -14,7 +26,7 @@ export default function AiChartPage() {
       />
       <section className="bg-white pt-3 pb-10 md:pt-4 md:pb-12">
         <div className="section-shell grid max-w-[1800px] gap-8">
-          <ChartBirthForm />
+          <ChartBirthForm resetKey={resetKey} />
         </div>
       </section>
     </>

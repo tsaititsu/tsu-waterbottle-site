@@ -214,6 +214,11 @@ export function Header() {
               key={item.href}
               className={`relative py-2 ${pathname === item.href ? 'text-deepPurple' : 'hover:text-purpleMain'}`}
               href={item.href}
+              onClick={(event) => {
+                if (item.href !== '/ai-chart') return
+                event.preventDefault()
+                router.push(`/ai-chart?reset=${Date.now()}`)
+              }}
             >
               {item.label}
             </Link>
@@ -259,7 +264,17 @@ export function Header() {
         <div className="border-t border-borderSoft bg-white lg:hidden">
           <div className="section-shell grid gap-2 py-4">
             {visibleNavItems.map((item) => (
-              <Link key={item.href} className="rounded-lg px-3 py-3 text-sm font-medium hover:bg-softPurple" href={item.href} onClick={() => setMenuOpen(false)}>
+              <Link
+                key={item.href}
+                className="rounded-lg px-3 py-3 text-sm font-medium hover:bg-softPurple"
+                href={item.href}
+                onClick={(event) => {
+                  setMenuOpen(false)
+                  if (item.href !== '/ai-chart') return
+                  event.preventDefault()
+                  router.push(`/ai-chart?reset=${Date.now()}`)
+                }}
+              >
                 {item.label}
               </Link>
             ))}
