@@ -2,7 +2,7 @@
 
 import { CalendarDays, CheckCircle2 } from 'lucide-react'
 import Link from 'next/link'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActionButton } from './ActionButton'
 import { bookingPlans, getBookingPlan } from '@/lib/bookingPlans'
 import { getAuthAccessToken, getMockUser } from '@/lib/mockAuth'
@@ -20,6 +20,10 @@ type PublicBookingSlot = {
   startAt: string
   endAt: string
   label: string
+}
+
+type BookingFormProps = {
+  resetKey?: string
 }
 
 const taipeiDateInputFormatter = new Intl.DateTimeFormat('en-CA', {
@@ -58,7 +62,7 @@ function getTaipeiTimeRange(slot: PublicBookingSlot) {
   return `${taipeiTimeFormatter.format(new Date(slot.startAt))}–${taipeiTimeFormatter.format(new Date(slot.endAt))}`
 }
 
-export function BookingForm() {
+export function BookingForm({ resetKey = '' }: BookingFormProps) {
   const [planId, setPlanId] = useState(bookingPlans[0].id)
   const [paymentMethod, setPaymentMethod] = useState<'bank-transfer' | 'newebpay-coming-soon' | 'linepay-coming-soon'>('bank-transfer')
   const [bookingSlots, setBookingSlots] = useState<PublicBookingSlot[]>([])
@@ -85,6 +89,32 @@ export function BookingForm() {
   const [hasAcceptedNotice, setHasAcceptedNotice] = useState(false)
   const [formError, setFormError] = useState('')
   const birthDateInputRef = useRef<HTMLInputElement | null>(null)
+
+  const resetFormToBlank = useCallback(() => {
+    setPlanId(bookingPlans[0].id)
+    setPaymentMethod('bank-transfer')
+    setSelectedBookingDate('')
+    setSelectedSlotId('')
+    setBookingSlotsError('')
+    setBankTransferPhone('')
+    setBankTransferLast5('')
+    setBankTransferFallbackUrl('')
+    setCustomerName('')
+    setCustomerEmail('')
+    setCustomerPhone('')
+    setLineDisplayName('')
+    setGender('female')
+    setBirthYear('')
+    setBirthMonth('')
+    setBirthDay('')
+    setBirthTime('')
+    setBirthPlace('')
+    setIsBirthTimeAccurate(null)
+    setQuestion('')
+    setNote('')
+    setHasAcceptedNotice(false)
+    setFormError('')
+  }, [])
 
   const selectedPlan = getBookingPlan(planId) ?? bookingPlans[0]
   const bookingDateOptions = useMemo(() => {
@@ -146,6 +176,10 @@ export function BookingForm() {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    resetFormToBlank()
+  }, [resetKey, resetFormToBlank])
 
   const updateSelectedBookingDate = (dateValue: string) => {
     setSelectedBookingDate(dateValue)
