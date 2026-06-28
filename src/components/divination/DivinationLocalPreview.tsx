@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { DivinationDrawPreview } from "./DivinationDrawPreview"
 import { DivinationQuestionForm } from "./DivinationQuestionForm"
 import type {
@@ -17,6 +17,10 @@ type QuestionSubmitPayload = {
 }
 
 const localUserStorageKey = "divination_local_user_id"
+
+type DivinationLocalPreviewProps = {
+  resetKey?: string
+}
 
 function createLocalUserId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -39,10 +43,11 @@ function getLocalUserId() {
   return localUserId
 }
 
-export function DivinationLocalPreview() {
+export function DivinationLocalPreview({ resetKey = "" }: DivinationLocalPreviewProps) {
   const [readingSession, setReadingSession] = useState<DivinationReadingSession | null>(null)
   const [isCreatingReading, setIsCreatingReading] = useState(false)
   const [errorMessage, setErrorMessage] = useState("")
+  const resetVersionRef = useRef(0)
 
   async function createReadingSession(input: {
     question: string
@@ -75,6 +80,7 @@ export function DivinationLocalPreview() {
   }
 
   async function handleQuestionSubmit(payload: QuestionSubmitPayload) {
+    const requestResetVersion = resetVersionRef.current
     setIsCreatingReading(true)
     setErrorMessage("")
     setReadingSession(null)
@@ -86,16 +92,29 @@ export function DivinationLocalPreview() {
       })
 
       if (session) {
-        setReadingSession(session)
+        if (requestResetVersion === resetVersionRef.current) {
+          setReadingSession(session)
+        }
       }
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "建立占卜紀錄失敗，請稍後再試。"
-      )
+      if (requestResetVersion === resetVersionRef.current) {
+        setErrorMessage(
+          error instanceof Error ? error.message : "建立占卜紀錄失敗，請稍後再試。"
+        )
+      }
     } finally {
-      setIsCreatingReading(false)
+      if (requestResetVersion === resetVersionRef.current) {
+        setIsCreatingReading(false)
+      }
     }
   }
+
+  useEffect(() => {
+    resetVersionRef.current += 1
+    setReadingSession(null)
+    setIsCreatingReading(false)
+    setErrorMessage("")
+  }, [resetKey])
 
   return (
     <section className="grid gap-6">
@@ -113,7 +132,7 @@ export function DivinationLocalPreview() {
             填寫一個清楚的問題，選擇你想要的抽牌方式。
           </p>
         </div>
-        <DivinationQuestionForm onQuestionSubmit={handleQuestionSubmit} />
+        <DivinationQuestionForm key={resetKey || "initial"} onQuestionSubmit={handleQuestionSubmit} />
         {isCreatingReading ? (
           <p className="rounded-xl border border-purple-100 bg-purple-50 px-4 py-3 text-sm leading-7 text-textMuted">
             正在建立占卜紀錄，請稍候...

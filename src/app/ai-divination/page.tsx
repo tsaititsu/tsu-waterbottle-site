@@ -4,10 +4,22 @@ import { PageHero } from '@/components/PageHero'
 import { shouldHideAiDivinationServices } from '@/lib/siteVisibility'
 import { redirect } from 'next/navigation'
 
-export default function AiDivinationPage() {
+type AiDivinationPageProps = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}
+
+function getSingleParam(value: string | string[] | undefined) {
+  if (Array.isArray(value)) return value[0] ?? ''
+  return value ?? ''
+}
+
+export default async function AiDivinationPage({ searchParams }: AiDivinationPageProps) {
   if (shouldHideAiDivinationServices()) {
     redirect('/')
   }
+
+  const resolvedSearchParams = await searchParams
+  const resetKey = getSingleParam(resolvedSearchParams.reset)
 
   return (
     <>
@@ -19,7 +31,7 @@ export default function AiDivinationPage() {
       <section className="bg-white py-12 md:py-16">
         <div className="section-shell grid gap-8">
           <DivinationEntryModule />
-          <DivinationLocalPreview />
+          <DivinationLocalPreview resetKey={resetKey} />
         </div>
       </section>
     </>

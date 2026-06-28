@@ -215,7 +215,7 @@ export function Header() {
               className={`relative py-2 ${pathname === item.href ? 'text-deepPurple' : 'hover:text-purpleMain'}`}
               href={item.href}
               onClick={(event) => {
-                if (item.href !== '/ai-chart' && item.href !== '/booking') return
+                if (item.href !== '/ai-chart' && item.href !== '/booking' && item.href !== '/ai-divination') return
                 event.preventDefault()
                 router.push(`${item.href}?reset=${Date.now()}`)
               }}
@@ -270,7 +270,7 @@ export function Header() {
                 href={item.href}
                 onClick={(event) => {
                   setMenuOpen(false)
-                  if (item.href !== '/ai-chart' && item.href !== '/booking') return
+                  if (item.href !== '/ai-chart' && item.href !== '/booking' && item.href !== '/ai-divination') return
                   event.preventDefault()
                   router.push(`${item.href}?reset=${Date.now()}`)
                 }}
