@@ -33,7 +33,7 @@ export function DivinationQuestionForm({ onQuestionSubmit }: DivinationQuestionF
       mode,
     })
     setMessageType('info')
-    setMessage('問題已送出，請往下進行抽牌。')
+    setMessage('問題已送出，正在前往抽牌頁。')
   }
 
   return (

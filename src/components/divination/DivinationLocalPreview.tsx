@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { DivinationDrawPreview } from "./DivinationDrawPreview"
+import { useRouter } from "next/navigation"
 import { DivinationQuestionForm } from "./DivinationQuestionForm"
 import type {
   CreateDivinationReadingResponse,
@@ -17,6 +17,7 @@ type QuestionSubmitPayload = {
 }
 
 const localUserStorageKey = "divination_local_user_id"
+const readingSessionStorageKey = "divination_reading_session"
 
 type DivinationLocalPreviewProps = {
   resetKey?: string
@@ -43,8 +44,18 @@ function getLocalUserId() {
   return localUserId
 }
 
+function saveReadingSession(session: DivinationReadingSession) {
+  if (typeof window === "undefined") return
+  window.sessionStorage.setItem(readingSessionStorageKey, JSON.stringify(session))
+}
+
+function clearReadingSession() {
+  if (typeof window === "undefined") return
+  window.sessionStorage.removeItem(readingSessionStorageKey)
+}
+
 export function DivinationLocalPreview({ resetKey = "" }: DivinationLocalPreviewProps) {
-  const [readingSession, setReadingSession] = useState<DivinationReadingSession | null>(null)
+  const router = useRouter()
   const [isCreatingReading, setIsCreatingReading] = useState(false)
   const [errorMessage, setErrorMessage] = useState("")
   const resetVersionRef = useRef(0)
@@ -83,7 +94,6 @@ export function DivinationLocalPreview({ resetKey = "" }: DivinationLocalPreview
     const requestResetVersion = resetVersionRef.current
     setIsCreatingReading(true)
     setErrorMessage("")
-    setReadingSession(null)
 
     try {
       const session = await createReadingSession({
@@ -93,7 +103,8 @@ export function DivinationLocalPreview({ resetKey = "" }: DivinationLocalPreview
 
       if (session) {
         if (requestResetVersion === resetVersionRef.current) {
-          setReadingSession(session)
+          saveReadingSession(session)
+          router.push("/ai-divination/draw")
         }
       }
     } catch (error) {
@@ -111,9 +122,9 @@ export function DivinationLocalPreview({ resetKey = "" }: DivinationLocalPreview
 
   useEffect(() => {
     resetVersionRef.current += 1
-    setReadingSession(null)
     setIsCreatingReading(false)
     setErrorMessage("")
+    clearReadingSession()
   }, [resetKey])
 
   return (
@@ -144,17 +155,6 @@ export function DivinationLocalPreview({ resetKey = "" }: DivinationLocalPreview
           </p>
         ) : null}
       </section>
-      {readingSession ? (
-        <section className="grid gap-4">
-          <div>
-            <p className="text-sm font-semibold tracking-[0.18em] text-darkGold">第二步</p>
-            <p className="mt-2 leading-7 text-textMuted">
-              依照你選擇的方式抽出一張紫微牌卡，先查看牌卡基礎牌義。
-            </p>
-          </div>
-          <DivinationDrawPreview readingSession={readingSession} />
-        </section>
-      ) : null}
     </section>
   )
 }
