@@ -4,13 +4,23 @@ import { useMemo, useState } from 'react'
 import type { ZiweiChart as PackageZiweiChart } from '../package'
 import type { ZiweiChart, ZiweiHoroscope } from '../lib'
 import { LangContext } from '../contexts/LangContext'
+import type { Locale } from '../i18n'
 import { AstrolabeChart } from './AstrolabeChart'
 import { DecadalTimeline } from './DecadalTimeline'
 import { YearlyTimeline } from './YearlyTimeline'
 
 type OriginalZiweiChartViewProps = {
   chart: PackageZiweiChart
+  onPrevTime?: () => void
+  onNextTime?: () => void
+  isRectified?: boolean
+  notes?: string
+  onSaveNotes?: (text: string) => void
+  chartId?: string
 }
+
+const LOCALE_STORAGE_KEY = 'ziwei-locale'
+const SUPPORTED_LOCALE_CODES: Locale[] = ['zh-TW', 'zh-CN', 'en']
 
 function getBirthYear(chart: ZiweiChart) {
   const lunarYear = chart.birthInfo.lunarDate.match(/\d{4}/)?.[0]
@@ -22,12 +32,30 @@ function dateForDecadal(birthSolarDate: string, ageRangeStart: number): Date {
   return new Date(year + ageRangeStart + 1, month - 1, day + 1)
 }
 
-export function OriginalZiweiChartView({ chart }: OriginalZiweiChartViewProps) {
+export function OriginalZiweiChartView({
+  chart,
+  onPrevTime = () => {},
+  onNextTime = () => {},
+  isRectified = false,
+  notes,
+  onSaveNotes,
+  chartId
+}: OriginalZiweiChartViewProps) {
+  const [locale, setLocaleState] = useState<Locale>(() => {
+    if (typeof window === 'undefined') return 'zh-TW'
+    const stored = window.localStorage.getItem(LOCALE_STORAGE_KEY) as Locale | null
+    return stored && SUPPORTED_LOCALE_CODES.includes(stored) ? stored : 'zh-TW'
+  })
   const [showPinyin, setShowPinyin] = useState(false)
   const [selectedPalaceIdx, setSelectedPalaceIdx] = useState<number | null>(null)
   const [selectedYear, setSelectedYear] = useState<number | null>(null)
   const [clickedPalaceIdx, setClickedPalaceIdx] = useState<number | null>(null)
   const [isMinorLimitMode, setIsMinorLimitMode] = useState(false)
+
+  const setLocale = (nextLocale: Locale) => {
+    setLocaleState(nextLocale)
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, nextLocale)
+  }
 
   const displayChart = chart as unknown as ZiweiChart
   const isNatalMode = selectedPalaceIdx === null && selectedYear === null
@@ -80,13 +108,13 @@ export function OriginalZiweiChartView({ chart }: OriginalZiweiChartViewProps) {
   return (
     <LangContext.Provider
       value={{
-        locale: 'zh-TW',
+        locale,
         showPinyin,
-        setLocale: () => {},
+        setLocale,
         togglePinyin: () => setShowPinyin((current) => !current)
       }}
     >
-      <div className="original-ziwei-view" data-locale="zh-TW" data-show-pinyin={showPinyin ? 'true' : 'false'}>
+      <div className="original-ziwei-view" data-locale={locale} data-show-pinyin={showPinyin ? 'true' : 'false'}>
         <AstrolabeChart
           chart={displayChart}
           horoscope={horoscope}
@@ -103,11 +131,14 @@ export function OriginalZiweiChartView({ chart }: OriginalZiweiChartViewProps) {
             setSelectedYear(null)
           }}
           multiBirthOrder={null}
-          onPrevTime={() => {}}
-          onNextTime={() => {}}
-          isRectified={false}
+          onPrevTime={onPrevTime}
+          onNextTime={onNextTime}
+          isRectified={isRectified}
           isMinorLimitMode={isMinorLimitMode && selectedYear !== null}
           onMinorLimitToggle={() => setIsMinorLimitMode((current) => !current)}
+          notes={notes}
+          onSaveNotes={onSaveNotes}
+          chartId={chartId}
           childhoodOverride={
             selectedPalaceIdx === -1
               ? [1, Math.min(...displayChart.palaces.map((palace) => palace.decadal.range[0])) - 1] as [number, number]

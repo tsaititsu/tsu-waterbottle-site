@@ -6,6 +6,7 @@ import { ActionButton } from './ActionButton'
 import { savePendingChartInput } from '@/lib/mockPayment'
 import { createZiweiGptPayload, type ChartInput, type ZiweiGptPayload } from '@/features/ziwei-chart/package'
 import { OriginalZiweiChartView } from '@/features/ziwei-chart/components/OriginalZiweiChartView'
+import { randomAnonName, RANDOM_NAME_PREFIX } from '@/features/ziwei-chart/lib/anonName'
 
 const timeOptions = [
   { label: '早子時　00:00-00:59', value: 0 },
@@ -50,6 +51,7 @@ type StoredChartState = {
 }
 
 const CHART_STORAGE_KEY = 'waterbottle-chart-categories'
+const CHART_NOTES_STORAGE_KEY = 'waterbottle-chart-notes'
 
 function normalizeCategories(categories: string[]) {
   const unique = Array.from(new Set(['自己', ...categories.map((category) => category.trim()).filter(Boolean)]))
@@ -72,6 +74,29 @@ function toSavedChart(input: ChartInput, id = chartId(input)): SavedChart {
     input,
     payload: createZiweiGptPayload(input)
   }
+}
+
+function randomDefaults() {
+  const today = new Date()
+  const minMs = new Date(1950, 0, 1).getTime()
+  const randomDate = new Date(minMs + Math.random() * (today.getTime() - minMs))
+  return {
+    year: randomDate.getFullYear(),
+    month: randomDate.getMonth() + 1,
+    day: randomDate.getDate(),
+    timeIndex: Math.floor(Math.random() * timeOptions.length),
+    gender: Math.random() < 0.5 ? 'male' : 'female' as 'male' | 'female'
+  }
+}
+
+function randomName() {
+  return `${RANDOM_NAME_PREFIX}${randomAnonName()}`
+}
+
+function adjustSolarDate(solarDate: string, offsetDays: number) {
+  const [year, month, day] = solarDate.split('-').map(Number)
+  const date = new Date(year, month - 1, day + offsetDays)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
 function restoreSavedCharts(storedCharts: StoredChartState['charts']) {
@@ -111,6 +136,8 @@ export function ChartBirthForm() {
   const [selectedChartId, setSelectedChartId] = useState('')
   const [chartsByCategory, setChartsByCategory] = useState<Record<string, SavedChart[]>>({})
   const [hasLoadedSavedCharts, setHasLoadedSavedCharts] = useState(false)
+  const [notesByChartId, setNotesByChartId] = useState<Record<string, string>>({})
+  const [hasLoadedChartNotes, setHasLoadedChartNotes] = useState(false)
 
   const applyChartToForm = (input: ChartInput) => {
     const [year, month, day] = input.solarDate.split('-')
@@ -120,6 +147,44 @@ export function ChartBirthForm() {
     setGender(input.gender)
     setName(input.name ?? '')
     setTimeIndex(input.timeIndex)
+  }
+
+  const rerollRandomChart = () => {
+    const random = randomDefaults()
+    setBirthYear(String(random.year))
+    setBirthMonth(String(random.month))
+    setBirthDay(String(random.day))
+    setTimeIndex(random.timeIndex)
+    setGender(random.gender)
+    setName(randomName())
+    setFormError('')
+  }
+
+  const shiftChartTime = (direction: -1 | 1) => {
+    if (!chartInput) return
+
+    const baseTimeIndex = chartInput.timeIndex
+    const nextTimeIndex = (baseTimeIndex + direction + timeOptions.length) % timeOptions.length
+    const nextSolarDate = direction === -1 && baseTimeIndex === 0
+      ? adjustSolarDate(chartInput.solarDate, -1)
+      : direction === 1 && baseTimeIndex === timeOptions.length - 1
+        ? adjustSolarDate(chartInput.solarDate, 1)
+        : chartInput.solarDate
+    const nextInput: ChartInput = {
+      ...chartInput,
+      solarDate: nextSolarDate,
+      timeIndex: nextTimeIndex
+    }
+
+    try {
+      setChartPayload(createZiweiGptPayload(nextInput))
+      setChartInput(nextInput)
+      setSelectedChartId('')
+      applyChartToForm(nextInput)
+      setFormError('')
+    } catch (error) {
+      setFormError(error instanceof Error ? `命盤產生失敗：${error.message}` : '命盤產生失敗，請確認資料後再試一次。')
+    }
   }
 
   const chooseCategory = (category: string) => {
@@ -183,6 +248,17 @@ export function ChartBirthForm() {
   }, [])
 
   useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(CHART_NOTES_STORAGE_KEY)
+      if (raw) setNotesByChartId(JSON.parse(raw) as Record<string, string>)
+    } catch {
+      window.localStorage.removeItem(CHART_NOTES_STORAGE_KEY)
+    } finally {
+      setHasLoadedChartNotes(true)
+    }
+  }, [])
+
+  useEffect(() => {
     if (!hasLoadedSavedCharts) return
 
     const charts: StoredChartState['charts'] = Object.fromEntries(
@@ -204,6 +280,11 @@ export function ChartBirthForm() {
 
     window.localStorage.setItem(CHART_STORAGE_KEY, JSON.stringify(stored))
   }, [categories, chartsByCategory, hasLoadedSavedCharts, selectedCategory, selectedChartId])
+
+  useEffect(() => {
+    if (!hasLoadedChartNotes) return
+    window.localStorage.setItem(CHART_NOTES_STORAGE_KEY, JSON.stringify(notesByChartId))
+  }, [hasLoadedChartNotes, notesByChartId])
 
   const addCategory = () => {
     const value = newCategory.trim()
@@ -340,13 +421,30 @@ export function ChartBirthForm() {
     return true
   }
 
+  const currentChartId = chartInput ? chartId(chartInput) : ''
+  const currentChartNotes = currentChartId ? notesByChartId[currentChartId] ?? '' : undefined
+  const saveChartNotes = (text: string) => {
+    if (!currentChartId) return
+    const value = text.trim()
+    setNotesByChartId((current) => {
+      const next = { ...current }
+      if (value) next[currentChartId] = value
+      else delete next[currentChartId]
+      return next
+    })
+  }
+
   const currentSavedCharts = chartsByCategory[selectedCategory] ?? []
 
   return (
     <form className="grid gap-6 rounded-2xl border border-borderSoft bg-white p-6 shadow-soft md:p-8">
       <div className="flex items-center justify-between gap-4">
         <h2 className="font-serifTC text-2xl font-semibold text-deepPurple">新增命盤</h2>
-        <button type="button" className="rounded-full border border-lightGold bg-white px-4 py-2 text-sm font-semibold text-darkGold">
+        <button
+          type="button"
+          className="rounded-full border border-lightGold bg-white px-4 py-2 text-sm font-semibold text-darkGold"
+          onClick={rerollRandomChart}
+        >
           隨機
         </button>
       </div>
@@ -601,7 +699,14 @@ export function ChartBirthForm() {
           </div>
 
           <div className="rounded-[18px] border border-white/70 bg-white/70 p-1 md:p-2">
-            <OriginalZiweiChartView chart={chartPayload.chart} />
+            <OriginalZiweiChartView
+              chart={chartPayload.chart}
+              chartId={currentChartId}
+              notes={currentChartNotes}
+              onSaveNotes={saveChartNotes}
+              onNextTime={() => shiftChartTime(1)}
+              onPrevTime={() => shiftChartTime(-1)}
+            />
           </div>
         </div>
       )}

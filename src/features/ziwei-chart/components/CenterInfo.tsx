@@ -148,11 +148,12 @@ export function CenterInfo({ chart, horoscope, isNatalMode, onReset, multiBirthO
   return (
     <div className="center-info">
       <div className="center-locale-wrap" ref={localeMenuRef}>
-        <button className="center-locale-btn" onClick={() => setLocaleMenuOpen(p => !p)} title="Language">🌐</button>
+        <button type="button" className="center-locale-btn" onClick={() => setLocaleMenuOpen(p => !p)} title="Language">🌐</button>
         {localeMenuOpen && (
           <div className="center-locale-menu">
             {SUPPORTED_LOCALES.map(l => (
               <button
+                type="button"
                 key={l.code}
                 className={`center-locale-item${locale === l.code ? ' active' : ''}`}
                 onClick={() => { setLocale(l.code); setLocaleMenuOpen(false); }}
@@ -164,6 +165,7 @@ export function CenterInfo({ chart, horoscope, isNatalMode, onReset, multiBirthO
         )}
       </div>
       <button
+        type="button"
         className={`center-hide-btn${hideMode ? ' active' : ''}`}
         onClick={() => setHideMode(v => !v)}
         title={hideMode
@@ -198,7 +200,7 @@ export function CenterInfo({ chart, horoscope, isNatalMode, onReset, multiBirthO
       </div>
 
       <div className="center-time-row">
-        {!hideMode && <button className="btn-time-arrow" onClick={onPrevTime} title="Previous hour">◀</button>}
+        {!hideMode && <button type="button" className="btn-time-arrow" onClick={onPrevTime} title="Previous hour">◀</button>}
         <div className={`center-time-inner${isRectified ? ' rectified' : ''}`}>
           <div className="center-time">
             {hideMode ? (
@@ -220,7 +222,7 @@ export function CenterInfo({ chart, horoscope, isNatalMode, onReset, multiBirthO
             )}
           </div>
         </div>
-        {!hideMode && <button className="btn-time-arrow" onClick={onNextTime} title="Next hour">▶</button>}
+        {!hideMode && <button type="button" className="btn-time-arrow" onClick={onNextTime} title="Next hour">▶</button>}
       </div>
 
       {isEn ? (
@@ -263,17 +265,18 @@ export function CenterInfo({ chart, horoscope, isNatalMode, onReset, multiBirthO
       )}
 
       <div className="center-btn-row">
-        <button className="btn-reset" onClick={onReset}>{backLabel}</button>
-        <button className={`lang-toggle-inline${showPinyin ? ' active' : ''}`} onClick={togglePinyin}>
+        <button type="button" className="btn-reset" onClick={onReset}>{backLabel}</button>
+        <button type="button" className={`lang-toggle-inline${showPinyin ? ' active' : ''}`} onClick={togglePinyin}>
           Pinyin
         </button>
         {onAdvToggle && (
-          <button className={`lang-toggle-inline${advMode ? ' active' : ''}`} onClick={onAdvToggle}>
+          <button type="button" className={`lang-toggle-inline${advMode ? ' active' : ''}`} onClick={onAdvToggle}>
             {useEnLabels ? 'Advanced' : '進階'}
           </button>
         )}
         {onSaveNotes && (
           <button
+            type="button"
             className={`lang-toggle-inline center-notes-btn${notes ? ' has-notes' : ''}`}
             onClick={openNotes}
           >
@@ -285,7 +288,7 @@ export function CenterInfo({ chart, horoscope, isNatalMode, onReset, multiBirthO
       {advMode && (
         <div className="center-adv-beta">
           <span className="adv-beta-badge">Beta</span>
-          <button className="adv-info-btn" onClick={showAdvInfo} aria-label="info">ⓘ</button>
+          <button type="button" className="adv-info-btn" onClick={showAdvInfo} aria-label="info">ⓘ</button>
           {advInfoOpen && (
             <div className="adv-info-pop" onClick={() => setAdvInfoOpen(false)}>
               {isEn ? 'Shows 3 transit layers at a time — tap a layer to switch' : '運線一次顯示 3 層，點各層可切換'}
@@ -313,10 +316,10 @@ export function CenterInfo({ chart, horoscope, isNatalMode, onReset, multiBirthO
                   onChange={e => setNotesDraft(e.target.value)}
                 />
                 <div className="notes-modal-btns">
-                  <button className="notes-btn-cancel" onClick={cancelEdit}>
+                  <button type="button" className="notes-btn-cancel" onClick={cancelEdit}>
                     {useEnLabels ? 'Cancel' : '取消'}
                   </button>
-                  <button className="notes-btn-save" onClick={saveNotes}>
+                  <button type="button" className="notes-btn-save" onClick={saveNotes}>
                     {useEnLabels ? 'Save' : '儲存'}
                   </button>
                 </div>
@@ -325,10 +328,10 @@ export function CenterInfo({ chart, horoscope, isNatalMode, onReset, multiBirthO
               <>
                 <div className="notes-view">{linkifyNotes(notes ?? '')}</div>
                 <div className="notes-modal-btns">
-                  <button className="notes-btn-cancel" onClick={() => setNotesOpen(false)}>
+                  <button type="button" className="notes-btn-cancel" onClick={() => setNotesOpen(false)}>
                     {useEnLabels ? 'Close' : '關閉'}
                   </button>
-                  <button className="notes-btn-save" onClick={() => { setNotesDraft(notes ?? ''); setNotesEditing(true); }}>
+                  <button type="button" className="notes-btn-save" onClick={() => { setNotesDraft(notes ?? ''); setNotesEditing(true); }}>
                     {useEnLabels ? 'Edit' : '編輯'}
                   </button>
                 </div>

@@ -82,8 +82,13 @@ export function DecadalTimeline({ chart, horoscope, selectedPalaceIdx, isNatalMo
 
       {/* ── 童限展開按鈕（左） ─────────────────────────────────── */}
       <button
+        type="button"
         className={`timeline-expand-btn timeline-expand-left${showChildhood ? ' expanded' : ''}`}
-        onClick={() => setShowChildhood(v => !v)}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setShowChildhood(v => !v);
+        }}
         title={showChildhood ? (useLatin ? 'Collapse childhood' : '收起童限') : (useLatin ? 'Childhood' : '展開童限')}
       >
         {showChildhood ? '◂' : (useLatin ? '▸Chd' : '▸童')}
@@ -131,8 +136,13 @@ export function DecadalTimeline({ chart, horoscope, selectedPalaceIdx, isNatalMo
       {/* ── 十一/十二限展開按鈕（右） ─────────────────────────── */}
       {extended.length > 0 && (
         <button
+          type="button"
           className={`timeline-expand-btn timeline-expand-right${showExtended ? ' expanded' : ''}`}
-          onClick={() => setShowExtended(v => !v)}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setShowExtended(v => !v);
+          }}
           title={showExtended ? (useLatin ? 'Collapse extended' : '收起延伸大限') : (useLatin ? 'Extended' : '展開十一、十二限')}
         >
           {showExtended ? '▸' : (useLatin ? '◂Ext' : '◂延')}
