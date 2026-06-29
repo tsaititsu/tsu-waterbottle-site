@@ -6,6 +6,7 @@ import { DivinationQuestionForm } from "./DivinationQuestionForm"
 import type {
   CreateDivinationReadingResponse,
   DivinationDrawMode,
+  DivinationInterpretation,
   DivinationReadingSession,
 } from "@/lib/divination/types"
 
@@ -65,6 +66,7 @@ export function DivinationLocalPreview({ resetKey = "" }: DivinationLocalPreview
   const router = useRouter()
   const [isCreatingReading, setIsCreatingReading] = useState(false)
   const [errorMessage, setErrorMessage] = useState("")
+  const [safetyInterpretation, setSafetyInterpretation] = useState<DivinationInterpretation | null>(null)
   const resetVersionRef = useRef(0)
 
   async function createReadingSession(input: {
@@ -89,18 +91,30 @@ export function DivinationLocalPreview({ resetKey = "" }: DivinationLocalPreview
       )
     }
 
-    return {
-      readingId: data.reading.id,
-      question: input.question,
-      drawMode: input.drawMode,
-      localUserId,
-    } satisfies DivinationReadingSession
+    if ("safetyBlocked" in data && data.safetyBlocked) {
+      return {
+        safetyBlocked: true as const,
+        interpretation: data.interpretation,
+      }
+    }
+
+    if ("reading" in data) {
+      return {
+        readingId: data.reading.id,
+        question: input.question,
+        drawMode: input.drawMode,
+        localUserId,
+      } satisfies DivinationReadingSession
+    }
+
+    throw new Error("建立占卜紀錄失敗，請稍後再試。")
   }
 
   async function handleQuestionSubmit(payload: QuestionSubmitPayload) {
     const requestResetVersion = resetVersionRef.current
     setIsCreatingReading(true)
     setErrorMessage("")
+    setSafetyInterpretation(null)
 
     try {
       const session = await createReadingSession({
@@ -110,6 +124,12 @@ export function DivinationLocalPreview({ resetKey = "" }: DivinationLocalPreview
 
       if (session) {
         if (requestResetVersion === resetVersionRef.current) {
+          if ("safetyBlocked" in session && session.safetyBlocked) {
+            clearReadingSession()
+            setSafetyInterpretation(session.interpretation)
+            return
+          }
+
           saveReadingSession(session, { autoMockPaid: payload.mode === "auto" && payload.mockPaid === true })
           router.push("/ai-divination/draw")
         }
@@ -131,6 +151,7 @@ export function DivinationLocalPreview({ resetKey = "" }: DivinationLocalPreview
     resetVersionRef.current += 1
     setIsCreatingReading(false)
     setErrorMessage("")
+    setSafetyInterpretation(null)
     clearReadingSession()
   }, [resetKey])
 
@@ -160,6 +181,17 @@ export function DivinationLocalPreview({ resetKey = "" }: DivinationLocalPreview
           <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-7 text-red-700">
             {errorMessage}
           </p>
+        ) : null}
+        {safetyInterpretation ? (
+          <article className="rounded-2xl border border-red-100 bg-white p-5 shadow-soft">
+            <p className="text-sm font-semibold tracking-[0.18em] text-darkGold">安全提醒</p>
+            <h3 className="mt-2 font-serifTC text-2xl font-semibold text-deepPurple">
+              這題先不進行抽牌
+            </h3>
+            <div className="mt-4 whitespace-pre-line leading-8 text-textMuted">
+              {safetyInterpretation.finalAnswer || safetyInterpretation.summary}
+            </div>
+          </article>
         ) : null}
       </section>
     </section>

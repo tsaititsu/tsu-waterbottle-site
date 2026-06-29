@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { ziweiCards } from "@/lib/divination/cards"
+import { runPreOpenAISafetyCheck } from "@/lib/divination/legacyReadingEngine"
 import type {
   CreateDivinationReadingRequest,
   CreateDivinationReadingResponse,
@@ -58,6 +59,17 @@ export async function POST(request: Request) {
 
   if (cardId && !selectedCard) {
     return jsonError("找不到這張紫微牌卡。")
+  }
+
+  const safetyResult = runPreOpenAISafetyCheck(question)
+
+  if (safetyResult.blocked) {
+    return NextResponse.json({
+      ok: true,
+      safetyBlocked: true,
+      safetyReason: safetyResult.reason,
+      interpretation: safetyResult.interpretation,
+    } satisfies CreateDivinationReadingResponse)
   }
 
   const readingId = createMockReadingId()

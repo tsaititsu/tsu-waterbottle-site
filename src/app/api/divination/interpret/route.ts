@@ -7,6 +7,7 @@ import {
   buildLegacyStructuredInterpretation,
   parseLegacyReviewResult,
   reviewAnswer,
+  runPreOpenAISafetyCheck,
 } from "@/lib/divination/legacyReadingEngine"
 import {
   consumeLocalDivinationEntitlement,
@@ -309,6 +310,29 @@ export async function POST(request: Request) {
 
   const safeDrawMode = drawMode as DivinationDrawMode
   const safePosition = position as DivinationPosition
+  const card = {
+    id: selectedCard.id,
+    name: selectedCard.name,
+    image: selectedCard.image,
+    reversedImage: selectedCard.reversedImage,
+    huaqi: selectedCard.huaqi,
+    element: selectedCard.element,
+    core: selectedCard.core,
+  } satisfies DivinationCardSummary
+  const safetyResult = runPreOpenAISafetyCheck(question)
+
+  if (safetyResult.blocked) {
+    return NextResponse.json({
+      ok: true,
+      interpretation: safetyResult.interpretation,
+      card,
+      position: safePosition,
+      drawMode: safeDrawMode,
+      safetyBlocked: true,
+      safetyReason: safetyResult.reason,
+    })
+  }
+
   const entitlementResult = reserveLocalDivinationEntitlement({
     readingId,
     localUserId,
@@ -369,15 +393,6 @@ export async function POST(request: Request) {
     )
   }
 
-  const card = {
-    id: selectedCard.id,
-    name: selectedCard.name,
-    image: selectedCard.image,
-    reversedImage: selectedCard.reversedImage,
-    huaqi: selectedCard.huaqi,
-    element: selectedCard.element,
-    core: selectedCard.core,
-  } satisfies DivinationCardSummary
   const paymentGate = {
     mode: "mock",
     paymentId: `mock_pay_${readingId}`,

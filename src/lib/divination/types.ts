@@ -61,6 +61,13 @@ export type CreateDivinationReadingSuccessResponse = {
   mockPaymentGate?: DivinationMockPaymentGate
 }
 
+export type CreateDivinationReadingSafetyResponse = {
+  ok: true
+  safetyBlocked: true
+  safetyReason: "self_harm" | "violence" | "prompt_injection" | "death_critical"
+  interpretation: DivinationInterpretation
+}
+
 export type DivinationErrorResponse = {
   ok: false
   error: string
@@ -71,6 +78,7 @@ export type DivinationErrorResponse = {
 
 export type CreateDivinationReadingResponse =
   | CreateDivinationReadingSuccessResponse
+  | CreateDivinationReadingSafetyResponse
   | DivinationErrorResponse
 
 export type DivinationInterpretation = {

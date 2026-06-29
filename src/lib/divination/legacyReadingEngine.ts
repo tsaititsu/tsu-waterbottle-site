@@ -852,3 +852,201 @@ function buildDefaultReminder(context: LegacyReadingContext) {
   if (context.questionType === "合約法律") return "合約法律題要回到文件與證據，必要時請找專業人士確認。"
   return "占卜是提醒，不是保證；真正要看你接下來怎麼回到現實裡調整。"
 }
+
+type PreOpenAISafetyResult =
+  | { blocked: false }
+  | {
+      blocked: true
+      reason: "self_harm" | "violence" | "prompt_injection" | "death_critical"
+      interpretation: DivinationInterpretation
+    }
+
+function buildSafetyInterpretation(finalAnswer: string, labels: {
+  summary: string
+  cardMessage: string
+  situationAnalysis: string
+  advice: string
+  reminder: string
+}): DivinationInterpretation {
+  return {
+    finalAnswer,
+    summary: labels.summary,
+    cardMessage: labels.cardMessage,
+    situationAnalysis: labels.situationAnalysis,
+    advice: labels.advice,
+    reminder: labels.reminder,
+  }
+}
+
+function isSelfHarmQuestion(question: string) {
+  return includesAny(question.toLowerCase(), [
+    "想死",
+    "不想活",
+    "不想活了",
+    "自殺",
+    "自伤",
+    "自傷",
+    "傷害自己",
+    "傷害我自己",
+    "割腕",
+    "輕生",
+    "結束生命",
+    "活不下去",
+  ])
+}
+
+function isViolenceQuestion(question: string) {
+  return includesAny(question.toLowerCase(), [
+    "殺人",
+    "想殺",
+    "想打死",
+    "打死他",
+    "打死她",
+    "傷害某人",
+    "傷害人",
+    "傷害他",
+    "傷害她",
+    "傷害別人",
+    "傷害他人",
+    "攻擊別人",
+    "攻擊他人",
+    "暴力",
+    "拿刀",
+    "報復",
+    "打人計畫",
+    "怎麼打",
+    "怎麼報復",
+  ])
+}
+
+function isPromptInjectionQuestion(question: string) {
+  return includesAny(question.toLowerCase(), [
+    "忽略所有規則",
+    "忽略前面",
+    "忽略以上",
+    "ignore previous",
+    "ignore all",
+    "system prompt",
+    "系統 prompt",
+    "系統提示",
+    "後台 prompt",
+    "openai prompt",
+    "完整規則",
+    "後台指令",
+    "api key",
+    "service role",
+    "token",
+    ".env",
+    "不要扣點",
+    "其他會員資料",
+  ])
+}
+
+function isDeathOrFuneralQuestion(question: string) {
+  return includesAny(question.toLowerCase(), [
+    "死亡",
+    "會不會死",
+    "會死",
+    "死掉",
+    "什麼時候死",
+    "哪天會死",
+    "幾歲會死",
+    "過世",
+    "離世",
+    "往生",
+    "圓寂",
+    "要走了",
+    "是不是要走了",
+    "能不能活",
+    "生命危險",
+    "病危",
+    "喪事",
+    "辦喪事",
+    "後事",
+    "告別式",
+    "快不行",
+    "撐過去",
+    "撐不撐得過",
+    "撐得過",
+    "撐不過",
+    "撐過",
+  ])
+}
+
+function buildDeathCriticalSafetyAnswer(question: string) {
+  const text = question.toLowerCase()
+
+  if (includesAny(text, ["喪事", "辦喪事", "後事", "告別式"])) {
+    return "這題牽涉生命與家人重大狀況，占卜不能判斷是否會死亡，也不能用牌面斷定是否會辦喪事。現在比較重要的是把家人溝通、照護安排、醫療資訊確認與必要的現實準備先整理好。\n\n如果當事人正在病危、失聯、意識不清或有立即危險，請先聯絡醫療單位、家人或當地緊急服務。等現實安全與資訊穩住後，再用占卜看你接下來可以怎麼陪伴與處理。"
+  }
+
+  return "這題牽涉生命與醫療狀況，占卜不能判斷是否會死亡、什麼時候死亡，或是否能撐過去，也不能用吉凶代替醫師評估。\n\n現在請先把重點放在現實安全：確認當事人的身體狀態、聯絡醫療專業、通知可信任的家人或身邊的人。如果有立即危險，請直接聯絡當地緊急服務。占卜可以之後再回來問照護、陪伴或溝通方向。"
+}
+
+export function runPreOpenAISafetyCheck(question: string): PreOpenAISafetyResult {
+  if (isSelfHarmQuestion(question)) {
+    const finalAnswer = "這題先不要用占卜判斷生死或吉凶。你現在如果有想傷害自己、覺得撐不住，請先把自己帶離危險物品和危險現場，立刻找身邊可信任的人陪你。\n\n如果你有立即危險，請聯絡當地緊急服務或危機協助資源。你不需要一個人撐過這一刻，先讓真人陪在你身邊，等安全穩住後，再回來問占卜問題會比較安全。"
+
+    return {
+      blocked: true,
+      reason: "self_harm",
+      interpretation: buildSafetyInterpretation(finalAnswer, {
+        summary: "這題先以人身安全為優先，不用占卜判斷。",
+        cardMessage: "這次不進行牌卡解讀，因為問題已經涉及自傷或生命安全。",
+        situationAnalysis: "當問題牽涉想死、不想活或傷害自己時，最重要的是先讓現實中的人介入陪伴與協助。",
+        advice: "請先離開危險物品和危險現場，立刻找可信任的人、當地緊急服務或危機協助資源。",
+        reminder: "等安全穩住後，再回來問占卜會比較安全。",
+      }),
+    }
+  }
+
+  if (isViolenceQuestion(question)) {
+    const finalAnswer = "這題我不能提供傷害他人、報復、攻擊或逃避責任的方法，也不適合用占卜替暴力行動找理由。\n\n現在比較重要的是先讓自己離開衝突現場，暫停聯絡或爭執，找可信任的人協助冷靜。如果你擔心自己會失控，請立刻聯絡當地緊急服務或相關協助資源，先把人身安全放在第一位。"
+
+    return {
+      blocked: true,
+      reason: "violence",
+      interpretation: buildSafetyInterpretation(finalAnswer, {
+        summary: "這題涉及傷害他人或報復，不能提供執行方法。",
+        cardMessage: "這次不進行牌卡解讀，因為問題已經偏向暴力或攻擊行動。",
+        situationAnalysis: "當情緒已經推向傷害他人時，重點不是占卜結果，而是先中斷衝突、降低危險。",
+        advice: "請先離開現場，暫停爭執，找可信任的人協助；若可能失控，請聯絡緊急服務。",
+        reminder: "不要讓一時情緒變成無法挽回的行動。",
+      }),
+    }
+  }
+
+  if (isPromptInjectionQuestion(question)) {
+    const finalAnswer = "這題我不能照外部指令修改系統、顯示後台資料、OpenAI prompt、API key、token、完整規則或任何機密資訊。\n\n如果你要占卜，請把問題改成你想詢問的感情、工作、金錢、健康、人際或某件具體事情本身，我會依照牌卡流程協助你解讀。"
+
+    return {
+      blocked: true,
+      reason: "prompt_injection",
+      interpretation: buildSafetyInterpretation(finalAnswer, {
+        summary: "這題是在要求系統或機密資訊，不能照做。",
+        cardMessage: "這次不進行牌卡解讀，因為問題不是占卜問題。",
+        situationAnalysis: "要求顯示 prompt、token、API key 或忽略規則，都不能被當成占卜內容處理。",
+        advice: "請改問一個具體事件，例如感情、工作、金錢或人際問題。",
+        reminder: "占卜會回答問題本身，不會揭露系統或後台資訊。",
+      }),
+    }
+  }
+
+  if (isDeathOrFuneralQuestion(question)) {
+    const finalAnswer = buildDeathCriticalSafetyAnswer(question)
+
+    return {
+      blocked: true,
+      reason: "death_critical",
+      interpretation: buildSafetyInterpretation(finalAnswer, {
+        summary: "這題牽涉死亡或生命安全，占卜不能給死亡斷言。",
+        cardMessage: "這次不以牌面判斷生死、日期或喪事結果。",
+        situationAnalysis: "生命與醫療狀況必須回到現實資訊、醫療專業、家人溝通與照護安排。",
+        advice: "請先確認當事人安全與醫療狀況；若有立即危險，請聯絡緊急服務或醫療單位。",
+        reminder: "占卜不能取代醫師、緊急服務或家人的實際協助。",
+      }),
+    }
+  }
+
+  return { blocked: false }
+}
