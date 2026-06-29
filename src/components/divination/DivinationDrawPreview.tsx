@@ -11,10 +11,12 @@ import type {
   DivinationReadingSession,
 } from "@/lib/divination/types"
 import Image from "next/image"
+import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
 
 type DivinationDrawPreviewProps = {
   readingSession?: DivinationReadingSession | null
+  autoMockPaid?: boolean
 }
 
 type PaymentRequiredState = {
@@ -29,6 +31,7 @@ const readyMessage = "洗牌完成，請憑直覺點選一張牌。"
 const pendingMessage = "你選到一張牌。請確認是不是這張。"
 const resultReadyMessage = "已產生牌義解讀預覽。"
 const blockedMessage = "請先在上方填寫問題，並選擇手動抽牌或自動抽牌。"
+const readingSessionStorageKey = "divination_reading_session"
 
 const positionLabels: Record<DivinationPosition, string> = {
   upright: "正位",
@@ -167,7 +170,8 @@ function DivinationConsentNotice({
   )
 }
 
-export function DivinationDrawPreview({ readingSession = null }: DivinationDrawPreviewProps) {
+export function DivinationDrawPreview({ readingSession = null, autoMockPaid = false }: DivinationDrawPreviewProps) {
+  const router = useRouter()
   const [started, setStarted] = useState(false)
   const [shuffling, setShuffling] = useState(false)
   const [pendingIndex, setPendingIndex] = useState<number | null>(null)
@@ -206,6 +210,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
       ? pendingCard.reversedImage
       : pendingCard.image
     : null
+  const hasCompletedInterpretation = Boolean(confirmedCard && confirmedPosition && interpretation)
 
   useEffect(() => {
     return () => {
@@ -357,7 +362,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
       setMessage("已為你抽出牌卡，正在產生解讀……")
 
       if (autoCard) {
-        void interpretCard(autoCard, autoPosition, { auto: true })
+        void interpretCard(autoCard, autoPosition, { auto: true, mockPaid: autoMockPaid })
       }
     }, drawDelayMs)
   }
@@ -472,7 +477,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
       return
     }
 
-    await interpretCard(pendingCard, pendingPosition, { mockPaid: Boolean(paymentRequired) })
+    await interpretCard(pendingCard, pendingPosition, { mockPaid: true })
   }
 
   async function handleMockPaidInterpret() {
@@ -490,6 +495,11 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
     } finally {
       setIsMockPaying(false)
     }
+  }
+
+  function returnToDivinationStart() {
+    window.sessionStorage.removeItem(readingSessionStorageKey)
+    router.push(`/ai-divination?reset=${Date.now()}`)
   }
 
   useEffect(() => {
@@ -771,9 +781,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                   className="rounded-full bg-deepPurple px-5 py-3 font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isInterpreting || isMockPaying
-                    ? paymentRequired
-                      ? "支付與解讀中..."
-                      : "開始解讀中..."
+                    ? "支付與解讀中..."
                     : paymentRequired
                       ? `支付 NT$${paymentRequired.amountTwd} 開始解讀（本機測試）`
                       : "支付 NT$50 開始解讀（本機測試）"}
@@ -818,7 +826,17 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
             />
           ) : null}
 
-          {canDraw && isManualMode ? (
+          {canDraw && hasCompletedInterpretation ? (
+            <button
+              type="button"
+              onClick={returnToDivinationStart}
+              className="w-full max-w-sm rounded-full bg-deepPurple px-8 py-3.5 text-base font-semibold text-white transition hover:bg-[#4b176b]"
+            >
+              返回占卜
+            </button>
+          ) : null}
+
+          {canDraw && isManualMode && !hasCompletedInterpretation ? (
             <button
               type="button"
               onClick={startShuffle}

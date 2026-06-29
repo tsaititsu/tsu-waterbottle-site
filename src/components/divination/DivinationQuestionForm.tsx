@@ -8,6 +8,7 @@ type DivinationQuestionFormProps = {
   onQuestionSubmit?: (payload: {
     question: string
     mode: DrawMode
+    mockPaid?: boolean
   }) => void
 }
 
@@ -18,8 +19,9 @@ export function DivinationQuestionForm({ onQuestionSubmit }: DivinationQuestionF
   const [question, setQuestion] = useState('')
   const [message, setMessage] = useState('')
   const [messageType, setMessageType] = useState<'error' | 'info'>('info')
+  const [selectedMode, setSelectedMode] = useState<DrawMode | null>(null)
 
-  const handlePreviewDraw = (mode: DrawMode) => {
+  const handlePreviewDraw = (mode: DrawMode, options?: { mockPaid?: boolean }) => {
     const trimmedQuestion = question.trim()
 
     if (!trimmedQuestion) {
@@ -31,9 +33,10 @@ export function DivinationQuestionForm({ onQuestionSubmit }: DivinationQuestionF
     onQuestionSubmit?.({
       question: trimmedQuestion,
       mode,
+      mockPaid: options?.mockPaid,
     })
     setMessageType('info')
-    setMessage('問題已送出，正在前往抽牌頁。')
+    setMessage(mode === 'auto' ? '正在建立占卜紀錄並前往自動抽牌頁。' : '問題已送出，正在前往抽牌頁。')
   }
 
   return (
@@ -71,15 +74,30 @@ export function DivinationQuestionForm({ onQuestionSubmit }: DivinationQuestionF
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <button
               type="button"
-              onClick={() => handlePreviewDraw('manual')}
-              className="focus-ring min-h-12 rounded-xl border border-borderSoft bg-white px-6 py-3 text-sm font-semibold text-deepPurple transition hover:bg-softPurple"
+              onClick={() => {
+                setSelectedMode('manual')
+                handlePreviewDraw('manual')
+              }}
+              className={`focus-ring min-h-12 rounded-xl border px-6 py-3 text-sm font-semibold transition ${
+                selectedMode === 'manual'
+                  ? 'border-deepPurple bg-softPurple text-deepPurple'
+                  : 'border-borderSoft bg-white text-deepPurple hover:bg-softPurple'
+              }`}
             >
               手動抽牌
             </button>
             <button
               type="button"
-              onClick={() => handlePreviewDraw('auto')}
-              className="focus-ring min-h-12 rounded-xl bg-deepPurple px-6 py-3 text-sm font-semibold text-white transition hover:bg-purpleMain"
+              onClick={() => {
+                setSelectedMode('auto')
+                setMessageType('info')
+                setMessage('已選擇自動抽牌。請按下方按鈕完成本機測試付款後開始解讀。')
+              }}
+              className={`focus-ring min-h-12 rounded-xl px-6 py-3 text-sm font-semibold transition ${
+                selectedMode === 'auto'
+                  ? 'bg-deepPurple text-white'
+                  : 'bg-deepPurple text-white hover:bg-purpleMain'
+              }`}
             >
               自動抽牌
             </button>
@@ -89,6 +107,21 @@ export function DivinationQuestionForm({ onQuestionSubmit }: DivinationQuestionF
             <p>自動抽牌：由系統為你隨機抽牌。</p>
           </div>
         </div>
+
+        {selectedMode === 'auto' ? (
+          <div className="mt-5 rounded-2xl border border-purple-100 bg-softPurple p-4">
+            <p className="text-sm leading-7 text-textMuted">
+              自動抽牌會在付款後建立占卜紀錄，接著自動洗牌、抽牌並開始 AI 解讀。
+            </p>
+            <button
+              type="button"
+              onClick={() => handlePreviewDraw('auto', { mockPaid: true })}
+              className="mt-3 rounded-full bg-deepPurple px-5 py-3 text-sm font-semibold text-white transition hover:bg-purpleMain"
+            >
+              支付 NT$50 開始解讀（本機測試）
+            </button>
+          </div>
+        ) : null}
 
         {message ? (
           <p

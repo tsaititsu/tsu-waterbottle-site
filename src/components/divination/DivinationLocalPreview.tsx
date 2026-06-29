@@ -14,6 +14,7 @@ type DrawMode = DivinationDrawMode
 type QuestionSubmitPayload = {
   question: string
   mode: DrawMode
+  mockPaid?: boolean
 }
 
 const localUserStorageKey = "divination_local_user_id"
@@ -44,9 +45,15 @@ function getLocalUserId() {
   return localUserId
 }
 
-function saveReadingSession(session: DivinationReadingSession) {
+function saveReadingSession(session: DivinationReadingSession, options?: { autoMockPaid?: boolean }) {
   if (typeof window === "undefined") return
-  window.sessionStorage.setItem(readingSessionStorageKey, JSON.stringify(session))
+  window.sessionStorage.setItem(
+    readingSessionStorageKey,
+    JSON.stringify({
+      ...session,
+      autoMockPaid: options?.autoMockPaid === true,
+    })
+  )
 }
 
 function clearReadingSession() {
@@ -103,7 +110,7 @@ export function DivinationLocalPreview({ resetKey = "" }: DivinationLocalPreview
 
       if (session) {
         if (requestResetVersion === resetVersionRef.current) {
-          saveReadingSession(session)
+          saveReadingSession(session, { autoMockPaid: payload.mode === "auto" && payload.mockPaid === true })
           router.push("/ai-divination/draw")
         }
       }

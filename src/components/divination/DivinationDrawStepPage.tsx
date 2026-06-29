@@ -7,11 +7,15 @@ import type { DivinationReadingSession } from "@/lib/divination/types"
 
 const readingSessionStorageKey = "divination_reading_session"
 
-function parseReadingSession(value: string | null): DivinationReadingSession | null {
+type StoredReadingSession = DivinationReadingSession & {
+  autoMockPaid?: boolean
+}
+
+function parseReadingSession(value: string | null): StoredReadingSession | null {
   if (!value) return null
 
   try {
-    const parsed = JSON.parse(value) as Partial<DivinationReadingSession>
+    const parsed = JSON.parse(value) as Partial<StoredReadingSession>
 
     if (
       typeof parsed.readingId !== "string" ||
@@ -29,6 +33,7 @@ function parseReadingSession(value: string | null): DivinationReadingSession | n
       localUserId: parsed.localUserId,
       entitlement: parsed.entitlement,
       mockPaymentGate: parsed.mockPaymentGate,
+      autoMockPaid: parsed.autoMockPaid === true,
     }
   } catch {
     return null
@@ -36,7 +41,7 @@ function parseReadingSession(value: string | null): DivinationReadingSession | n
 }
 
 export function DivinationDrawStepPage() {
-  const [readingSession, setReadingSession] = useState<DivinationReadingSession | null>(null)
+  const [readingSession, setReadingSession] = useState<StoredReadingSession | null>(null)
   const [hasLoadedSession, setHasLoadedSession] = useState(false)
 
   useEffect(() => {
@@ -77,7 +82,7 @@ export function DivinationDrawStepPage() {
           依照你選擇的方式抽出一張紫微牌卡，先查看牌卡基礎牌義。
         </p>
       </div>
-      <DivinationDrawPreview readingSession={readingSession} />
+      <DivinationDrawPreview readingSession={readingSession} autoMockPaid={readingSession.autoMockPaid === true} />
     </section>
   )
 }
