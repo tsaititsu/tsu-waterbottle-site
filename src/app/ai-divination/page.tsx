@@ -20,6 +20,7 @@ export default async function AiDivinationPage({ searchParams }: AiDivinationPag
 
   const resolvedSearchParams = await searchParams
   const resetKey = getSingleParam(resolvedSearchParams.reset)
+  const followUpKey = getSingleParam(resolvedSearchParams.followUp)
 
   return (
     <>
@@ -31,7 +32,7 @@ export default async function AiDivinationPage({ searchParams }: AiDivinationPag
       <section className="bg-white py-12 md:py-16">
         <div className="section-shell grid gap-8">
           <DivinationEntryModule />
-          <DivinationLocalPreview resetKey={resetKey} />
+          <DivinationLocalPreview resetKey={resetKey} followUpKey={followUpKey} />
         </div>
       </section>
     </>

@@ -3,11 +3,17 @@
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { DivinationQuestionForm } from "./DivinationQuestionForm"
+import {
+  clearDivinationFollowUpDraft,
+  loadDivinationFollowUpDraft,
+} from "@/lib/divination/followUpStorage"
 import type {
   CreateDivinationReadingResponse,
   DivinationDrawMode,
+  DivinationFollowUpDraft,
   DivinationInterpretation,
   DivinationReadingSession,
+  DivinationPosition,
 } from "@/lib/divination/types"
 
 type DrawMode = DivinationDrawMode
@@ -23,6 +29,12 @@ const readingSessionStorageKey = "divination_reading_session"
 
 type DivinationLocalPreviewProps = {
   resetKey?: string
+  followUpKey?: string
+}
+
+const positionLabels: Record<DivinationPosition, string> = {
+  upright: "正位",
+  reversed: "反位",
 }
 
 function createLocalUserId() {
@@ -62,11 +74,12 @@ function clearReadingSession() {
   window.sessionStorage.removeItem(readingSessionStorageKey)
 }
 
-export function DivinationLocalPreview({ resetKey = "" }: DivinationLocalPreviewProps) {
+export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: DivinationLocalPreviewProps) {
   const router = useRouter()
   const [isCreatingReading, setIsCreatingReading] = useState(false)
   const [errorMessage, setErrorMessage] = useState("")
   const [safetyInterpretation, setSafetyInterpretation] = useState<DivinationInterpretation | null>(null)
+  const [followUpDraft, setFollowUpDraft] = useState<DivinationFollowUpDraft | null>(null)
   const resetVersionRef = useRef(0)
 
   async function createReadingSession(input: {
@@ -152,8 +165,23 @@ export function DivinationLocalPreview({ resetKey = "" }: DivinationLocalPreview
     setIsCreatingReading(false)
     setErrorMessage("")
     setSafetyInterpretation(null)
+    setFollowUpDraft(null)
     clearReadingSession()
+    if (resetKey) {
+      clearDivinationFollowUpDraft()
+    }
   }, [resetKey])
+
+  useEffect(() => {
+    if (!followUpKey) {
+      setFollowUpDraft(null)
+      return
+    }
+
+    setFollowUpDraft(loadDivinationFollowUpDraft())
+  }, [followUpKey])
+
+  const latestFollowUpReading = followUpDraft?.previousReadings.at(-1)
 
   return (
     <section className="grid gap-6">
@@ -171,6 +199,29 @@ export function DivinationLocalPreview({ resetKey = "" }: DivinationLocalPreview
             填寫一個清楚的問題，選擇你想要的抽牌方式。
           </p>
         </div>
+        {followUpKey && latestFollowUpReading ? (
+          <article className="rounded-2xl border border-purple-100 bg-white p-5 shadow-soft">
+            <p className="text-sm font-semibold tracking-[0.18em] text-darkGold">
+              正在延續上一題追問
+            </p>
+            <div className="mt-3 grid gap-3 leading-7 text-textMuted">
+              <div>
+                <p className="font-semibold text-deepPurple">上一題：</p>
+                <p>「{latestFollowUpReading.question}」</p>
+              </div>
+              <div>
+                <p className="font-semibold text-deepPurple">抽到：</p>
+                <p>
+                  {latestFollowUpReading.cardName || "紫微牌卡"}
+                  {latestFollowUpReading.position ? `｜${positionLabels[latestFollowUpReading.position]}` : ""}
+                </p>
+              </div>
+              <p>
+                請輸入這次想追問的問題。下一步仍會重新抽牌，AI 解讀每次 NT$50。
+              </p>
+            </div>
+          </article>
+        ) : null}
         <DivinationQuestionForm key={resetKey || "initial"} onQuestionSubmit={handleQuestionSubmit} />
         {isCreatingReading ? (
           <p className="rounded-xl border border-purple-100 bg-purple-50 px-4 py-3 text-sm leading-7 text-textMuted">

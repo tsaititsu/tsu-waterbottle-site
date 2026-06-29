@@ -4,6 +4,7 @@ import { DivinationResultPreview } from "@/components/divination/DivinationResul
 import { ziweiCards, type ZiweiCard } from "@/lib/divination/cards"
 import {
   buildDivinationFollowUpDraft,
+  clearDivinationFollowUpDraft,
   saveDivinationFollowUpDraft,
 } from "@/lib/divination/followUpStorage"
 import type {
@@ -187,6 +188,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     useState<DivinationMockPaymentGate | null>(null)
   const [interpretation, setInterpretation] = useState<DivinationInterpretation | null>(null)
   const [isSafetyResult, setIsSafetyResult] = useState(false)
+  const [hasFollowUpDraft, setHasFollowUpDraft] = useState(false)
   const [isInterpreting, setIsInterpreting] = useState(false)
   const [isMockPaying, setIsMockPaying] = useState(false)
   const [paymentRequired, setPaymentRequired] = useState<PaymentRequiredState | null>(null)
@@ -241,6 +243,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setConfirmedPaymentGate(null)
     setInterpretation(null)
     setIsSafetyResult(false)
+    setHasFollowUpDraft(false)
     setIsInterpreting(false)
     setIsMockPaying(false)
     setPaymentRequired(null)
@@ -277,6 +280,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setConfirmedPaymentGate(null)
     setInterpretation(null)
     setIsSafetyResult(false)
+    setHasFollowUpDraft(false)
     setIsInterpreting(false)
     setIsMockPaying(false)
     setPaymentRequired(null)
@@ -304,6 +308,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setConfirmedPaymentGate(null)
     setInterpretation(null)
     setIsSafetyResult(false)
+    setHasFollowUpDraft(false)
     setPaymentRequired(null)
     setErrorMessage("")
     setMessage(pendingMessage)
@@ -322,6 +327,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setConfirmedPaymentGate(null)
     setInterpretation(null)
     setIsSafetyResult(false)
+    setHasFollowUpDraft(false)
     setPaymentRequired(null)
     setErrorMessage("")
     setMessage(readyMessage)
@@ -353,6 +359,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setConfirmedPaymentGate(null)
     setInterpretation(null)
     setIsSafetyResult(false)
+    setHasFollowUpDraft(false)
     setIsInterpreting(false)
     setIsMockPaying(false)
     setPaymentRequired(null)
@@ -408,6 +415,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setConfirmedPaymentGate(null)
     setInterpretation(null)
     setIsSafetyResult(false)
+    setHasFollowUpDraft(false)
     setPaymentRequired(null)
     setErrorMessage("")
     setMessage(options?.mockPaid ? "支付與解讀中..." : "開始解讀中...")
@@ -475,6 +483,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
       setConfirmedPaymentGate(null)
       setInterpretation(null)
       setIsSafetyResult(false)
+      setHasFollowUpDraft(false)
       setErrorMessage(error instanceof Error ? error.message : "解讀預覽產生失敗，請稍後再試。")
       setMessage(pendingMessage)
     } finally {
@@ -517,7 +526,13 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
 
   function returnToDivinationStart() {
     window.sessionStorage.removeItem(readingSessionStorageKey)
+    clearDivinationFollowUpDraft()
     router.push(`/ai-divination?reset=${Date.now()}`)
+  }
+
+  function continueFollowUp() {
+    window.sessionStorage.removeItem(readingSessionStorageKey)
+    router.push(`/ai-divination?followUp=${Date.now()}`)
   }
 
   useEffect(() => {
@@ -549,6 +564,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
 
     saveDivinationFollowUpDraft(followUpDraft)
     savedFollowUpDraftReadingIdRef.current = confirmedReadingId
+    setHasFollowUpDraft(true)
   }, [
     confirmedCard,
     confirmedPosition,
@@ -878,13 +894,24 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
           ) : null}
 
           {canDraw && hasCompletedInterpretation ? (
-            <button
-              type="button"
-              onClick={returnToDivinationStart}
-              className="w-full max-w-sm rounded-full bg-deepPurple px-8 py-3.5 text-base font-semibold text-white transition hover:bg-[#4b176b]"
-            >
-              返回占卜
-            </button>
+            <div className="grid w-full max-w-2xl gap-3 sm:grid-cols-2">
+              {!isSafetyResult && hasFollowUpDraft ? (
+                <button
+                  type="button"
+                  onClick={continueFollowUp}
+                  className="rounded-full bg-deepPurple px-8 py-3.5 text-base font-semibold text-white transition hover:bg-[#4b176b]"
+                >
+                  繼續追問
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={returnToDivinationStart}
+                className="rounded-full border border-borderSoft bg-white px-8 py-3.5 text-base font-semibold text-deepPurple transition hover:border-darkGold hover:text-darkGold"
+              >
+                返回占卜
+              </button>
+            </div>
           ) : null}
 
           {canDraw && isManualMode && !hasCompletedInterpretation ? (
