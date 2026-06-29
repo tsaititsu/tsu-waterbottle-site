@@ -77,6 +77,27 @@ export function buildDivinationFollowUpDraft(input: {
   }
 }
 
+export function toDivinationFollowUpContext(
+  draft: DivinationFollowUpDraft | null
+): DivinationFollowUpContext | undefined {
+  if (!draft?.threadId || !draft.parentReadingId || !Array.isArray(draft.previousReadings)) {
+    return undefined
+  }
+
+  const previousReadings = trimPreviousReadings(
+    draft.previousReadings.filter((reading) => reading.readingId && reading.question)
+  )
+
+  if (previousReadings.length === 0) return undefined
+
+  return {
+    isFollowUp: true,
+    threadId: draft.threadId,
+    parentReadingId: draft.parentReadingId,
+    previousReadings,
+  }
+}
+
 export function saveDivinationFollowUpDraft(draft: DivinationFollowUpDraft): void {
   if (typeof window === "undefined") return
 

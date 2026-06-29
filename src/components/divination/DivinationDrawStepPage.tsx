@@ -3,12 +3,56 @@
 import Link from "next/link"
 import { useEffect, useState } from "react"
 import { DivinationDrawPreview } from "./DivinationDrawPreview"
-import type { DivinationReadingSession } from "@/lib/divination/types"
+import type {
+  DivinationFollowUpContext,
+  DivinationPosition,
+  DivinationReadingSession,
+} from "@/lib/divination/types"
 
 const readingSessionStorageKey = "divination_reading_session"
 
 type StoredReadingSession = DivinationReadingSession & {
   autoMockPaid?: boolean
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function parseFollowUpContext(value: unknown): DivinationFollowUpContext | undefined {
+  if (!isRecord(value)) return undefined
+  if (value.isFollowUp !== true) return undefined
+  if (typeof value.threadId !== "string" || typeof value.parentReadingId !== "string") return undefined
+  if (!Array.isArray(value.previousReadings) || value.previousReadings.length === 0) return undefined
+
+  const previousReadings = value.previousReadings
+    .filter(isRecord)
+    .map((reading) => ({
+      readingId: typeof reading.readingId === "string" ? reading.readingId : "",
+      question: typeof reading.question === "string" ? reading.question : "",
+      cardId: typeof reading.cardId === "string" ? reading.cardId : undefined,
+      cardName: typeof reading.cardName === "string" ? reading.cardName : undefined,
+      position:
+        reading.position === "upright" || reading.position === "reversed"
+          ? (reading.position as DivinationPosition)
+          : undefined,
+      answerSummary: typeof reading.answerSummary === "string" ? reading.answerSummary : "",
+      finalAnswer: typeof reading.finalAnswer === "string" ? reading.finalAnswer : undefined,
+      questionType: typeof reading.questionType === "string" ? reading.questionType : undefined,
+      questionSubcategory:
+        typeof reading.questionSubcategory === "string" ? reading.questionSubcategory : undefined,
+      createdAt: typeof reading.createdAt === "string" ? reading.createdAt : undefined,
+    }))
+    .filter((reading) => reading.readingId && reading.question && reading.answerSummary)
+
+  if (previousReadings.length === 0) return undefined
+
+  return {
+    isFollowUp: true,
+    threadId: value.threadId,
+    parentReadingId: value.parentReadingId,
+    previousReadings,
+  }
 }
 
 function parseReadingSession(value: string | null): StoredReadingSession | null {
@@ -33,6 +77,7 @@ function parseReadingSession(value: string | null): StoredReadingSession | null 
       localUserId: parsed.localUserId,
       entitlement: parsed.entitlement,
       mockPaymentGate: parsed.mockPaymentGate,
+      followUpContext: parseFollowUpContext(parsed.followUpContext),
       autoMockPaid: parsed.autoMockPaid === true,
     }
   } catch {

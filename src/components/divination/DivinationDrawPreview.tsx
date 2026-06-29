@@ -432,6 +432,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
           position: selectedPosition,
           localUserId,
           mockPaid: options?.mockPaid === true,
+          ...(readingSession?.followUpContext ? { followUpContext: readingSession.followUpContext } : {}),
         }),
       })
       const interpretData = (await interpretResponse.json()) as DivinationInterpretResponse

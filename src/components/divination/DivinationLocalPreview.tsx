@@ -6,6 +6,7 @@ import { DivinationQuestionForm } from "./DivinationQuestionForm"
 import {
   clearDivinationFollowUpDraft,
   loadDivinationFollowUpDraft,
+  toDivinationFollowUpContext,
 } from "@/lib/divination/followUpStorage"
 import type {
   CreateDivinationReadingResponse,
@@ -143,7 +144,12 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
             return
           }
 
-          saveReadingSession(session, { autoMockPaid: payload.mode === "auto" && payload.mockPaid === true })
+          const followUpContext = followUpKey
+            ? toDivinationFollowUpContext(loadDivinationFollowUpDraft())
+            : undefined
+          const readingSession = followUpContext ? { ...session, followUpContext } : session
+
+          saveReadingSession(readingSession, { autoMockPaid: payload.mode === "auto" && payload.mockPaid === true })
           router.push("/ai-divination/draw")
         }
       }
