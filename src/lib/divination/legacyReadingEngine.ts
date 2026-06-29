@@ -41,6 +41,13 @@ const aiToneWords = [
   "更加完美",
   "明智的選擇",
   "有助於",
+  "不妨",
+  "促進",
+  "展現出",
+  "顯得",
+  "面臨一些挑戰",
+  "進一步優化",
+  "方為長遠之計",
 ]
 
 const harshToneReplacements: Array<[string, string]> = [
@@ -73,9 +80,26 @@ const harshToneReplacements: Array<[string, string]> = [
   ["須審慎評估", "要先看清楚"],
   ["資金流向缺乏透明度", "資金和資訊還沒看清楚"],
   ["存在不平衡", "現在看不清楚"],
+  ["聚焦於", "把重點放在"],
   ["聚焦於清楚了解狀況和改善付出", "先把狀況看懂，不要硬撐"],
   ["更為穩健且有自我控制", "節奏會比較穩"],
   ["非理性壓力", "一時壓力"],
+  ["規避規範", "想走捷徑"],
+  ["使用槓桿或規避規範", "把錢放太大，或想用比較快的方式硬衝"],
+  ["主動負責溝通有關界線和期望", "輕一點確認他的態度"],
+  ["不僅能減少誤會，也能關係自然前進", "關係才比較容易自然往前"],
+  ["法律風險", "後續麻煩"],
+  ["違法疑慮", "規則還沒看清楚"],
+  ["非法疑慮", "規則還沒看清楚"],
+  ["詐騙風險", "不透明來源"],
+  ["器官功能", "身體狀態"],
+  ["病症惡化", "狀態變差"],
+  ["神經不適", "神經比較緊繃"],
+  ["筋骨和神經循環", "讓筋骨活動開，也讓精神放鬆一點"],
+  ["具備不平衡的狀態", "規則和責任的理解可能不一致"],
+  ["存在不平衡的狀態", "規則和責任的理解可能不一致"],
+  ["合約效力受到挑戰", "後面執行時容易有爭議"],
+  ["效力受到挑戰", "執行上容易有爭議"],
 ]
 
 const prohibitedInvestmentActionWords = [
@@ -283,14 +307,22 @@ function buildOutputRulesBlock() {
 - 第一段第一句必須直接回答使用者真正問的問題，先斷方向，再解釋牌義；不要先說「從某星來看」或「這張牌代表」。
 - 第 1 段只斷事，不要反覆解釋原因；第 2 段才用牌義說明為什麼；第 3 段才給做法。
 - 不要在相鄰段落重複同一個判斷，例如投資題不要第 1 段和第 2 段都一直重複「不適合急著進場、重押、追高」。
+- 每一段都要回扣原問題裡的對象、行動、條件和想知道的結果，不要把題目改成另一件事。
+- 不要把牌義硬套到錯誤領域；感情題不要寫成財務、健康或工作分析，工作題不要寫成感情溝通，金錢財務題不要自動寫成股票期貨操作。
 - 牌卡判斷要佔 70% 到 80%，行動建議佔 20% 到 30%。
 - 正位要先偏向有機會、可推進、可整理、照牌卡提醒做會比較順。
 - 反位要先指出隱憂、卡點、不穩定或用錯方式，再給修正。
+- 反位不是判死，也不是把正位意思簡單反過來；要講卡在哪裡、為什麼卡、怎麼調整。
 - 不要使用：這意味著、象徵著、顯示出、綜上所述、因此可見、保持開放、正能量、最佳狀態。
 - 不要使用太嚴重或太官方的詞，例如：職場信譽受損、合作關係破裂、切記、須警惕、潛藏風險、無意識地踩踏灰色地帶。
 - 不要使用指令外露感的詞，例如：回到原本風險規則、原本風險規則、風險資產、制定規則、規則感不明。
 - 不要使用不自然比喻，例如：如外交官般、像外交官、如法官般、像法官、如老師般、像老師。
+- 非健康題不要亂講器官、疾病、免疫、內分泌、腎臟、呼吸系統或醫療診斷；請改成體力、狀態、節奏、壓力或準備度。
+- 非法律題不要亂加詐騙、違法、官非、法律風險；除非原問題或牌義明確指向合約、借貸、詐騙、違法、糾紛或官方程序。
+- 日期 / 擇日題沒有候選日期時不能編日期；有單一日期才判斷適合度和注意點，多候選日期不要用一張牌硬選某一天。
+- 房產題要先看房子本身、價格、屋況、貸款、合約和仲介；交通題要看行程、路線、時間、工具和安全節奏；合作題要看分工、責任、利益和界線。
 - 回答不要超過四段，每段不要超過三句。
+- 建議必須能落地：問工作就提履歷、面試、薪資工時或交接；問房產就提屋況、價格、合約；問合約就提文件、條款、證據；不要只說保持正向或好好溝通。
 - 不要在回答中說問題分類是什麼。`
 }
 
@@ -405,12 +437,16 @@ export function buildLegacyDraftPrompt(context: LegacyReadingContext) {
 
 題型硬規則：
 感情心意題第一段要先給偏向判斷，例如偏有心、偏觀望、偏退開、偏熱度下降、偏想靠近但不穩定，不能只說還需要觀察。
+感情心意題要回答對方感覺、態度、回覆品質、主動或觀望，不要變成金錢、健康、工作分析；除非使用者明確提到，否則不要硬拉到現實資源或職場規則。
 工作題第一句要先回到工作語境，例如適不適合換工作、要不要裸辭、是否先面試看看、主管規則、同事互動、職務條件與交接責任；建議要像老師現場提醒：先整理履歷、看職缺、面試看看市場，確認薪資、工時、主管風格、職務內容，不要只是因為現在不爽就裸辭。
 投資題第一句要先明確講節奏：現在不適合急著進場，尤其不適合重押或追高。第 2 段禁止再重複不適合進場、不建議投入、重押、追高、風險承受度，必須改成牌義原因段，依抽到的牌說明判斷力、資訊透明度、主導權、短線誘惑、面子或資源消耗。第 3 段才講目前投資狀態，例如市場或標的還不夠清楚、容易被外在消息影響、適合做功課與整理資金配置。第 4 段再給行動建議：小額觀察、不借錢投資、不碰保證獲利或不透明來源、等自己看得懂也掌握得住再說。不能替使用者決定買賣、停損、加碼或出場，也不要每次自動加詐騙、非法、法律風險，除非問題或牌義明確指向詐騙、違法、借貸、合約、官非。
+一般金錢財務題不是股票期貨題；請回答收支、預算、現金流、回款、貸款條件、保險或大額購買，不要使用進場、出場、部位、停損、加碼、減碼。
 房產題要先看房子本身、價格、合約、貸款與屋況，不要一開始寫家人相處。
 健康題不能做醫療診斷，也不能叫使用者停藥或取代醫師建議；有明顯不適要提醒找專業醫師。
-合約法律題不能直接叫使用者簽、不簽、提告或放棄權利，要提醒條款、證據、責任歸屬與專業協助。
+健康題可以依星曜提醒身體使用方式與注意方向，但不要直接寫肝臟功能、肝臟區域不適、器官功能或病名，也不要寫神經不適、神經循環這類醫療化或不順的句子。請改用作息、壓力、睡眠、筋骨四肢、神經緊繃、身體訊號；可以說這不是直接說你有病，而是提醒最近身體容易因為緊繃、睡眠或生活節奏而有反應。
+合約法律題不能直接叫使用者簽、不簽、提告或放棄權利，要提醒條款、證據、責任歸屬與專業協助。不要寫具備不平衡的狀態、存在不平衡的狀態、合約效力受到挑戰或效力受到挑戰；請改成雙方對規則和責任的理解可能不一致、條款不清、後面執行時容易有爭議。
 日期題沒有明確日期時不能編日期，只能回答時機感、準備度與注意事項。
+交通出行題不要恐嚇事故；只提醒路線、時間、工具、分心、臨時變動與安全節奏。房產、合約、交通、合作都要放回該事件本身，不要一律寫成個性或心態。
 
 第一句範例：
 - 感情題：他對你不是沒有感覺，但現在還沒有到完全穩定投入的狀態。
@@ -444,8 +480,36 @@ Investment Review Mode
 只能把草稿整理成風險提醒與規則檢查。
 `
       : ""
+  const healthReviewMode =
+    context.questionType === "健康狀態"
+      ? `
+Health Review Mode
+這是健康或身體題。請降低醫療化語氣，不可診斷、不可保證好轉或惡化、不可取代醫師。
+若使用者只問作息、睡眠、疲累或生活狀態，請放在休息、壓力、飲食、作息、體力與白天精神，不要主動新增器官或疾病。
+健康題即使抽到和身體部位有關的星曜，也不要寫「肝臟功能」「肝臟區域不適」「神經不適」「神經循環」這類診斷感或不順的句子；請改成作息、壓力、睡眠、筋骨四肢、神經緊繃、身體訊號。只有明顯疼痛、麻木、長期不舒服時，才提醒就醫檢查。`
+      : ""
+  const legalReviewMode =
+    context.questionType === "合約法律"
+      ? `
+Legal Review Mode
+這是合約或法律題。不可判定勝訴、敗訴、一定能告或一定不能告。
+請回到文件、條款、付款方式、責任歸屬、證據保存與專業協助；不要下法律結論。
+不要寫「具備不平衡的狀態」「存在不平衡的狀態」「合約效力受到挑戰」「效力受到挑戰」；請改成條款不清、責任沒有說清楚、後面執行時容易有爭議、容易各說各話。`
+      : ""
+  const crossDomainReviewMode = `
+Domain Guard Review Mode
+請檢查是否亂跨領域：
+- 感情題不能變成財務、健康或工作分析。
+- 工作題不能變成感情溝通或法律合約，除非題目明確提到。
+- 一般金錢財務題不能變成股票期貨操作。
+- 非健康題不要亂加器官、疾病或醫療診斷。
+- 非法律 / 合約 / 借貸 / 詐騙題，不要亂加詐騙、違法、官非或法律風險。
+- 日期題不能亂編日期；沒有候選日期時只能談適合度、準備度與注意點。`
 
   return `${investmentReviewMode}
+${healthReviewMode}
+${legalReviewMode}
+${crossDomainReviewMode}
 你是占卜系統的內容審稿者與潤飾者。
 
 你會看到第一輪占卜解讀草稿。你的任務不是重新占卜，而是把草稿整理成可以正式給使用者看的最終版。
@@ -472,9 +536,14 @@ Investment Review Mode
 - 投資題第 4 段才給行動建議：先小額觀察、不借錢投資、不碰保證獲利或不透明來源、等資訊清楚、自己能掌握節奏後再說。
 - 投資題不要每次自動加入詐騙、非法手段、法律風險，除非使用者問題或牌義明確指向詐騙、違法、借貸、合約、官非。
 - 感情題請改成自然口吻：對你有吸引力、有曖昧和新鮮感、還沒有穩定下來、他比較享受互動過程，還不急著給承諾。
+- 感情建議請像老師現場提醒：你可以輕一點確認他的態度，不要逼他馬上表態，先讓互動穩定下來，關係比較容易自然往前。
 - 文字要像水瓶先生現場講話，不要像 AI 審稿，不要用切記、須警惕、潛藏風險、職場信譽受損、合作關係破裂。
 - 禁止出現這些不自然或指令外露的詞：回到原本風險規則、原本風險規則、風險資產、制定規則、規則感不明、多元社交、多重關係中的選擇。
 - 禁止使用不自然比喻：如外交官般、像外交官、如法官般、像法官、如老師般、像老師。除非問題真的在問外交、法律職業或教學職業，否則一律改成白話判斷。
+- 如果第二段和第一段在重複同一個判斷，第二段要改成牌義原因段，說明抽到的星曜與正反位為什麼落在這題。
+- 如果草稿漏掉抽到的星曜或正反位，請補回，但不要硬背牌義。
+- 如果草稿把題目寫到錯誤領域，請拉回原問題，不要擴大成不相關的健康、法律、財務或感情分析。
+- 如果安全題已被安全提醒處理，不得把它改回一般占卜斷事。
 
 請檢查並修正：
 - 是否第一段先回答使用者真正問的問題。
@@ -486,6 +555,9 @@ Investment Review Mode
 - 是否有簡體字、英文漏句、重複詞或怪句。
 - 是否符合題型語境。
 - 是否保留原本主結論。
+- 是否保留抽到的星曜與正反位。
+- 是否段落之間沒有重複。
+- 是否沒有 AI 報告感、官腔、財經報告感或過度法律化語氣。
 
 題型資料：
 大分類：${context.questionType}
@@ -545,6 +617,13 @@ export function reviewAnswer(answer: string, context: LegacyReadingContext) {
   next = ensureAnswerParagraphs(next, context)
   next = reduceInvestmentRepetition(next, context)
   next = cleanInvestmentLegalOverreach(next, context)
+  next = cleanNonHealthMedicalBleed(next, context)
+  next = cleanNonLegalOverreach(next, context)
+  next = cleanContractLegalTone(next, context)
+  next = cleanHealthMedicalTone(next, context)
+  next = cleanInvestmentLegalizedTone(next, context)
+  next = cleanLoveAdviceTone(next, context)
+  next = cleanReportLikeLanguage(next)
 
   return next
 }
@@ -566,6 +645,7 @@ function cleanSimplifiedChinese(answer: string) {
     .replaceAll("关系", "關係")
     .replaceAll("风险", "風險")
     .replaceAll("选择", "選擇")
+    .replaceAll("采取", "採取")
 }
 
 function softenAbsoluteClaims(answer: string) {
@@ -818,6 +898,112 @@ function cleanInvestmentLegalOverreach(answer: string, context: LegacyReadingCon
     .replaceAll("非法手段", "來路不清的做法")
     .replaceAll("違法", "不清楚")
     .replaceAll("法律風險", "後續麻煩")
+}
+
+function cleanNonHealthMedicalBleed(answer: string, context: LegacyReadingContext) {
+  if (context.questionType === "健康狀態" || context.riskLevel === "critical_health") return answer
+
+  return answer
+    .replaceAll("免疫力下降", "續航力變弱")
+    .replaceAll("免疫力", "續航力")
+    .replaceAll("內分泌", "生活節奏")
+    .replaceAll("腎臟", "體力")
+    .replaceAll("呼吸系統", "節奏")
+    .replaceAll("生殖系統", "狀態")
+    .replaceAll("脾胃", "承接能力")
+    .replaceAll("消化不良", "承接不順")
+    .replaceAll("疾病", "狀況")
+    .replaceAll("病症", "狀況")
+    .replaceAll("醫療診斷", "現實判斷")
+}
+
+function cleanNonLegalOverreach(answer: string, context: LegacyReadingContext) {
+  const legalContext =
+    context.questionType === "合約法律" ||
+    includesAny(context.question, ["詐騙", "違法", "非法", "借錢", "借貸", "合約", "契約", "法律", "官非", "提告", "糾紛", "警察", "法院"])
+
+  if (legalContext) return answer
+
+  return answer
+    .replaceAll("詐騙風險", "不透明來源")
+    .replaceAll("詐騙", "不透明來源")
+    .replaceAll("非法手段", "來路不清的做法")
+    .replaceAll("違法疑慮", "規則還沒看清楚")
+    .replaceAll("違法", "不清楚")
+    .replaceAll("官非", "後續麻煩")
+    .replaceAll("法律責任", "後續責任")
+    .replaceAll("法律風險", "後續麻煩")
+}
+
+function cleanHealthMedicalTone(answer: string, context: LegacyReadingContext) {
+  if (context.questionType !== "健康狀態") return answer
+
+  return answer
+    .replaceAll("肝臟功能", "作息和壓力狀態")
+    .replaceAll("肝臟區域不適", "身體明顯不舒服")
+    .replaceAll("肝臟區域", "身體狀態")
+    .replaceAll("神經不適", "神經比較緊繃")
+    .replaceAll("筋骨和神經循環", "讓筋骨活動開，也讓精神放鬆一點")
+    .replaceAll("筋骨與神經循環", "讓筋骨活動開，也讓精神放鬆一點")
+    .replaceAll("促進筋骨和神經循環", "讓筋骨活動開，也讓精神放鬆一點")
+    .replaceAll("促進筋骨與神經循環", "讓筋骨活動開，也讓精神放鬆一點")
+    .replaceAll("神經循環", "精神放鬆")
+    .replaceAll("神經系統的放鬆", "神經緊繃和放鬆")
+    .replaceAll("神經系統", "神經緊繃")
+    .replaceAll("四肢麻木", "四肢明顯麻木或長期不舒服")
+    .replaceAll("器官功能", "身體狀態")
+    .replaceAll("病名", "狀況")
+    .replaceAll("療法", "處理方式")
+}
+
+function cleanContractLegalTone(answer: string, context: LegacyReadingContext) {
+  if (context.questionType !== "合約法律") return answer
+
+  return answer
+    .replaceAll("具備不平衡的狀態", "規則和責任的理解可能不一致")
+    .replaceAll("存在不平衡的狀態", "規則和責任的理解可能不一致")
+    .replaceAll("現在看不清楚的狀態", "規則和責任的理解可能不一致")
+    .replaceAll("不平衡的狀態", "規則和責任的理解可能不一致")
+    .replaceAll("合約效力受到挑戰", "後面執行時容易有爭議")
+    .replaceAll("效力受到挑戰", "執行上容易有爭議")
+    .replaceAll("導致雙方對承擔的義務有不同理解", "讓雙方對責任怎麼分容易各說各話")
+    .replaceAll("程序也可能未嚴格遵守", "流程上也可能有沒說清楚的地方")
+}
+
+function cleanInvestmentLegalizedTone(answer: string, context: LegacyReadingContext) {
+  if (context.questionType !== "金錢投資") return answer
+
+  return answer
+    .replaceAll("試圖使用槓桿或規避規範，增加不必要的危險", "可能想快一點、走捷徑，或因為想翻本而把錢放太大")
+    .replaceAll("使用槓桿或規避規範", "把錢放太大，或想用比較快的方式硬衝")
+    .replaceAll("規避規範", "想走捷徑")
+    .replaceAll("規避", "繞路硬衝")
+    .replaceAll("小額且分階段的觀察策略", "小額觀察，分階段看清楚")
+    .replaceAll("方為長遠之計", "這樣節奏會比較穩")
+    .replaceAll("採取小額且分階段的觀察策略", "先小額觀察，分階段看清楚")
+    .replaceAll("采取小額且分階段的觀察策略", "先小額觀察，分階段看清楚")
+}
+
+function cleanLoveAdviceTone(answer: string, context: LegacyReadingContext) {
+  if (context.questionType !== "感情關係") return answer
+
+  return answer
+    .replaceAll("如果你主動負責溝通有關界線和期望，不僅能減少誤會，也能關係自然前進。", "你可以輕一點確認他的態度，不要逼他馬上表態；先讓互動穩定下來，關係比較容易自然往前。")
+    .replaceAll("主動負責溝通有關界線和期望", "輕一點確認他的態度")
+    .replaceAll("減少誤會，也能關係自然前進", "讓互動穩定下來，關係比較容易自然往前")
+}
+
+function cleanReportLikeLanguage(answer: string) {
+  return answer
+    .replaceAll("資金流向", "錢的去向")
+    .replaceAll("透明度", "清楚度")
+    .replaceAll("審慎評估", "先看清楚")
+    .replaceAll("須審慎", "要先看清楚")
+    .replaceAll("不宜", "不適合")
+    .replaceAll("應避免", "先不要")
+    .replaceAll("方為長遠之計", "這樣節奏會比較穩")
+    .replaceAll("聚焦於", "把重點放在")
+    .replaceAll("進一步優化", "再調整")
 }
 
 export function buildAnswerSummary(answer: string) {
