@@ -24,6 +24,26 @@ export type DivinationMockPaymentGate = {
   entitlementToken?: string
 }
 
+export type DivinationPreviousReadingSummary = {
+  readingId: string
+  question: string
+  cardId?: string
+  cardName?: string
+  position?: DivinationPosition
+  answerSummary: string
+  finalAnswer?: string
+  questionType?: string
+  questionSubcategory?: string
+  createdAt?: string
+}
+
+export type DivinationFollowUpContext = {
+  isFollowUp: true
+  threadId: string
+  parentReadingId: string
+  previousReadings: DivinationPreviousReadingSummary[]
+}
+
 export type DivinationReadingPreview = {
   id: string
   question: string
@@ -52,6 +72,7 @@ export type DivinationReadingSession = {
   localUserId: string
   entitlement?: DivinationLocalEntitlement
   mockPaymentGate?: DivinationMockPaymentGate
+  followUpContext?: DivinationFollowUpContext
 }
 
 export type CreateDivinationReadingSuccessResponse = {
@@ -109,6 +130,7 @@ export type DivinationInterpretRequest = {
   localUserId?: string
   mockPaid?: boolean
   mockPaymentGate?: DivinationMockPaymentGate
+  followUpContext?: DivinationFollowUpContext
 }
 
 export type DivinationInterpretSuccessResponse = {

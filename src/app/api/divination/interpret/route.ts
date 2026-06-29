@@ -5,6 +5,7 @@ import {
   buildLegacyReadingContext,
   buildLegacyReviewPrompt,
   buildLegacyStructuredInterpretation,
+  buildFollowUpSafetyCheckText,
   parseLegacyReviewResult,
   reviewAnswer,
   runPreOpenAISafetyCheck,
@@ -186,6 +187,7 @@ async function createOpenAiInterpretation(input: {
   drawMode: DivinationDrawMode
   card: (typeof ziweiCards)[number]
   position: DivinationPosition
+  followUpContext?: unknown
 }) {
   const apiKey = process.env.OPENAI_API_KEY
 
@@ -274,6 +276,7 @@ export async function POST(request: Request) {
   const readingId = getTrimmedString(body.readingId)
   const localUserId = getTrimmedString(body.localUserId)
   const mockPaid = body.mockPaid === true
+  const followUpContext = body.followUpContext
 
   if (!question) {
     return jsonError("請先填寫占卜問題。")
@@ -319,7 +322,8 @@ export async function POST(request: Request) {
     element: selectedCard.element,
     core: selectedCard.core,
   } satisfies DivinationCardSummary
-  const safetyResult = runPreOpenAISafetyCheck(question)
+  const safetyCheckText = buildFollowUpSafetyCheckText(question, followUpContext)
+  const safetyResult = runPreOpenAISafetyCheck(safetyCheckText)
 
   if (safetyResult.blocked) {
     return NextResponse.json({
@@ -372,6 +376,7 @@ export async function POST(request: Request) {
     drawMode: safeDrawMode,
     card: selectedCard,
     position: safePosition,
+    followUpContext,
   })
 
   if (!openAiResult.ok) {
