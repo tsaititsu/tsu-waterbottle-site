@@ -2,6 +2,10 @@
 
 import { DivinationResultPreview } from "@/components/divination/DivinationResultPreview"
 import { ziweiCards, type ZiweiCard } from "@/lib/divination/cards"
+import {
+  buildDivinationFollowUpDraft,
+  saveDivinationFollowUpDraft,
+} from "@/lib/divination/followUpStorage"
 import type {
   DivinationDrawMode,
   DivinationInterpretResponse,
@@ -182,6 +186,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
   const [confirmedPaymentGate, setConfirmedPaymentGate] =
     useState<DivinationMockPaymentGate | null>(null)
   const [interpretation, setInterpretation] = useState<DivinationInterpretation | null>(null)
+  const [isSafetyResult, setIsSafetyResult] = useState(false)
   const [isInterpreting, setIsInterpreting] = useState(false)
   const [isMockPaying, setIsMockPaying] = useState(false)
   const [paymentRequired, setPaymentRequired] = useState<PaymentRequiredState | null>(null)
@@ -193,6 +198,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
   const interpretRequestRef = useRef(0)
   const autoStartedReadingIdRef = useRef("")
   const autoInterpretedReadingIdRef = useRef("")
+  const savedFollowUpDraftReadingIdRef = useRef("")
 
   const hasResultPreview = Boolean(confirmedCard && confirmedPosition)
   const pendingCard = pendingIndex === null ? null : ziweiCards[pendingIndex]
@@ -234,6 +240,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setConfirmedReadingId("")
     setConfirmedPaymentGate(null)
     setInterpretation(null)
+    setIsSafetyResult(false)
     setIsInterpreting(false)
     setIsMockPaying(false)
     setPaymentRequired(null)
@@ -242,6 +249,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     interpretRequestRef.current += 1
     autoStartedReadingIdRef.current = ""
     autoInterpretedReadingIdRef.current = ""
+    savedFollowUpDraftReadingIdRef.current = ""
     setErrorMessage("")
     setMessage(initialMessage)
   }, [readingSession?.readingId, trimmedQuestion, drawMode])
@@ -268,6 +276,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setConfirmedReadingId("")
     setConfirmedPaymentGate(null)
     setInterpretation(null)
+    setIsSafetyResult(false)
     setIsInterpreting(false)
     setIsMockPaying(false)
     setPaymentRequired(null)
@@ -294,6 +303,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setConfirmedReadingId("")
     setConfirmedPaymentGate(null)
     setInterpretation(null)
+    setIsSafetyResult(false)
     setPaymentRequired(null)
     setErrorMessage("")
     setMessage(pendingMessage)
@@ -311,6 +321,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setConfirmedReadingId("")
     setConfirmedPaymentGate(null)
     setInterpretation(null)
+    setIsSafetyResult(false)
     setPaymentRequired(null)
     setErrorMessage("")
     setMessage(readyMessage)
@@ -341,6 +352,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setConfirmedReadingId("")
     setConfirmedPaymentGate(null)
     setInterpretation(null)
+    setIsSafetyResult(false)
     setIsInterpreting(false)
     setIsMockPaying(false)
     setPaymentRequired(null)
@@ -395,6 +407,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setConfirmedReadingId("")
     setConfirmedPaymentGate(null)
     setInterpretation(null)
+    setIsSafetyResult(false)
     setPaymentRequired(null)
     setErrorMessage("")
     setMessage(options?.mockPaid ? "支付與解讀中..." : "開始解讀中...")
@@ -440,11 +453,15 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
 
       if (interpretRequestRef.current !== requestId) return
 
+      const safetyBlocked =
+        "safetyBlocked" in interpretData && interpretData.safetyBlocked === true
+
       setConfirmedCard(selectedCard)
       setConfirmedPosition(selectedPosition)
       setConfirmedReadingId(readingId)
-      setConfirmedPaymentGate(interpretData.paymentGate)
+      setConfirmedPaymentGate(safetyBlocked ? null : interpretData.paymentGate)
       setInterpretation(interpretData.interpretation)
+      setIsSafetyResult(safetyBlocked)
       setPaymentRequired(null)
       setErrorMessage("")
       setMessage(resultReadyMessage)
@@ -457,6 +474,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
       setConfirmedReadingId("")
       setConfirmedPaymentGate(null)
       setInterpretation(null)
+      setIsSafetyResult(false)
       setErrorMessage(error instanceof Error ? error.message : "解讀預覽產生失敗，請稍後再試。")
       setMessage(pendingMessage)
     } finally {
@@ -508,6 +526,39 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     // 自動模式必須只針對同一 readingId 啟動一次，內部 ref 會擋掉重複 render。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAutoMode, canDraw, readingId, hasResultPreview])
+
+  useEffect(() => {
+    if (!hasCompletedInterpretation || isSafetyResult) return
+    if (!confirmedReadingId || !trimmedQuestion || !confirmedCard || !confirmedPosition) return
+    if (savedFollowUpDraftReadingIdRef.current === confirmedReadingId) return
+
+    const finalAnswer = interpretation?.finalAnswer?.trim()
+    if (!finalAnswer) return
+
+    const followUpDraft = buildDivinationFollowUpDraft({
+      readingId: confirmedReadingId,
+      question: trimmedQuestion,
+      cardId: confirmedCard.id,
+      cardName: confirmedCard.name,
+      position: confirmedPosition,
+      finalAnswer,
+      existingFollowUpContext: readingSession?.followUpContext,
+    })
+
+    if (!followUpDraft) return
+
+    saveDivinationFollowUpDraft(followUpDraft)
+    savedFollowUpDraftReadingIdRef.current = confirmedReadingId
+  }, [
+    confirmedCard,
+    confirmedPosition,
+    confirmedReadingId,
+    hasCompletedInterpretation,
+    interpretation,
+    isSafetyResult,
+    readingSession?.followUpContext,
+    trimmedQuestion,
+  ])
 
   return (
     <section className="overflow-hidden rounded-2xl border border-borderSoft/80 bg-white p-5 shadow-[0_12px_32px_rgba(31,27,46,0.05)] md:p-6">

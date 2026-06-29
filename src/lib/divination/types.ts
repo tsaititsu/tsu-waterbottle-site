@@ -44,6 +44,13 @@ export type DivinationFollowUpContext = {
   previousReadings: DivinationPreviousReadingSummary[]
 }
 
+export type DivinationFollowUpDraft = {
+  threadId: string
+  parentReadingId: string
+  previousReadings: DivinationPreviousReadingSummary[]
+  createdAt: string
+}
+
 export type DivinationReadingPreview = {
   id: string
   question: string
