@@ -36,6 +36,38 @@ type ReviewResult = {
 const followUpFinalAnswerMaxLength = 4000
 const followUpSafetyAnswerMaxLength = 1400
 
+function isComplexOutputContext(context: LegacyReadingContext) {
+  return (
+    Boolean(context.followUpContext?.isFollowUp && context.followUpContext.previousReadings.length) ||
+    context.riskLevel === "professional_boundary" ||
+    context.questionType === "金錢投資" ||
+    context.questionType === "合約法律" ||
+    context.questionType === "健康狀態"
+  )
+}
+
+function getAnswerParagraphRange(context: LegacyReadingContext) {
+  return isComplexOutputContext(context) ? { min: 5, max: 6 } : { min: 4, max: 5 }
+}
+
+function getAnswerLengthSpec(context: LegacyReadingContext) {
+  return isComplexOutputContext(context)
+    ? { target: "700 到 1100", softMinimum: "650" }
+    : { target: "650 到 950", softMinimum: "650" }
+}
+
+function buildOutputLengthRule(context: LegacyReadingContext) {
+  const range = getAnswerParagraphRange(context)
+  const length = getAnswerLengthSpec(context)
+  const isComplex = isComplexOutputContext(context)
+  const complexityLabel = isComplex ? "複雜題或連續追問" : "一般題"
+  const paragraphPreference = isComplex
+    ? "請優先寫滿 6 段；只有內容真的很單純時才可 5 段"
+    : "請優先寫 5 段；只有內容真的很單純時才可 4 段"
+
+  return `${complexityLabel} finalAnswer 請寫成 ${range.min} 到 ${range.max} 段，${paragraphPreference}，建議約 ${length.target} 個中文字；正常占卜不可低於約 ${length.softMinimum} 字，除非是 safetyBlocked 安全阻擋題。內容要完整回答問題，若低於最低字數視為內容不足，必須補足有效分析，不要為了湊字重複。`
+}
+
 const aiToneWords = [
   "這意味著",
   "意味著",
@@ -110,6 +142,13 @@ const harshToneReplacements: Array<[string, string]> = [
   ["存在不平衡的狀態", "規則和責任的理解可能不一致"],
   ["合約效力受到挑戰", "後面執行時容易有爭議"],
   ["效力受到挑戰", "執行上容易有爭議"],
+  ["力量的源泉", "優勢，也可能是壓力來源"],
+  ["質量兼具", "比較有品質"],
+  ["此力量的發揮", "這股力量要用在對的地方"],
+  ["全面資訊的理解", "先把資訊看清楚"],
+  ["穩定發展", "比較穩"],
+  ["正向改變", "慢慢往好的方向調整"],
+  ["萬靈丹", "簽了就完全沒事"],
 ]
 
 const prohibitedInvestmentActionWords = [
@@ -681,10 +720,18 @@ ${lines.join("\n\n")}
 - 如果使用者問「接下來怎麼做」，重點放在下一步建議。${relationshipMoneyValuesGuard}`
 }
 
-function buildOutputRulesBlock() {
+function buildOutputRulesBlock(context: LegacyReadingContext) {
+  const range = getAnswerParagraphRange(context)
+
   return `Output Rules
-- 回答控制在 250 到 300 個中文字之間，必要安全題可略超過，但不要冗長。
-- 必須保留 3 到 4 段自然段，段落之間用空行分隔，不要輸出成一整塊文字。
+- ${buildOutputLengthRule(context)}
+- 必須保留 ${range.min} 到 ${range.max} 段自然段，段落之間用空行分隔，不要輸出成一整塊文字。
+- 如果正常解讀寫完低於最低字數，請新增或補強「目前狀況」「具體建議」「觀察重點」其中不足的部分；不要把偏短版本直接交出去。
+- summary 只需要一句短摘要；answerSummary 只作為追問摘要，不要跟 finalAnswer 一起變長。
+- safetyBlocked 或高危安全阻擋題要短、清楚、穩定，不要為了符合一般字數而加長。
+- finalAnswer 至少要涵蓋：直接回答問題、抽到星曜與正反位的原因、目前狀況或卡點、使用者接下來可以怎麼做、觀察重點 / 風險提醒 / 不適合做什麼。
+- 除第一段可以短一點，其餘段落至少要有 2 句有效內容；如果低於最低字數，優先補牌義原因、現況卡點、具體做法、觀察條件，不要補空話。
+- 連續追問要承接上一題，但不可重講上一題全文；必須補本題的新判斷、上一題和本題的差異、具體做法、接下來可以觀察的訊號，避免只用短答收尾。
 - 第一段第一句必須直接回答使用者真正問的問題，先斷方向，再解釋牌義；不要先說「從某星來看」或「這張牌代表」。
 - 第 1 段只斷事，不要反覆解釋原因；第 2 段才用牌義說明為什麼；第 3 段才給做法。
 - 不要在相鄰段落重複同一個判斷，例如投資題不要第 1 段和第 2 段都一直重複「不適合急著進場、重押、追高」。
@@ -699,10 +746,16 @@ function buildOutputRulesBlock() {
 - 不要使用指令外露感的詞，例如：回到原本風險規則、原本風險規則、風險資產、制定規則、規則感不明。
 - 不要使用不自然比喻，例如：如外交官般、像外交官、如法官般、像法官、如老師般、像老師。
 - 非健康題不要亂講器官、疾病、免疫、內分泌、腎臟、呼吸系統或醫療診斷；請改成體力、狀態、節奏、壓力或準備度。
+- 健康題不要直接使用婦科、生殖系統、肝臟功能、肝臟區域不適、神經不適、疾病名稱、病名判斷或診斷語氣；請改成生理週期、水分代謝、身體訊號、睡眠品質、情緒壓力、身體不舒服、長期不適、明顯不舒服、需要專業醫師評估。
 - 非法律題不要亂加詐騙、違法、官非、法律風險；除非原問題或牌義明確指向合約、借貸、詐騙、違法、糾紛或官方程序。
 - 日期 / 擇日題沒有候選日期時不能編日期；有單一日期才判斷適合度和注意點，多候選日期不要用一張牌硬選某一天。
 - 房產題要先看房子本身、價格、屋況、貸款、合約和仲介；交通題要看行程、路線、時間、工具和安全節奏；合作題要看分工、責任、利益和界線。
-- 回答不要超過四段，每段不要超過三句。
+- 一般題不要超過五段，複雜題或連續追問不要超過六段，每段不要超過四句。
+- 感情題要補對方態度、關係卡點、你要主動 / 等待 / 觀察 / 設界線，以及接下來看什麼互動訊號。
+- 工作題要補履歷、面試、薪資、工時、主管風格、交接與職務責任。
+- 投資題要補資訊是否足夠、資金比例、風險界線、觀察條件、不要重押 / 不要追高，但不要變成財經報告。
+- 健康題要補作息、壓力、睡眠、身體訊號、筋骨四肢、神經緊繃與生活節奏，但不要診斷。
+- 合約題要補條款、文件、責任歸屬、書面紀錄、證據保存與專業協助，但不要下法律結論。
 - 建議必須能落地：問工作就提履歷、面試、薪資工時或交接；問房產就提屋況、價格、合約；問合約就提文件、條款、證據；不要只說保持正向或好好溝通。
 - 不要在回答中說問題分類是什麼。`
 }
@@ -804,11 +857,14 @@ function buildReadingPromptPrelude(context: LegacyReadingContext) {
     buildQuestionContextBlock(context),
     buildFollowUpContextBlock(context),
     buildCardContextBlock(context),
-    buildOutputRulesBlock(),
+    buildOutputRulesBlock(context),
   ].filter(Boolean).join("\n\n")
 }
 
 export function buildLegacyDraftPrompt(context: LegacyReadingContext) {
+  const range = getAnswerParagraphRange(context)
+  const length = getAnswerLengthSpec(context)
+
   return `${buildReadingPromptPrelude(context)}
 
 你是水瓶先生的紫微十四主星牌卡解讀系統。
@@ -849,20 +905,24 @@ export function buildLegacyDraftPrompt(context: LegacyReadingContext) {
 
 回答規則：
 1. 使用繁體中文。
-2. 控制在 250 到 300 個中文字之間。
+2. finalAnswer 請寫成 ${range.min} 到 ${range.max} 段，建議約 ${length.target} 個中文字；正常占卜不可低於約 ${length.softMinimum} 字，除非是 safetyBlocked 安全阻擋題。低於這個字數視為內容不足，必須補足有效分析；重點是完整、清楚，不要為了湊字重複。
 3. 語氣要像水瓶先生在直接幫粉絲解牌。
 4. 白話、實際、直接，不要寫得像作文。
 5. 不要用條列式。
 6. 第一段先講使用者問的事情本身在這個狀態下呈現什麼狀態。
 7. 第二段再講星曜與正反位為什麼會這樣。
-8. 第三段給清楚行動建議。
-9. 最後一句收在一個直接、實際、可執行的提醒。
-10. 回答中不要出現「使用者」兩個字，要直接說「你」。
+8. 第三段以後要補目前狀況或卡點、清楚行動建議、觀察重點，以及不適合做什麼。
+9. 投資、健康、合約、工作、感情心意、連續追問如果低於約 ${length.softMinimum} 字，視為內容不足且不可直接輸出；請補足目前狀況、具體建議、觀察條件與不適合做什麼，不要補空話。
+10. 除第一段可以短一點之外，其餘段落至少要有 2 句有效內容；不要用一句話帶過牌義、狀況或建議。
+11. 最後一句收在一個直接、實際、可執行的提醒。
+12. 回答中不要出現「使用者」兩個字，要直接說「你」。
 
 請開始解讀。`
 }
 
 export function buildLegacyReviewPrompt(context: LegacyReadingContext, draftAnswer: string) {
+  const range = getAnswerParagraphRange(context)
+  const length = getAnswerLengthSpec(context)
   const investmentReviewMode =
     context.questionType === "金錢投資"
       ? `
@@ -925,7 +985,7 @@ ${relationshipMoneyValuesReviewMode}
 你是占卜系統的內容審稿者與潤飾者。
 
 你會看到第一輪占卜解讀草稿。你的任務不是重新占卜，而是把草稿整理成可以正式給使用者看的最終版。
-你不是摘要器，不是要把回答縮短。你的任務是保留完整占卜結構，修正語氣、順稿、安全性與前後矛盾。
+你不是摘要器，不是要把回答縮短。你的任務是保留完整占卜結構，補足缺少的有效內容，修正語氣、順稿、安全性與前後矛盾。
 
 第二段必守規則：
 - 不要重新抽牌。
@@ -936,10 +996,16 @@ ${relationshipMoneyValuesReviewMode}
 - 不要把安全提醒刪掉。
 - 不要加入新的保證。
 - 不要把完整解讀縮成只有一句結論。
-- 最終解讀必須保留 3 到 4 段，段落之間用空行分隔，不可以輸出成一整塊文字。
-- 一般付費占卜的最終解讀，請控制在 250 到 300 個中文字；重大健康、法律、投資安全界線必要時可略超過。
-- 請保留草稿中的核心判斷，但刪掉重複句、空泛鋪陳與多餘提醒。
-- 最終回答應包含：主結論、星曜解讀、放回使用者問題的狀態分析、具體觀察或建議。
+- 最終解讀必須保留 ${range.min} 到 ${range.max} 段，段落之間用空行分隔，不可以輸出成一整塊文字。
+- finalAnswer 建議約 ${length.target} 個中文字；正常占卜不可低於約 ${length.softMinimum} 字，除非是 safetyBlocked 安全阻擋題。低於最低字數視為 review 未完成，也不要把完整占卜縮成短摘要。
+- summary 只需要一句短摘要；answerSummary 仍是追問摘要，不要跟著變長。
+- safetyBlocked 或高危安全阻擋題要短、清楚、穩定，不要為了符合一般字數而加長。
+- 請保留草稿中的核心判斷；只刪真正重複的句子，不要為了精簡而刪掉有效段落。
+- 如果草稿缺少目前狀況、具體建議、觀察重點或不適合做什麼，請補足；不要只做壓縮。
+- 如果整理後低於約 ${length.softMinimum} 字，代表內容槽位不足，請補足目前狀況、具體建議、觀察條件與不適合做什麼；不要直接輸出偏短版本，也不要只說「保持溝通、觀察」就收尾。
+- 如果是連續追問，請補足：承接上一題的狀態、本題新的直接判斷、兩題之間的差異、使用者下一步做法、可觀察的互動訊號；不可把上一題完整重講一次。
+- 除第一段可以短一點，其餘段落至少要有 2 句有效內容。
+- 最終回答應包含：主結論、星曜解讀、放回使用者問題的狀態分析、具體做法、觀察重點或風險提醒。
 - 第一段第一句必須先斷事，直接回答問題；不要先鋪陳牌義，不要先說「從某星來看」。
 - 工作題請用職場白話：主管規則、同事互動、制度不清、履歷、面試、薪資、工時、主管風格、職務內容、交接責任；避免灰色地帶、短期利益、信譽破裂這類太嚴重的字。
 - 工作題建議要具體到：先整理履歷、先看職缺、先面試看看市場、確認薪資工時主管風格和職務內容、不要裸辭、不要只是因為現在不爽就離開、先把目前工作責任與交接釐清。
@@ -949,7 +1015,13 @@ ${relationshipMoneyValuesReviewMode}
 - 投資題不要每次自動加入詐騙、非法手段、法律風險，除非使用者問題或牌義明確指向詐騙、違法、借貸、合約、官非。
 - 感情題請改成自然口吻：對你有吸引力、有曖昧和新鮮感、還沒有穩定下來、他比較享受互動過程，還不急著給承諾。
 - 感情建議請像老師現場提醒：你可以輕一點確認他的態度，不要逼他馬上表態，先讓互動穩定下來，關係比較容易自然往前。
+- 感情題要補對方態度、關係卡點、你要主動 / 等待 / 觀察 / 設界線，以及接下來看什麼互動訊號。
+- 工作題要補履歷、面試、薪資、工時、主管風格、交接與職務責任。
+- 投資題要補資訊是否足夠、資金比例、風險界線、觀察條件、不要重押 / 不要追高，但不要變成財經報告。
+- 健康題要補作息、壓力、睡眠、身體訊號、筋骨四肢、神經緊繃與生活節奏，但不要診斷，也不要使用婦科、生殖系統、肝臟功能、肝臟區域不適、神經不適、疾病名稱、病名判斷。
+- 合約題要補條款、文件、責任歸屬、書面紀錄、證據保存與專業協助，但不要下法律結論。
 - 文字要像水瓶先生現場講話，不要像 AI 審稿，不要用切記、須警惕、潛藏風險、職場信譽受損、合作關係破裂。
+- 請把力量的源泉、質量兼具、此力量的發揮、全面資訊的理解、穩定發展、正向改變、萬靈丹這類書面詞改成白話。
 - 禁止出現這些不自然或指令外露的詞：回到原本風險規則、原本風險規則、風險資產、制定規則、規則感不明、多元社交、多重關係中的選擇。
 - 禁止使用不自然比喻：如外交官般、像外交官、如法官般、像法官、如老師般、像老師。除非問題真的在問外交、法律職業或教學職業，否則一律改成白話判斷。
 - 如果第二段和第一段在重複同一個判斷，第二段要改成牌義原因段，說明抽到的星曜與正反位為什麼落在這題。
@@ -982,7 +1054,7 @@ ${draftAnswer}
 
 請只輸出 JSON，不要 markdown，不要程式碼區塊：
 {
-  "finalAnswer": "整理後給使用者看的完整最終解讀，一般題請控制在 250 到 300 個中文字，必須用空行分成 3 到 4 段，不可只剩一句結論或摘要",
+  "finalAnswer": "整理後給使用者看的完整最終解讀，請寫成 ${range.min} 到 ${range.max} 段，建議約 ${length.target} 個中文字；正常占卜不可低於約 ${length.softMinimum} 字，除非是 safetyBlocked 安全阻擋題。低於最低字數視為不合格，不可只剩一句結論或摘要，也不要為了湊字重複",
   "changedMeaning": false,
   "safetyAdjusted": false,
   "issuesFixed": ["簡短列出有修什麼"]
@@ -1025,7 +1097,7 @@ export function reviewAnswer(answer: string, context: LegacyReadingContext) {
   next = enforceProfessionalBoundary(next, context)
   next = enforceDeathCriticalGuard(next, context)
   next = removeDuplicateAdviceParagraphs(next)
-  next = finalOutputGuard(next)
+  next = finalOutputGuard(next, context)
   next = ensureAnswerParagraphs(next, context)
   next = reduceInvestmentRepetition(next, context)
   next = cleanInvestmentLegalOverreach(next, context)
@@ -1037,6 +1109,7 @@ export function reviewAnswer(answer: string, context: LegacyReadingContext) {
   next = cleanLoveAdviceTone(next, context)
   next = cleanReportLikeLanguage(next)
   next = cleanRelationshipMoneyValuesFinanceBleed(next, context)
+  next = ensureMinimumAnswerDepth(next, context)
 
   return next
 }
@@ -1126,6 +1199,8 @@ function cleanInvestmentOperationTone(answer: string, context: LegacyReadingCont
   }
 
   return next
+    .replaceAll("不適合大幅度先停下來確認風險", "比較適合先停下來確認風險")
+    .replaceAll("不適合先停下來確認風險", "比較適合先停下來確認風險")
     .replaceAll("收益", "風險狀態")
     .replaceAll("獲利", "風險控管")
     .replaceAll("賺錢機會", "判斷依據")
@@ -1170,14 +1245,19 @@ function removeDuplicateAdviceParagraphs(answer: string) {
     .join("\n\n")
 }
 
-function finalOutputGuard(answer: string) {
+function finalOutputGuard(answer: string, context: LegacyReadingContext) {
   const normalized = normalizeText(answer)
-  if (countChineseCharacters(normalized) <= 360) return normalized
+  if (countChineseCharacters(normalized) <= 1800) return normalized
 
-  return normalized
+  const { max } = getAnswerParagraphRange(context)
+  const paragraphs = normalized
     .split(/\n{2,}/)
-    .slice(0, 4)
-    .join("\n\n")
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+
+  if (paragraphs.length <= max) return normalized
+
+  return [...paragraphs.slice(0, max - 1), paragraphs[paragraphs.length - 1]].join("\n\n")
 }
 
 function splitIntoSentences(answer: string) {
@@ -1188,32 +1268,42 @@ function splitIntoSentences(answer: string) {
     .filter(Boolean)
 }
 
+function distributeSentencesIntoParagraphs(sentences: string[], paragraphCount: number) {
+  const groups: string[] = []
+  const safeParagraphCount = Math.min(paragraphCount, sentences.length)
+
+  for (let index = 0; index < safeParagraphCount; index += 1) {
+    const start = Math.floor((index * sentences.length) / safeParagraphCount)
+    const end = Math.floor(((index + 1) * sentences.length) / safeParagraphCount)
+    const paragraph = sentences.slice(start, end).join("")
+    if (paragraph.trim()) groups.push(paragraph.trim())
+  }
+
+  return groups.join("\n\n")
+}
+
 function ensureAnswerParagraphs(answer: string, context: LegacyReadingContext) {
+  const { min, max } = getAnswerParagraphRange(context)
   const paragraphs = normalizeText(answer)
     .split(/\n{2,}/)
     .map((paragraph) => paragraph.trim())
     .filter(Boolean)
 
-  if (paragraphs.length >= 3 && paragraphs.length <= 4) {
+  if (paragraphs.length >= min && paragraphs.length <= max) {
     return paragraphs.join("\n\n")
   }
 
-  if (paragraphs.length > 4) {
-    return paragraphs.slice(0, 4).join("\n\n")
+  if (paragraphs.length > max) {
+    return [...paragraphs.slice(0, max - 1), paragraphs[paragraphs.length - 1]].join("\n\n")
   }
 
   const sentences = splitIntoSentences(paragraphs.join(" "))
 
-  if (sentences.length >= 4) {
-    const first = sentences.slice(0, 1).join("")
-    const second = sentences.slice(1, Math.max(2, Math.ceil(sentences.length / 2))).join("")
-    const third = sentences.slice(Math.max(2, Math.ceil(sentences.length / 2)), -1).join("")
-    const fourth = sentences.slice(-1).join("")
-
-    return [first, second, third, fourth].filter(Boolean).join("\n\n")
+  if (sentences.length >= min) {
+    return distributeSentencesIntoParagraphs(sentences, min)
   }
 
-  if (sentences.length === 3) {
+  if (sentences.length >= 3) {
     return sentences.join("\n\n")
   }
 
@@ -1224,6 +1314,73 @@ function ensureAnswerParagraphs(answer: string, context: LegacyReadingContext) {
   ]
     .filter(Boolean)
     .join("\n\n")
+}
+
+function getSoftMinimumChineseLength(context: LegacyReadingContext) {
+  return Number.parseInt(getAnswerLengthSpec(context).softMinimum, 10) || 0
+}
+
+function appendDepthSupplement(answer: string, supplement: string, context: LegacyReadingContext) {
+  const { max } = getAnswerParagraphRange(context)
+  const paragraphs = normalizeText(answer)
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+
+  if (!paragraphs.length) return supplement
+
+  if (paragraphs.length >= max) {
+    paragraphs[paragraphs.length - 1] = `${paragraphs[paragraphs.length - 1]}${supplement}`
+  } else {
+    paragraphs.push(supplement)
+  }
+
+  return paragraphs.join("\n\n")
+}
+
+function buildMinimumDepthSupplement(context: LegacyReadingContext) {
+  if (context.followUpContext?.isFollowUp) {
+    return "接下來可以用一週左右觀察三個訊號：他是否主動開話題、是否延續你們前面的互動、是否願意把時間或安排講清楚。如果只有偶爾回應卻沒有安排和承擔，就先把期待放低，把重心放回自己的節奏。"
+  }
+
+  if (context.questionType === "金錢投資") {
+    return "接下來可以先做三個檢查：這筆錢是不是閒錢、你能不能承受短期波動、資訊來源是否足夠透明。三項都沒有確認前，不要急著把資金放大；先小額觀察或暫時觀望，會比硬進場更穩。"
+  }
+
+  if (context.questionType === "健康狀態") {
+    return "接下來可以連續觀察一到兩週：睡眠是否穩定、壓力是否下降、身體不舒服有沒有持續。如果狀況沒有改善，或明顯影響日常生活，就要找專業醫師評估，不要自己硬撐。"
+  }
+
+  if (context.questionType === "合約法律") {
+    return "接下來請先把條款、對話紀錄、付款或交付證明整理好，尤其是責任歸屬、期限、違約處理和書面確認。不要只靠口頭承諾推進，必要時請專業人士協助看文件。"
+  }
+
+  if (context.questionType === "工作事業") {
+    return "接下來可以先整理履歷、職缺條件、薪資工時、主管風格和交接責任，再決定要不要往外看。不要只因為當下情緒不舒服就衝動離開，先確認下一步是否真的更穩。"
+  }
+
+  if (context.questionType === "感情關係") {
+    return "接下來可以觀察對方是否主動開話題、是否願意安排時間、是否把你的感受放進考量。若只有曖昧熱度卻沒有穩定行動，你就要慢慢把界線放清楚，不要一直替對方補理由。"
+  }
+
+  return "接下來可以把重點放在可觀察的現實訊號：對方或事情是否真的有行動、條件是否變清楚、你是否更有掌握感。如果只是感覺好一點但現實沒有變，就先不要急著做大決定。"
+}
+
+function ensureMinimumAnswerDepth(answer: string, context: LegacyReadingContext) {
+  const normalized = normalizeText(answer)
+  const minimum = getSoftMinimumChineseLength(context)
+
+  if (!minimum || countChineseCharacters(normalized) >= minimum) return normalized
+
+  const supplemented = appendDepthSupplement(normalized, buildMinimumDepthSupplement(context), context)
+
+  if (countChineseCharacters(supplemented) >= minimum) return supplemented
+
+  return appendDepthSupplement(
+    supplemented,
+    "這一題不要只看一句結論，真正要看的是牌面提醒你哪裡需要調整，以及接下來哪些現實訊號能證明情況有沒有往好的方向走。把這些訊號看清楚，再決定下一步會比較穩。",
+    context
+  )
 }
 
 function reduceInvestmentRepetition(answer: string, context: LegacyReadingContext) {
@@ -1352,6 +1509,16 @@ function cleanHealthMedicalTone(answer: string, context: LegacyReadingContext) {
   if (context.questionType !== "健康狀態") return answer
 
   return answer
+    .replaceAll(
+      "如果你察覺婦科或生殖系統方面有明顯不舒服，請及時安排醫療檢查",
+      "如果你最近有生理週期、睡眠、情緒壓力或身體不舒服的狀況，而且持續沒有改善，就建議找專業醫師評估，不要自己硬撐或自行判斷"
+    )
+    .replaceAll("身體狀態一定的波動", "身體狀態有一定的波動")
+    .replaceAll("這些都身體穩定", "這些都有助於身體穩定")
+    .replaceAll("婦科或生殖系統方面", "生理週期、睡眠、情緒壓力或身體訊號")
+    .replaceAll("婦科", "生理週期")
+    .replaceAll("生殖系統方面", "身體訊號")
+    .replaceAll("生殖系統", "身體訊號")
     .replaceAll("肝臟功能", "作息和壓力狀態")
     .replaceAll("肝臟區域不適", "身體明顯不舒服")
     .replaceAll("肝臟區域", "身體狀態")
@@ -1365,7 +1532,10 @@ function cleanHealthMedicalTone(answer: string, context: LegacyReadingContext) {
     .replaceAll("神經系統", "神經緊繃")
     .replaceAll("四肢麻木", "四肢明顯麻木或長期不舒服")
     .replaceAll("器官功能", "身體狀態")
+    .replaceAll("疾病名稱", "身體狀況")
+    .replaceAll("病名判斷", "身體狀況判斷")
     .replaceAll("病名", "狀況")
+    .replaceAll("診斷語氣", "生活提醒")
     .replaceAll("療法", "處理方式")
 }
 
@@ -1401,6 +1571,7 @@ function cleanLoveAdviceTone(answer: string, context: LegacyReadingContext) {
   if (context.questionType !== "感情關係") return answer
 
   return answer
+    .replaceAll("更關係發展", "更有利於關係發展")
     .replaceAll("如果你主動負責溝通有關界線和期望，不僅能減少誤會，也能關係自然前進。", "你可以輕一點確認他的態度，不要逼他馬上表態；先讓互動穩定下來，關係比較容易自然往前。")
     .replaceAll("主動負責溝通有關界線和期望", "輕一點確認他的態度")
     .replaceAll("減少誤會，也能關係自然前進", "讓互動穩定下來，關係比較容易自然往前")
@@ -1432,6 +1603,7 @@ function cleanRelationshipMoneyValuesFinanceBleed(answer: string, context: Legac
 
 function cleanReportLikeLanguage(answer: string) {
   return answer
+    .replaceAll("這也，", "這也代表")
     .replaceAll("資金流向", "錢的去向")
     .replaceAll("透明度", "清楚度")
     .replaceAll("審慎評估", "先看清楚")
