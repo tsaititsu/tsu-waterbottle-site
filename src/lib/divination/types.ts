@@ -51,6 +51,23 @@ export type DivinationFollowUpDraft = {
   createdAt: string
 }
 
+export type DivinationFollowUpDisplayReading = {
+  readingId: string
+  question: string
+  cardId?: string
+  cardName?: string
+  position?: DivinationPosition
+  finalAnswer: string
+  answerSummary?: string
+  createdAt: string
+}
+
+export type DivinationFollowUpDisplayThread = {
+  threadId: string
+  readings: DivinationFollowUpDisplayReading[]
+  updatedAt: string
+}
+
 export type DivinationReadingPreview = {
   id: string
   question: string

@@ -33,6 +33,9 @@ type ReviewResult = {
   issuesFixed?: string[]
 }
 
+const followUpFinalAnswerMaxLength = 4000
+const followUpSafetyAnswerMaxLength = 1400
+
 const aiToneWords = [
   "這意味著",
   "意味著",
@@ -172,7 +175,7 @@ export function normalizeFollowUpContext(value: unknown): DivinationFollowUpCont
 
       const answerSummary =
         trimString(item.answerSummary, 220) ||
-        buildAnswerSummary(trimString(item.finalAnswer, 360))
+        buildAnswerSummary(trimString(item.finalAnswer, followUpFinalAnswerMaxLength))
 
       return {
         readingId: trimString(item.readingId, 120),
@@ -181,7 +184,7 @@ export function normalizeFollowUpContext(value: unknown): DivinationFollowUpCont
         cardName: trimString(item.cardName, 30) || undefined,
         position: normalizePreviousPosition(item.position),
         answerSummary,
-        finalAnswer: trimString(item.finalAnswer, 360) || undefined,
+        finalAnswer: trimString(item.finalAnswer, followUpFinalAnswerMaxLength) || undefined,
         questionType: trimString(item.questionType, 30) || undefined,
         questionSubcategory: trimString(item.questionSubcategory, 40) || undefined,
         createdAt: trimString(item.createdAt, 40) || undefined,
@@ -221,7 +224,11 @@ export function buildFollowUpSafetyCheckText(question: string, followUpContext?:
     .map((item, index) =>
       [
         `前題 ${index + 1} 問題：${item.question}`,
-        item.answerSummary ? `前題 ${index + 1} 摘要：${item.answerSummary.slice(0, 120)}` : "",
+        item.finalAnswer
+          ? `前題 ${index + 1} 解答：${item.finalAnswer.slice(0, followUpSafetyAnswerMaxLength)}`
+          : item.answerSummary
+            ? `前題 ${index + 1} 摘要：${item.answerSummary.slice(0, 220)}`
+            : "",
       ]
         .filter(Boolean)
         .join("\n")
@@ -529,13 +536,13 @@ function buildFollowUpContextBlock(context: LegacyReadingContext) {
   const focus = detectFollowUpFocus(context.question, followUpContext)
   const lines = previous.map((item, index) => {
     const cardText = [item.cardName, previousPositionLabel(item.position)].filter(Boolean).join("｜")
-    const summary = item.answerSummary || buildAnswerSummary(item.finalAnswer || "")
+    const answerForPrompt = item.finalAnswer?.trim() || item.answerSummary?.trim() || ""
 
     return [
       `${index + 1}. 問題：${item.question}`,
       cardText ? `   牌：${cardText}` : "",
       item.questionSubcategory ? `   題型：${item.questionSubcategory}` : "",
-      summary ? `   回答摘要：${summary}` : "",
+      answerForPrompt ? `   完整解答：\n   ${answerForPrompt}` : "",
     ]
       .filter(Boolean)
       .join("\n")
@@ -552,7 +559,7 @@ function buildFollowUpContextBlock(context: LegacyReadingContext) {
 threadId: ${followUpContext.threadId}
 parentReadingId: ${followUpContext.parentReadingId}
 
-上一題 / 前幾題摘要：
+上一題 / 前幾題：
 ${lines.join("\n\n")}
 
 本次追問焦點：${focus}

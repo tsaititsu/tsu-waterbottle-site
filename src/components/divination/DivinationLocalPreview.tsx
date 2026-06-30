@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation"
 import { DivinationQuestionForm } from "./DivinationQuestionForm"
 import {
   clearDivinationFollowUpDraft,
+  clearDivinationFollowUpDisplayThread,
+  loadDivinationFollowUpDisplayThread,
   loadDivinationFollowUpDraft,
   toDivinationFollowUpContext,
 } from "@/lib/divination/followUpStorage"
@@ -12,6 +14,7 @@ import type {
   CreateDivinationReadingResponse,
   DivinationDrawMode,
   DivinationFollowUpDraft,
+  DivinationFollowUpDisplayThread,
   DivinationInterpretation,
   DivinationReadingSession,
   DivinationPosition,
@@ -81,6 +84,7 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
   const [errorMessage, setErrorMessage] = useState("")
   const [safetyInterpretation, setSafetyInterpretation] = useState<DivinationInterpretation | null>(null)
   const [followUpDraft, setFollowUpDraft] = useState<DivinationFollowUpDraft | null>(null)
+  const [followUpDisplayThread, setFollowUpDisplayThread] = useState<DivinationFollowUpDisplayThread | null>(null)
   const resetVersionRef = useRef(0)
 
   async function createReadingSession(input: {
@@ -172,22 +176,28 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
     setErrorMessage("")
     setSafetyInterpretation(null)
     setFollowUpDraft(null)
+    setFollowUpDisplayThread(null)
     clearReadingSession()
     if (resetKey) {
       clearDivinationFollowUpDraft()
+      clearDivinationFollowUpDisplayThread()
     }
   }, [resetKey])
 
   useEffect(() => {
     if (!followUpKey) {
       setFollowUpDraft(null)
+      setFollowUpDisplayThread(null)
       return
     }
 
-    setFollowUpDraft(loadDivinationFollowUpDraft())
+    const draft = loadDivinationFollowUpDraft()
+    setFollowUpDraft(draft)
+    setFollowUpDisplayThread(loadDivinationFollowUpDisplayThread(draft?.threadId))
   }, [followUpKey])
 
   const latestFollowUpReading = followUpDraft?.previousReadings.at(-1)
+  const latestDisplayReading = followUpDisplayThread?.readings.at(-1)
 
   return (
     <section className="grid gap-6">
@@ -226,6 +236,32 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
                 請輸入這次想追問的問題。下一步仍會重新抽牌，AI 解讀每次 NT$50。
               </p>
             </div>
+            {latestDisplayReading ? (
+              <details className="mt-4 rounded-2xl border border-purple-100 bg-softPurple/60 p-4">
+                <summary className="cursor-pointer text-sm font-semibold text-deepPurple">
+                  查看上一題題目與解答
+                </summary>
+                <div className="mt-4 grid gap-4 leading-7 text-textMuted">
+                  <div>
+                    <p className="font-semibold text-deepPurple">上一題問題：</p>
+                    <p>「{latestDisplayReading.question}」</p>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-deepPurple">抽到：</p>
+                    <p>
+                      {latestDisplayReading.cardName || "紫微牌卡"}
+                      {latestDisplayReading.position ? `｜${positionLabels[latestDisplayReading.position]}` : ""}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-deepPurple">上一題解答：</p>
+                    <div className="mt-2 max-h-80 overflow-y-auto whitespace-pre-line rounded-xl bg-white p-4 text-sm leading-7 text-textDark">
+                      {latestDisplayReading.finalAnswer}
+                    </div>
+                  </div>
+                </div>
+              </details>
+            ) : null}
           </article>
         ) : null}
         <DivinationQuestionForm key={resetKey || "initial"} onQuestionSubmit={handleQuestionSubmit} />

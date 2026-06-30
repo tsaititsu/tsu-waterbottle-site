@@ -5,6 +5,9 @@ import { ziweiCards, type ZiweiCard } from "@/lib/divination/cards"
 import {
   buildDivinationFollowUpDraft,
   clearDivinationFollowUpDraft,
+  clearDivinationFollowUpDisplayThread,
+  createAnswerSummary,
+  saveDivinationFollowUpDisplayReading,
   saveDivinationFollowUpDraft,
 } from "@/lib/divination/followUpStorage"
 import type {
@@ -528,6 +531,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
   function returnToDivinationStart() {
     window.sessionStorage.removeItem(readingSessionStorageKey)
     clearDivinationFollowUpDraft()
+    clearDivinationFollowUpDisplayThread()
     router.push(`/ai-divination?reset=${Date.now()}`)
   }
 
@@ -564,6 +568,16 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     if (!followUpDraft) return
 
     saveDivinationFollowUpDraft(followUpDraft)
+    saveDivinationFollowUpDisplayReading({
+      readingId: confirmedReadingId,
+      question: trimmedQuestion,
+      cardId: confirmedCard.id,
+      cardName: confirmedCard.name,
+      position: confirmedPosition,
+      finalAnswer,
+      answerSummary: createAnswerSummary(finalAnswer),
+      existingFollowUpContext: readingSession?.followUpContext,
+    })
     savedFollowUpDraftReadingIdRef.current = confirmedReadingId
     setHasFollowUpDraft(true)
   }, [
