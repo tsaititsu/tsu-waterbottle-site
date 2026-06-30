@@ -128,6 +128,62 @@ function includesAny(value: string, keywords: string[]) {
   return keywords.some((keyword) => value.includes(keyword))
 }
 
+const loveContextKeywords = [
+  "復合",
+  "感情",
+  "喜歡",
+  "愛",
+  "對我",
+  "心意",
+  "曖昧",
+  "桃花",
+  "前任",
+  "男友",
+  "女友",
+  "老公",
+  "老婆",
+  "伴侶",
+  "關係",
+]
+
+const relationshipMoneyValueKeywords = [
+  "金錢價值觀",
+  "金錢觀",
+  "價值觀",
+  "付出",
+  "回報",
+  "誰付比較多",
+  "AA",
+  "花錢",
+  "現實問題",
+  "生活規劃",
+  "穩定",
+  "責任",
+  "我們目前是",
+  "所以我們是",
+  "所以我們目前是",
+]
+
+const explicitFinanceKeywords = [
+  "投資",
+  "進場",
+  "股票",
+  "加密貨幣",
+  "基金",
+  "貸款",
+  "借錢",
+  "還款",
+  "現金流",
+  "收入支出",
+  "預算表",
+  "回款",
+  "創業資金",
+  "合夥資金",
+  "資金調度",
+  "利率",
+  "債務",
+]
+
 function toLegacyPosition(position: DivinationPosition): LegacyPosition {
   return position === "reversed" ? "反位" : "正位"
 }
@@ -336,6 +392,39 @@ export function buildFollowUpContextSearchText(followUpContext?: DivinationFollo
     .join(" ")
 }
 
+function hasLoveFollowUpContext(followUpContext?: DivinationFollowUpContext | null) {
+  if (!followUpContext?.isFollowUp || !followUpContext.previousReadings.length) return false
+
+  return followUpContext.previousReadings.some((item) => {
+    const text = [item.question, item.questionType, item.questionSubcategory, item.answerSummary, item.finalAnswer]
+      .filter(Boolean)
+      .join(" ")
+
+    return item.questionType === "感情關係" || includesAny(text, loveContextKeywords)
+  })
+}
+
+function hasRelationshipMoneyValueQuestion(question: string) {
+  const lowerQuestion = question.toLowerCase()
+
+  return includesAny(question, relationshipMoneyValueKeywords) || lowerQuestion.includes("aa")
+}
+
+function hasExplicitFinanceQuestion(question: string) {
+  return includesAny(question, explicitFinanceKeywords)
+}
+
+function isRelationshipMoneyValuesFollowUp(
+  question: string,
+  followUpContext?: DivinationFollowUpContext | null
+) {
+  return (
+    hasLoveFollowUpContext(followUpContext) &&
+    hasRelationshipMoneyValueQuestion(question) &&
+    !hasExplicitFinanceQuestion(question)
+  )
+}
+
 export function detectFollowUpFocus(question: string, followUpContext?: DivinationFollowUpContext | null) {
   if (!followUpContext?.isFollowUp || !followUpContext.previousReadings.length) return "general"
 
@@ -365,6 +454,10 @@ export function detectFollowUpFocus(question: string, followUpContext?: Divinati
     return "riskCheck"
   }
 
+  if (isRelationshipMoneyValuesFollowUp(question, followUpContext)) {
+    return "relationshipMoneyValues"
+  }
+
   if (includesAny(text, ["follow up", "follow-up"])) return "general"
 
   return "general"
@@ -380,6 +473,7 @@ export function inferFollowUpQuestionType(
   followUpContext?: DivinationFollowUpContext | null
 ) {
   if (!followUpContext?.isFollowUp || !followUpContext.previousReadings.length) return detectedQuestionType
+  if (isRelationshipMoneyValuesFollowUp(question, followUpContext)) return "感情關係"
   if (hasExplicitQuestionType(question)) return detectedQuestionType
 
   const latest = getLatestPreviousReading(followUpContext)
@@ -409,6 +503,9 @@ export function inferFollowUpQuestionSubcategory(
   const followUpFocus = detectFollowUpFocus(question, followUpContext)
   const latest = getLatestPreviousReading(followUpContext)
 
+  if (questionType === "感情關係" && followUpFocus === "relationshipMoneyValues") {
+    return "感情｜金錢價值觀"
+  }
   if (questionType === "感情關係" && followUpFocus === "replyOrReturn") return "感情｜回覆復聯"
   if (followUpFocus === "nextStep") return `${questionType.replace("關係", "").replace("狀態", "")}｜下一步`
   if (followUpFocus === "timing") return "日期｜追問時機"
@@ -420,6 +517,10 @@ export function inferFollowUpQuestionSubcategory(
 }
 
 export function buildQuestionCore(questionType: string, questionSubcategory: string) {
+  if (questionType === "感情關係" && questionSubcategory.includes("金錢價值觀")) {
+    return "感情中的金錢觀、付出回報、責任承擔、生活規劃與穩定感差異"
+  }
+
   const coreByType: Record<string, string> = {
     感情關係: "對方態度、關係狀態、互動品質、主動或等待",
     工作事業: "職場局勢、合作對象、壓力點、下一步",
@@ -438,6 +539,10 @@ export function buildQuestionCore(questionType: string, questionSubcategory: str
 }
 
 export function buildAnswerContract(questionType: string, questionSubcategory: string) {
+  if (questionType === "感情關係" && questionSubcategory.includes("金錢價值觀")) {
+    return "必答：感情中的金錢觀差異、付出與回報是否不平衡、誰承擔比較多、現實責任與生活規劃是否不同。避免：寫成現金流、貸款、利率、還款、預算表或資金調度。"
+  }
+
   const contractByType: Record<string, string> = {
     感情關係: "必答：對方態度偏向、關係目前狀態、互動卡點、主動或觀察。避免：只講自我成長或泛泛溝通。",
     工作事業: "必答：這件工作或職場局勢本身、主管同事或合作方、壓力點、下一步。避免：只叫使用者努力。",
@@ -521,6 +626,7 @@ function buildTargetedFollowUpFocusInstruction(focus: string) {
     replyOrReturn: "本次追問焦點是回覆、復聯或回來跡象。請回答有沒有回覆 / 回來的傾向，但不要保證結果或日期。",
     timing: "本次追問焦點是時間。請回答時機感、觀察期或適合度，不要保證日期，也不要亂編具體日子。",
     riskCheck: "本次追問焦點是風險檢查。請講清楚卡點、風險點與注意事項，並給可執行的確認方式。",
+    relationshipMoneyValues: "本次追問焦點是感情裡的金錢觀、付出回報、現實責任與生活規劃差異。請留在感情互動語境，不要改寫成財務管理、現金流、貸款或資金調度題。",
     general: "本次追問需自然承接前題脈絡，但仍以本次新問題為主，不要把前題完整重講一遍。",
   }
 
@@ -534,6 +640,9 @@ function buildFollowUpContextBlock(context: LegacyReadingContext) {
   if (!followUpContext?.isFollowUp || previous.length === 0) return ""
 
   const focus = detectFollowUpFocus(context.question, followUpContext)
+  const relationshipMoneyValuesGuard = isRelationshipMoneyValuesFollowUp(context.question, followUpContext)
+    ? "\n- 這是感情脈絡下的金錢價值觀追問；即使出現「金錢、價值觀、付出回報」，也要先判斷成感情互動裡的現實價值觀差異。除非使用者明確問投資、貸款、收入、還款、預算、現金流，否則不可改成財務管理題。"
+    : ""
   const lines = previous.map((item, index) => {
     const cardText = [item.cardName, previousPositionLabel(item.position)].filter(Boolean).join("｜")
     const answerForPrompt = item.finalAnswer?.trim() || item.answerSummary?.trim() || ""
@@ -569,7 +678,7 @@ ${lines.join("\n\n")}
 - 要回答這一題的新問題。
 - 如果使用者是在修正「不是這個意思」，要依新的意思修正回答方向。
 - 如果使用者問「那他呢 / 那對方呢」，要承接上一題人物關係。
-- 如果使用者問「接下來怎麼做」，重點放在下一步建議。`
+- 如果使用者問「接下來怎麼做」，重點放在下一步建議。${relationshipMoneyValuesGuard}`
 }
 
 function buildOutputRulesBlock() {
@@ -799,12 +908,20 @@ Follow-up Review Mode
 - 如果使用者說「不是這個意思」，是否有依新的意思修正方向。
 - 是否沒有因追問而亂跨領域。`
       : ""
+  const relationshipMoneyValuesReviewMode = isRelationshipMoneyValuesFollowUp(context.question, context.followUpContext)
+    ? `
+Relationship Money Values Review Mode
+這是感情脈絡下的追問，本題是在問金錢價值觀、付出回報或現實責任，不是財務管理題。
+最終回答不可出現現金流管理、回款安排、貸款、利率、還款方案、預算控管、資金調度、預算表等財務管理語境。
+請改回感情中的金錢觀、付出比例、責任承擔、生活規劃差異、穩定關係期待與互動壓力。`
+    : ""
 
   return `${investmentReviewMode}
 ${healthReviewMode}
 ${legalReviewMode}
 ${crossDomainReviewMode}
 ${followUpReviewMode}
+${relationshipMoneyValuesReviewMode}
 你是占卜系統的內容審稿者與潤飾者。
 
 你會看到第一輪占卜解讀草稿。你的任務不是重新占卜，而是把草稿整理成可以正式給使用者看的最終版。
@@ -919,6 +1036,7 @@ export function reviewAnswer(answer: string, context: LegacyReadingContext) {
   next = cleanInvestmentLegalizedTone(next, context)
   next = cleanLoveAdviceTone(next, context)
   next = cleanReportLikeLanguage(next)
+  next = cleanRelationshipMoneyValuesFinanceBleed(next, context)
 
   return next
 }
@@ -1286,6 +1404,30 @@ function cleanLoveAdviceTone(answer: string, context: LegacyReadingContext) {
     .replaceAll("如果你主動負責溝通有關界線和期望，不僅能減少誤會，也能關係自然前進。", "你可以輕一點確認他的態度，不要逼他馬上表態；先讓互動穩定下來，關係比較容易自然往前。")
     .replaceAll("主動負責溝通有關界線和期望", "輕一點確認他的態度")
     .replaceAll("減少誤會，也能關係自然前進", "讓互動穩定下來，關係比較容易自然往前")
+}
+
+function cleanRelationshipMoneyValuesFinanceBleed(answer: string, context: LegacyReadingContext) {
+  if (!isRelationshipMoneyValuesFollowUp(context.question, context.followUpContext)) return answer
+
+  return answer
+    .replaceAll("現金流管理", "付出與回報")
+    .replaceAll("現金流", "金錢使用習慣")
+    .replaceAll("錢的去向", "金錢使用習慣")
+    .replaceAll("收入與支出", "付出與回報")
+    .replaceAll("收入支出", "付出與回報")
+    .replaceAll("預算控管", "生活現實安排")
+    .replaceAll("預算表", "生活現實安排")
+    .replaceAll("回款安排", "對承擔責任的回應")
+    .replaceAll("回款", "責任回應")
+    .replaceAll("還款方案", "責任承擔方式")
+    .replaceAll("還款", "責任承擔")
+    .replaceAll("貸款", "現實責任")
+    .replaceAll("利率", "現實壓力")
+    .replaceAll("資金調度", "生活規劃協調")
+    .replaceAll("資金配置", "生活規劃")
+    .replaceAll("財務管理", "感情裡的現實價值觀")
+    .replaceAll("財務規劃", "感情裡的生活規劃")
+    .replaceAll("資金", "現實資源")
 }
 
 function cleanReportLikeLanguage(answer: string) {
