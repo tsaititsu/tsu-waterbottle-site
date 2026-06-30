@@ -3,6 +3,7 @@
 import type { ZiweiCard } from "@/lib/divination/cards"
 import type {
   DivinationDrawMode,
+  DivinationFollowUpDisplayThread,
   DivinationInterpretation,
   DivinationMockPaymentGate,
   DivinationPosition,
@@ -17,6 +18,7 @@ type DivinationResultPreviewProps = {
   readingId?: string
   paymentGate?: DivinationMockPaymentGate
   interpretation?: DivinationInterpretation
+  followUpThread?: DivinationFollowUpDisplayThread | null
 }
 
 const drawModeLabels: Record<DivinationDrawMode, string> = {
@@ -34,12 +36,16 @@ export function DivinationResultPreview({
   drawMode,
   card,
   position,
+  readingId,
   interpretation,
+  followUpThread,
 }: DivinationResultPreviewProps) {
   const cardImage = position === "reversed" ? card.reversedImage : card.image
   const meaning = position === "reversed" ? card.reversedMeaning : card.uprightMeaning
   const advice = position === "reversed" ? card.advice.reversed : card.advice.upright
   const finalAnswer = interpretation?.finalAnswer?.trim()
+  const followUpReadings = followUpThread?.readings ?? []
+  const shouldShowFollowUpHistory = followUpReadings.length >= 2
 
   return (
     <section className="w-full rounded-[2rem] border border-purple-100 bg-[#faf7ff] p-5 text-slate-700 shadow-[0_18px_48px_rgba(88,55,132,0.12)] md:p-6">
@@ -134,6 +140,52 @@ export function DivinationResultPreview({
               </div>
             </div>
           )}
+
+          {shouldShowFollowUpHistory ? (
+            <details className="group rounded-2xl border border-purple-100 bg-purple-50/70 p-4 leading-7">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-base font-semibold text-[#4b2d73]">
+                <span>查看本串追問紀錄</span>
+                <span className="text-sm font-medium text-[#7b5a2b] group-open:hidden">展開</span>
+                <span className="hidden text-sm font-medium text-[#7b5a2b] group-open:inline">收合</span>
+              </summary>
+
+              <div className="mt-4 grid gap-4">
+                {followUpReadings.map((reading, index) => {
+                  const isCurrentReading = Boolean(readingId && reading.readingId === readingId)
+                  const readingPosition = reading.position ? positionLabels[reading.position] : "未記錄"
+                  const readingCard = reading.cardName || reading.cardId || "未記錄"
+
+                  return (
+                    <article
+                      key={reading.readingId || `${reading.question}-${index}`}
+                      className="grid gap-3 rounded-2xl border border-purple-100 bg-white p-4 text-[#3f3450] shadow-[0_10px_28px_rgba(88,55,132,0.06)]"
+                    >
+                      <p className="font-semibold text-[#4b2d73]">
+                        第 {index + 1} 題{isCurrentReading ? "（目前這題）" : ""}
+                      </p>
+
+                      <div className="grid gap-2">
+                        <p className="text-sm font-semibold text-[#7b5a2b]">問題：</p>
+                        <p>「{reading.question}」</p>
+                      </div>
+
+                      <div className="grid gap-2">
+                        <p className="text-sm font-semibold text-[#7b5a2b]">抽到：</p>
+                        <p>
+                          {readingCard}｜{readingPosition}
+                        </p>
+                      </div>
+
+                      <div className="grid gap-2">
+                        <p className="text-sm font-semibold text-[#7b5a2b]">解答：</p>
+                        <div className="whitespace-pre-line">{reading.finalAnswer}</div>
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
+            </details>
+          ) : null}
         </div>
       </div>
     </section>

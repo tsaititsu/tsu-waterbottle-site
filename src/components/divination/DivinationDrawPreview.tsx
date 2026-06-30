@@ -7,11 +7,13 @@ import {
   clearDivinationFollowUpDraft,
   clearDivinationFollowUpDisplayThread,
   createAnswerSummary,
+  loadDivinationFollowUpDisplayThread,
   saveDivinationFollowUpDisplayReading,
   saveDivinationFollowUpDraft,
 } from "@/lib/divination/followUpStorage"
 import type {
   DivinationDrawMode,
+  DivinationFollowUpDisplayThread,
   DivinationInterpretResponse,
   DivinationInterpretation,
   DivinationMockPaymentGate,
@@ -192,6 +194,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
   const [interpretation, setInterpretation] = useState<DivinationInterpretation | null>(null)
   const [isSafetyResult, setIsSafetyResult] = useState(false)
   const [hasFollowUpDraft, setHasFollowUpDraft] = useState(false)
+  const [displayThread, setDisplayThread] = useState<DivinationFollowUpDisplayThread | null>(null)
   const [isInterpreting, setIsInterpreting] = useState(false)
   const [isMockPaying, setIsMockPaying] = useState(false)
   const [paymentRequired, setPaymentRequired] = useState<PaymentRequiredState | null>(null)
@@ -247,6 +250,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setInterpretation(null)
     setIsSafetyResult(false)
     setHasFollowUpDraft(false)
+    setDisplayThread(null)
     setIsInterpreting(false)
     setIsMockPaying(false)
     setPaymentRequired(null)
@@ -284,6 +288,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setInterpretation(null)
     setIsSafetyResult(false)
     setHasFollowUpDraft(false)
+    setDisplayThread(null)
     setIsInterpreting(false)
     setIsMockPaying(false)
     setPaymentRequired(null)
@@ -312,6 +317,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setInterpretation(null)
     setIsSafetyResult(false)
     setHasFollowUpDraft(false)
+    setDisplayThread(null)
     setPaymentRequired(null)
     setErrorMessage("")
     setMessage(pendingMessage)
@@ -331,6 +337,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setInterpretation(null)
     setIsSafetyResult(false)
     setHasFollowUpDraft(false)
+    setDisplayThread(null)
     setPaymentRequired(null)
     setErrorMessage("")
     setMessage(readyMessage)
@@ -363,6 +370,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setInterpretation(null)
     setIsSafetyResult(false)
     setHasFollowUpDraft(false)
+    setDisplayThread(null)
     setIsInterpreting(false)
     setIsMockPaying(false)
     setPaymentRequired(null)
@@ -419,6 +427,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setInterpretation(null)
     setIsSafetyResult(false)
     setHasFollowUpDraft(false)
+    setDisplayThread(null)
     setPaymentRequired(null)
     setErrorMessage("")
     setMessage(options?.mockPaid ? "支付與解讀中..." : "開始解讀中...")
@@ -488,6 +497,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
       setInterpretation(null)
       setIsSafetyResult(false)
       setHasFollowUpDraft(false)
+      setDisplayThread(null)
       setErrorMessage(error instanceof Error ? error.message : "解讀預覽產生失敗，請稍後再試。")
       setMessage(pendingMessage)
     } finally {
@@ -532,6 +542,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     window.sessionStorage.removeItem(readingSessionStorageKey)
     clearDivinationFollowUpDraft()
     clearDivinationFollowUpDisplayThread()
+    setDisplayThread(null)
     router.push(`/ai-divination?reset=${Date.now()}`)
   }
 
@@ -578,6 +589,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
       answerSummary: createAnswerSummary(finalAnswer),
       existingFollowUpContext: readingSession?.followUpContext,
     })
+    setDisplayThread(loadDivinationFollowUpDisplayThread(followUpDraft.threadId))
     savedFollowUpDraftReadingIdRef.current = confirmedReadingId
     setHasFollowUpDraft(true)
   }, [
@@ -905,6 +917,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
               readingId={confirmedReadingId || undefined}
               paymentGate={confirmedPaymentGate ?? undefined}
               interpretation={interpretation ?? undefined}
+              followUpThread={!isSafetyResult ? displayThread : null}
             />
           ) : null}
 
