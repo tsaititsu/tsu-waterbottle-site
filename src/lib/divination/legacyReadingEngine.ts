@@ -167,6 +167,46 @@ function includesAny(value: string, keywords: string[]) {
   return keywords.some((keyword) => value.includes(keyword))
 }
 
+const weeklyWorkAttentionKeywords = [
+  "這週工作要注意什麼",
+  "本週工作要注意什麼",
+  "最近工作要注意什麼",
+  "工作上要注意什麼",
+  "這週職場要注意什麼",
+  "本週職場要注意什麼",
+  "工作狀況如何",
+  "這週上班要注意什麼",
+  "本週上班要注意什麼",
+  "工作要注意什麼",
+  "職場要注意什麼",
+  "上班要注意什麼",
+]
+
+const careerTransitionKeywords = [
+  "要不要換工作",
+  "適合換工作",
+  "換工作",
+  "找工作",
+  "適合找工作",
+  "面試",
+  "離職",
+  "裸辭",
+  "轉職",
+  "新職缺",
+  "職缺",
+  "薪資談判",
+  "跳槽",
+  "新工作",
+]
+
+function isWeeklyWorkAttentionQuestion(question: string) {
+  return includesAny(question, weeklyWorkAttentionKeywords) && !isCareerTransitionQuestion(question)
+}
+
+function isCareerTransitionQuestion(question: string) {
+  return includesAny(question, careerTransitionKeywords)
+}
+
 const loveContextKeywords = [
   "復合",
   "感情",
@@ -228,7 +268,15 @@ function toLegacyPosition(position: DivinationPosition): LegacyPosition {
 }
 
 function normalizeText(value: string) {
-  return value.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
+  return value
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\r/g, "\n")
+    .replace(/\\t/g, " ")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -394,8 +442,9 @@ export function buildQuestionSubcategory(questionType: string, question: string)
   }
 
   if (questionType === "工作事業") {
+    if (isWeeklyWorkAttentionQuestion(question)) return "工作｜本週工作注意"
     if (includesAny(question, ["面試", "錄取"])) return "工作｜面試錄取"
-    if (includesAny(question, ["離職", "換工作", "轉職"])) return "工作｜轉職離職"
+    if (isCareerTransitionQuestion(question) || includesAny(question, ["離職", "換工作", "轉職"])) return "工作｜轉職離職"
     if (includesAny(question, ["合作", "客戶", "接案"])) return "工作｜合作客戶"
     return "工作｜職場局勢"
   }
@@ -560,6 +609,10 @@ export function buildQuestionCore(questionType: string, questionSubcategory: str
     return "感情中的金錢觀、付出回報、責任承擔、生活規劃與穩定感差異"
   }
 
+  if (questionSubcategory === "工作｜本週工作注意") {
+    return "本週工作狀態、任務優先順序、責任分工、主管同事溝通、文件紀錄、進度控管與細節檢查"
+  }
+
   const coreByType: Record<string, string> = {
     感情關係: "對方態度、關係狀態、互動品質、主動或等待",
     工作事業: "職場局勢、合作對象、壓力點、下一步",
@@ -580,6 +633,10 @@ export function buildQuestionCore(questionType: string, questionSubcategory: str
 export function buildAnswerContract(questionType: string, questionSubcategory: string) {
   if (questionType === "感情關係" && questionSubcategory.includes("金錢價值觀")) {
     return "必答：感情中的金錢觀差異、付出與回報是否不平衡、誰承擔比較多、現實責任與生活規劃是否不同。避免：寫成現金流、貸款、利率、還款、預算表或資金調度。"
+  }
+
+  if (questionSubcategory === "工作｜本週工作注意") {
+    return "必答：本週工作要注意的任務排序、分工責任、主管同事溝通、進度控管、數字文件時間點與紀錄。避免：履歷、面試、找工作、離職、裸辭、職缺、交接、薪資工時或尋找新機會，除非使用者明確問換工作。"
   }
 
   const contractByType: Record<string, string> = {
@@ -722,6 +779,19 @@ ${lines.join("\n\n")}
 
 function buildOutputRulesBlock(context: LegacyReadingContext) {
   const range = getAnswerParagraphRange(context)
+  const workDomainRule =
+    context.questionSubcategory === "工作｜本週工作注意"
+      ? `- 這是本週工作注意題，不是換工作題。請回答本週工作狀態、任務排序、責任分工、主管 / 同事溝通、文件紀錄、進度控管、細節檢查；不要自動帶入履歷、面試、找工作、離職、裸辭、職缺、交接、薪資工時或尋找新機會。
+- 本週工作注意題的建議要落在：先把手上任務排序、跟主管確認期待、跟同事確認分工、重要事項留下紀錄、數字 / 文件 / 時間點檢查清楚、不要只靠口頭承諾、不要因一時急躁把責任全攬下來。`
+      : context.questionType === "工作事業"
+        ? "- 換工作 / 面試 / 離職 / 轉職題才補履歷、面試、薪資、工時、主管風格、職務內容與交接責任；其他工作題請回到題目本身的職場局勢、任務、分工與溝通。"
+        : ""
+  const wuquWeeklyWorkRule =
+    context.questionSubcategory === "工作｜本週工作注意" &&
+    context.card.name.includes("武曲") &&
+    context.position === "正位"
+      ? "- 武曲星正位放在本週工作注意題，重點是務實執行、專業、耐力、紀律、實際成果、數字、成本、報表、紀錄、責任歸屬與細節核對；不要過度寫成金錢利益分配、轉職、履歷、職缺、薪資工時、衝動離職或高風險合作。"
+      : ""
 
   return `Output Rules
 - ${buildOutputLengthRule(context)}
@@ -752,12 +822,14 @@ function buildOutputRulesBlock(context: LegacyReadingContext) {
 - 房產題要先看房子本身、價格、屋況、貸款、合約和仲介；交通題要看行程、路線、時間、工具和安全節奏；合作題要看分工、責任、利益和界線。
 - 一般題不要超過五段，複雜題或連續追問不要超過六段，每段不要超過四句。
 - 感情題要補對方態度、關係卡點、你要主動 / 等待 / 觀察 / 設界線，以及接下來看什麼互動訊號。
-- 工作題要補履歷、面試、薪資、工時、主管風格、交接與職務責任。
+- 工作題要依細分類回答：換工作 / 面試 / 離職題才補履歷、面試、薪資、工時、主管風格、交接與職務責任；本週工作注意題請補任務排序、分工、紀錄、主管同事溝通、進度和細節。
 - 投資題要補資訊是否足夠、資金比例、風險界線、觀察條件、不要重押 / 不要追高，但不要變成財經報告。
 - 健康題要補作息、壓力、睡眠、身體訊號、筋骨四肢、神經緊繃與生活節奏，但不要診斷。
 - 合約題要補條款、文件、責任歸屬、書面紀錄、證據保存與專業協助，但不要下法律結論。
-- 建議必須能落地：問工作就提履歷、面試、薪資工時或交接；問房產就提屋況、價格、合約；問合約就提文件、條款、證據；不要只說保持正向或好好溝通。
-- 不要在回答中說問題分類是什麼。`
+- 建議必須能落地：問換工作才提履歷、面試、薪資工時或交接；問本週工作注意就提任務排序、分工、紀錄、數字文件時間點與主管同事溝通；問房產就提屋況、價格、合約；問合約就提文件、條款、證據；不要只說保持正向或好好溝通。
+- 不要在回答中說問題分類是什麼。
+${workDomainRule}
+${wuquWeeklyWorkRule}`
 }
 
 export function buildLegacyReadingContext(input: {
@@ -864,6 +936,29 @@ function buildReadingPromptPrelude(context: LegacyReadingContext) {
 export function buildLegacyDraftPrompt(context: LegacyReadingContext) {
   const range = getAnswerParagraphRange(context)
   const length = getAnswerLengthSpec(context)
+  const workPromptMode =
+    context.questionSubcategory === "工作｜本週工作注意"
+      ? `
+本週工作注意題規則：
+這題是在問本週 / 最近工作要注意什麼，不是換工作、找工作或離職題。
+第一句要先回答本週工作重點，例如穩定執行、任務排序、責任分工、進度控管、主管同事溝通、文件紀錄或細節檢查。
+不可自動寫履歷、面試、職缺、薪資、工時、主管風格、交接、裸辭、離職或尋找新機會，除非使用者明確問換工作。
+建議要放在：本週先把手上任務排序、跟主管確認期待、跟同事確認分工、重要事項留下紀錄、數字 / 文件 / 時間點要檢查清楚，不要只靠口頭承諾，也不要因一時急躁把責任全攬下來。`
+      : context.questionType === "工作事業"
+        ? `
+工作題規則：
+如果是換工作、面試、離職、轉職題，才回答履歷、面試、職缺、薪資、工時、主管風格、職務內容與交接責任。
+如果只是問近期工作狀況、職場局勢或工作注意事項，請回到任務、分工、主管同事溝通、制度、紀錄、進度與責任，不要自動寫成換工作。`
+        : ""
+  const wuquWeeklyWorkPrompt =
+    context.questionSubcategory === "工作｜本週工作注意" &&
+    context.card.name.includes("武曲") &&
+    context.position === "正位"
+      ? `
+武曲正位在本週工作注意題：
+請把武曲正位寫成務實執行、專業、耐力、紀律、實際成果、數字、成本、報表、紀錄、責任歸屬和細節核對。
+不要過度寫金錢利益分配、轉職、履歷、職缺、薪資工時、衝動離職或高風險合作。`
+      : ""
 
   return `${buildReadingPromptPrelude(context)}
 
@@ -886,7 +981,7 @@ export function buildLegacyDraftPrompt(context: LegacyReadingContext) {
 題型硬規則：
 感情心意題第一段要先給偏向判斷，例如偏有心、偏觀望、偏退開、偏熱度下降、偏想靠近但不穩定，不能只說還需要觀察。
 感情心意題要回答對方感覺、態度、回覆品質、主動或觀望，不要變成金錢、健康、工作分析；除非使用者明確提到，否則不要硬拉到現實資源或職場規則。
-工作題第一句要先回到工作語境，例如適不適合換工作、要不要裸辭、是否先面試看看、主管規則、同事互動、職務條件與交接責任；建議要像老師現場提醒：先整理履歷、看職缺、面試看看市場，確認薪資、工時、主管風格、職務內容，不要只是因為現在不爽就裸辭。
+工作題第一句要先回到工作語境，但必須依細分類回答：換工作題才講適不適合換工作、要不要裸辭、是否先面試看看；本週工作注意題要講任務排序、分工責任、主管同事溝通、文件紀錄與細節檢查。
 投資題第一句要先明確講節奏：現在不適合急著進場，尤其不適合重押或追高。第 2 段禁止再重複不適合進場、不建議投入、重押、追高、風險承受度，必須改成牌義原因段，依抽到的牌說明判斷力、資訊透明度、主導權、短線誘惑、面子或資源消耗。第 3 段才講目前投資狀態，例如市場或標的還不夠清楚、容易被外在消息影響、適合做功課與整理資金配置。第 4 段再給行動建議：小額觀察、不借錢投資、不碰保證獲利或不透明來源、等自己看得懂也掌握得住再說。不能替使用者決定買賣、停損、加碼或出場，也不要每次自動加詐騙、非法、法律風險，除非問題或牌義明確指向詐騙、違法、借貸、合約、官非。
 一般金錢財務題不是股票期貨題；請回答收支、預算、現金流、回款、貸款條件、保險或大額購買，不要使用進場、出場、部位、停損、加碼、減碼。
 房產題要先看房子本身、價格、合約、貸款與屋況，不要一開始寫家人相處。
@@ -895,10 +990,13 @@ export function buildLegacyDraftPrompt(context: LegacyReadingContext) {
 合約法律題不能直接叫使用者簽、不簽、提告或放棄權利，要提醒條款、證據、責任歸屬與專業協助。不要寫具備不平衡的狀態、存在不平衡的狀態、合約效力受到挑戰或效力受到挑戰；請改成雙方對規則和責任的理解可能不一致、條款不清、後面執行時容易有爭議。
 日期題沒有明確日期時不能編日期，只能回答時機感、準備度與注意事項。
 交通出行題不要恐嚇事故；只提醒路線、時間、工具、分心、臨時變動與安全節奏。房產、合約、交通、合作都要放回該事件本身，不要一律寫成個性或心態。
+${workPromptMode}
+${wuquWeeklyWorkPrompt}
 
 第一句範例：
 - 感情題：他對你不是沒有感覺，但現在還沒有到完全穩定投入的狀態。
 - 換工作題：現在不適合衝動換工作，先不要裸辭；比較適合先整理履歷、面試看看。
+- 本週工作注意題：這週工作重點是穩定執行，不適合急著衝新方向；你要注意任務排序、責任分工和實際成果，尤其是數字、文件、時間點要清楚。
 - 投資題：現在不適合急著進場，尤其不適合重押或追高。
 - 感情題：他對你有吸引力，也有曖昧和新鮮感，但還沒有穩定下來；他比較享受互動過程，還不急著給承諾。
 - 感情題不要寫多元社交、多重關係中的選擇、解決問題這種書面詞，請改成互動比較活、對你有吸引力、有曖昧和新鮮感、還沒有穩定下來。
@@ -975,6 +1073,19 @@ Relationship Money Values Review Mode
 最終回答不可出現現金流管理、回款安排、貸款、利率、還款方案、預算控管、資金調度、預算表等財務管理語境。
 請改回感情中的金錢觀、付出比例、責任承擔、生活規劃差異、穩定關係期待與互動壓力。`
     : ""
+  const workReviewMode =
+    context.questionSubcategory === "工作｜本週工作注意"
+      ? `
+Weekly Work Attention Review Mode
+這是本週工作注意題，不是換工作題。
+請檢查最終回答是否回到本週工作狀態、任務排序、責任分工、主管同事溝通、文件紀錄、進度控管、數字 / 文件 / 時間點與細節檢查。
+最終回答不可自動出現履歷、面試、找工作、離職、裸辭、職缺、交接、薪資工時、尋找新機會或衝動離職；若草稿出現，請改成本週手上任務、主管期待、同事分工、重要紀錄、數字文件時間點、不要把責任全攬下來。
+如果抽到武曲星正位，請把牌義放在務實執行、專業、耐力、紀律、成果、紀錄、責任歸屬和細節核對，不要過度寫金錢利益分配或轉職。`
+      : context.questionType === "工作事業"
+        ? `
+Work Review Mode
+請依工作題細分類修稿。換工作 / 面試 / 離職 / 轉職題才補履歷、面試、職缺、薪資、工時、主管風格、職務內容與交接責任；一般工作狀況或工作注意題請回到任務、分工、主管同事溝通、紀錄、進度與責任。`
+        : ""
 
   return `${investmentReviewMode}
 ${healthReviewMode}
@@ -982,6 +1093,7 @@ ${legalReviewMode}
 ${crossDomainReviewMode}
 ${followUpReviewMode}
 ${relationshipMoneyValuesReviewMode}
+${workReviewMode}
 你是占卜系統的內容審稿者與潤飾者。
 
 你會看到第一輪占卜解讀草稿。你的任務不是重新占卜，而是把草稿整理成可以正式給使用者看的最終版。
@@ -1007,8 +1119,8 @@ ${relationshipMoneyValuesReviewMode}
 - 除第一段可以短一點，其餘段落至少要有 2 句有效內容。
 - 最終回答應包含：主結論、星曜解讀、放回使用者問題的狀態分析、具體做法、觀察重點或風險提醒。
 - 第一段第一句必須先斷事，直接回答問題；不要先鋪陳牌義，不要先說「從某星來看」。
-- 工作題請用職場白話：主管規則、同事互動、制度不清、履歷、面試、薪資、工時、主管風格、職務內容、交接責任；避免灰色地帶、短期利益、信譽破裂這類太嚴重的字。
-- 工作題建議要具體到：先整理履歷、先看職缺、先面試看看市場、確認薪資工時主管風格和職務內容、不要裸辭、不要只是因為現在不爽就離開、先把目前工作責任與交接釐清。
+- 工作題請依細分類使用職場白話：換工作 / 面試 / 離職題才寫履歷、面試、薪資、工時、主管風格、職務內容、交接責任；本週工作注意題請寫主管期待、同事分工、制度、任務排序、紀錄、進度控管與細節檢查。
+- 本週工作注意題建議要具體到：先整理本週手上的任務、確認主管期待、確認同事分工、重要事項留下紀錄、檢查數字文件時間點、不要因為一時急躁把責任全攬下來。
 - 投資題第一句要直接提醒不適合急著進場、不適合重押或追高，但不要給買賣指令；第 2 段不得再重複不適合進場、不建議投入、重押、追高或風險承受度，請改用抽到的牌說明原因，例如判斷力沒有完全打開、資訊不夠透明、主導權不足、面子或責任感、資源消耗、短線誘惑、資訊不足或紀律不足。
 - 投資題第 3 段才講目前投資狀態：市場或標的還不夠清楚、容易被外在消息影響、現在比較適合觀察、做功課、整理資金配置；不要寫成財經報告。
 - 投資題第 4 段才給行動建議：先小額觀察、不借錢投資、不碰保證獲利或不透明來源、等資訊清楚、自己能掌握節奏後再說。
@@ -1016,7 +1128,7 @@ ${relationshipMoneyValuesReviewMode}
 - 感情題請改成自然口吻：對你有吸引力、有曖昧和新鮮感、還沒有穩定下來、他比較享受互動過程，還不急著給承諾。
 - 感情建議請像老師現場提醒：你可以輕一點確認他的態度，不要逼他馬上表態，先讓互動穩定下來，關係比較容易自然往前。
 - 感情題要補對方態度、關係卡點、你要主動 / 等待 / 觀察 / 設界線，以及接下來看什麼互動訊號。
-- 工作題要補履歷、面試、薪資、工時、主管風格、交接與職務責任。
+- 工作題要依細分類補內容：換工作 / 面試 / 離職題補履歷、面試、薪資、工時、主管風格、交接與職務責任；本週工作注意題補任務排序、分工、紀錄、主管同事溝通、進度與細節。
 - 投資題要補資訊是否足夠、資金比例、風險界線、觀察條件、不要重押 / 不要追高，但不要變成財經報告。
 - 健康題要補作息、壓力、睡眠、身體訊號、筋骨四肢、神經緊繃與生活節奏，但不要診斷，也不要使用婦科、生殖系統、肝臟功能、肝臟區域不適、神經不適、疾病名稱、病名判斷。
 - 合約題要補條款、文件、責任歸屬、書面紀錄、證據保存與專業協助，但不要下法律結論。
@@ -1109,9 +1221,11 @@ export function reviewAnswer(answer: string, context: LegacyReadingContext) {
   next = cleanLoveAdviceTone(next, context)
   next = cleanReportLikeLanguage(next)
   next = cleanRelationshipMoneyValuesFinanceBleed(next, context)
+  next = cleanWeeklyWorkCareerBleed(next, context)
   next = ensureMinimumAnswerDepth(next, context)
+  next = cleanWeeklyWorkCareerBleed(next, context)
 
-  return next
+  return normalizeText(next)
 }
 
 function unwrapFinalAnswerJsonText(answer: string) {
@@ -1165,6 +1279,13 @@ function enforceDirectOpening(answer: string, context: LegacyReadingContext) {
   const question = context.question
 
   if (
+    context.questionSubcategory === "工作｜本週工作注意" &&
+    !includesAny(firstParagraph, ["這週", "本週", "工作重點", "任務", "分工", "紀錄", "進度"])
+  ) {
+    return prependOpening(answer, "這週工作重點是穩定執行，不適合急著衝新方向；你要注意任務排序、責任分工和實際成果，尤其是數字、文件、時間點要清楚。")
+  }
+
+  if (
     context.questionType === "金錢投資" &&
     !includesAny(firstParagraph, ["不適合急著", "不適合重押", "不適合追高", "先觀察", "先不要急"])
   ) {
@@ -1173,6 +1294,7 @@ function enforceDirectOpening(answer: string, context: LegacyReadingContext) {
 
   if (
     context.questionType === "工作事業" &&
+    context.questionSubcategory !== "工作｜本週工作注意" &&
     includesAny(question, ["換工作", "離職", "轉職", "裸辭", "適合"]) &&
     !includesAny(firstParagraph, ["換工作", "裸辭", "履歷", "面試", "適合", "先不要"])
   ) {
@@ -1320,19 +1442,54 @@ function getSoftMinimumChineseLength(context: LegacyReadingContext) {
   return Number.parseInt(getAnswerLengthSpec(context).softMinimum, 10) || 0
 }
 
+function isConclusionParagraph(paragraph: string) {
+  return includesAny(paragraph, ["綜合來說", "總結來說", "總結而言", "整體來說", "整體而言", "總之"])
+}
+
+function isWeeklyWorkSupplementAlreadyCovered(answer: string, context: LegacyReadingContext) {
+  if (context.questionSubcategory !== "工作｜本週工作注意") return false
+
+  const coveredSignals = [
+    "任務",
+    "分工",
+    "紀錄",
+    "主管",
+    "同事",
+    "數字",
+    "文件",
+    "時間點",
+    "責任",
+    "進度",
+  ].filter((signal) => answer.includes(signal))
+
+  return coveredSignals.length >= 6
+}
+
 function appendDepthSupplement(answer: string, supplement: string, context: LegacyReadingContext) {
   const { max } = getAnswerParagraphRange(context)
   const paragraphs = normalizeText(answer)
     .split(/\n{2,}/)
     .map((paragraph) => paragraph.trim())
     .filter(Boolean)
+  const normalizedSupplement = normalizeText(supplement)
 
-  if (!paragraphs.length) return supplement
+  if (!paragraphs.length) return normalizedSupplement
+  if (!normalizedSupplement) return paragraphs.join("\n\n")
+  if (isWeeklyWorkSupplementAlreadyCovered(paragraphs.join("\n\n"), context)) return paragraphs.join("\n\n")
 
-  if (paragraphs.length >= max) {
-    paragraphs[paragraphs.length - 1] = `${paragraphs[paragraphs.length - 1]}${supplement}`
+  const lastIndex = paragraphs.length - 1
+  const shouldInsertBeforeConclusion = paragraphs.length > 1 && isConclusionParagraph(paragraphs[lastIndex])
+
+  if (shouldInsertBeforeConclusion) {
+    if (paragraphs.length < max) {
+      paragraphs.splice(lastIndex, 0, normalizedSupplement)
+    } else {
+      paragraphs[lastIndex - 1] = `${paragraphs[lastIndex - 1]}\n\n${normalizedSupplement}`
+    }
+  } else if (paragraphs.length >= max) {
+    paragraphs[paragraphs.length - 1] = `${paragraphs[paragraphs.length - 1]}\n\n${normalizedSupplement}`
   } else {
-    paragraphs.push(supplement)
+    paragraphs.push(normalizedSupplement)
   }
 
   return paragraphs.join("\n\n")
@@ -1356,6 +1513,10 @@ function buildMinimumDepthSupplement(context: LegacyReadingContext) {
   }
 
   if (context.questionType === "工作事業") {
+    if (context.questionSubcategory === "工作｜本週工作注意") {
+      return "這週也可以特別觀察三件事：第一，主管或合作對象有沒有把期待說清楚；第二，哪些任務容易因為分工不明而卡住；第三，數字、文件或時間點有沒有需要再次確認。這些地方看似細節，但會直接影響你這週的工作成果。"
+    }
+
     return "接下來可以先整理履歷、職缺條件、薪資工時、主管風格和交接責任，再決定要不要往外看。不要只因為當下情緒不舒服就衝動離開，先確認下一步是否真的更穩。"
   }
 
@@ -1601,9 +1762,59 @@ function cleanRelationshipMoneyValuesFinanceBleed(answer: string, context: Legac
     .replaceAll("資金", "現實資源")
 }
 
+function cleanWeeklyWorkCareerBleed(answer: string, context: LegacyReadingContext) {
+  if (context.questionSubcategory !== "工作｜本週工作注意") return answer
+
+  return normalizeText(answer)
+    .replaceAll("整理自己的履歷", "整理本週手上的任務")
+    .replaceAll("整理履歷", "整理本週手上的任務")
+    .replaceAll("先看職缺", "先看本週任務優先順序")
+    .replaceAll("看職缺", "看本週任務優先順序")
+    .replaceAll("職缺條件", "本週任務重點")
+    .replaceAll("新職缺", "新的工作安排")
+    .replaceAll("職缺", "本週任務")
+    .replaceAll("面試看看市場", "確認本週工作期待")
+    .replaceAll("面試看看", "確認主管期待")
+    .replaceAll("面試", "確認主管期待")
+    .replaceAll("找工作", "整理本週工作")
+    .replaceAll("尋找新機會", "確認本週工作優先順序")
+    .replaceAll("往外看", "先把手上事情看清楚")
+    .replaceAll("新機會", "新的任務方向")
+    .replaceAll("薪資、工時和主管風格", "數字、文件、時間點和主管期待")
+    .replaceAll("薪資工時主管風格", "數字文件時間點和主管期待")
+    .replaceAll("薪資工時", "數字、文件和時間點")
+    .replaceAll("薪資、工時", "數字、文件和時間點")
+    .replaceAll("薪資", "數字")
+    .replaceAll("工時", "時間點")
+    .replaceAll("主管風格", "主管期待")
+    .replaceAll("職務內容", "本週任務內容")
+    .replaceAll("交接事宜", "責任歸屬")
+    .replaceAll("交接責任", "責任歸屬")
+    .replaceAll("交接", "責任歸屬")
+    .replaceAll("換工作", "調整本週工作安排")
+    .replaceAll("轉職", "調整工作安排")
+    .replaceAll("離職", "一時急躁做大決定")
+    .replaceAll("裸辭", "一時急躁把責任全攬下來")
+    .replaceAll("衝動離開", "一時急躁接下太多責任")
+    .replaceAll("衝動一時急躁做大決定", "一時急躁做大決定")
+}
+
 function cleanReportLikeLanguage(answer: string) {
   return answer
     .replaceAll("這也，", "這也代表")
+    .replaceAll("稽核與回顧", "後續確認")
+    .replaceAll("有條不紊地推進", "順順地往前推")
+    .replaceAll("有條不紊地推展", "順順地往前推")
+    .replaceAll("有條不紊地", "穩穩地")
+    .replaceAll("憑藉", "靠")
+    .replaceAll("憑借", "靠")
+    .replaceAll("職業規劃", "職涯規劃")
+    .replaceAll("轉職決策的核心", "判斷轉職的重點")
+    .replaceAll("重覆", "重複")
+    .replaceAll("數據", "數字")
+    .replaceAll("程式延宕", "流程延誤")
+    .replaceAll("也進度控管", "也有助於進度控管")
+    .replaceAll("這樣更分工和後續追蹤", "這樣更方便分工和後續追蹤")
     .replaceAll("資金流向", "錢的去向")
     .replaceAll("透明度", "清楚度")
     .replaceAll("審慎評估", "先看清楚")
