@@ -36,7 +36,7 @@ export function DivinationQuestionForm({ onQuestionSubmit }: DivinationQuestionF
       mockPaid: options?.mockPaid,
     })
     setMessageType('info')
-    setMessage(mode === 'auto' ? '正在建立占卜紀錄並前往自動抽牌頁。' : '問題已送出，正在前往抽牌頁。')
+    setMessage(mode === 'auto' ? '正在建立占卜紀錄並前往自動抽牌頁。' : '已收到問題，正在確認是否可以進入抽牌流程。')
   }
 
   return (
