@@ -1242,10 +1242,21 @@ function cleanSimplifiedChinese(answer: string) {
   return answer
     .replaceAll("用户", "你")
     .replaceAll("建议", "建議")
+    .replaceAll("承担", "承擔")
     .replaceAll("关系", "關係")
+    .replaceAll("责任", "責任")
     .replaceAll("风险", "風險")
+    .replaceAll("资金", "資金")
+    .replaceAll("贷款", "貸款")
+    .replaceAll("还款", "還款")
     .replaceAll("选择", "選擇")
     .replaceAll("采取", "採取")
+    .replaceAll("通过", "透過")
+    .replaceAll("计划", "計畫")
+    .replaceAll("质量", "品質")
+    .replaceAll("信息", "資訊")
+    .replaceAll("优化", "優化")
+    .replaceAll("稳定", "穩定")
 }
 
 function softenAbsoluteClaims(answer: string) {
@@ -1802,6 +1813,10 @@ function cleanWeeklyWorkCareerBleed(answer: string, context: LegacyReadingContex
 function cleanReportLikeLanguage(answer: string) {
   return answer
     .replaceAll("這也，", "這也代表")
+    .replaceAll("導致他的主動性無法來", "讓他比較難主動靠近")
+    .replaceAll("導致主動性無法來", "讓他比較難主動行動")
+    .replaceAll("讓他的主動性無法來", "讓他比較難主動表態")
+    .replaceAll("主動性無法來", "比較難主動行動")
     .replaceAll("稽核與回顧", "後續確認")
     .replaceAll("有條不紊地推進", "順順地往前推")
     .replaceAll("有條不紊地推展", "順順地往前推")
