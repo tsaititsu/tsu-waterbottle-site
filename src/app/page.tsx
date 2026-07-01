@@ -1,4 +1,5 @@
 import { CoursePreview } from '@/components/CoursePreview'
+import { CustomerFeedback } from '@/components/CustomerFeedback'
 import { HeroSection } from '@/components/HeroSection'
 import { PricingSection } from '@/components/PricingSection'
 import { ProcessSteps } from '@/components/ProcessSteps'
@@ -9,6 +10,7 @@ export default function Home() {
     <>
       <HeroSection />
       <ServiceCards />
+      <CustomerFeedback />
       <ProcessSteps />
       <PricingSection />
       <CoursePreview />
