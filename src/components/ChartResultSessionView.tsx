@@ -178,7 +178,7 @@ export function ChartResultSessionView() {
       <div className="rounded-2xl border border-borderSoft bg-white p-6 text-center shadow-soft">
         <h2 className="font-serifTC text-2xl font-semibold text-deepPurple">尚未產生命盤</h2>
         <p className="mt-3 text-textMuted">{loadError || '請先回到新增命盤頁。'}</p>
-        <Link className="focus-ring mt-5 inline-flex rounded-lg bg-deepPurple px-5 py-3 font-semibold text-white" href={`/ai-chart?reset=${Date.now()}`}>
+        <Link className="focus-ring mt-5 inline-flex rounded-lg bg-deepPurple px-5 py-3 font-semibold text-white" href="/ai-chart?reset=1">
           回到新增命盤頁
         </Link>
       </div>
