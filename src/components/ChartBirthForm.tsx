@@ -377,8 +377,8 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
   const currentSavedCharts = chartsByCategory[selectedCategory] ?? []
 
   return (
-    <form className="grid gap-6 rounded-2xl border border-borderSoft bg-white p-6 shadow-soft md:p-8">
-      <div className="flex items-center justify-between gap-4">
+    <form className="grid min-w-0 max-w-full gap-6 rounded-2xl border border-borderSoft bg-white p-6 shadow-soft md:p-8">
+      <div className="flex min-w-0 items-center justify-between gap-4">
         <h2 className="font-serifTC text-2xl font-semibold text-deepPurple">新增命盤</h2>
         <button
           type="button"
@@ -419,7 +419,7 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
         <span className="text-sm font-semibold text-textDark">
           姓名 <span className="font-normal text-textMuted">(選填)</span>
         </span>
-        <input className="focus-ring rounded-lg border border-borderSoft bg-white px-4 py-3" onChange={(event) => setName(event.target.value)} placeholder="請輸入姓名" type="text" value={name} />
+        <input className="focus-ring min-w-0 max-w-full rounded-lg border border-borderSoft bg-white px-4 py-3" onChange={(event) => setName(event.target.value)} placeholder="請輸入姓名" type="text" value={name} />
       </label>
 
       <div className="grid gap-3">
@@ -487,9 +487,9 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
             </div>
           ))}
         </div>
-        <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+        <div className="grid min-w-0 gap-2 sm:grid-cols-[1fr_auto]">
           <input
-            className="focus-ring rounded-lg border border-borderSoft bg-white px-4 py-3"
+            className="focus-ring min-w-0 max-w-full rounded-lg border border-borderSoft bg-white px-4 py-3"
             onChange={(event) => setNewCategory(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
@@ -501,7 +501,7 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
             type="text"
             value={newCategory}
           />
-          <button className="focus-ring inline-flex items-center justify-center gap-2 rounded-lg border border-deepPurple bg-white px-5 py-3 font-semibold text-deepPurple" onClick={addCategory} type="button">
+          <button className="focus-ring inline-flex min-w-0 max-w-full items-center justify-center gap-2 rounded-lg border border-deepPurple bg-white px-5 py-3 font-semibold text-deepPurple" onClick={addCategory} type="button">
             <Plus size={18} />
             新增分類
           </button>
@@ -509,9 +509,9 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
 
         <div className="grid gap-2">
           <span className="text-sm font-semibold text-textDark">已儲存命盤</span>
-          <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+          <div className="grid min-w-0 gap-2 sm:grid-cols-[1fr_auto]">
             <select
-              className="focus-ring rounded-lg border border-borderSoft bg-white px-4 py-3"
+              className="focus-ring min-w-0 max-w-full rounded-lg border border-borderSoft bg-white px-4 py-3"
               disabled={currentSavedCharts.length === 0}
               onChange={(event) => chooseSavedChart(event.target.value)}
               value={selectedChartId}
@@ -524,7 +524,7 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
               ))}
             </select>
             <button
-              className="focus-ring rounded-lg border border-borderSoft bg-white px-4 py-3 text-sm font-semibold text-textMuted disabled:cursor-not-allowed disabled:opacity-50"
+              className="focus-ring min-w-0 max-w-full rounded-lg border border-borderSoft bg-white px-4 py-3 text-sm font-semibold text-textMuted disabled:cursor-not-allowed disabled:opacity-50"
               disabled={!selectedChartId}
               onClick={deleteSelectedSavedChart}
               type="button"
@@ -542,9 +542,9 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
         <span className="text-sm font-semibold text-textDark">
           陽曆生日 <span className="text-deepPurple">*</span>
         </span>
-        <div className="grid grid-cols-[1.4fr_auto_1fr_auto_1fr_auto] items-center gap-2">
+        <div className="grid min-w-0 grid-cols-[1.4fr_auto_1fr_auto_1fr_auto] items-center gap-2">
           <input
-            className="focus-ring rounded-lg border border-borderSoft bg-white px-4 py-3"
+            className="focus-ring min-w-0 max-w-full rounded-lg border border-borderSoft bg-white px-4 py-3"
             inputMode="numeric"
             max="2100"
             min="1900"
@@ -556,7 +556,7 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
           />
           <span className="font-semibold text-textMuted">年</span>
           <input
-            className="focus-ring rounded-lg border border-borderSoft bg-white px-4 py-3"
+            className="focus-ring min-w-0 max-w-full rounded-lg border border-borderSoft bg-white px-4 py-3"
             inputMode="numeric"
             max="12"
             min="1"
@@ -568,7 +568,7 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
           />
           <span className="font-semibold text-textMuted">月</span>
           <input
-            className="focus-ring rounded-lg border border-borderSoft bg-white px-4 py-3"
+            className="focus-ring min-w-0 max-w-full rounded-lg border border-borderSoft bg-white px-4 py-3"
             inputMode="numeric"
             max="31"
             min="1"
@@ -586,7 +586,7 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
         <span className="text-sm font-semibold text-textDark">
           時辰 <span className="text-deepPurple">*</span>
         </span>
-        <select className="focus-ring rounded-lg border border-borderSoft bg-white px-4 py-3" onChange={(event) => setTimeIndex(Number(event.target.value))} value={timeIndex}>
+        <select className="focus-ring min-w-0 max-w-full rounded-lg border border-borderSoft bg-white px-4 py-3" onChange={(event) => setTimeIndex(Number(event.target.value))} value={timeIndex}>
           {timeOptions.map((time) => (
             <option key={time.value} value={time.value}>
               {time.label}
