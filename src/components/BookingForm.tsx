@@ -342,8 +342,8 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
   }
 
   return (
-    <div className="grid gap-6">
-      <form className="grid gap-6 rounded-2xl border border-borderSoft bg-white p-6 shadow-soft md:p-8">
+    <div className="grid min-w-0 max-w-full gap-6">
+      <form className="grid min-w-0 max-w-full gap-6 rounded-2xl border border-borderSoft bg-white p-6 shadow-soft md:p-8 [&_*]:min-w-0 [&_input]:max-w-full [&_select]:max-w-full [&_textarea]:max-w-full">
         <div>
           <p className="text-sm font-semibold text-darkGold">預約表單</p>
           <h2 className="mt-2 font-serifTC text-2xl font-semibold text-deepPurple">預約資料</h2>

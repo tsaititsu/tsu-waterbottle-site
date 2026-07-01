@@ -14,7 +14,7 @@ export function AddConsultationToCartButton() {
   const [message, setMessage] = useState('')
 
   return (
-    <div className="mt-8 rounded-2xl border border-borderSoft bg-softPurple p-5">
+    <div className="mt-8 min-w-0 max-w-full rounded-2xl border border-borderSoft bg-softPurple p-5">
       <p className="text-sm font-semibold text-deepPurple">論命預約付款前</p>
       <p className="mt-1 text-textMuted">若先預覽購物流程，可先將論命服務加入購物車。</p>
       <button
