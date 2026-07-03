@@ -1,11 +1,14 @@
-export type NewebPayEnv = 'sandbox' | 'production'
+export type NewebPayEnv = 'test' | 'production'
 
 export type NewebPayConfig = {
   merchantId: string
   hashKey: string
   hashIv: string
   env: NewebPayEnv
+  version: string
   siteUrl: string
+  mpgGatewayUrl: string
+  /** @deprecated Use mpgGatewayUrl. Kept for the existing course payment helper. */
   mpgEndpoint: string
 }
 
