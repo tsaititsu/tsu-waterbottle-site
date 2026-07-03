@@ -23,6 +23,11 @@ assert.deepEqual(getNewebPayPaymentItem('booking_consultation_60'), {
   itemDesc: '水瓶先生論命',
   amount: 3600,
 })
+assert.deepEqual(getNewebPayPaymentItem('newebpay_live_smoke_test_1'), {
+  itemKey: 'newebpay_live_smoke_test_1',
+  itemDesc: '藍新正式環境測試付款',
+  amount: 1,
+})
 assert.equal(getNewebPayPaymentItem('unknown_item'), null)
 
 const orderNo = generateNewebPayMerchantOrderNo(new Date(2026, 6, 3, 17, 25, 30), 'A1B2')
@@ -56,3 +61,16 @@ assert.equal(decrypted.get('LINEPAY'), '1')
 assert.equal(decrypted.get('NotifyURL'), 'http://localhost:3000/api/payments/newebpay/notify')
 assert.equal(decrypted.get('ReturnURL'), 'http://localhost:3000/payment/newebpay/return')
 assert.equal(decrypted.get('ClientBackURL'), 'http://localhost:3000/booking')
+
+const smokeData = createNewebPayMpgPaymentData({
+  itemKey: 'newebpay_live_smoke_test_1',
+  config,
+  now: new Date(2026, 6, 3, 17, 25, 30),
+  merchantOrderNo: 'WB20260703172530C3D4',
+})
+const decryptedSmoke = new URLSearchParams(decryptTradeInfo(smokeData.fields.TradeInfo, hashKey, hashIv))
+
+assert.equal(smokeData.itemKey, 'newebpay_live_smoke_test_1')
+assert.equal(smokeData.amount, 1)
+assert.equal(decryptedSmoke.get('Amt'), '1')
+assert.equal(decryptedSmoke.get('ItemDesc'), '藍新正式環境測試付款')

@@ -28,6 +28,28 @@ type RequestState = {
   paymentData: Extract<NewebPayCreateResponse, { ok: true }> | null
 }
 
+type TestItemKey = 'newebpay_live_smoke_test_1' | 'booking_consultation_60'
+
+const testItems: Array<{
+  itemKey: TestItemKey
+  label: string
+  description: string
+  amount: number
+}> = [
+  {
+    itemKey: 'newebpay_live_smoke_test_1',
+    label: '藍新正式環境 1 元測試付款',
+    description: '只測正式藍新付款串接，不建立預約、不開通 AI 服務、不更新付款狀態。',
+    amount: 1,
+  },
+  {
+    itemKey: 'booking_consultation_60',
+    label: '水瓶先生論命 3600 元',
+    description: '用來確認正式論命付款表單資料，請避免在 smoke test 誤刷。',
+    amount: 3600,
+  },
+]
+
 const isEnabled = process.env.NEXT_PUBLIC_ENABLE_NEWEBPAY === 'true'
 
 function formatTwd(amount: number) {
@@ -36,6 +58,7 @@ function formatTwd(amount: number) {
 
 export function NewebPayTestClient() {
   const formRef = useRef<HTMLFormElement | null>(null)
+  const [selectedItemKey, setSelectedItemKey] = useState<TestItemKey>('newebpay_live_smoke_test_1')
   const [state, setState] = useState<RequestState>({
     loading: false,
     error: '',
@@ -52,7 +75,7 @@ export function NewebPayTestClient() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          itemKey: 'booking_consultation_60',
+          itemKey: selectedItemKey,
           source: 'manual_test',
         }),
       })
@@ -98,6 +121,40 @@ export function NewebPayTestClient() {
             </div>
           ) : (
             <div className="mt-7 grid gap-5">
+              <div className="rounded-2xl border border-[#f0c36d] bg-[#fff8e6] px-5 py-4 text-sm font-semibold leading-6 text-[#7a4d00]">
+                目前是正式藍新環境 1 元測試付款，可能會產生真實交易紀錄。
+                此測試不會建立預約、不會開通 AI 服務、不會更新付款狀態。
+              </div>
+
+              <fieldset className="grid gap-3">
+                <legend className="text-sm font-semibold text-deepPurple">選擇測試品項</legend>
+                {testItems.map((item) => (
+                  <label
+                    key={item.itemKey}
+                    className="grid cursor-pointer gap-2 rounded-2xl border border-borderSoft bg-softPurple px-5 py-4 text-sm leading-6 text-textMuted transition hover:border-deepPurple/40"
+                  >
+                    <span className="flex items-start gap-3">
+                      <input
+                        type="radio"
+                        name="newebpay-test-item"
+                        value={item.itemKey}
+                        checked={selectedItemKey === item.itemKey}
+                        onChange={() => {
+                          setSelectedItemKey(item.itemKey)
+                          setState({ loading: false, error: '', paymentData: null })
+                        }}
+                        className="mt-1"
+                      />
+                      <span>
+                        <span className="block font-semibold text-textDark">{item.label}</span>
+                        <span className="mt-1 block">{item.description}</span>
+                        <span className="mt-1 block font-semibold text-deepPurple">{formatTwd(item.amount)}</span>
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+
               <button
                 type="button"
                 onClick={() => void createPayment()}
