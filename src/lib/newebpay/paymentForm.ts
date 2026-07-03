@@ -4,6 +4,7 @@ import { getNewebPayPaymentItem, type NewebPayPaymentItemKey } from './paymentIt
 import type { NewebPayConfig } from './types'
 
 export type NewebPayPaymentSource = 'booking' | 'ai_divination' | 'ai_chart' | 'manual_test'
+export type NewebPayPaymentMode = 'credit' | 'merchant_default'
 
 export type NewebPayMpgPaymentFields = {
   MerchantID: string
@@ -24,19 +25,26 @@ export type NewebPayMpgPaymentData = {
 type CreateNewebPayMpgPaymentDataInput = {
   itemKey: NewebPayPaymentItemKey
   config: NewebPayConfig
+  paymentMode?: NewebPayPaymentMode
   now?: Date
   merchantOrderNo?: string
 }
 
 const allowedSources = new Set<NewebPayPaymentSource>(['booking', 'ai_divination', 'ai_chart', 'manual_test'])
+const allowedPaymentModes = new Set<NewebPayPaymentMode>(['credit', 'merchant_default'])
 
 export function isNewebPayPaymentSource(source: unknown): source is NewebPayPaymentSource {
   return typeof source === 'string' && allowedSources.has(source as NewebPayPaymentSource)
 }
 
+export function isNewebPayPaymentMode(mode: unknown): mode is NewebPayPaymentMode {
+  return typeof mode === 'string' && allowedPaymentModes.has(mode as NewebPayPaymentMode)
+}
+
 export function createNewebPayMpgPaymentData({
   itemKey,
   config,
+  paymentMode = 'credit',
   now = new Date(),
   merchantOrderNo = generateNewebPayMerchantOrderNo(now),
 }: CreateNewebPayMpgPaymentDataInput): NewebPayMpgPaymentData {
@@ -45,24 +53,25 @@ export function createNewebPayMpgPaymentData({
     throw new Error('Unsupported NewebPay payment item')
   }
 
-  const tradeInfo = encryptTradeInfo(
-    {
-      MerchantID: config.merchantId,
-      RespondType: 'JSON',
-      TimeStamp: Math.floor(now.getTime() / 1000),
-      Version: config.version,
-      MerchantOrderNo: merchantOrderNo,
-      Amt: item.amount,
-      ItemDesc: item.itemDesc,
-      ReturnURL: `${config.siteUrl}/payment/newebpay/return`,
-      NotifyURL: `${config.siteUrl}/api/payments/newebpay/notify`,
-      ClientBackURL: `${config.siteUrl}/booking`,
-      LangType: 'zh-tw',
-      LINEPAY: 1,
-    },
-    config.hashKey,
-    config.hashIv,
-  )
+  const tradeInfoParams: Record<string, string | number> = {
+    MerchantID: config.merchantId,
+    RespondType: 'JSON',
+    TimeStamp: Math.floor(now.getTime() / 1000),
+    Version: config.version,
+    MerchantOrderNo: merchantOrderNo,
+    Amt: item.amount,
+    ItemDesc: item.itemDesc,
+    ReturnURL: `${config.siteUrl}/payment/newebpay/return`,
+    NotifyURL: `${config.siteUrl}/api/payments/newebpay/notify`,
+    ClientBackURL: `${config.siteUrl}/booking`,
+    LangType: 'zh-tw',
+  }
+
+  if (paymentMode === 'credit') {
+    tradeInfoParams.CREDIT = 1
+  }
+
+  const tradeInfo = encryptTradeInfo(tradeInfoParams, config.hashKey, config.hashIv)
 
   return {
     action: config.mpgGatewayUrl,

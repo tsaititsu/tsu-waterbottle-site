@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { decryptTradeInfo, verifyTradeSha } from './crypto'
 import { generateNewebPayMerchantOrderNo } from './orderNo'
-import { createNewebPayMpgPaymentData, isNewebPayPaymentSource } from './paymentForm'
+import { createNewebPayMpgPaymentData, isNewebPayPaymentMode, isNewebPayPaymentSource } from './paymentForm'
 import { getNewebPayPaymentItem } from './paymentItems'
 import type { NewebPayConfig } from './types'
 
@@ -38,6 +38,9 @@ assert.match(orderNo, /^[A-Z0-9_]{1,30}$/)
 assert.equal(isNewebPayPaymentSource('booking'), true)
 assert.equal(isNewebPayPaymentSource('manual_test'), true)
 assert.equal(isNewebPayPaymentSource('external'), false)
+assert.equal(isNewebPayPaymentMode('credit'), true)
+assert.equal(isNewebPayPaymentMode('merchant_default'), true)
+assert.equal(isNewebPayPaymentMode('linepay'), false)
 
 const data = createNewebPayMpgPaymentData({
   itemKey: 'booking_consultation_60',
@@ -57,7 +60,8 @@ assert.match(data.fields.TradeSha, /^[0-9A-F]{64}$/)
 assert.equal(verifyTradeSha(data.fields.TradeInfo, data.fields.TradeSha, hashKey, hashIv), true)
 assert.equal(decrypted.get('Amt'), '3600')
 assert.equal(decrypted.get('ItemDesc'), '水瓶先生論命')
-assert.equal(decrypted.get('LINEPAY'), '1')
+assert.equal(decrypted.get('CREDIT'), '1')
+assert.equal(decrypted.has('LINEPAY'), false)
 assert.equal(decrypted.get('NotifyURL'), 'http://localhost:3000/api/payments/newebpay/notify')
 assert.equal(decrypted.get('ReturnURL'), 'http://localhost:3000/payment/newebpay/return')
 assert.equal(decrypted.get('ClientBackURL'), 'http://localhost:3000/booking')
@@ -74,3 +78,34 @@ assert.equal(smokeData.itemKey, 'newebpay_live_smoke_test_1')
 assert.equal(smokeData.amount, 1)
 assert.equal(decryptedSmoke.get('Amt'), '1')
 assert.equal(decryptedSmoke.get('ItemDesc'), '藍新正式環境測試付款')
+assert.equal(decryptedSmoke.get('CREDIT'), '1')
+assert.equal(decryptedSmoke.has('LINEPAY'), false)
+
+const merchantDefaultData = createNewebPayMpgPaymentData({
+  itemKey: 'newebpay_live_smoke_test_1',
+  config,
+  paymentMode: 'merchant_default',
+  now: new Date(2026, 6, 3, 17, 25, 30),
+  merchantOrderNo: 'WB20260703172530E5F6',
+})
+const decryptedMerchantDefault = new URLSearchParams(
+  decryptTradeInfo(merchantDefaultData.fields.TradeInfo, hashKey, hashIv),
+)
+
+for (const paymentTool of [
+  'CREDIT',
+  'LINEPAY',
+  'VACC',
+  'WEBATM',
+  'CVS',
+  'BARCODE',
+  'APPLEPAY',
+  'ANDROIDPAY',
+  'SAMSUNGPAY',
+  'TAIWANPAY',
+  'ESUNWALLET',
+  'TWQR',
+  'AFTEE',
+]) {
+  assert.equal(decryptedMerchantDefault.has(paymentTool), false)
+}

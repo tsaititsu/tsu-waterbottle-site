@@ -29,6 +29,7 @@ type RequestState = {
 }
 
 type TestItemKey = 'newebpay_live_smoke_test_1' | 'booking_consultation_60'
+type PaymentMode = 'credit' | 'merchant_default'
 
 const testItems: Array<{
   itemKey: TestItemKey
@@ -50,6 +51,23 @@ const testItems: Array<{
   },
 ]
 
+const paymentModes: Array<{
+  mode: PaymentMode
+  label: string
+  description: string
+}> = [
+  {
+    mode: 'credit',
+    label: '信用卡一次付清',
+    description: 'TradeInfo 只指定 CREDIT=1，用來測最單純的正式藍新付款流程。',
+  },
+  {
+    mode: 'merchant_default',
+    label: '商店預設付款方式',
+    description: '不指定付款工具，交由藍新商店後台已啟用的付款方式顯示。',
+  },
+]
+
 const isEnabled = process.env.NEXT_PUBLIC_ENABLE_NEWEBPAY === 'true'
 
 function formatTwd(amount: number) {
@@ -59,6 +77,7 @@ function formatTwd(amount: number) {
 export function NewebPayTestClient() {
   const formRef = useRef<HTMLFormElement | null>(null)
   const [selectedItemKey, setSelectedItemKey] = useState<TestItemKey>('newebpay_live_smoke_test_1')
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('credit')
   const [state, setState] = useState<RequestState>({
     loading: false,
     error: '',
@@ -77,6 +96,7 @@ export function NewebPayTestClient() {
         body: JSON.stringify({
           itemKey: selectedItemKey,
           source: 'manual_test',
+          paymentMode,
         }),
       })
       const data = (await response.json().catch(() => null)) as NewebPayCreateResponse | null
@@ -122,8 +142,8 @@ export function NewebPayTestClient() {
           ) : (
             <div className="mt-7 grid gap-5">
               <div className="rounded-2xl border border-[#f0c36d] bg-[#fff8e6] px-5 py-4 text-sm font-semibold leading-6 text-[#7a4d00]">
-                目前是正式藍新環境 1 元測試付款，可能會產生真實交易紀錄。
-                此測試不會建立預約、不會開通 AI 服務、不會更新付款狀態。
+                目前 LINE Pay 尚未啟用，本測試預設使用信用卡一次付清 1 元付款。
+                請勿使用 3600 元品項測試付款。
               </div>
 
               <fieldset className="grid gap-3">
@@ -149,6 +169,34 @@ export function NewebPayTestClient() {
                         <span className="block font-semibold text-textDark">{item.label}</span>
                         <span className="mt-1 block">{item.description}</span>
                         <span className="mt-1 block font-semibold text-deepPurple">{formatTwd(item.amount)}</span>
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+
+              <fieldset className="grid gap-3">
+                <legend className="text-sm font-semibold text-deepPurple">選擇付款模式</legend>
+                {paymentModes.map((item) => (
+                  <label
+                    key={item.mode}
+                    className="grid cursor-pointer gap-2 rounded-2xl border border-borderSoft bg-softPurple px-5 py-4 text-sm leading-6 text-textMuted transition hover:border-deepPurple/40"
+                  >
+                    <span className="flex items-start gap-3">
+                      <input
+                        type="radio"
+                        name="newebpay-payment-mode"
+                        value={item.mode}
+                        checked={paymentMode === item.mode}
+                        onChange={() => {
+                          setPaymentMode(item.mode)
+                          setState({ loading: false, error: '', paymentData: null })
+                        }}
+                        className="mt-1"
+                      />
+                      <span>
+                        <span className="block font-semibold text-textDark">{item.label}</span>
+                        <span className="mt-1 block">{item.description}</span>
                       </span>
                     </span>
                   </label>

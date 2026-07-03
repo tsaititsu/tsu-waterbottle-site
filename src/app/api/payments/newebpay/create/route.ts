@@ -1,11 +1,17 @@
 import { NextResponse } from 'next/server'
 import { getNewebPayConfig } from '@/lib/newebpay/config'
-import { createNewebPayMpgPaymentData, isNewebPayPaymentSource } from '@/lib/newebpay/paymentForm'
+import {
+  createNewebPayMpgPaymentData,
+  isNewebPayPaymentMode,
+  isNewebPayPaymentSource,
+  type NewebPayPaymentMode,
+} from '@/lib/newebpay/paymentForm'
 import { getNewebPayPaymentItem } from '@/lib/newebpay/paymentItems'
 
 type CreateNewebPayPaymentRequest = {
   itemKey?: unknown
   source?: unknown
+  paymentMode?: unknown
 }
 
 function paymentConfigErrorResponse() {
@@ -27,11 +33,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: '不支援的付款來源。' }, { status: 400 })
   }
 
+  if (body?.paymentMode === 'linepay') {
+    return NextResponse.json({ ok: false, error: 'linepay_not_enabled' }, { status: 400 })
+  }
+
+  if (body?.paymentMode !== undefined && !isNewebPayPaymentMode(body.paymentMode)) {
+    return NextResponse.json({ ok: false, error: '不支援的付款模式。' }, { status: 400 })
+  }
+
+  const paymentMode: NewebPayPaymentMode = body?.paymentMode ?? 'credit'
+
   try {
     const config = getNewebPayConfig()
     const paymentData = createNewebPayMpgPaymentData({
       itemKey: item.itemKey,
       config,
+      paymentMode,
     })
 
     return NextResponse.json({
