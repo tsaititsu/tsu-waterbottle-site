@@ -1,37 +1,14 @@
 import Link from 'next/link'
-import { cookies } from 'next/headers'
-import { createServerClient } from '@supabase/ssr'
-import { getSupabaseAdmin, hasSupabaseAdminConfig } from '@/lib/supabase/admin'
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
 type ReturnPageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }
 
-type PaymentRow = {
-  id: string
-  item_name: string
-  item_type: string
-  amount_twd: number
+type ReturnSummary = {
+  merchantOrderNo: string
   status: string
-  failure_reason: string | null
-  merchant_order_no: string | null
-}
-
-async function getServerSupabaseClient() {
-  if (!supabaseUrl || !supabaseAnonKey) return null
-
-  const cookieStore = await cookies()
-
-  return createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll()
-      },
-    },
-  })
+  tradeNo: string
+  paymentType: string
 }
 
 function getSingleParam(value: string | string[] | undefined) {
@@ -39,146 +16,60 @@ function getSingleParam(value: string | string[] | undefined) {
   return value ?? ''
 }
 
-function ResultCard({
-  title,
-  message,
-  detail,
-  actionHref,
-  actionLabel,
-}: {
-  title: string
-  message: string
-  detail?: string | null
-  actionHref: string
-  actionLabel: string
-}) {
-  return (
-    <section className="bg-softPurple py-16 md:py-24">
-      <div className="section-shell max-w-2xl rounded-[28px] border border-borderSoft bg-white p-8 text-center shadow-soft">
-        <p className="text-sm font-semibold text-darkGold">NewebPay</p>
-        <h1 className="mt-3 font-serifTC text-3xl font-semibold text-deepPurple">{title}</h1>
-        <p className="mt-4 leading-7 text-textMuted">{message}</p>
-        {detail ? <p className="mt-4 rounded-lg bg-softPurple px-4 py-3 text-sm font-semibold text-deepPurple">{detail}</p> : null}
-        <Link className="focus-ring mt-7 inline-flex rounded-lg bg-deepPurple px-6 py-3 font-semibold text-white" href={actionHref}>
-          {actionLabel}
-        </Link>
-      </div>
-    </section>
-  )
+function getReturnSummary(searchParams: Record<string, string | string[] | undefined>): ReturnSummary {
+  return {
+    merchantOrderNo: getSingleParam(searchParams.MerchantOrderNo) || getSingleParam(searchParams.merchantOrderNo),
+    status: getSingleParam(searchParams.Status) || getSingleParam(searchParams.status),
+    tradeNo: getSingleParam(searchParams.TradeNo) || getSingleParam(searchParams.tradeNo),
+    paymentType: getSingleParam(searchParams.PaymentType) || getSingleParam(searchParams.paymentType),
+  }
 }
 
-function renderPaymentStatus(payment: PaymentRow) {
-  const isCoursePayment = payment.item_type === 'course'
-
-  if (payment.status === 'paid') {
-    return (
-      <ResultCard
-        title="付款成功"
-        message={isCoursePayment ? '你的課程已開通，可以到「我的課程」查看。' : '1 元藍新測試付款已完成，這筆測試不會開通課程。'}
-        detail={`${payment.item_name}｜NT$${payment.amount_twd.toLocaleString('zh-TW')}`}
-        actionHref={isCoursePayment ? '/account/courses' : '/payment/newebpay/test'}
-        actionLabel={isCoursePayment ? '查看我的課程' : '返回測試頁'}
-      />
-    )
-  }
-
-  if (payment.status === 'failed') {
-    return (
-      <ResultCard
-        title="付款失敗"
-        message={isCoursePayment ? '這筆付款沒有完成，請重新回到課程頁購買。' : '這筆 1 元測試付款沒有完成，請回到測試頁重新測試。'}
-        detail={payment.failure_reason}
-        actionHref={isCoursePayment ? '/courses' : '/payment/newebpay/test'}
-        actionLabel={isCoursePayment ? '返回課程頁' : '返回測試頁'}
-      />
-    )
-  }
+function DetailRow({ label, value }: { label: string; value: string }) {
+  if (!value) return null
 
   return (
-    <ResultCard
-      title="付款確認中"
-      message={isCoursePayment ? '系統正在等待藍新金流通知。若你已完成付款，通常稍後就會開通。' : '系統正在等待藍新金流通知。若你已完成付款，通常稍後就會更新測試付款狀態。'}
-      detail={`${payment.item_name}｜目前狀態：${payment.status}`}
-      actionHref={isCoursePayment ? '/account/courses' : '/payment/newebpay/test'}
-      actionLabel={isCoursePayment ? '查看我的課程' : '返回測試頁'}
-    />
+    <div className="rounded-xl bg-white px-4 py-3 text-left">
+      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-textMuted">{label}</p>
+      <p className="mt-1 break-words font-semibold text-deepPurple">{value}</p>
+    </div>
   )
 }
 
 export default async function NewebPayReturnPage({ searchParams }: ReturnPageProps) {
   const resolvedSearchParams = await searchParams
-  const merchantOrderNo = getSingleParam(resolvedSearchParams.merchantOrderNo)
-  const status = getSingleParam(resolvedSearchParams.status)
+  const summary = getReturnSummary(resolvedSearchParams)
+  const hasSummary = Boolean(summary.merchantOrderNo || summary.status || summary.tradeNo || summary.paymentType)
 
-  if (!merchantOrderNo) {
-    return (
-      <ResultCard
-        title="付款狀態確認中"
-        message={status === 'unknown' ? '暫時無法判讀藍新回傳資料，請重新登入後到會員中心查看課程。' : '請重新登入後到會員中心查看課程。'}
-        actionHref="/account/courses"
-        actionLabel="查看我的課程"
-      />
-    )
-  }
+  // ReturnURL only means the user was redirected back to this site.
+  // A real paid state must come from NotifyURL after TradeSha verification and TradeInfo decryption.
+  return (
+    <section className="bg-softPurple py-16 md:py-24">
+      <div className="section-shell max-w-2xl rounded-[28px] border border-borderSoft bg-white p-6 text-center shadow-soft md:p-8">
+        <p className="text-sm font-semibold text-darkGold">NewebPay</p>
+        <h1 className="mt-3 font-serifTC text-3xl font-semibold text-deepPurple">付款結果確認中</h1>
+        <p className="mt-4 leading-7 text-textMuted">
+          我們已收到藍新金流導回資訊，實際付款結果會以系統背景通知為準。
+          如果畫面尚未更新，請稍後重新整理，或回到預約頁查看狀態。
+        </p>
 
-  if (!hasSupabaseAdminConfig()) {
-    return (
-      <ResultCard
-        title="查無付款紀錄"
-        message="付款查詢設定尚未完成，請回到課程頁重新確認。"
-        actionHref="/courses"
-        actionLabel="返回課程頁"
-      />
-    )
-  }
+        {hasSummary ? (
+          <div className="mt-7 grid gap-3 rounded-2xl border border-borderSoft bg-softPurple p-4">
+            <DetailRow label="MerchantOrderNo" value={summary.merchantOrderNo} />
+            <DetailRow label="Status" value={summary.status} />
+            <DetailRow label="TradeNo" value={summary.tradeNo} />
+            <DetailRow label="PaymentType" value={summary.paymentType} />
+          </div>
+        ) : null}
 
-  const supabase = await getServerSupabaseClient()
-  if (!supabase) {
-    return (
-      <ResultCard
-        title="請重新登入"
-        message="請重新登入後到會員中心查看課程。"
-        actionHref="/account/courses"
-        actionLabel="查看我的課程"
-      />
-    )
-  }
+        <p className="mt-6 rounded-xl bg-softPurple px-4 py-3 text-sm leading-6 text-textMuted">
+          ReturnURL 只代表你已回到網站，不會單獨作為付款成功依據。付款是否成功，會以藍新背景通知驗證後的結果為準。
+        </p>
 
-  const { data: userData, error: userError } = await supabase.auth.getUser()
-  const user = userData.user
-
-  if (userError || !user) {
-    return (
-      <ResultCard
-        title="請重新登入"
-        message="請重新登入後到會員中心查看課程。"
-        actionHref="/account/courses"
-        actionLabel="查看我的課程"
-      />
-    )
-  }
-
-  const admin = getSupabaseAdmin()
-  const { data: payment, error } = await admin
-    .from('payments')
-    .select('id,item_name,item_type,amount_twd,status,failure_reason,merchant_order_no')
-    .eq('merchant_order_no', merchantOrderNo)
-    .eq('user_id', user.id)
-    .eq('provider', 'newebpay')
-    .in('item_type', ['course', 'newebpay_test'])
-    .maybeSingle<PaymentRow>()
-
-  if (error || !payment) {
-    return (
-      <ResultCard
-        title="查無付款紀錄"
-        message="請回到課程頁重新確認。"
-        detail={error?.message}
-        actionHref="/courses"
-        actionLabel="返回課程頁"
-      />
-    )
-  }
-
-  return renderPaymentStatus(payment)
+        <Link className="focus-ring mt-7 inline-flex rounded-lg bg-deepPurple px-6 py-3 font-semibold text-white" href="/booking">
+          返回預約頁
+        </Link>
+      </div>
+    </section>
+  )
 }
