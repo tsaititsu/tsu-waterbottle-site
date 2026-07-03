@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import { decryptTradeInfo, verifyTradeSha } from './crypto'
 import { generateNewebPayMerchantOrderNo } from './orderNo'
-import { createNewebPayMpgPaymentData, isNewebPayPaymentMode, isNewebPayPaymentSource } from './paymentForm'
+import {
+  buildNewebPayPendingPaymentMetadata,
+  createNewebPayMpgPaymentData,
+  isNewebPayPaymentMode,
+  isNewebPayPaymentSource,
+} from './paymentForm'
 import { getNewebPayPaymentItem } from './paymentItems'
 import type { NewebPayConfig } from './types'
 
@@ -80,6 +85,40 @@ assert.equal(decryptedSmoke.get('Amt'), '1')
 assert.equal(decryptedSmoke.get('ItemDesc'), '藍新正式環境測試付款')
 assert.equal(decryptedSmoke.get('CREDIT'), '1')
 assert.equal(decryptedSmoke.has('LINEPAY'), false)
+
+const smokePendingPaymentMetadata = buildNewebPayPendingPaymentMetadata({
+  itemKey: 'newebpay_live_smoke_test_1',
+  source: 'manual_test',
+  paymentMode: 'credit',
+  merchantOrderNo: smokeData.merchantOrderNo,
+})
+
+assert.equal(smokePendingPaymentMetadata.itemType, 'newebpay_smoke_test')
+assert.equal(smokePendingPaymentMetadata.itemId, 'newebpay_live_smoke_test_1')
+assert.deepEqual(smokePendingPaymentMetadata.rawPayload, {
+  itemKey: 'newebpay_live_smoke_test_1',
+  source: 'manual_test',
+  paymentMode: 'credit',
+  amount: 1,
+  itemDesc: '藍新正式環境測試付款',
+  merchantOrderNo: smokeData.merchantOrderNo,
+})
+assert.equal('TradeInfo' in smokePendingPaymentMetadata.rawPayload, false)
+assert.equal('TradeSha' in smokePendingPaymentMetadata.rawPayload, false)
+
+const bookingPendingPaymentMetadata = buildNewebPayPendingPaymentMetadata({
+  itemKey: 'booking_consultation_60',
+  source: 'booking',
+  paymentMode: 'credit',
+  merchantOrderNo: data.merchantOrderNo,
+})
+
+assert.equal(bookingPendingPaymentMetadata.itemType, 'booking')
+assert.equal(bookingPendingPaymentMetadata.itemId, 'booking_consultation_60')
+assert.equal(bookingPendingPaymentMetadata.rawPayload.amount, 3600)
+assert.equal(bookingPendingPaymentMetadata.rawPayload.itemDesc, '水瓶先生論命')
+assert.equal('bookingStatus' in bookingPendingPaymentMetadata.rawPayload, false)
+assert.equal('paymentStatus' in bookingPendingPaymentMetadata.rawPayload, false)
 
 const merchantDefaultData = createNewebPayMpgPaymentData({
   itemKey: 'newebpay_live_smoke_test_1',

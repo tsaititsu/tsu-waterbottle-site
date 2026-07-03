@@ -1,12 +1,15 @@
 import { NextResponse } from 'next/server'
 import { getNewebPayConfig } from '@/lib/newebpay/config'
 import {
+  buildNewebPayPendingPaymentMetadata,
   createNewebPayMpgPaymentData,
   isNewebPayPaymentMode,
   isNewebPayPaymentSource,
   type NewebPayPaymentMode,
+  type NewebPayPaymentSource,
 } from '@/lib/newebpay/paymentForm'
 import { getNewebPayPaymentItem } from '@/lib/newebpay/paymentItems'
+import { createPendingPayment } from '@/lib/supabase/payments'
 
 type CreateNewebPayPaymentRequest = {
   itemKey?: unknown
@@ -19,6 +22,16 @@ function paymentConfigErrorResponse() {
     { ok: false, error: '藍新金流設定尚未完整，請確認必要環境變數。' },
     { status: 500 },
   )
+}
+
+function pendingPaymentErrorResponse(input: { merchantOrderNo: string; itemKey: string; error: unknown }) {
+  console.error('建立藍新 pending payment 失敗', {
+    merchantOrderNo: input.merchantOrderNo,
+    itemKey: input.itemKey,
+    error: input.error instanceof Error ? input.error.message : 'unknown_error',
+  })
+
+  return NextResponse.json({ ok: false, error: '建立付款紀錄失敗，請稍後再試。' }, { status: 500 })
 }
 
 export async function POST(request: Request) {
@@ -42,6 +55,7 @@ export async function POST(request: Request) {
   }
 
   const paymentMode: NewebPayPaymentMode = body?.paymentMode ?? 'credit'
+  const source = body?.source as NewebPayPaymentSource | undefined
 
   try {
     const config = getNewebPayConfig()
@@ -50,6 +64,30 @@ export async function POST(request: Request) {
       config,
       paymentMode,
     })
+    const pendingPaymentMetadata = buildNewebPayPendingPaymentMetadata({
+      itemKey: item.itemKey,
+      source,
+      paymentMode,
+      merchantOrderNo: paymentData.merchantOrderNo,
+    })
+
+    try {
+      await createPendingPayment({
+        provider: 'newebpay',
+        itemType: pendingPaymentMetadata.itemType,
+        itemId: pendingPaymentMetadata.itemId,
+        itemName: item.itemDesc,
+        merchantOrderNo: paymentData.merchantOrderNo,
+        amountTwd: item.amount,
+        rawPayload: pendingPaymentMetadata.rawPayload,
+      })
+    } catch (error) {
+      return pendingPaymentErrorResponse({
+        merchantOrderNo: paymentData.merchantOrderNo,
+        itemKey: item.itemKey,
+        error,
+      })
+    }
 
     return NextResponse.json({
       ok: true,

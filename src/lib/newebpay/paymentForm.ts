@@ -22,12 +22,32 @@ export type NewebPayMpgPaymentData = {
   fields: NewebPayMpgPaymentFields
 }
 
+export type NewebPayPendingPaymentMetadata = {
+  itemType: string
+  itemId: string
+  rawPayload: {
+    itemKey: NewebPayPaymentItemKey
+    source: NewebPayPaymentSource | null
+    paymentMode: NewebPayPaymentMode
+    amount: number
+    itemDesc: string
+    merchantOrderNo: string
+  }
+}
+
 type CreateNewebPayMpgPaymentDataInput = {
   itemKey: NewebPayPaymentItemKey
   config: NewebPayConfig
   paymentMode?: NewebPayPaymentMode
   now?: Date
   merchantOrderNo?: string
+}
+
+type BuildNewebPayPendingPaymentMetadataInput = {
+  itemKey: NewebPayPaymentItemKey
+  source?: NewebPayPaymentSource
+  paymentMode: NewebPayPaymentMode
+  merchantOrderNo: string
 }
 
 const allowedSources = new Set<NewebPayPaymentSource>(['booking', 'ai_divination', 'ai_chart', 'manual_test'])
@@ -39,6 +59,44 @@ export function isNewebPayPaymentSource(source: unknown): source is NewebPayPaym
 
 export function isNewebPayPaymentMode(mode: unknown): mode is NewebPayPaymentMode {
   return typeof mode === 'string' && allowedPaymentModes.has(mode as NewebPayPaymentMode)
+}
+
+function getPendingPaymentTarget(itemKey: NewebPayPaymentItemKey) {
+  if (itemKey === 'newebpay_live_smoke_test_1') {
+    return {
+      itemType: 'newebpay_smoke_test',
+      itemId: itemKey,
+    }
+  }
+
+  return {
+    itemType: 'booking',
+    itemId: itemKey,
+  }
+}
+
+export function buildNewebPayPendingPaymentMetadata({
+  itemKey,
+  source,
+  paymentMode,
+  merchantOrderNo,
+}: BuildNewebPayPendingPaymentMetadataInput): NewebPayPendingPaymentMetadata {
+  const item = getNewebPayPaymentItem(itemKey)
+  if (!item) {
+    throw new Error('Unsupported NewebPay payment item')
+  }
+
+  return {
+    ...getPendingPaymentTarget(item.itemKey),
+    rawPayload: {
+      itemKey: item.itemKey,
+      source: source ?? null,
+      paymentMode,
+      amount: item.amount,
+      itemDesc: item.itemDesc,
+      merchantOrderNo,
+    },
+  }
 }
 
 export function createNewebPayMpgPaymentData({
