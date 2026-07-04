@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { canBuyCourse, getCourseById, getCourseLockedReason, isCourseId, type CourseId } from '@/lib/courses'
 import { getNewebPayConfig } from '@/lib/newebpay/config'
+import { buildCoursePaymentRawPayload, buildNewebPayMerchantOrderUrl } from '@/lib/newebpay/coursePayment'
 import { createCoursePaymentMpgForm, generateMerchantOrderNo } from '@/lib/newebpay/mpg'
 import { getSupabaseAdmin, hasSupabaseAdminConfig } from '@/lib/supabase/admin'
 import { getUserIdFromRequest } from '@/lib/supabase/auth'
@@ -76,11 +77,12 @@ export async function POST(request: Request) {
         currency: 'TWD',
         status: 'pending',
         merchant_order_no: merchantOrderNo,
-        raw_payload: {
+        raw_payload: buildCoursePaymentRawPayload({
           courseId: course.id,
+          amount: course.price,
+          merchantOrderNo,
           itemDesc,
-          source: 'newebpay_course_start',
-        },
+        }),
       })
       .select('id')
       .single()
@@ -94,8 +96,8 @@ export async function POST(request: Request) {
         merchantOrderNo,
         amount: course.price,
         itemDesc,
-        notifyUrl: `${config.siteUrl}/api/payments/newebpay/notify`,
-        returnUrl: `${config.siteUrl}/api/payments/newebpay/return`,
+        notifyUrl: buildNewebPayMerchantOrderUrl(config.siteUrl, '/api/payments/newebpay/notify', merchantOrderNo),
+        returnUrl: buildNewebPayMerchantOrderUrl(config.siteUrl, '/api/payments/newebpay/return', merchantOrderNo),
         clientBackUrl: `${config.siteUrl}/account/courses`,
       },
       config,
