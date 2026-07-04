@@ -26,6 +26,30 @@ type BookingFormProps = {
   resetKey?: string
 }
 
+type BookingPaymentMethod = 'bank-transfer' | 'newebpay-credit'
+
+type NewebPayCreateResponse =
+  | {
+      ok: true
+      action: string
+      method: 'POST'
+      merchantOrderNo: string
+      itemKey: string
+      amount: number
+      fields: {
+        MerchantID: string
+        TradeInfo: string
+        TradeSha: string
+        Version: string
+      }
+    }
+  | {
+      ok: false
+      error?: string
+    }
+
+const isNewebPayEnabled = process.env.NEXT_PUBLIC_ENABLE_NEWEBPAY === 'true'
+
 const taipeiDateInputFormatter = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Taipei',
   year: 'numeric',
@@ -62,9 +86,27 @@ function getTaipeiTimeRange(slot: PublicBookingSlot) {
   return `${taipeiTimeFormatter.format(new Date(slot.startAt))}–${taipeiTimeFormatter.format(new Date(slot.endAt))}`
 }
 
+function submitNewebPayForm(action: string, fields: Extract<NewebPayCreateResponse, { ok: true }>['fields']) {
+  const form = document.createElement('form')
+  form.method = 'POST'
+  form.action = action
+  form.style.display = 'none'
+
+  for (const [name, value] of Object.entries(fields)) {
+    const input = document.createElement('input')
+    input.type = 'hidden'
+    input.name = name
+    input.value = value
+    form.appendChild(input)
+  }
+
+  document.body.appendChild(form)
+  form.submit()
+}
+
 export function BookingForm({ resetKey = '' }: BookingFormProps) {
   const [planId, setPlanId] = useState(bookingPlans[0].id)
-  const [paymentMethod, setPaymentMethod] = useState<'bank-transfer' | 'newebpay-coming-soon' | 'linepay-coming-soon'>('bank-transfer')
+  const [paymentMethod, setPaymentMethod] = useState<BookingPaymentMethod>('bank-transfer')
   const [bookingSlots, setBookingSlots] = useState<PublicBookingSlot[]>([])
   const [selectedBookingDate, setSelectedBookingDate] = useState('')
   const [selectedSlotId, setSelectedSlotId] = useState('')
@@ -88,6 +130,9 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
   const [note, setNote] = useState('')
   const [hasAcceptedNotice, setHasAcceptedNotice] = useState(false)
   const [formError, setFormError] = useState('')
+  const [formStatus, setFormStatus] = useState('')
+  const [createdBookingId, setCreatedBookingId] = useState('')
+  const [createdBookingSignature, setCreatedBookingSignature] = useState('')
   const birthDateInputRef = useRef<HTMLInputElement | null>(null)
 
   const resetFormToBlank = useCallback(() => {
@@ -114,6 +159,9 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
     setNote('')
     setHasAcceptedNotice(false)
     setFormError('')
+    setFormStatus('')
+    setCreatedBookingId('')
+    setCreatedBookingSignature('')
   }, [])
 
   const selectedPlan = getBookingPlan(planId) ?? bookingPlans[0]
@@ -230,6 +278,7 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
     const input = buildInput()
     if (!input) return false
 
+    setFormStatus('')
     const payerPhone = bankTransferPhone.trim() || customerPhone.trim()
     if (paymentMethod === 'bank-transfer') {
       if (!payerPhone) {
@@ -243,31 +292,78 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
       }
     }
 
-    let bookingId: string | undefined
-    try {
-      setBankTransferFallbackUrl('')
-      const accessToken = await getAuthAccessToken()
-      const response = await fetch('/api/bookings/create', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
-        },
-        body: JSON.stringify(input)
-      })
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok || data.ok === false) {
-        throw new Error(data.message || '建立預約失敗')
+    const bookingSignature = JSON.stringify(input)
+    let bookingId = createdBookingSignature === bookingSignature ? createdBookingId : ''
+
+    if (!bookingId) {
+      try {
+        setBankTransferFallbackUrl('')
+        const accessToken = await getAuthAccessToken()
+        const response = await fetch('/api/bookings/create', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
+          },
+          body: JSON.stringify(input)
+        })
+        const data = (await response.json().catch(() => ({}))) as { ok?: boolean; message?: string; bookingId?: string }
+        if (!response.ok || data.ok === false) {
+          throw new Error(data.message || '建立預約失敗')
+        }
+        if (!data.bookingId) {
+          throw new Error('建立預約失敗')
+        }
+        bookingId = data.bookingId
+        setCreatedBookingId(bookingId)
+        setCreatedBookingSignature(bookingSignature)
+      } catch (error) {
+        setFormError(error instanceof Error ? error.message : '建立預約失敗，請稍後再試。')
+        return false
       }
-      bookingId = data.bookingId
-    } catch (error) {
-      setFormError(error instanceof Error ? error.message : '建立預約失敗，請稍後再試。')
-      return false
     }
 
     const pending = savePendingBooking(input, bookingId)
     if (!pending) {
       setFormError('預約資料暫存失敗，請確認是否已登入。')
+      return false
+    }
+
+    if (paymentMethod === 'newebpay-credit') {
+      if (!isNewebPayEnabled) {
+        setFormError('信用卡線上付款測試中，請先使用郵局匯款。')
+        return false
+      }
+
+      try {
+        setFormError('')
+        setFormStatus('正在前往藍新金流付款頁，請稍候。')
+        const accessToken = await getAuthAccessToken()
+        const response = await fetch('/api/payments/newebpay/create', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
+          },
+          body: JSON.stringify({
+            itemKey: 'booking_consultation_60',
+            source: 'booking',
+            paymentMode: 'credit',
+            bookingId
+          })
+        })
+        const data = (await response.json().catch(() => null)) as NewebPayCreateResponse | null
+
+        if (!response.ok || !data || data.ok !== true) {
+          throw new Error(data?.ok === false ? data.error || '建立線上付款資料失敗' : '建立線上付款資料失敗')
+        }
+
+        submitNewebPayForm(data.action, data.fields)
+      } catch {
+        setFormStatus('')
+        setFormError('預約已建立，但線上付款資料建立失敗。請改用匯款或聯繫客服協助處理。')
+      }
+
       return false
     }
 
@@ -308,16 +404,6 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
 
       setFormError('')
       window.location.href = '/account/bookings?bankTransferSubmitted=1'
-      return false
-    }
-
-    if (paymentMethod === 'newebpay-coming-soon') {
-      setFormError('此付款方式尚未開放，請先使用郵局匯款。')
-      return false
-    }
-
-    if (paymentMethod === 'linepay-coming-soon') {
-      setFormError('此付款方式尚未開放，請先使用郵局匯款。')
       return false
     }
 
@@ -563,11 +649,8 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
               value={paymentMethod}
             >
               <option value="bank-transfer">郵局匯款｜需至水瓶先生官方 LINE 核對開通</option>
-              <option disabled value="newebpay-coming-soon">
-                藍新線上付款｜即將開放
-              </option>
-              <option disabled value="linepay-coming-soon">
-                LINE Pay｜即將開放
+              <option disabled={!isNewebPayEnabled} value="newebpay-credit">
+                {isNewebPayEnabled ? '信用卡線上付款｜藍新金流' : '信用卡線上付款｜線上付款測試中'}
               </option>
             </select>
           </label>
@@ -621,6 +704,20 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
                   </label>
                 </div>
               </>
+            ) : null}
+
+            {paymentMethod === 'newebpay-credit' ? (
+              <div className="rounded-xl border border-borderSoft bg-white p-4 text-sm leading-6 text-textMuted">
+                <p>
+                  送出後會先建立預約，再前往藍新金流信用卡一次付清頁。實際付款狀態會以藍新背景通知為準，付款完成後系統會自動確認預約。
+                </p>
+              </div>
+            ) : null}
+
+            {!isNewebPayEnabled ? (
+              <p className="rounded-xl border border-borderSoft bg-white p-4 text-sm leading-6 text-textMuted">
+                信用卡線上付款測試中，請先使用郵局匯款。
+              </p>
             ) : null}
           </div>
         </div>
@@ -716,6 +813,12 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
             ) : null}
           </div>
         )}
+
+        {formStatus && !formError ? (
+          <div className="rounded-xl border border-borderSoft bg-softPurple px-4 py-3 text-sm font-semibold text-deepPurple">
+            {formStatus}
+          </div>
+        ) : null}
 
         <ActionButton
           amount={selectedPlan.price}
