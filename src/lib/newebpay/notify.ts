@@ -2,6 +2,7 @@ import { decryptTradeInfo, getEncryptedTradeInfoDiagnostics, verifyTradeSha } fr
 import type { NewebPayQueryResult, QueryNewebPayTradeInput } from './query'
 import type { NewebPayConfig } from './types'
 import type { MarkBookingPaidInput, MarkBookingPaidResult } from '../supabase/bookingPayments'
+import type { MarkCoursePaidInput, MarkCoursePaidResult } from '../supabase/coursePurchases'
 import type { MarkPaymentPaidInput, MarkPaymentPaidResult, PaymentPaidContext, PaymentRecord } from '../supabase/payments'
 
 export type NewebPayNotifyResult = {
@@ -53,6 +54,12 @@ export type NewebPayBookingSyncResult =
   | { bookingSync: 'updated' | 'already_paid' | 'not_found'; bookingId: string }
   | { bookingSync: 'failed'; bookingId: string; error: string }
 
+export type NewebPayCourseSyncResult =
+  | { courseSync: 'skipped_not_course' }
+  | { courseSync: 'skipped_missing_course_context' }
+  | { courseSync: 'inserted' | 'updated' | 'already_paid'; userId: string; courseId: string }
+  | { courseSync: 'failed'; userId: string | null; courseId: string | null; error: string }
+
 export type NewebPayNotifyErrorMetadata = {
   status: string
   merchantId: string
@@ -72,6 +79,7 @@ type MarkPaymentPaidHandler = (input: MarkPaymentPaidInput) => Promise<MarkPayme
 type GetPaymentByMerchantOrderNoHandler = (merchantOrderNo: string) => Promise<PaymentRecord | null>
 type QueryNewebPayTradeHandler = (input: QueryNewebPayTradeInput) => Promise<NewebPayQueryResult>
 type MarkBookingPaidHandler = (input: MarkBookingPaidInput) => Promise<MarkBookingPaidResult>
+type MarkCoursePaidHandler = (input: MarkCoursePaidInput) => Promise<MarkCoursePaidResult>
 
 type NewebPayPaymentMatchValidationResult =
   | { ok: true; payment: PaymentRecord; localAmount: number; providerAmount: number }
@@ -290,6 +298,48 @@ export async function syncNewebPayBookingAfterPayment({
     return {
       bookingSync: 'failed',
       bookingId: payment.bookingId,
+      error: error instanceof Error ? error.message : 'unknown_error',
+    }
+  }
+}
+
+export async function syncNewebPayCourseAfterPayment({
+  payment,
+  markCoursePaid,
+}: {
+  payment: PaymentPaidContext
+  markCoursePaid: MarkCoursePaidHandler
+}): Promise<NewebPayCourseSyncResult> {
+  if (payment.itemType !== 'course') {
+    return {
+      courseSync: 'skipped_not_course',
+    }
+  }
+
+  if (!payment.userId || !payment.itemId) {
+    return {
+      courseSync: 'skipped_missing_course_context',
+    }
+  }
+
+  try {
+    const result = await markCoursePaid({
+      paymentId: payment.id,
+      userId: payment.userId,
+      courseId: payment.itemId,
+      paidAt: payment.paidAt,
+    })
+
+    return {
+      courseSync: result.result,
+      userId: result.userId,
+      courseId: result.courseId,
+    }
+  } catch (error) {
+    return {
+      courseSync: 'failed',
+      userId: payment.userId,
+      courseId: payment.itemId,
       error: error instanceof Error ? error.message : 'unknown_error',
     }
   }

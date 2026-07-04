@@ -8,9 +8,11 @@ import {
   persistNewebPayNotifyQueryFallback,
   persistNewebPayNotifyPaymentResult,
   syncNewebPayBookingAfterPayment,
+  syncNewebPayCourseAfterPayment,
 } from '@/lib/newebpay/notify'
 import { queryNewebPayTrade } from '@/lib/newebpay/query'
 import { markBookingPaidById } from '@/lib/supabase/bookingPayments'
+import { markCoursePaidByPayment } from '@/lib/supabase/coursePurchases'
 import { getPaymentByMerchantOrderNo, markPaymentPaidByMerchantOrderNo } from '@/lib/supabase/payments'
 
 export const runtime = 'nodejs'
@@ -94,6 +96,59 @@ async function syncBookingAfterPayment(input: {
     bookingSync: bookingSync.bookingSync,
   })
   return bookingSync.bookingSync
+}
+
+async function syncCourseAfterPayment(input: {
+  merchantOrderNo: string
+  paymentResult: string
+  payment: Parameters<typeof syncNewebPayCourseAfterPayment>[0]['payment']
+}) {
+  const courseSync = await syncNewebPayCourseAfterPayment({
+    payment: input.payment,
+    markCoursePaid: markCoursePaidByPayment,
+  })
+
+  if (courseSync.courseSync === 'skipped_not_course') {
+    return courseSync.courseSync
+  }
+
+  if (courseSync.courseSync === 'skipped_missing_course_context') {
+    console.info('NewebPay course sync skipped', {
+      merchantOrderNo: input.merchantOrderNo,
+      paymentResult: input.paymentResult,
+      paymentId: input.payment.id,
+      itemType: input.payment.itemType,
+      itemId: input.payment.itemId,
+      hasUserId: Boolean(input.payment.userId),
+      courseSync: courseSync.courseSync,
+    })
+    return courseSync.courseSync
+  }
+
+  if (courseSync.courseSync === 'failed') {
+    console.warn('NewebPay course sync failed', {
+      merchantOrderNo: input.merchantOrderNo,
+      paymentResult: input.paymentResult,
+      paymentId: input.payment.id,
+      itemType: input.payment.itemType,
+      itemId: input.payment.itemId,
+      hasUserId: Boolean(input.payment.userId),
+      courseSync: courseSync.courseSync,
+      error: courseSync.error,
+    })
+    return courseSync.courseSync
+  }
+
+  console.info('NewebPay course sync completed', {
+    merchantOrderNo: input.merchantOrderNo,
+    paymentResult: input.paymentResult,
+    paymentId: input.payment.id,
+    itemType: input.payment.itemType,
+    itemId: courseSync.courseId,
+    hasUserId: true,
+    courseSync: courseSync.courseSync,
+  })
+  return courseSync.courseSync
 }
 
 function getNotifyQueryMerchantOrderNo(request: Request) {
@@ -211,12 +266,18 @@ export async function POST(request: Request) {
         paymentResult: paymentPersistence.result,
         payment: paymentPersistence.payment,
       })
+      const courseSync = await syncCourseAfterPayment({
+        merchantOrderNo: result.merchantOrderNo,
+        paymentResult: paymentPersistence.result,
+        payment: paymentPersistence.payment,
+      })
 
       return NextResponse.json({
         ok: true,
         paymentStatus: 'paid',
         result: paymentPersistence.result,
         bookingSync,
+        courseSync,
       })
     } catch (error) {
       return notifyPaymentUpdateError(error, result)
@@ -296,12 +357,18 @@ export async function POST(request: Request) {
           paymentResult: fallbackResult.result,
           payment: fallbackResult.payment,
         })
+        const courseSync = await syncCourseAfterPayment({
+          merchantOrderNo: queryMerchantOrderNo as string,
+          paymentResult: fallbackResult.result,
+          payment: fallbackResult.payment,
+        })
 
         return NextResponse.json({
           ok: true,
           paymentStatus: 'paid',
           result: fallbackResult.result,
           bookingSync,
+          courseSync,
         })
       } catch (fallbackError) {
         console.warn('NewebPay notify query fallback failed', {
