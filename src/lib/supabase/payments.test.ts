@@ -149,7 +149,10 @@ const paidContext = mapPaymentPaidContext({
 
 assert.deepEqual(paidContext, {
   id: 'payment-1',
+  userId: 'user-1',
   bookingId: 'booking-1',
+  itemType: 'booking',
+  itemId: 'booking-1',
   provider: 'newebpay',
   status: 'paid',
   merchantOrderNo: 'WB202607032025252082',
@@ -158,6 +161,35 @@ assert.deepEqual(paidContext, {
 })
 assert.equal('rawPayload' in paidContext, false)
 assert.equal('customerEmail' in paidContext, false)
+
+const coursePaidContext = mapPaymentPaidContext({
+  ...record,
+  id: 'payment-course-1',
+  userId: 'user-course-1',
+  bookingId: null,
+  itemType: 'course',
+  itemId: 'ziwei-basics',
+  itemName: '紫微斗數初階課',
+  amountTwd: 9800,
+  status: 'paid',
+  providerTradeNo: '26070320270019133',
+  paidAt: '2026-07-03T12:37:00.000Z',
+})
+
+assert.deepEqual(coursePaidContext, {
+  id: 'payment-course-1',
+  userId: 'user-course-1',
+  bookingId: null,
+  itemType: 'course',
+  itemId: 'ziwei-basics',
+  provider: 'newebpay',
+  status: 'paid',
+  merchantOrderNo: 'WB202607032025252082',
+  providerTradeNo: '26070320270019133',
+  paidAt: '2026-07-03T12:37:00.000Z',
+})
+assert.equal('rawPayload' in coursePaidContext, false)
+assert.equal('TradeInfo' in coursePaidContext, false)
 
 const pendingRecord: Pick<PaymentRecord, 'status'> = { status: 'pending' }
 const paidRecord: Pick<PaymentRecord, 'status'> = { status: 'paid' }

@@ -151,7 +151,10 @@ assert.equal(parsedJson.paymentMethod, 'LINEPAY')
 function createPaymentPaidContext(overrides: Partial<PaymentPaidContext> = {}): PaymentPaidContext {
   return {
     id: 'payment-1',
+    userId: null,
     bookingId: null,
+    itemType: 'newebpay_smoke_test',
+    itemId: 'newebpay_live_smoke_test_1',
     provider: 'newebpay',
     status: 'paid',
     merchantOrderNo: 'WB20260703172530A1B2',

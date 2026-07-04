@@ -72,7 +72,10 @@ export type PaymentRecord = {
 
 export type PaymentPaidContext = {
   id: string
+  userId: string | null
   bookingId: string | null
+  itemType: string | null
+  itemId: string | null
   provider: PaymentProvider | string
   status: PaymentStatus | string
   merchantOrderNo: string | null
@@ -143,7 +146,10 @@ export function mapPaymentRow(row: PaymentRow): PaymentRecord {
 export function mapPaymentPaidContext(payment: PaymentRecord): PaymentPaidContext {
   return {
     id: payment.id,
+    userId: payment.userId,
     bookingId: payment.bookingId,
+    itemType: payment.itemType,
+    itemId: payment.itemId,
     provider: payment.provider,
     status: payment.status,
     merchantOrderNo: payment.merchantOrderNo,
