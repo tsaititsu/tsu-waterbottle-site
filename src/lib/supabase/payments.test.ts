@@ -3,6 +3,7 @@ import {
   buildPaidPaymentUpdate,
   buildPendingPaymentInsert,
   getMarkPaymentPaidDecision,
+  mapPaymentPaidContext,
   mapPaymentRow,
   type PaymentRecord,
   type PaymentRow,
@@ -138,6 +139,25 @@ assert.deepEqual(record, {
   createdAt: '2026-07-03T12:00:00.000Z',
   updatedAt: '2026-07-03T12:00:00.000Z',
 })
+
+const paidContext = mapPaymentPaidContext({
+  ...record,
+  status: 'paid',
+  providerTradeNo: '26070320270019132',
+  paidAt: '2026-07-03T12:27:00.000Z',
+})
+
+assert.deepEqual(paidContext, {
+  id: 'payment-1',
+  bookingId: 'booking-1',
+  provider: 'newebpay',
+  status: 'paid',
+  merchantOrderNo: 'WB202607032025252082',
+  providerTradeNo: '26070320270019132',
+  paidAt: '2026-07-03T12:27:00.000Z',
+})
+assert.equal('rawPayload' in paidContext, false)
+assert.equal('customerEmail' in paidContext, false)
 
 const pendingRecord: Pick<PaymentRecord, 'status'> = { status: 'pending' }
 const paidRecord: Pick<PaymentRecord, 'status'> = { status: 'paid' }

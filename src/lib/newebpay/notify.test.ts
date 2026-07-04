@@ -8,8 +8,9 @@ import {
   parseNewebPayNotifyPayload,
   persistNewebPayNotifyQueryFallback,
   persistNewebPayNotifyPaymentResult,
+  syncNewebPayBookingAfterPayment,
 } from './notify'
-import type { PaymentRecord } from '../supabase/payments'
+import type { PaymentPaidContext, PaymentRecord } from '../supabase/payments'
 
 const hashKey = '12345678901234567890123456789012'
 const hashIv = '1234567890123456'
@@ -146,13 +147,27 @@ assert.equal(parsedJson.amount, 3600)
 assert.equal(parsedJson.paymentType, 'LINEPAY')
 assert.equal(parsedJson.paymentMethod, 'LINEPAY')
 
+function createPaymentPaidContext(overrides: Partial<PaymentPaidContext> = {}): PaymentPaidContext {
+  return {
+    id: 'payment-1',
+    bookingId: null,
+    provider: 'newebpay',
+    status: 'paid',
+    merchantOrderNo: 'WB20260703172530A1B2',
+    providerTradeNo: '26070416000012345',
+    paidAt: '2026-07-04 16:00:00',
+    ...overrides,
+  }
+}
+
 async function runPaymentPersistenceAssertions() {
   let updatedInput: unknown
+  const paidContext = createPaymentPaidContext({ bookingId: 'booking-1' })
   const updatedResult = await persistNewebPayNotifyPaymentResult(
     parsedQuery,
     async (input) => {
       updatedInput = input
-      return { result: 'updated', payment: {} as never }
+      return { result: 'updated', payment: paidContext }
     },
     '2026-07-03T09:31:00.000Z',
   )
@@ -161,18 +176,21 @@ async function runPaymentPersistenceAssertions() {
     ok: true,
     paymentStatus: 'paid',
     result: 'updated',
+    payment: paidContext,
   })
   assert.deepEqual(updatedInput, paidInput)
+  assert.equal('rawPayload' in updatedResult.payment, false)
 
   const alreadyPaidResult = await persistNewebPayNotifyPaymentResult(parsedQuery, async () => ({
     result: 'already_paid',
-    payment: {} as never,
+    payment: paidContext,
   }))
 
   assert.deepEqual(alreadyPaidResult, {
     ok: true,
     paymentStatus: 'paid',
     result: 'already_paid',
+    payment: paidContext,
   })
 
   const notFoundResult = await persistNewebPayNotifyPaymentResult(parsedQuery, async () => ({
@@ -204,6 +222,7 @@ async function runPaymentPersistenceAssertions() {
     status: 'TRADE_FAIL',
   })
   assert.equal(nonSuccessCalled, false)
+  assert.equal('payment' in nonSuccessResult, false)
 
   assert.throws(
     () => parseNewebPayNotifyPayload(createPayload(queryTradeInfo, { tradeSha: '1'.repeat(64) })),
@@ -276,7 +295,7 @@ async function runQueryFallbackAssertions() {
     },
     markPaymentPaid: async (input) => {
       markInput = input
-      return { result: 'updated', payment: createPaymentRecord({ status: 'paid' }) }
+      return { result: 'updated', payment: createPaymentPaidContext({ bookingId: 'booking-1' }) }
     },
     notifyReceivedAt: '2026-07-04T08:01:00.000Z',
   })
@@ -286,6 +305,7 @@ async function runQueryFallbackAssertions() {
     paymentStatus: 'paid',
     result: 'updated',
     query: successQuery,
+    payment: createPaymentPaidContext({ bookingId: 'booking-1' }),
   })
   assert.deepEqual(queryInput, {
     merchantId,
@@ -323,10 +343,11 @@ async function runQueryFallbackAssertions() {
     config,
     getPaymentByMerchantOrderNo: async () => createPaymentRecord({ status: 'paid' }),
     queryNewebPayTrade: async () => successQuery,
-    markPaymentPaid: async () => ({ result: 'already_paid', payment: createPaymentRecord({ status: 'paid' }) }),
+    markPaymentPaid: async () => ({ result: 'already_paid', payment: createPaymentPaidContext({ bookingId: 'booking-1' }) }),
   })
   assert.equal(alreadyPaid.ok, true)
   assert.equal('result' in alreadyPaid && alreadyPaid.result, 'already_paid')
+  assert.equal('payment' in alreadyPaid && alreadyPaid.payment.bookingId, 'booking-1')
 
   let markCalled = false
   const notPaid = await persistNewebPayNotifyQueryFallback({
@@ -336,7 +357,7 @@ async function runQueryFallbackAssertions() {
     queryNewebPayTrade: async () => ({ ...successQuery, tradeStatus: '0' }),
     markPaymentPaid: async () => {
       markCalled = true
-      return { result: 'updated', payment: createPaymentRecord({ status: 'paid' }) }
+      return { result: 'updated', payment: createPaymentPaidContext() }
     },
   })
   assert.deepEqual(notPaid, {
@@ -392,7 +413,83 @@ async function runQueryFallbackAssertions() {
   assert.equal(queryCalled, false)
 }
 
-Promise.all([runPaymentPersistenceAssertions(), runQueryFallbackAssertions()]).catch((error) => {
+async function runBookingSyncAssertions() {
+  let bookingSyncCalled = false
+  const skipped = await syncNewebPayBookingAfterPayment({
+    payment: createPaymentPaidContext({ bookingId: null }),
+    markBookingPaid: async () => {
+      bookingSyncCalled = true
+      return { result: 'updated', bookingId: 'booking-1' }
+    },
+  })
+
+  assert.deepEqual(skipped, {
+    bookingSync: 'skipped_no_booking',
+  })
+  assert.equal(bookingSyncCalled, false)
+
+  let markBookingInput: unknown
+  const updated = await syncNewebPayBookingAfterPayment({
+    payment: createPaymentPaidContext({ bookingId: 'booking-1' }),
+    markBookingPaid: async (input) => {
+      markBookingInput = input
+      return { result: 'updated', bookingId: input.bookingId }
+    },
+  })
+
+  assert.deepEqual(updated, {
+    bookingSync: 'updated',
+    bookingId: 'booking-1',
+  })
+  assert.deepEqual(markBookingInput, {
+    bookingId: 'booking-1',
+    paymentId: 'payment-1',
+    provider: 'newebpay',
+    providerTradeNo: '26070416000012345',
+    paidAt: '2026-07-04 16:00:00',
+  })
+  assert.equal(markBookingInput && 'readingId' in (markBookingInput as Record<string, unknown>), false)
+  assert.equal(markBookingInput && 'aiDivination' in (markBookingInput as Record<string, unknown>), false)
+
+  const alreadyPaid = await syncNewebPayBookingAfterPayment({
+    payment: createPaymentPaidContext({ bookingId: 'booking-1' }),
+    markBookingPaid: async (input) => ({ result: 'already_paid', bookingId: input.bookingId }),
+  })
+
+  assert.deepEqual(alreadyPaid, {
+    bookingSync: 'already_paid',
+    bookingId: 'booking-1',
+  })
+
+  const notFound = await syncNewebPayBookingAfterPayment({
+    payment: createPaymentPaidContext({ bookingId: 'booking-missing' }),
+    markBookingPaid: async (input) => ({ result: 'not_found', bookingId: input.bookingId }),
+  })
+
+  assert.deepEqual(notFound, {
+    bookingSync: 'not_found',
+    bookingId: 'booking-missing',
+  })
+
+  const failed = await syncNewebPayBookingAfterPayment({
+    payment: createPaymentPaidContext({ bookingId: 'booking-1' }),
+    markBookingPaid: async () => {
+      throw new Error('booking update failed')
+    },
+  })
+
+  assert.deepEqual(failed, {
+    bookingSync: 'failed',
+    bookingId: 'booking-1',
+    error: 'booking update failed',
+  })
+}
+
+Promise.all([
+  runPaymentPersistenceAssertions(),
+  runQueryFallbackAssertions(),
+  runBookingSyncAssertions(),
+]).catch((error) => {
   console.error(error)
   process.exitCode = 1
 })

@@ -70,6 +70,16 @@ export type PaymentRecord = {
   updatedAt: string
 }
 
+export type PaymentPaidContext = {
+  id: string
+  bookingId: string | null
+  provider: PaymentProvider | string
+  status: PaymentStatus | string
+  merchantOrderNo: string | null
+  providerTradeNo: string | null
+  paidAt: string | null
+}
+
 export type PendingPaymentInsertPayload = {
   user_id: string | null
   booking_id: string | null
@@ -96,8 +106,8 @@ export type MarkPaymentPaidDecision = 'not_found' | 'already_paid' | 'should_upd
 
 export type MarkPaymentPaidResult =
   | { result: 'not_found'; payment: null }
-  | { result: 'already_paid'; payment: PaymentRecord }
-  | { result: 'updated'; payment: PaymentRecord }
+  | { result: 'already_paid'; payment: PaymentPaidContext }
+  | { result: 'updated'; payment: PaymentPaidContext }
 
 function assertRequiredText(value: string, fieldName: string) {
   if (!value.trim()) {
@@ -127,6 +137,18 @@ export function mapPaymentRow(row: PaymentRow): PaymentRecord {
     failureReason: row.failure_reason,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  }
+}
+
+export function mapPaymentPaidContext(payment: PaymentRecord): PaymentPaidContext {
+  return {
+    id: payment.id,
+    bookingId: payment.bookingId,
+    provider: payment.provider,
+    status: payment.status,
+    merchantOrderNo: payment.merchantOrderNo,
+    providerTradeNo: payment.providerTradeNo,
+    paidAt: payment.paidAt,
   }
 }
 
@@ -217,7 +239,7 @@ export async function markPaymentPaidByMerchantOrderNo(input: MarkPaymentPaidInp
   }
 
   if (decision === 'already_paid') {
-    return { result: 'already_paid', payment: existingPayment as PaymentRecord }
+    return { result: 'already_paid', payment: mapPaymentPaidContext(existingPayment as PaymentRecord) }
   }
 
   const supabase = getSupabaseAdmin()
@@ -233,5 +255,5 @@ export async function markPaymentPaidByMerchantOrderNo(input: MarkPaymentPaidInp
     throw new Error(error.message)
   }
 
-  return { result: 'updated', payment: mapPaymentRow(data as PaymentRow) }
+  return { result: 'updated', payment: mapPaymentPaidContext(mapPaymentRow(data as PaymentRow)) }
 }

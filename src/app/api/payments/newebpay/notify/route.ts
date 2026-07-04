@@ -7,8 +7,10 @@ import {
   parseNewebPayNotifyPayload,
   persistNewebPayNotifyQueryFallback,
   persistNewebPayNotifyPaymentResult,
+  syncNewebPayBookingAfterPayment,
 } from '@/lib/newebpay/notify'
 import { queryNewebPayTrade } from '@/lib/newebpay/query'
+import { markBookingPaidById } from '@/lib/supabase/bookingPayments'
 import { getPaymentByMerchantOrderNo, markPaymentPaidByMerchantOrderNo } from '@/lib/supabase/payments'
 
 export const runtime = 'nodejs'
@@ -50,6 +52,48 @@ function notifyPaymentUpdateError(error: unknown, result: {
   })
 
   return NextResponse.json({ ok: false, error: 'payment_update_failed' })
+}
+
+async function syncBookingAfterPayment(input: {
+  merchantOrderNo: string
+  paymentResult: string
+  payment: Parameters<typeof syncNewebPayBookingAfterPayment>[0]['payment']
+}) {
+  const bookingSync = await syncNewebPayBookingAfterPayment({
+    payment: input.payment,
+    markBookingPaid: markBookingPaidById,
+  })
+
+  if (bookingSync.bookingSync === 'skipped_no_booking') {
+    console.info('NewebPay booking sync skipped', {
+      merchantOrderNo: input.merchantOrderNo,
+      paymentResult: input.paymentResult,
+      paymentId: input.payment.id,
+      bookingSync: bookingSync.bookingSync,
+    })
+    return bookingSync.bookingSync
+  }
+
+  if (bookingSync.bookingSync === 'failed') {
+    console.warn('NewebPay booking sync failed', {
+      merchantOrderNo: input.merchantOrderNo,
+      paymentResult: input.paymentResult,
+      paymentId: input.payment.id,
+      bookingId: bookingSync.bookingId,
+      bookingSync: bookingSync.bookingSync,
+      error: bookingSync.error,
+    })
+    return bookingSync.bookingSync
+  }
+
+  console.info('NewebPay booking sync completed', {
+    merchantOrderNo: input.merchantOrderNo,
+    paymentResult: input.paymentResult,
+    paymentId: input.payment.id,
+    bookingId: bookingSync.bookingId,
+    bookingSync: bookingSync.bookingSync,
+  })
+  return bookingSync.bookingSync
 }
 
 function getNotifyQueryMerchantOrderNo(request: Request) {
@@ -150,12 +194,21 @@ export async function POST(request: Request) {
         paymentType: result.paymentType,
         paymentMethod: result.paymentMethod,
         result: paymentPersistence.result,
+        paymentId: paymentPersistence.payment.id,
+        bookingId: paymentPersistence.payment.bookingId,
+      })
+
+      const bookingSync = await syncBookingAfterPayment({
+        merchantOrderNo: result.merchantOrderNo,
+        paymentResult: paymentPersistence.result,
+        payment: paymentPersistence.payment,
       })
 
       return NextResponse.json({
         ok: true,
         paymentStatus: 'paid',
         result: paymentPersistence.result,
+        bookingSync,
       })
     } catch (error) {
       return notifyPaymentUpdateError(error, result)
@@ -226,12 +279,21 @@ export async function POST(request: Request) {
           queryPaymentType: fallbackResult.query.paymentType,
           queryPaymentMethod: fallbackResult.query.paymentMethod,
           result: fallbackResult.result,
+          paymentId: fallbackResult.payment.id,
+          bookingId: fallbackResult.payment.bookingId,
+        })
+
+        const bookingSync = await syncBookingAfterPayment({
+          merchantOrderNo: queryMerchantOrderNo as string,
+          paymentResult: fallbackResult.result,
+          payment: fallbackResult.payment,
         })
 
         return NextResponse.json({
           ok: true,
           paymentStatus: 'paid',
           result: fallbackResult.result,
+          bookingSync,
         })
       } catch (fallbackError) {
         console.warn('NewebPay notify query fallback failed', {

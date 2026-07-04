@@ -1,7 +1,8 @@
 import { decryptTradeInfo, getEncryptedTradeInfoDiagnostics, verifyTradeSha } from './crypto'
 import type { NewebPayQueryResult, QueryNewebPayTradeInput } from './query'
 import type { NewebPayConfig } from './types'
-import type { MarkPaymentPaidInput, MarkPaymentPaidResult, PaymentRecord } from '../supabase/payments'
+import type { MarkBookingPaidInput, MarkBookingPaidResult } from '../supabase/bookingPayments'
+import type { MarkPaymentPaidInput, MarkPaymentPaidResult, PaymentPaidContext, PaymentRecord } from '../supabase/payments'
 
 export type NewebPayNotifyResult = {
   status: string
@@ -17,11 +18,17 @@ export type NewebPayNotifyResult = {
 
 export type NewebPayNotifyPaymentPersistenceResult =
   | { ok: true; ignored: true; status: string }
-  | { ok: true; paymentStatus: 'paid'; result: 'updated' | 'already_paid' }
+  | { ok: true; paymentStatus: 'paid'; result: 'updated' | 'already_paid'; payment: PaymentPaidContext }
   | { ok: false; error: 'payment_not_found'; result: 'not_found' }
 
 export type NewebPayNotifyQueryFallbackResult =
-  | { ok: true; paymentStatus: 'paid'; result: 'updated' | 'already_paid'; query: NewebPayQueryResult }
+  | {
+      ok: true
+      paymentStatus: 'paid'
+      result: 'updated' | 'already_paid'
+      query: NewebPayQueryResult
+      payment: PaymentPaidContext
+    }
   | {
       ok: true
       ignored: true
@@ -33,6 +40,11 @@ export type NewebPayNotifyQueryFallbackResult =
       query?: NewebPayQueryResult
     }
   | { ok: false; error: 'payment_not_found'; result: 'not_found' }
+
+export type NewebPayBookingSyncResult =
+  | { bookingSync: 'skipped_no_booking' }
+  | { bookingSync: 'updated' | 'already_paid' | 'not_found'; bookingId: string }
+  | { bookingSync: 'failed'; bookingId: string; error: string }
 
 export type NewebPayNotifyErrorMetadata = {
   status: string
@@ -52,6 +64,7 @@ export type NewebPayNotifyErrorMetadata = {
 type MarkPaymentPaidHandler = (input: MarkPaymentPaidInput) => Promise<MarkPaymentPaidResult>
 type GetPaymentByMerchantOrderNoHandler = (merchantOrderNo: string) => Promise<PaymentRecord | null>
 type QueryNewebPayTradeHandler = (input: QueryNewebPayTradeInput) => Promise<NewebPayQueryResult>
+type MarkBookingPaidHandler = (input: MarkBookingPaidInput) => Promise<MarkBookingPaidResult>
 
 type ParseNewebPayNotifyPayloadInput = {
   status: string
@@ -212,6 +225,42 @@ export async function persistNewebPayNotifyPaymentResult(
     ok: true,
     paymentStatus: 'paid',
     result: updateResult.result,
+    payment: updateResult.payment,
+  }
+}
+
+export async function syncNewebPayBookingAfterPayment({
+  payment,
+  markBookingPaid,
+}: {
+  payment: PaymentPaidContext
+  markBookingPaid: MarkBookingPaidHandler
+}): Promise<NewebPayBookingSyncResult> {
+  if (!payment.bookingId) {
+    return {
+      bookingSync: 'skipped_no_booking',
+    }
+  }
+
+  try {
+    const result = await markBookingPaid({
+      bookingId: payment.bookingId,
+      paymentId: payment.id,
+      provider: 'newebpay',
+      providerTradeNo: payment.providerTradeNo,
+      paidAt: payment.paidAt,
+    })
+
+    return {
+      bookingSync: result.result,
+      bookingId: result.bookingId,
+    }
+  } catch (error) {
+    return {
+      bookingSync: 'failed',
+      bookingId: payment.bookingId,
+      error: error instanceof Error ? error.message : 'unknown_error',
+    }
   }
 }
 
@@ -321,6 +370,7 @@ export async function persistNewebPayNotifyQueryFallback({
     paymentStatus: 'paid',
     result: updateResult.result,
     query,
+    payment: updateResult.payment,
   }
 }
 
