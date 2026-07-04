@@ -1,4 +1,5 @@
 import { decryptTradeInfo, verifyTradeSha } from './crypto'
+import type { MarkPaymentPaidInput, MarkPaymentPaidResult } from '../supabase/payments'
 
 export type NewebPayNotifyResult = {
   status: string
@@ -11,6 +12,13 @@ export type NewebPayNotifyResult = {
   payTime?: string
   rawResult: Record<string, unknown>
 }
+
+export type NewebPayNotifyPaymentPersistenceResult =
+  | { ok: true; ignored: true; status: string }
+  | { ok: true; paymentStatus: 'paid'; result: 'updated' | 'already_paid' }
+  | { ok: false; error: 'payment_not_found'; result: 'not_found' }
+
+type MarkPaymentPaidHandler = (input: MarkPaymentPaidInput) => Promise<MarkPaymentPaidResult>
 
 type ParseNewebPayNotifyPayloadInput = {
   status: string
@@ -69,6 +77,68 @@ function parseDecryptedTradeInfo(decryptedTradeInfo: string): Record<string, unk
 
 function getResultRecord(root: Record<string, unknown>) {
   return isRecord(root.Result) ? root.Result : root
+}
+
+export function buildNewebPayNotifyRawPayload(result: NewebPayNotifyResult): Record<string, unknown> {
+  return {
+    status: result.status,
+    merchantId: result.merchantId,
+    merchantOrderNo: result.merchantOrderNo,
+    tradeNo: result.tradeNo ?? null,
+    amount: result.amount ?? null,
+    paymentType: result.paymentType ?? null,
+    paymentMethod: result.paymentMethod ?? null,
+    payTime: result.payTime ?? null,
+  }
+}
+
+export function buildMarkPaymentPaidInputFromNotify(
+  result: NewebPayNotifyResult,
+  notifyReceivedAt = new Date().toISOString(),
+): MarkPaymentPaidInput | null {
+  if (result.status !== 'SUCCESS') {
+    return null
+  }
+
+  return {
+    merchantOrderNo: result.merchantOrderNo,
+    providerTradeNo: result.tradeNo ?? null,
+    paidAt: result.payTime ?? notifyReceivedAt,
+    notifyReceivedAt,
+    rawPayload: buildNewebPayNotifyRawPayload(result),
+  }
+}
+
+export async function persistNewebPayNotifyPaymentResult(
+  result: NewebPayNotifyResult,
+  markPaymentPaid: MarkPaymentPaidHandler,
+  notifyReceivedAt = new Date().toISOString(),
+): Promise<NewebPayNotifyPaymentPersistenceResult> {
+  const input = buildMarkPaymentPaidInputFromNotify(result, notifyReceivedAt)
+
+  if (!input) {
+    return {
+      ok: true,
+      ignored: true,
+      status: result.status,
+    }
+  }
+
+  const updateResult = await markPaymentPaid(input)
+
+  if (updateResult.result === 'not_found') {
+    return {
+      ok: false,
+      error: 'payment_not_found',
+      result: 'not_found',
+    }
+  }
+
+  return {
+    ok: true,
+    paymentStatus: 'paid',
+    result: updateResult.result,
+  }
 }
 
 export function parseNewebPayNotifyPayload({
