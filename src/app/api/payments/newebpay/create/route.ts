@@ -5,16 +5,20 @@ import {
   createNewebPayMpgPaymentData,
   isNewebPayPaymentMode,
   isNewebPayPaymentSource,
+  resolveNewebPayBookingIdForPayment,
   type NewebPayPaymentMode,
   type NewebPayPaymentSource,
+  validateNewebPayBookingPayment,
 } from '@/lib/newebpay/paymentForm'
 import { getNewebPayPaymentItem } from '@/lib/newebpay/paymentItems'
+import { getSupabaseBookingPaymentContext } from '@/lib/supabase/bookings'
 import { createPendingPayment } from '@/lib/supabase/payments'
 
 type CreateNewebPayPaymentRequest = {
   itemKey?: unknown
   source?: unknown
   paymentMode?: unknown
+  bookingId?: unknown
 }
 
 function paymentConfigErrorResponse() {
@@ -32,6 +36,15 @@ function pendingPaymentErrorResponse(input: { merchantOrderNo: string; itemKey: 
   })
 
   return NextResponse.json({ ok: false, error: '建立付款紀錄失敗，請稍後再試。' }, { status: 500 })
+}
+
+function bookingLookupErrorResponse(input: { bookingId: string; error: unknown }) {
+  console.error('藍新付款 booking 查詢失敗', {
+    bookingId: input.bookingId,
+    error: input.error instanceof Error ? input.error.message : 'unknown_error',
+  })
+
+  return NextResponse.json({ ok: false, error: 'booking_lookup_failed' }, { status: 500 })
 }
 
 export async function POST(request: Request) {
@@ -56,6 +69,36 @@ export async function POST(request: Request) {
 
   const paymentMode: NewebPayPaymentMode = body?.paymentMode ?? 'credit'
   const source = body?.source as NewebPayPaymentSource | undefined
+  const bookingIdResolution = resolveNewebPayBookingIdForPayment({
+    itemKey: item.itemKey,
+    source,
+    bookingId: body?.bookingId,
+  })
+
+  if (!bookingIdResolution.ok) {
+    return NextResponse.json({ ok: false, error: bookingIdResolution.error }, { status: 400 })
+  }
+
+  const bookingId = bookingIdResolution.bookingId
+
+  if (bookingId) {
+    let booking
+
+    try {
+      booking = await getSupabaseBookingPaymentContext(bookingId)
+    } catch (error) {
+      return bookingLookupErrorResponse({ bookingId, error })
+    }
+
+    const bookingValidation = validateNewebPayBookingPayment({
+      booking,
+      expectedAmountTwd: item.amount,
+    })
+
+    if (!bookingValidation.ok) {
+      return NextResponse.json({ ok: false, error: bookingValidation.error }, { status: 400 })
+    }
+  }
 
   try {
     const config = getNewebPayConfig()
@@ -69,6 +112,7 @@ export async function POST(request: Request) {
       source,
       paymentMode,
       merchantOrderNo: paymentData.merchantOrderNo,
+      bookingId,
     })
 
     try {
@@ -77,6 +121,7 @@ export async function POST(request: Request) {
         itemType: pendingPaymentMetadata.itemType,
         itemId: pendingPaymentMetadata.itemId,
         itemName: item.itemDesc,
+        bookingId: pendingPaymentMetadata.bookingId,
         merchantOrderNo: paymentData.merchantOrderNo,
         amountTwd: item.amount,
         rawPayload: pendingPaymentMetadata.rawPayload,

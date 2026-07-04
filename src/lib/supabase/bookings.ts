@@ -46,6 +46,14 @@ type ConsultationPlanRow = {
   is_active: boolean | null
 }
 
+export type BookingPaymentContext = {
+  id: string
+  planId: string | null
+  amountTwd: number
+  status: string
+  paymentStatus: string
+}
+
 function normalizeBirthTime(value: string) {
   return value.length === 5 ? `${value}:00` : value
 }
@@ -182,6 +190,36 @@ export async function getSupabaseBooking(bookingId: string) {
 
   if (error) throw new Error(error.message)
   return data ? mapBookingRow(data as BookingRow) : null
+}
+
+export async function getSupabaseBookingPaymentContext(bookingId: string): Promise<BookingPaymentContext | null> {
+  if (!hasSupabaseAdminConfig()) return null
+
+  const supabase = getSupabaseAdmin()
+  const { data, error } = await supabase
+    .from('bookings')
+    .select('id,plan_id,amount_twd,status,payment_status')
+    .eq('id', bookingId)
+    .maybeSingle()
+
+  if (error) throw new Error(error.message)
+  if (!data) return null
+
+  const row = data as {
+    id: string
+    plan_id: string | null
+    amount_twd: number
+    status: string
+    payment_status: string
+  }
+
+  return {
+    id: row.id,
+    planId: row.plan_id,
+    amountTwd: row.amount_twd,
+    status: row.status,
+    paymentStatus: row.payment_status,
+  }
 }
 
 export async function updateSupabaseBooking(bookingId: string, updates: Partial<BookingRecord>) {

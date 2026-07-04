@@ -6,6 +6,22 @@ import type { NewebPayConfig } from './types'
 export type NewebPayPaymentSource = 'booking' | 'ai_divination' | 'ai_chart' | 'manual_test'
 export type NewebPayPaymentMode = 'credit' | 'merchant_default'
 
+export type NewebPayBookingPaymentContext = {
+  id: string
+  amountTwd: number
+  status: string
+  paymentStatus: string
+  planId?: string | null
+}
+
+export type NewebPayBookingIdResolution =
+  | { ok: true; bookingId: string | null }
+  | { ok: false; error: 'booking_id_required' | 'invalid_booking_id' | 'booking_id_not_allowed' }
+
+export type NewebPayBookingPaymentValidationResult =
+  | { ok: true }
+  | { ok: false; error: 'booking_not_found' | 'booking_amount_mismatch' | 'booking_already_paid' }
+
 export type NewebPayMpgPaymentFields = {
   MerchantID: string
   TradeInfo: string
@@ -25,6 +41,7 @@ export type NewebPayMpgPaymentData = {
 export type NewebPayPendingPaymentMetadata = {
   itemType: string
   itemId: string
+  bookingId: string | null
   rawPayload: {
     itemKey: NewebPayPaymentItemKey
     source: NewebPayPaymentSource | null
@@ -32,6 +49,7 @@ export type NewebPayPendingPaymentMetadata = {
     amount: number
     itemDesc: string
     merchantOrderNo: string
+    bookingId?: string
   }
 }
 
@@ -48,6 +66,7 @@ type BuildNewebPayPendingPaymentMetadataInput = {
   source?: NewebPayPaymentSource
   paymentMode: NewebPayPaymentMode
   merchantOrderNo: string
+  bookingId?: string | null
 }
 
 const allowedSources = new Set<NewebPayPaymentSource>(['booking', 'ai_divination', 'ai_chart', 'manual_test'])
@@ -61,17 +80,78 @@ export function isNewebPayPaymentMode(mode: unknown): mode is NewebPayPaymentMod
   return typeof mode === 'string' && allowedPaymentModes.has(mode as NewebPayPaymentMode)
 }
 
-function getPendingPaymentTarget(itemKey: NewebPayPaymentItemKey) {
+export function isValidNewebPayBookingId(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.trim())
+  )
+}
+
+export function resolveNewebPayBookingIdForPayment(input: {
+  itemKey: NewebPayPaymentItemKey
+  source?: NewebPayPaymentSource
+  bookingId?: unknown
+}): NewebPayBookingIdResolution {
+  const hasBookingId =
+    input.bookingId !== undefined &&
+    input.bookingId !== null &&
+    (typeof input.bookingId !== 'string' || input.bookingId.trim() !== '')
+
+  if (input.itemKey === 'newebpay_live_smoke_test_1') {
+    return hasBookingId ? { ok: false, error: 'booking_id_not_allowed' } : { ok: true, bookingId: null }
+  }
+
+  if (hasBookingId && input.source !== 'booking') {
+    return { ok: false, error: 'booking_id_not_allowed' }
+  }
+
+  if (input.source !== 'booking') {
+    return { ok: true, bookingId: null }
+  }
+
+  if (!hasBookingId) {
+    return { ok: false, error: 'booking_id_required' }
+  }
+
+  if (!isValidNewebPayBookingId(input.bookingId)) {
+    return { ok: false, error: 'invalid_booking_id' }
+  }
+
+  return { ok: true, bookingId: input.bookingId.trim() }
+}
+
+export function validateNewebPayBookingPayment(input: {
+  booking: NewebPayBookingPaymentContext | null
+  expectedAmountTwd: number
+}): NewebPayBookingPaymentValidationResult {
+  if (!input.booking) {
+    return { ok: false, error: 'booking_not_found' }
+  }
+
+  if (input.booking.amountTwd !== input.expectedAmountTwd) {
+    return { ok: false, error: 'booking_amount_mismatch' }
+  }
+
+  if (input.booking.status !== 'pending_payment' || input.booking.paymentStatus !== 'pending') {
+    return { ok: false, error: 'booking_already_paid' }
+  }
+
+  return { ok: true }
+}
+
+function getPendingPaymentTarget(itemKey: NewebPayPaymentItemKey, bookingId?: string | null) {
   if (itemKey === 'newebpay_live_smoke_test_1') {
     return {
       itemType: 'newebpay_smoke_test',
       itemId: itemKey,
+      bookingId: null,
     }
   }
 
   return {
     itemType: 'booking',
-    itemId: itemKey,
+    itemId: bookingId ?? itemKey,
+    bookingId: bookingId ?? null,
   }
 }
 
@@ -86,14 +166,17 @@ export function buildNewebPayPendingPaymentMetadata({
   source,
   paymentMode,
   merchantOrderNo,
+  bookingId,
 }: BuildNewebPayPendingPaymentMetadataInput): NewebPayPendingPaymentMetadata {
   const item = getNewebPayPaymentItem(itemKey)
   if (!item) {
     throw new Error('Unsupported NewebPay payment item')
   }
 
+  const target = getPendingPaymentTarget(item.itemKey, bookingId)
+
   return {
-    ...getPendingPaymentTarget(item.itemKey),
+    ...target,
     rawPayload: {
       itemKey: item.itemKey,
       source: source ?? null,
@@ -101,6 +184,7 @@ export function buildNewebPayPendingPaymentMetadata({
       amount: item.amount,
       itemDesc: item.itemDesc,
       merchantOrderNo,
+      ...(target.bookingId ? { bookingId: target.bookingId } : {}),
     },
   }
 }

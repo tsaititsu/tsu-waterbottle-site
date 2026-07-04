@@ -6,6 +6,8 @@ import {
   createNewebPayMpgPaymentData,
   isNewebPayPaymentMode,
   isNewebPayPaymentSource,
+  resolveNewebPayBookingIdForPayment,
+  validateNewebPayBookingPayment,
 } from './paymentForm'
 import { getNewebPayPaymentItem } from './paymentItems'
 import type { NewebPayConfig } from './types'
@@ -46,6 +48,91 @@ assert.equal(isNewebPayPaymentSource('external'), false)
 assert.equal(isNewebPayPaymentMode('credit'), true)
 assert.equal(isNewebPayPaymentMode('merchant_default'), true)
 assert.equal(isNewebPayPaymentMode('linepay'), false)
+
+const bookingId = '550e8400-e29b-41d4-a716-446655440000'
+
+assert.deepEqual(
+  resolveNewebPayBookingIdForPayment({
+    itemKey: 'booking_consultation_60',
+    source: 'booking',
+  }),
+  { ok: false, error: 'booking_id_required' },
+)
+assert.deepEqual(
+  resolveNewebPayBookingIdForPayment({
+    itemKey: 'booking_consultation_60',
+    source: 'booking',
+    bookingId: 'not-a-uuid',
+  }),
+  { ok: false, error: 'invalid_booking_id' },
+)
+assert.deepEqual(
+  resolveNewebPayBookingIdForPayment({
+    itemKey: 'booking_consultation_60',
+    source: 'booking',
+    bookingId,
+  }),
+  { ok: true, bookingId },
+)
+assert.deepEqual(
+  resolveNewebPayBookingIdForPayment({
+    itemKey: 'newebpay_live_smoke_test_1',
+    source: 'manual_test',
+  }),
+  { ok: true, bookingId: null },
+)
+assert.deepEqual(
+  resolveNewebPayBookingIdForPayment({
+    itemKey: 'newebpay_live_smoke_test_1',
+    source: 'manual_test',
+    bookingId,
+  }),
+  { ok: false, error: 'booking_id_not_allowed' },
+)
+
+assert.deepEqual(
+  validateNewebPayBookingPayment({
+    booking: null,
+    expectedAmountTwd: 3600,
+  }),
+  { ok: false, error: 'booking_not_found' },
+)
+assert.deepEqual(
+  validateNewebPayBookingPayment({
+    booking: {
+      id: bookingId,
+      amountTwd: 3000,
+      status: 'pending_payment',
+      paymentStatus: 'pending',
+    },
+    expectedAmountTwd: 3600,
+  }),
+  { ok: false, error: 'booking_amount_mismatch' },
+)
+assert.deepEqual(
+  validateNewebPayBookingPayment({
+    booking: {
+      id: bookingId,
+      amountTwd: 3600,
+      status: 'confirmed',
+      paymentStatus: 'paid',
+    },
+    expectedAmountTwd: 3600,
+  }),
+  { ok: false, error: 'booking_already_paid' },
+)
+assert.deepEqual(
+  validateNewebPayBookingPayment({
+    booking: {
+      id: bookingId,
+      amountTwd: 3600,
+      status: 'pending_payment',
+      paymentStatus: 'pending',
+    },
+    expectedAmountTwd: 3600,
+  }),
+  { ok: true },
+)
 
 const data = createNewebPayMpgPaymentData({
   itemKey: 'booking_consultation_60',
@@ -120,14 +207,19 @@ const bookingPendingPaymentMetadata = buildNewebPayPendingPaymentMetadata({
   source: 'booking',
   paymentMode: 'credit',
   merchantOrderNo: data.merchantOrderNo,
+  bookingId,
 })
 
 assert.equal(bookingPendingPaymentMetadata.itemType, 'booking')
-assert.equal(bookingPendingPaymentMetadata.itemId, 'booking_consultation_60')
+assert.equal(bookingPendingPaymentMetadata.itemId, bookingId)
+assert.equal(bookingPendingPaymentMetadata.bookingId, bookingId)
 assert.equal(bookingPendingPaymentMetadata.rawPayload.amount, 3600)
 assert.equal(bookingPendingPaymentMetadata.rawPayload.itemDesc, '水瓶先生論命')
+assert.equal(bookingPendingPaymentMetadata.rawPayload.bookingId, bookingId)
 assert.equal('bookingStatus' in bookingPendingPaymentMetadata.rawPayload, false)
 assert.equal('paymentStatus' in bookingPendingPaymentMetadata.rawPayload, false)
+assert.equal('TradeInfo' in bookingPendingPaymentMetadata.rawPayload, false)
+assert.equal('TradeSha' in bookingPendingPaymentMetadata.rawPayload, false)
 
 const merchantDefaultData = createNewebPayMpgPaymentData({
   itemKey: 'newebpay_live_smoke_test_1',
