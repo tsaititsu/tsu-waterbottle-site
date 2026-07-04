@@ -9,6 +9,7 @@ import {
   persistNewebPayNotifyQueryFallback,
   persistNewebPayNotifyPaymentResult,
   syncNewebPayBookingAfterPayment,
+  validateNewebPayPaymentMatch,
 } from './notify'
 import type { PaymentPaidContext, PaymentRecord } from '../supabase/payments'
 
@@ -163,8 +164,48 @@ function createPaymentPaidContext(overrides: Partial<PaymentPaidContext> = {}): 
 async function runPaymentPersistenceAssertions() {
   let updatedInput: unknown
   const paidContext = createPaymentPaidContext({ bookingId: 'booking-1' })
+  const matchingPayment = createPaymentRecord({
+    bookingId: 'booking-1',
+    itemType: 'booking',
+    itemId: 'booking-1',
+    itemName: '水瓶先生論命',
+    amountTwd: 3600,
+    rawPayload: {
+      amount: 3600,
+      itemKey: 'booking_consultation_60',
+      merchantOrderNo: 'WB20260703172530A1B2',
+    },
+  })
+
+  assert.deepEqual(validateNewebPayPaymentMatch({
+    payment: matchingPayment,
+    expectedMerchantOrderNo: 'WB20260703172530A1B2',
+    providerMerchantOrderNo: 'WB20260703172530A1B2',
+    providerAmount: 3600,
+  }), {
+    ok: true,
+    payment: matchingPayment,
+    localAmount: 3600,
+    providerAmount: 3600,
+  })
+
+  assert.deepEqual(validateNewebPayPaymentMatch({
+    payment: matchingPayment,
+    expectedMerchantOrderNo: 'WB20260703172530A1B2',
+    providerMerchantOrderNo: 'WB20260703172530A1B2',
+    providerAmount: 3500,
+  }), {
+    ok: false,
+    error: 'payment_amount_mismatch',
+    result: 'amount_mismatch',
+    localAmount: 3600,
+    providerAmount: 3500,
+    paymentStatus: 'pending',
+  })
+
   const updatedResult = await persistNewebPayNotifyPaymentResult(
     parsedQuery,
+    async () => matchingPayment,
     async (input) => {
       updatedInput = input
       return { result: 'updated', payment: paidContext }
@@ -181,10 +222,17 @@ async function runPaymentPersistenceAssertions() {
   assert.deepEqual(updatedInput, paidInput)
   assert.equal('rawPayload' in updatedResult.payment, false)
 
-  const alreadyPaidResult = await persistNewebPayNotifyPaymentResult(parsedQuery, async () => ({
-    result: 'already_paid',
-    payment: paidContext,
-  }))
+  const alreadyPaidResult = await persistNewebPayNotifyPaymentResult(
+    parsedQuery,
+    async () => createPaymentRecord({
+      ...matchingPayment,
+      status: 'paid',
+    }),
+    async () => ({
+      result: 'already_paid',
+      payment: paidContext,
+    }),
+  )
 
   assert.deepEqual(alreadyPaidResult, {
     ok: true,
@@ -193,22 +241,116 @@ async function runPaymentPersistenceAssertions() {
     payment: paidContext,
   })
 
-  const notFoundResult = await persistNewebPayNotifyPaymentResult(parsedQuery, async () => ({
-    result: 'not_found',
-    payment: null,
-  }))
+  let markCalledAfterNotFound = false
+  const notFoundResult = await persistNewebPayNotifyPaymentResult(
+    parsedQuery,
+    async () => null,
+    async () => {
+      markCalledAfterNotFound = true
+      return { result: 'updated', payment: paidContext }
+    },
+  )
 
   assert.deepEqual(notFoundResult, {
     ok: false,
     error: 'payment_not_found',
     result: 'not_found',
+    providerAmount: 3600,
+    paymentStatus: null,
   })
+  assert.equal(markCalledAfterNotFound, false)
 
+  let markCalledAfterMissingAmount = false
+  const missingAmountResult = await persistNewebPayNotifyPaymentResult(
+    parsedQuery,
+    async () => createPaymentRecord({
+      ...matchingPayment,
+      rawPayload: {
+        itemKey: 'booking_consultation_60',
+        merchantOrderNo: 'WB20260703172530A1B2',
+      },
+    }),
+    async () => {
+      markCalledAfterMissingAmount = true
+      return { result: 'updated', payment: paidContext }
+    },
+  )
+
+  assert.deepEqual(missingAmountResult, {
+    ok: false,
+    error: 'payment_amount_missing',
+    result: 'amount_missing',
+    localAmount: null,
+    providerAmount: 3600,
+    paymentStatus: 'pending',
+  })
+  assert.equal(markCalledAfterMissingAmount, false)
+
+  let markCalledAfterAmountMismatch = false
+  const amountMismatchResult = await persistNewebPayNotifyPaymentResult(
+    parsedQuery,
+    async () => createPaymentRecord({
+      ...matchingPayment,
+      rawPayload: {
+        amount: 3500,
+        itemKey: 'booking_consultation_60',
+        merchantOrderNo: 'WB20260703172530A1B2',
+      },
+    }),
+    async () => {
+      markCalledAfterAmountMismatch = true
+      return { result: 'updated', payment: paidContext }
+    },
+  )
+
+  assert.deepEqual(amountMismatchResult, {
+    ok: false,
+    error: 'payment_amount_mismatch',
+    result: 'amount_mismatch',
+    localAmount: 3500,
+    providerAmount: 3600,
+    paymentStatus: 'pending',
+  })
+  assert.equal(markCalledAfterAmountMismatch, false)
+
+  let markCalledAfterAlreadyPaidMismatch = false
+  const alreadyPaidMismatchResult = await persistNewebPayNotifyPaymentResult(
+    parsedQuery,
+    async () => createPaymentRecord({
+      ...matchingPayment,
+      status: 'paid',
+      rawPayload: {
+        amount: 3500,
+        itemKey: 'booking_consultation_60',
+        merchantOrderNo: 'WB20260703172530A1B2',
+      },
+    }),
+    async () => {
+      markCalledAfterAlreadyPaidMismatch = true
+      return { result: 'already_paid', payment: paidContext }
+    },
+  )
+
+  assert.deepEqual(alreadyPaidMismatchResult, {
+    ok: false,
+    error: 'payment_amount_mismatch',
+    result: 'amount_mismatch',
+    localAmount: 3500,
+    providerAmount: 3600,
+    paymentStatus: 'paid',
+  })
+  assert.equal(markCalledAfterAlreadyPaidMismatch, false)
+
+  let getPaymentCalledForNonSuccess = false
   let nonSuccessCalled = false
   const nonSuccessResult = await persistNewebPayNotifyPaymentResult(
     {
       ...parsedQuery,
       status: 'TRADE_FAIL',
+    },
+    async () => {
+      getPaymentCalledForNonSuccess = true
+      return matchingPayment
     },
     async () => {
       nonSuccessCalled = true
@@ -221,6 +363,7 @@ async function runPaymentPersistenceAssertions() {
     ignored: true,
     status: 'TRADE_FAIL',
   })
+  assert.equal(getPaymentCalledForNonSuccess, false)
   assert.equal(nonSuccessCalled, false)
   assert.equal('payment' in nonSuccessResult, false)
 

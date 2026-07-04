@@ -19,7 +19,14 @@ export type NewebPayNotifyResult = {
 export type NewebPayNotifyPaymentPersistenceResult =
   | { ok: true; ignored: true; status: string }
   | { ok: true; paymentStatus: 'paid'; result: 'updated' | 'already_paid'; payment: PaymentPaidContext }
-  | { ok: false; error: 'payment_not_found'; result: 'not_found' }
+  | {
+      ok: false
+      error: 'payment_not_found' | 'payment_amount_missing' | 'payment_amount_mismatch' | 'payment_merchant_order_mismatch'
+      result: 'not_found' | 'amount_missing' | 'amount_mismatch' | 'merchant_order_mismatch'
+      localAmount?: number | null
+      providerAmount?: number | null
+      paymentStatus?: string | null
+    }
 
 export type NewebPayNotifyQueryFallbackResult =
   | {
@@ -65,6 +72,17 @@ type MarkPaymentPaidHandler = (input: MarkPaymentPaidInput) => Promise<MarkPayme
 type GetPaymentByMerchantOrderNoHandler = (merchantOrderNo: string) => Promise<PaymentRecord | null>
 type QueryNewebPayTradeHandler = (input: QueryNewebPayTradeInput) => Promise<NewebPayQueryResult>
 type MarkBookingPaidHandler = (input: MarkBookingPaidInput) => Promise<MarkBookingPaidResult>
+
+type NewebPayPaymentMatchValidationResult =
+  | { ok: true; payment: PaymentRecord; localAmount: number; providerAmount: number }
+  | {
+      ok: false
+      error: 'payment_not_found' | 'payment_amount_missing' | 'payment_amount_mismatch' | 'payment_merchant_order_mismatch'
+      result: 'not_found' | 'amount_missing' | 'amount_mismatch' | 'merchant_order_mismatch'
+      localAmount?: number | null
+      providerAmount?: number | null
+      paymentStatus?: string | null
+    }
 
 type ParseNewebPayNotifyPayloadInput = {
   status: string
@@ -198,6 +216,7 @@ export function buildMarkPaymentPaidInputFromNotify(
 
 export async function persistNewebPayNotifyPaymentResult(
   result: NewebPayNotifyResult,
+  getPaymentByMerchantOrderNo: GetPaymentByMerchantOrderNoHandler,
   markPaymentPaid: MarkPaymentPaidHandler,
   notifyReceivedAt = new Date().toISOString(),
 ): Promise<NewebPayNotifyPaymentPersistenceResult> {
@@ -209,6 +228,18 @@ export async function persistNewebPayNotifyPaymentResult(
       ignored: true,
       status: result.status,
     }
+  }
+
+  const payment = await getPaymentByMerchantOrderNo(result.merchantOrderNo)
+  const validation = validateNewebPayPaymentMatch({
+    payment,
+    expectedMerchantOrderNo: result.merchantOrderNo,
+    providerMerchantOrderNo: result.merchantOrderNo,
+    providerAmount: result.amount,
+  })
+
+  if (!validation.ok) {
+    return validation
   }
 
   const updateResult = await markPaymentPaid(input)
@@ -268,6 +299,70 @@ function getPaymentRawPayloadAmount(payment: PaymentRecord) {
   const amount = payment.rawPayload?.amount
   const normalizedAmount = typeof amount === 'number' ? amount : Number(getString(amount))
   return Number.isFinite(normalizedAmount) && normalizedAmount > 0 ? normalizedAmount : null
+}
+
+export function validateNewebPayPaymentMatch({
+  payment,
+  expectedMerchantOrderNo,
+  providerMerchantOrderNo,
+  providerAmount,
+}: {
+  payment: PaymentRecord | null
+  expectedMerchantOrderNo: string
+  providerMerchantOrderNo: string
+  providerAmount?: number | null
+}): NewebPayPaymentMatchValidationResult {
+  if (!payment) {
+    return {
+      ok: false,
+      error: 'payment_not_found',
+      result: 'not_found',
+      providerAmount: providerAmount ?? null,
+      paymentStatus: null,
+    }
+  }
+
+  const localAmount = getPaymentRawPayloadAmount(payment)
+  const paymentStatus = payment.status ?? null
+  if (payment.merchantOrderNo !== providerMerchantOrderNo || providerMerchantOrderNo !== expectedMerchantOrderNo) {
+    return {
+      ok: false,
+      error: 'payment_merchant_order_mismatch',
+      result: 'merchant_order_mismatch',
+      localAmount,
+      providerAmount: providerAmount ?? null,
+      paymentStatus,
+    }
+  }
+
+  if (!localAmount || !providerAmount) {
+    return {
+      ok: false,
+      error: 'payment_amount_missing',
+      result: 'amount_missing',
+      localAmount,
+      providerAmount: providerAmount ?? null,
+      paymentStatus,
+    }
+  }
+
+  if (localAmount !== providerAmount) {
+    return {
+      ok: false,
+      error: 'payment_amount_mismatch',
+      result: 'amount_mismatch',
+      localAmount,
+      providerAmount,
+      paymentStatus,
+    }
+  }
+
+  return {
+    ok: true,
+    payment,
+    localAmount,
+    providerAmount,
+  }
 }
 
 export function isNewebPayTradeInfoDecryptError(error: unknown) {
@@ -331,7 +426,14 @@ export async function persistNewebPayNotifyQueryFallback({
     }
   }
 
-  if (query.merchantOrderNo !== merchantOrderNo) {
+  const validation = validateNewebPayPaymentMatch({
+    payment,
+    expectedMerchantOrderNo: merchantOrderNo,
+    providerMerchantOrderNo: query.merchantOrderNo,
+    providerAmount: query.amount,
+  })
+
+  if (!validation.ok && validation.error === 'payment_merchant_order_mismatch') {
     return {
       ok: true,
       ignored: true,
@@ -340,11 +442,20 @@ export async function persistNewebPayNotifyQueryFallback({
     }
   }
 
-  if (query.amount !== amount) {
+  if (!validation.ok && validation.error === 'payment_amount_mismatch') {
     return {
       ok: true,
       ignored: true,
       reason: 'query_amount_mismatch',
+      query,
+    }
+  }
+
+  if (!validation.ok) {
+    return {
+      ok: true,
+      ignored: true,
+      reason: 'missing_payment_amount',
       query,
     }
   }

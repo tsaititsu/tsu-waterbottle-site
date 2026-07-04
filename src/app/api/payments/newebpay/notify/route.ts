@@ -157,7 +157,11 @@ export async function POST(request: Request) {
     })
 
     try {
-      const paymentPersistence = await persistNewebPayNotifyPaymentResult(result, markPaymentPaidByMerchantOrderNo)
+      const paymentPersistence = await persistNewebPayNotifyPaymentResult(
+        result,
+        getPaymentByMerchantOrderNo,
+        markPaymentPaidByMerchantOrderNo,
+      )
 
       if ('ignored' in paymentPersistence) {
         console.info('NewebPay notify ignored for non-success status', {
@@ -173,7 +177,7 @@ export async function POST(request: Request) {
       }
 
       if (!paymentPersistence.ok) {
-        console.warn('NewebPay notify payment not found', {
+        console.warn('NewebPay notify payment validation failed', {
           merchantOrderNo: result.merchantOrderNo,
           status: result.status,
           tradeNo: result.tradeNo,
@@ -181,9 +185,13 @@ export async function POST(request: Request) {
           paymentType: result.paymentType,
           paymentMethod: result.paymentMethod,
           result: paymentPersistence.result,
+          error: paymentPersistence.error,
+          localAmount: paymentPersistence.localAmount ?? null,
+          providerAmount: paymentPersistence.providerAmount ?? result.amount ?? null,
+          paymentStatus: paymentPersistence.paymentStatus ?? null,
         })
 
-        return NextResponse.json({ ok: false, error: 'payment_not_found' })
+        return NextResponse.json({ ok: false, error: paymentPersistence.error })
       }
 
       console.info('NewebPay notify payment marked paid', {
