@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server'
 import { getNewebPayConfig } from '@/lib/newebpay/config'
-import { parseNewebPayNotifyPayload, persistNewebPayNotifyPaymentResult } from '@/lib/newebpay/notify'
+import {
+  buildNewebPayNotifyErrorMetadata,
+  parseNewebPayNotifyPayload,
+  persistNewebPayNotifyPaymentResult,
+} from '@/lib/newebpay/notify'
 import { markPaymentPaidByMerchantOrderNo } from '@/lib/supabase/payments'
 
 export const runtime = 'nodejs'
@@ -10,12 +14,15 @@ function getFormString(formData: FormData, key: string) {
   return typeof value === 'string' ? value : ''
 }
 
-function notifyError(error: string, status: string, merchantId: string) {
-  console.warn('NewebPay notify rejected', {
-    error,
-    status,
-    merchantId,
-  })
+function notifyError(input: {
+  error: unknown
+  status: string
+  merchantId: string
+  tradeInfo: string
+  tradeSha: string
+  formKeys: string[]
+}) {
+  console.warn('NewebPay notify rejected', buildNewebPayNotifyErrorMetadata(input))
 
   return NextResponse.json({ ok: false, error: 'invalid_notify' })
 }
@@ -43,6 +50,7 @@ function notifyPaymentUpdateError(error: unknown, result: {
 
 export async function POST(request: Request) {
   const formData = await request.formData()
+  const formKeys = Array.from(formData.keys())
   const status = getFormString(formData, 'Status')
   const merchantId = getFormString(formData, 'MerchantID')
   const version = getFormString(formData, 'Version')
@@ -124,7 +132,13 @@ export async function POST(request: Request) {
       return notifyPaymentUpdateError(error, result)
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Invalid NewebPay notify payload'
-    return notifyError(message, status, merchantId)
+    return notifyError({
+      error,
+      status,
+      merchantId,
+      tradeInfo,
+      tradeSha,
+      formKeys,
+    })
   }
 }

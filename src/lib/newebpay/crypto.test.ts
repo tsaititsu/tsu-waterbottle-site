@@ -6,6 +6,8 @@ import {
   createTradeSha,
   decryptTradeInfo,
   encryptTradeInfo,
+  getEncryptedTradeInfoDiagnostics,
+  normalizeEncryptedTradeInfo,
   verifyTradeSha
 } from './crypto'
 
@@ -39,6 +41,33 @@ test('encryptTradeInfo output can be decrypted back to the query string', () => 
 
   assert.match(encrypted, /^[0-9a-f]+$/)
   assert.equal(decryptTradeInfo(encrypted, hashKey, hashIv), plainTradeInfo)
+  assert.equal(decryptTradeInfo(`\n ${encrypted} \n`, hashKey, hashIv), plainTradeInfo)
+  assert.equal(decryptTradeInfo(encrypted.toUpperCase(), hashKey, hashIv), plainTradeInfo)
+})
+
+test('normalizeEncryptedTradeInfo preserves normal hex and decodes encoded values once', () => {
+  const encrypted = encryptTradeInfo({ MerchantID: 'MS123456789', Amt: 50 }, hashKey, hashIv)
+
+  assert.equal(normalizeEncryptedTradeInfo(encrypted), encrypted)
+  assert.equal(normalizeEncryptedTradeInfo(` ${encrypted}\n`), encrypted)
+  assert.equal(normalizeEncryptedTradeInfo(encodeURIComponent(encrypted)), encrypted)
+})
+
+test('getEncryptedTradeInfoDiagnostics reports shape without exposing raw payload', () => {
+  const encrypted = encryptTradeInfo({ MerchantID: 'MS123456789', Amt: 50 }, hashKey, hashIv)
+  const tradeSha = createTradeSha(encrypted, hashKey, hashIv)
+  const diagnostics = getEncryptedTradeInfoDiagnostics(encrypted, tradeSha)
+
+  assert.deepEqual(diagnostics, {
+    tradeInfoLength: encrypted.length,
+    tradeInfoIsHex: true,
+    tradeInfoHexLengthIsEven: true,
+    tradeInfoHexLengthMultipleOf32: true,
+    tradeInfoFingerprint: diagnostics.tradeInfoFingerprint,
+    tradeShaLength: 64,
+    tradeShaLooksSha256: true,
+  })
+  assert.match(diagnostics.tradeInfoFingerprint, /^[0-9a-f]{12}$/)
 })
 
 test('createTradeSha returns uppercase SHA256 and verifyTradeSha validates it', () => {

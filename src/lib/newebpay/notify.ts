@@ -1,4 +1,4 @@
-import { decryptTradeInfo, verifyTradeSha } from './crypto'
+import { decryptTradeInfo, getEncryptedTradeInfoDiagnostics, verifyTradeSha } from './crypto'
 import type { MarkPaymentPaidInput, MarkPaymentPaidResult } from '../supabase/payments'
 
 export type NewebPayNotifyResult = {
@@ -17,6 +17,21 @@ export type NewebPayNotifyPaymentPersistenceResult =
   | { ok: true; ignored: true; status: string }
   | { ok: true; paymentStatus: 'paid'; result: 'updated' | 'already_paid' }
   | { ok: false; error: 'payment_not_found'; result: 'not_found' }
+
+export type NewebPayNotifyErrorMetadata = {
+  status: string
+  merchantId: string
+  tradeInfoLength: number
+  tradeInfoIsHex: boolean
+  tradeInfoHexLengthIsEven: boolean
+  tradeInfoHexLengthMultipleOf32: boolean
+  tradeInfoFingerprint: string
+  tradeShaLength: number
+  tradeShaLooksSha256: boolean
+  formKeys: string[]
+  errorName: string
+  errorMessage: string
+}
 
 type MarkPaymentPaidHandler = (input: MarkPaymentPaidInput) => Promise<MarkPaymentPaidResult>
 
@@ -77,6 +92,33 @@ function parseDecryptedTradeInfo(decryptedTradeInfo: string): Record<string, unk
 
 function getResultRecord(root: Record<string, unknown>) {
   return isRecord(root.Result) ? root.Result : root
+}
+
+export function buildNewebPayNotifyErrorMetadata({
+  status,
+  merchantId,
+  tradeInfo,
+  tradeSha,
+  formKeys = [],
+  error,
+}: {
+  status: string
+  merchantId: string
+  tradeInfo: string
+  tradeSha: string
+  formKeys?: string[]
+  error: unknown
+}): NewebPayNotifyErrorMetadata {
+  const diagnostics = getEncryptedTradeInfoDiagnostics(tradeInfo, tradeSha)
+
+  return {
+    status,
+    merchantId,
+    ...diagnostics,
+    formKeys: [...formKeys].sort(),
+    errorName: error instanceof Error ? error.name : 'Error',
+    errorMessage: error instanceof Error ? error.message : 'Invalid NewebPay notify payload',
+  }
 }
 
 export function buildNewebPayNotifyRawPayload(result: NewebPayNotifyResult): Record<string, unknown> {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { createCipheriv } from 'node:crypto'
 import { createTradeSha, encryptTradeInfo } from './crypto'
 import {
+  buildNewebPayNotifyErrorMetadata,
   buildMarkPaymentPaidInputFromNotify,
   buildNewebPayNotifyRawPayload,
   parseNewebPayNotifyPayload,
@@ -99,6 +100,27 @@ assert.throws(
   () => parseNewebPayNotifyPayload(createPayload(queryTradeInfo, { tradeSha: '0'.repeat(64) })),
   /Invalid TradeSha/,
 )
+
+assert.throws(
+  () => parseNewebPayNotifyPayload(createPayload('UNSAFE_RAW_TRADE_INFO_VALUE')),
+  /TradeInfo must be hex encoded/,
+)
+
+const notifyErrorMetadata = buildNewebPayNotifyErrorMetadata({
+  status: 'SUCCESS',
+  merchantId,
+  tradeInfo: 'UNSAFE_RAW_TRADE_INFO_VALUE',
+  tradeSha: 'UNSAFE_RAW_TRADE_SHA_VALUE',
+  formKeys: ['TradeSha', 'TradeInfo', 'Version', 'MerchantID', 'Status'],
+  error: new Error('bad decrypt'),
+})
+const serializedNotifyErrorMetadata = JSON.stringify(notifyErrorMetadata)
+
+assert.deepEqual(notifyErrorMetadata.formKeys, ['MerchantID', 'Status', 'TradeInfo', 'TradeSha', 'Version'])
+assert.equal(serializedNotifyErrorMetadata.includes('UNSAFE_RAW_TRADE_INFO_VALUE'), false)
+assert.equal(serializedNotifyErrorMetadata.includes('UNSAFE_RAW_TRADE_SHA_VALUE'), false)
+assert.equal(notifyErrorMetadata.tradeShaLength, 'UNSAFE_RAW_TRADE_SHA_VALUE'.length)
+assert.equal(notifyErrorMetadata.tradeShaLooksSha256, false)
 
 const jsonTradeInfo = encryptText(JSON.stringify({
   Status: 'SUCCESS',
