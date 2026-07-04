@@ -1,5 +1,7 @@
 import { decryptTradeInfo, getEncryptedTradeInfoDiagnostics, verifyTradeSha } from './crypto'
-import type { MarkPaymentPaidInput, MarkPaymentPaidResult } from '../supabase/payments'
+import type { NewebPayQueryResult, QueryNewebPayTradeInput } from './query'
+import type { NewebPayConfig } from './types'
+import type { MarkPaymentPaidInput, MarkPaymentPaidResult, PaymentRecord } from '../supabase/payments'
 
 export type NewebPayNotifyResult = {
   status: string
@@ -18,6 +20,20 @@ export type NewebPayNotifyPaymentPersistenceResult =
   | { ok: true; paymentStatus: 'paid'; result: 'updated' | 'already_paid' }
   | { ok: false; error: 'payment_not_found'; result: 'not_found' }
 
+export type NewebPayNotifyQueryFallbackResult =
+  | { ok: true; paymentStatus: 'paid'; result: 'updated' | 'already_paid'; query: NewebPayQueryResult }
+  | {
+      ok: true
+      ignored: true
+      reason:
+        | 'query_not_paid'
+        | 'query_amount_mismatch'
+        | 'query_merchant_order_mismatch'
+        | 'missing_payment_amount'
+      query?: NewebPayQueryResult
+    }
+  | { ok: false; error: 'payment_not_found'; result: 'not_found' }
+
 export type NewebPayNotifyErrorMetadata = {
   status: string
   merchantId: string
@@ -34,6 +50,8 @@ export type NewebPayNotifyErrorMetadata = {
 }
 
 type MarkPaymentPaidHandler = (input: MarkPaymentPaidInput) => Promise<MarkPaymentPaidResult>
+type GetPaymentByMerchantOrderNoHandler = (merchantOrderNo: string) => Promise<PaymentRecord | null>
+type QueryNewebPayTradeHandler = (input: QueryNewebPayTradeInput) => Promise<NewebPayQueryResult>
 
 type ParseNewebPayNotifyPayloadInput = {
   status: string
@@ -134,6 +152,20 @@ export function buildNewebPayNotifyRawPayload(result: NewebPayNotifyResult): Rec
   }
 }
 
+export function buildNewebPayQueryFallbackRawPayload(result: NewebPayQueryResult): Record<string, unknown> {
+  return {
+    source: 'query_fallback',
+    status: result.status,
+    merchantOrderNo: result.merchantOrderNo,
+    tradeStatus: result.tradeStatus ?? null,
+    tradeNo: result.tradeNo ?? null,
+    amount: result.amount,
+    paymentType: result.paymentType ?? null,
+    paymentMethod: result.paymentMethod ?? null,
+    payTime: result.payTime ?? null,
+  }
+}
+
 export function buildMarkPaymentPaidInputFromNotify(
   result: NewebPayNotifyResult,
   notifyReceivedAt = new Date().toISOString(),
@@ -180,6 +212,115 @@ export async function persistNewebPayNotifyPaymentResult(
     ok: true,
     paymentStatus: 'paid',
     result: updateResult.result,
+  }
+}
+
+function getPaymentRawPayloadAmount(payment: PaymentRecord) {
+  const amount = payment.rawPayload?.amount
+  const normalizedAmount = typeof amount === 'number' ? amount : Number(getString(amount))
+  return Number.isFinite(normalizedAmount) && normalizedAmount > 0 ? normalizedAmount : null
+}
+
+export function isNewebPayTradeInfoDecryptError(error: unknown) {
+  const message = error instanceof Error ? error.message : ''
+  return (
+    message.includes('bad decrypt') ||
+    message.startsWith('TradeInfo must be') ||
+    message.startsWith('TradeInfo hex length')
+  )
+}
+
+export async function persistNewebPayNotifyQueryFallback({
+  merchantOrderNo,
+  config,
+  getPaymentByMerchantOrderNo,
+  queryNewebPayTrade,
+  markPaymentPaid,
+  notifyReceivedAt = new Date().toISOString(),
+}: {
+  merchantOrderNo: string
+  config: NewebPayConfig
+  getPaymentByMerchantOrderNo: GetPaymentByMerchantOrderNoHandler
+  queryNewebPayTrade: QueryNewebPayTradeHandler
+  markPaymentPaid: MarkPaymentPaidHandler
+  notifyReceivedAt?: string
+}): Promise<NewebPayNotifyQueryFallbackResult> {
+  const payment = await getPaymentByMerchantOrderNo(merchantOrderNo)
+
+  if (!payment) {
+    return {
+      ok: false,
+      error: 'payment_not_found',
+      result: 'not_found',
+    }
+  }
+
+  const amount = getPaymentRawPayloadAmount(payment)
+  if (!amount) {
+    return {
+      ok: true,
+      ignored: true,
+      reason: 'missing_payment_amount',
+    }
+  }
+
+  const query = await queryNewebPayTrade({
+    merchantId: config.merchantId,
+    merchantOrderNo,
+    amount,
+    hashKey: config.hashKey,
+    hashIv: config.hashIv,
+    env: config.env,
+  })
+
+  if (query.status !== 'SUCCESS' || query.tradeStatus !== '1') {
+    return {
+      ok: true,
+      ignored: true,
+      reason: 'query_not_paid',
+      query,
+    }
+  }
+
+  if (query.merchantOrderNo !== merchantOrderNo) {
+    return {
+      ok: true,
+      ignored: true,
+      reason: 'query_merchant_order_mismatch',
+      query,
+    }
+  }
+
+  if (query.amount !== amount) {
+    return {
+      ok: true,
+      ignored: true,
+      reason: 'query_amount_mismatch',
+      query,
+    }
+  }
+
+  const updateResult = await markPaymentPaid({
+    merchantOrderNo,
+    providerTradeNo: query.tradeNo ?? null,
+    paidAt: query.payTime ?? notifyReceivedAt,
+    notifyReceivedAt,
+    rawPayload: buildNewebPayQueryFallbackRawPayload(query),
+  })
+
+  if (updateResult.result === 'not_found') {
+    return {
+      ok: false,
+      error: 'payment_not_found',
+      result: 'not_found',
+    }
+  }
+
+  return {
+    ok: true,
+    paymentStatus: 'paid',
+    result: updateResult.result,
+    query,
   }
 }
 

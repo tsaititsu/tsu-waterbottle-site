@@ -67,8 +67,17 @@ assert.equal(decrypted.get('Amt'), '3600')
 assert.equal(decrypted.get('ItemDesc'), '水瓶先生論命')
 assert.equal(decrypted.get('CREDIT'), '1')
 assert.equal(decrypted.has('LINEPAY'), false)
-assert.equal(decrypted.get('NotifyURL'), 'http://localhost:3000/api/payments/newebpay/notify')
-assert.equal(decrypted.get('ReturnURL'), 'http://localhost:3000/payment/newebpay/return')
+assert.equal(
+  decrypted.get('NotifyURL'),
+  'http://localhost:3000/api/payments/newebpay/notify?merchantOrderNo=WB20260703172530A1B2',
+)
+assert.equal(
+  decrypted.get('ReturnURL'),
+  'http://localhost:3000/payment/newebpay/return?merchantOrderNo=WB20260703172530A1B2',
+)
+assert.equal(decrypted.get('NotifyURL')?.includes('Amt='), false)
+assert.equal(decrypted.get('NotifyURL')?.includes('TradeInfo='), false)
+assert.equal(decrypted.get('NotifyURL')?.includes('TradeSha='), false)
 assert.equal(decrypted.get('ClientBackURL'), 'http://localhost:3000/booking')
 
 const smokeData = createNewebPayMpgPaymentData({

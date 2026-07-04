@@ -75,6 +75,12 @@ function getPendingPaymentTarget(itemKey: NewebPayPaymentItemKey) {
   }
 }
 
+function buildMerchantOrderUrl(siteUrl: string, pathname: string, merchantOrderNo: string) {
+  const url = new URL(pathname, `${siteUrl}/`)
+  url.searchParams.set('merchantOrderNo', merchantOrderNo)
+  return url.toString()
+}
+
 export function buildNewebPayPendingPaymentMetadata({
   itemKey,
   source,
@@ -119,8 +125,8 @@ export function createNewebPayMpgPaymentData({
     MerchantOrderNo: merchantOrderNo,
     Amt: item.amount,
     ItemDesc: item.itemDesc,
-    ReturnURL: `${config.siteUrl}/payment/newebpay/return`,
-    NotifyURL: `${config.siteUrl}/api/payments/newebpay/notify`,
+    ReturnURL: buildMerchantOrderUrl(config.siteUrl, '/payment/newebpay/return', merchantOrderNo),
+    NotifyURL: buildMerchantOrderUrl(config.siteUrl, '/api/payments/newebpay/notify', merchantOrderNo),
     ClientBackURL: `${config.siteUrl}/booking`,
     LangType: 'zh-tw',
   }

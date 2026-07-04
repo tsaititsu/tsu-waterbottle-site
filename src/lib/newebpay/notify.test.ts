@@ -6,8 +6,10 @@ import {
   buildMarkPaymentPaidInputFromNotify,
   buildNewebPayNotifyRawPayload,
   parseNewebPayNotifyPayload,
+  persistNewebPayNotifyQueryFallback,
   persistNewebPayNotifyPaymentResult,
 } from './notify'
+import type { PaymentRecord } from '../supabase/payments'
 
 const hashKey = '12345678901234567890123456789012'
 const hashIv = '1234567890123456'
@@ -209,7 +211,188 @@ async function runPaymentPersistenceAssertions() {
   )
 }
 
-runPaymentPersistenceAssertions().catch((error) => {
+function createPaymentRecord(overrides: Partial<PaymentRecord> = {}): PaymentRecord {
+  return {
+    id: 'payment-1',
+    userId: null,
+    bookingId: null,
+    provider: 'newebpay',
+    providerPaymentId: null,
+    itemType: 'newebpay_smoke_test',
+    itemId: 'newebpay_live_smoke_test_1',
+    itemName: '藍新正式環境測試付款',
+    amountTwd: 1,
+    currency: 'TWD',
+    status: 'pending',
+    paidAt: null,
+    refundedAt: null,
+    rawPayload: {
+      amount: 1,
+      itemKey: 'newebpay_live_smoke_test_1',
+      merchantOrderNo: 'WB20260703172530A1B2',
+    },
+    merchantOrderNo: 'WB20260703172530A1B2',
+    providerTradeNo: null,
+    notifyReceivedAt: null,
+    failureReason: null,
+    createdAt: '2026-07-03T09:00:00.000Z',
+    updatedAt: '2026-07-03T09:00:00.000Z',
+    ...overrides,
+  }
+}
+
+async function runQueryFallbackAssertions() {
+  const config = {
+    merchantId,
+    hashKey,
+    hashIv,
+    env: 'production' as const,
+    version: '2.3',
+    siteUrl: 'https://example.com',
+    mpgGatewayUrl: 'https://core.newebpay.com/MPG/mpg_gateway',
+    mpgEndpoint: 'https://core.newebpay.com/MPG/mpg_gateway',
+  }
+  let queryInput: unknown
+  let markInput: unknown
+  const successQuery = {
+    status: 'SUCCESS',
+    merchantOrderNo: 'WB20260703172530A1B2',
+    amount: 1,
+    tradeStatus: '1',
+    tradeNo: '26070416000012345',
+    paymentType: 'CREDIT',
+    paymentMethod: 'CREDIT',
+    payTime: '2026-07-04 16:00:00',
+    rawResult: {},
+  }
+
+  const updated = await persistNewebPayNotifyQueryFallback({
+    merchantOrderNo: 'WB20260703172530A1B2',
+    config,
+    getPaymentByMerchantOrderNo: async () => createPaymentRecord(),
+    queryNewebPayTrade: async (input) => {
+      queryInput = input
+      return successQuery
+    },
+    markPaymentPaid: async (input) => {
+      markInput = input
+      return { result: 'updated', payment: createPaymentRecord({ status: 'paid' }) }
+    },
+    notifyReceivedAt: '2026-07-04T08:01:00.000Z',
+  })
+
+  assert.deepEqual(updated, {
+    ok: true,
+    paymentStatus: 'paid',
+    result: 'updated',
+    query: successQuery,
+  })
+  assert.deepEqual(queryInput, {
+    merchantId,
+    merchantOrderNo: 'WB20260703172530A1B2',
+    amount: 1,
+    hashKey,
+    hashIv,
+    env: 'production',
+  })
+  assert.deepEqual(markInput, {
+    merchantOrderNo: 'WB20260703172530A1B2',
+    providerTradeNo: '26070416000012345',
+    paidAt: '2026-07-04 16:00:00',
+    notifyReceivedAt: '2026-07-04T08:01:00.000Z',
+    rawPayload: {
+      source: 'query_fallback',
+      status: 'SUCCESS',
+      merchantOrderNo: 'WB20260703172530A1B2',
+      tradeStatus: '1',
+      tradeNo: '26070416000012345',
+      amount: 1,
+      paymentType: 'CREDIT',
+      paymentMethod: 'CREDIT',
+      payTime: '2026-07-04 16:00:00',
+    },
+  })
+  assert.equal(markInput && 'bookingId' in (markInput as Record<string, unknown>), false)
+  assert.equal(
+    JSON.stringify((markInput as { rawPayload: Record<string, unknown> }).rawPayload).includes('bookingStatus'),
+    false,
+  )
+
+  const alreadyPaid = await persistNewebPayNotifyQueryFallback({
+    merchantOrderNo: 'WB20260703172530A1B2',
+    config,
+    getPaymentByMerchantOrderNo: async () => createPaymentRecord({ status: 'paid' }),
+    queryNewebPayTrade: async () => successQuery,
+    markPaymentPaid: async () => ({ result: 'already_paid', payment: createPaymentRecord({ status: 'paid' }) }),
+  })
+  assert.equal(alreadyPaid.ok, true)
+  assert.equal('result' in alreadyPaid && alreadyPaid.result, 'already_paid')
+
+  let markCalled = false
+  const notPaid = await persistNewebPayNotifyQueryFallback({
+    merchantOrderNo: 'WB20260703172530A1B2',
+    config,
+    getPaymentByMerchantOrderNo: async () => createPaymentRecord(),
+    queryNewebPayTrade: async () => ({ ...successQuery, tradeStatus: '0' }),
+    markPaymentPaid: async () => {
+      markCalled = true
+      return { result: 'updated', payment: createPaymentRecord({ status: 'paid' }) }
+    },
+  })
+  assert.deepEqual(notPaid, {
+    ok: true,
+    ignored: true,
+    reason: 'query_not_paid',
+    query: { ...successQuery, tradeStatus: '0' },
+  })
+  assert.equal(markCalled, false)
+
+  const amountMismatch = await persistNewebPayNotifyQueryFallback({
+    merchantOrderNo: 'WB20260703172530A1B2',
+    config,
+    getPaymentByMerchantOrderNo: async () => createPaymentRecord(),
+    queryNewebPayTrade: async () => ({ ...successQuery, amount: 2 }),
+    markPaymentPaid: async () => {
+      throw new Error('markPaymentPaid should not be called')
+    },
+  })
+  assert.equal(amountMismatch.ok, true)
+  assert.equal('reason' in amountMismatch && amountMismatch.reason, 'query_amount_mismatch')
+
+  const orderMismatch = await persistNewebPayNotifyQueryFallback({
+    merchantOrderNo: 'WB20260703172530A1B2',
+    config,
+    getPaymentByMerchantOrderNo: async () => createPaymentRecord(),
+    queryNewebPayTrade: async () => ({ ...successQuery, merchantOrderNo: 'WB20260703172530ZZZZ' }),
+    markPaymentPaid: async () => {
+      throw new Error('markPaymentPaid should not be called')
+    },
+  })
+  assert.equal(orderMismatch.ok, true)
+  assert.equal('reason' in orderMismatch && orderMismatch.reason, 'query_merchant_order_mismatch')
+
+  let queryCalled = false
+  const notFound = await persistNewebPayNotifyQueryFallback({
+    merchantOrderNo: 'WB20260703172530A1B2',
+    config,
+    getPaymentByMerchantOrderNo: async () => null,
+    queryNewebPayTrade: async () => {
+      queryCalled = true
+      return successQuery
+    },
+    markPaymentPaid: async () => {
+      throw new Error('markPaymentPaid should not be called')
+    },
+  })
+  assert.deepEqual(notFound, {
+    ok: false,
+    error: 'payment_not_found',
+    result: 'not_found',
+  })
+  assert.equal(queryCalled, false)
+}
+
+Promise.all([runPaymentPersistenceAssertions(), runQueryFallbackAssertions()]).catch((error) => {
   console.error(error)
   process.exitCode = 1
 })
