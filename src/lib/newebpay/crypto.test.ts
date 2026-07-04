@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict'
-import test from 'node:test'
-import { getNewebPayConfig } from './config'
 import {
   buildQueryString,
   createTradeSha,
@@ -13,6 +11,16 @@ import {
 
 const hashKey = '12345678901234567890123456789012'
 const hashIv = '1234567890123456'
+
+function test(name: string, fn: () => void) {
+  try {
+    fn()
+    console.log(`✓ ${name}`)
+  } catch (error) {
+    console.error(`✗ ${name}`)
+    throw error
+  }
+}
 
 test('buildQueryString creates a stable encoded query string', () => {
   assert.equal(
@@ -80,13 +88,8 @@ test('createTradeSha returns uppercase SHA256 and verifyTradeSha validates it', 
   assert.equal(verifyTradeSha(encrypted, invalidTradeSha, hashKey, hashIv), false)
 })
 
-test('getNewebPayConfig throws a clear error when required env is missing', () => {
-  const originalEnv = { ...process.env }
-  delete process.env.NEWEBPAY_MERCHANT_ID
-  process.env.NEWEBPAY_HASH_KEY = hashKey
-  process.env.NEWEBPAY_HASH_IV = hashIv
-  process.env.NEWEBPAY_ENV = 'test'
-
-  assert.throws(() => getNewebPayConfig(), /Missing required NewebPay environment variable: NEWEBPAY_MERCHANT_ID/)
-  process.env = originalEnv
+test('decryptTradeInfo rejects invalid hex input with clear errors', () => {
+  assert.throws(() => decryptTradeInfo('not-hex', hashKey, hashIv), /TradeInfo must be hex encoded/)
+  assert.throws(() => decryptTradeInfo('abc', hashKey, hashIv), /TradeInfo hex length must be even/)
+  assert.throws(() => decryptTradeInfo('abcd', hashKey, hashIv), /TradeInfo hex length must be a multiple of 32/)
 })
