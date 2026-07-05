@@ -5,6 +5,7 @@ import {
   createNewebPayMpgPaymentData,
   isNewebPayPaymentMode,
   isNewebPayPaymentSource,
+  resolveNewebPayDivinationPendingPaymentLink,
   resolveNewebPayBookingIdForPayment,
   resolveNewebPayDivinationReadingIdForPayment,
   type NewebPayPaymentMode,
@@ -15,6 +16,7 @@ import { getNewebPayPaymentItem } from '@/lib/newebpay/paymentItems'
 import { getSupabaseBookingPaymentContext } from '@/lib/supabase/bookings'
 import {
   getDivinationReadingPaymentContext,
+  linkDivinationReadingPendingPayment,
   validateDivinationReadingPayment,
 } from '@/lib/supabase/divinationReadings'
 import { createPendingPayment } from '@/lib/supabase/payments'
@@ -60,6 +62,43 @@ function divinationReadingLookupErrorResponse(input: { readingId: string; error:
   })
 
   return NextResponse.json({ ok: false, error: 'divination_reading_lookup_failed' }, { status: 500 })
+}
+
+function divinationPaymentLinkErrorResponse(input: {
+  readingId: string
+  paymentId: string
+  merchantOrderNo: string
+  error: unknown
+}) {
+  console.error('藍新占卜 payment link 失敗', {
+    readingId: input.readingId,
+    paymentId: input.paymentId,
+    merchantOrderNo: input.merchantOrderNo,
+    error: input.error instanceof Error ? input.error.message : 'unknown_error',
+  })
+
+  return NextResponse.json({ ok: false, error: 'divination_payment_link_failed' }, { status: 500 })
+}
+
+function divinationPaymentLinkResultResponse(input: {
+  readingId: string
+  paymentId: string
+  merchantOrderNo: string
+  result: 'already_linked' | 'not_found' | 'not_payable'
+}) {
+  const resolution = resolveNewebPayDivinationPendingPaymentLink(input.result)
+
+  console.warn('藍新占卜 payment link 未完成', {
+    readingId: input.readingId,
+    paymentId: input.paymentId,
+    merchantOrderNo: input.merchantOrderNo,
+    result: input.result,
+  })
+
+  return NextResponse.json(
+    { ok: false, error: resolution.ok ? 'divination_payment_link_failed' : resolution.error },
+    { status: 400 },
+  )
 }
 
 export async function POST(request: Request) {
@@ -157,8 +196,10 @@ export async function POST(request: Request) {
       readingId,
     })
 
+    let pendingPayment: Awaited<ReturnType<typeof createPendingPayment>>
+
     try {
-      await createPendingPayment({
+      pendingPayment = await createPendingPayment({
         provider: 'newebpay',
         itemType: pendingPaymentMetadata.itemType,
         itemId: pendingPaymentMetadata.itemId,
@@ -174,6 +215,32 @@ export async function POST(request: Request) {
         itemKey: item.itemKey,
         error,
       })
+    }
+
+    if (readingId) {
+      try {
+        const linkResult = await linkDivinationReadingPendingPayment({
+          readingId,
+          paymentId: pendingPayment.id,
+          merchantOrderNo: paymentData.merchantOrderNo,
+        })
+
+        if (linkResult.result !== 'linked') {
+          return divinationPaymentLinkResultResponse({
+            readingId,
+            paymentId: pendingPayment.id,
+            merchantOrderNo: paymentData.merchantOrderNo,
+            result: linkResult.result,
+          })
+        }
+      } catch (error) {
+        return divinationPaymentLinkErrorResponse({
+          readingId,
+          paymentId: pendingPayment.id,
+          merchantOrderNo: paymentData.merchantOrderNo,
+          error,
+        })
+      }
     }
 
     return NextResponse.json({

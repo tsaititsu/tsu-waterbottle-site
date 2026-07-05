@@ -6,6 +6,7 @@ import {
   createNewebPayMpgPaymentData,
   isNewebPayPaymentMode,
   isNewebPayPaymentSource,
+  resolveNewebPayDivinationPendingPaymentLink,
   resolveNewebPayBookingIdForPayment,
   resolveNewebPayDivinationReadingIdForPayment,
   validateNewebPayBookingPayment,
@@ -127,6 +128,13 @@ assert.deepEqual(
 assert.deepEqual(
   resolveNewebPayDivinationReadingIdForPayment({
     itemKey: 'newebpay_live_smoke_test_1',
+    readingId,
+  }),
+  { ok: false, error: 'divination_reading_id_not_allowed' },
+)
+assert.deepEqual(
+  resolveNewebPayDivinationReadingIdForPayment({
+    itemKey: 'newebpay_live_smoke_test_1',
   }),
   { ok: true, readingId: null },
 )
@@ -174,6 +182,20 @@ assert.deepEqual(
   }),
   { ok: true },
 )
+
+assert.deepEqual(resolveNewebPayDivinationPendingPaymentLink('linked'), { ok: true })
+assert.deepEqual(resolveNewebPayDivinationPendingPaymentLink('already_linked'), {
+  ok: false,
+  error: 'divination_reading_already_linked',
+})
+assert.deepEqual(resolveNewebPayDivinationPendingPaymentLink('not_found'), {
+  ok: false,
+  error: 'divination_reading_not_found',
+})
+assert.deepEqual(resolveNewebPayDivinationPendingPaymentLink('not_payable'), {
+  ok: false,
+  error: 'divination_reading_not_payable',
+})
 
 const data = createNewebPayMpgPaymentData({
   itemKey: 'booking_consultation_60',
@@ -286,6 +308,12 @@ assert.equal('HashKey' in divinationPendingPaymentMetadata.rawPayload, false)
 assert.equal('HashIV' in divinationPendingPaymentMetadata.rawPayload, false)
 assert.equal('question' in divinationPendingPaymentMetadata.rawPayload, false)
 assert.equal('interpretation' in divinationPendingPaymentMetadata.rawPayload, false)
+assert.equal('status' in divinationPendingPaymentMetadata.rawPayload, false)
+assert.equal('payment_id' in divinationPendingPaymentMetadata.rawPayload, false)
+assert.equal('merchant_order_no' in divinationPendingPaymentMetadata.rawPayload, false)
+assert.equal('bookingId' in divinationPendingPaymentMetadata.rawPayload, false)
+assert.equal('courseId' in divinationPendingPaymentMetadata.rawPayload, false)
+assert.equal('productId' in divinationPendingPaymentMetadata.rawPayload, false)
 
 const bookingPendingPaymentMetadata = buildNewebPayPendingPaymentMetadata({
   itemKey: 'booking_consultation_60',

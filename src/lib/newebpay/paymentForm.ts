@@ -33,6 +33,22 @@ export type NewebPayBookingPaymentValidationResult =
   | { ok: true }
   | { ok: false; error: 'booking_not_found' | 'booking_amount_mismatch' | 'booking_already_paid' }
 
+export type NewebPayDivinationPendingPaymentLinkResult =
+  | 'linked'
+  | 'already_linked'
+  | 'not_found'
+  | 'not_payable'
+
+export type NewebPayDivinationPendingPaymentLinkResolution =
+  | { ok: true }
+  | {
+      ok: false
+      error:
+        | 'divination_reading_already_linked'
+        | 'divination_reading_not_found'
+        | 'divination_reading_not_payable'
+    }
+
 export type NewebPayMpgPaymentFields = {
   MerchantID: string
   TradeInfo: string
@@ -182,6 +198,25 @@ export function validateNewebPayBookingPayment(input: {
   }
 
   return { ok: true }
+}
+
+export function resolveNewebPayDivinationPendingPaymentLink(
+  result: NewebPayDivinationPendingPaymentLinkResult,
+): NewebPayDivinationPendingPaymentLinkResolution {
+  if (result === 'linked') {
+    return { ok: true }
+  }
+
+  const errorByResult = {
+    already_linked: 'divination_reading_already_linked',
+    not_found: 'divination_reading_not_found',
+    not_payable: 'divination_reading_not_payable',
+  } as const
+
+  return {
+    ok: false,
+    error: errorByResult[result],
+  }
 }
 
 function getPendingPaymentTarget(itemKey: NewebPayPaymentItemKey, bookingId?: string | null) {
