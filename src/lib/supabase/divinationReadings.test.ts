@@ -59,6 +59,44 @@ assert.equal(pendingPayloadWithDraw.user_id, null)
 assert.equal(pendingPayloadWithDraw.external_reading_id, null)
 assert.equal(pendingPayloadWithDraw.source, 'waterbottle-ai-divination')
 
+const pendingPayloadForDbCreate = buildPendingDivinationReadingPayload(
+  {
+    externalReadingId: 'local-reading-2',
+    question: '我今天適合怎麼面對工作？',
+    drawMode: 'manual',
+    rawPayload: {
+      source: 'ai_divination',
+      flow: 'readings_create',
+      localReadingId: 'local-reading-2',
+      amount: 50,
+      TradeInfo: 'unsafe-trade-info',
+      TradeSha: 'unsafe-trade-sha',
+      HashKey: 'unsafe-hash-key',
+      HashIV: 'unsafe-hash-iv',
+      interpretation: 'unsafe-interpretation',
+    },
+  },
+  '2026-07-05T12:20:00.000Z',
+)
+
+assert.equal(pendingPayloadForDbCreate.question, '我今天適合怎麼面對工作？')
+assert.equal(pendingPayloadForDbCreate.status, 'pending_payment')
+assert.equal(pendingPayloadForDbCreate.source, 'waterbottle-ai-divination')
+assert.deepEqual(pendingPayloadForDbCreate.raw_payload, {
+  source: 'ai_divination',
+  flow: 'readings_create',
+  localReadingId: 'local-reading-2',
+  amount: 50,
+})
+assert.equal(pendingPayloadForDbCreate.card_id, null)
+assert.equal(pendingPayloadForDbCreate.card_name, null)
+assert.equal(pendingPayloadForDbCreate.position, null)
+assert.equal('TradeInfo' in pendingPayloadForDbCreate.raw_payload, false)
+assert.equal('TradeSha' in pendingPayloadForDbCreate.raw_payload, false)
+assert.equal('HashKey' in pendingPayloadForDbCreate.raw_payload, false)
+assert.equal('HashIV' in pendingPayloadForDbCreate.raw_payload, false)
+assert.equal('interpretation' in pendingPayloadForDbCreate.raw_payload, false)
+
 const paidPayload = buildDivinationPaidUpdatePayload(
   {
     paymentId: 'payment-1',

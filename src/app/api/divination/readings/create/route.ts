@@ -8,6 +8,7 @@ import type {
   DivinationPosition,
   DivinationReadingPreview,
 } from "@/lib/divination/types"
+import { createPendingDivinationReading } from "@/lib/supabase/divinationReadings"
 
 type RequestBody = Partial<Record<keyof CreateDivinationReadingRequest, unknown>>
 
@@ -26,6 +27,10 @@ function createMockReadingId() {
   return typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
     : `mock_${Date.now()}`
+}
+
+function shouldPersistDivinationReading() {
+  return process.env.ENABLE_DIVINATION_DB_READINGS === "true"
 }
 
 export async function POST(request: Request) {
@@ -72,7 +77,37 @@ export async function POST(request: Request) {
     } satisfies CreateDivinationReadingResponse)
   }
 
-  const readingId = createMockReadingId()
+  const localReadingId = createMockReadingId()
+  let readingId = localReadingId
+  let persisted = false
+
+  if (shouldPersistDivinationReading()) {
+    try {
+      const persistedReading = await createPendingDivinationReading({
+        externalReadingId: localReadingId,
+        question,
+        drawMode: drawMode as DivinationDrawMode,
+        cardId: selectedCard?.id ?? null,
+        cardName: selectedCard?.name ?? null,
+        position: positions.has(position as DivinationPosition) ? (position as DivinationPosition) : null,
+        source: "ai_divination",
+        rawPayload: {
+          source: "ai_divination",
+          flow: "readings_create",
+          localReadingId,
+          drawMode: drawMode as DivinationDrawMode,
+          cardId: selectedCard?.id ?? null,
+          position: positions.has(position as DivinationPosition) ? (position as DivinationPosition) : null,
+        },
+      })
+
+      readingId = persistedReading.id
+      persisted = true
+    } catch {
+      return jsonError("divination_reading_create_failed", 500)
+    }
+  }
+
   const reading = {
     id: readingId,
     question,
@@ -87,7 +122,8 @@ export async function POST(request: Request) {
   const response = {
     ok: true,
     reading,
-  } satisfies CreateDivinationReadingResponse
+    persisted,
+  } as CreateDivinationReadingResponse & { persisted: boolean }
 
   // Local development only. Gate is checked when the user starts interpretation.
   return NextResponse.json(response)

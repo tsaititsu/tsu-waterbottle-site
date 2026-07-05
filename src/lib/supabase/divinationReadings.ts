@@ -34,6 +34,11 @@ export type PendingDivinationReadingPayload = {
   updated_at: string
 }
 
+export type PendingDivinationReadingRow = {
+  id: string
+  status: 'pending_payment'
+}
+
 export type BuildDivinationPaidUpdatePayloadInput = {
   paymentId: string
   merchantOrderNo: string
@@ -106,6 +111,13 @@ function resolveTimestamp(value: string | null | undefined, now: string) {
   return value?.trim() || now
 }
 
+function sanitizeDivinationReadingRawPayload(rawPayload?: Record<string, unknown>) {
+  if (!rawPayload) return null
+
+  const unsafeKeys = new Set(['TradeInfo', 'TradeSha', 'HashKey', 'HashIV', 'interpretation', 'aiInterpretation'])
+  return Object.fromEntries(Object.entries(rawPayload).filter(([key]) => !unsafeKeys.has(key)))
+}
+
 export function buildPendingDivinationReadingPayload(
   input: BuildPendingDivinationReadingPayloadInput,
   now = new Date().toISOString(),
@@ -122,9 +134,27 @@ export function buildPendingDivinationReadingPayload(
     position: normalizeOptionalText(input.position),
     status: 'pending_payment',
     source: input.source?.trim() || 'waterbottle-ai-divination',
-    raw_payload: input.rawPayload ?? null,
+    raw_payload: sanitizeDivinationReadingRawPayload(input.rawPayload),
     updated_at: now,
   }
+}
+
+export async function createPendingDivinationReading(
+  input: BuildPendingDivinationReadingPayloadInput,
+): Promise<PendingDivinationReadingRow> {
+  const supabase = getSupabaseAdmin()
+  const insertPayload = buildPendingDivinationReadingPayload(input)
+  const { data, error } = await supabase
+    .from('divination_readings')
+    .insert(insertPayload)
+    .select('id,status')
+    .single()
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return data as PendingDivinationReadingRow
 }
 
 export function buildDivinationPaidUpdatePayload(
