@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { canBuyCourse, getCourseById, getCourseLockedReason, isCourseId, type CourseId } from '@/lib/courses'
 import { getNewebPayConfig } from '@/lib/newebpay/config'
-import { buildCoursePaymentRawPayload, buildNewebPayMerchantOrderUrl } from '@/lib/newebpay/coursePayment'
+import { buildCoursePaymentInsertPayload, buildNewebPayMerchantOrderUrl } from '@/lib/newebpay/coursePayment'
 import { createCoursePaymentMpgForm, generateMerchantOrderNo } from '@/lib/newebpay/mpg'
 import { getSupabaseAdmin, hasSupabaseAdminConfig } from '@/lib/supabase/admin'
 import { getUserIdFromRequest } from '@/lib/supabase/auth'
@@ -67,23 +67,16 @@ export async function POST(request: Request) {
 
     const { data: payment, error: paymentError } = await supabase
       .from('payments')
-      .insert({
-        user_id: userId,
-        provider: 'newebpay',
-        item_type: 'course',
-        item_id: course.id,
-        item_name: course.title,
-        amount_twd: course.price,
-        currency: 'TWD',
-        status: 'pending',
-        merchant_order_no: merchantOrderNo,
-        raw_payload: buildCoursePaymentRawPayload({
+      .insert(
+        buildCoursePaymentInsertPayload({
+          userId,
           courseId: course.id,
+          courseTitle: course.title,
           amount: course.price,
           merchantOrderNo,
           itemDesc,
         }),
-      })
+      )
       .select('id')
       .single()
 
