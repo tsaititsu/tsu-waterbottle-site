@@ -1,4 +1,5 @@
 import { decryptTradeInfo, getEncryptedTradeInfoDiagnostics, verifyTradeSha } from './crypto'
+import { syncDivinationReadingAfterPayment } from './divinationSync'
 import type { NewebPayQueryResult, QueryNewebPayTradeInput } from './query'
 import type { NewebPayConfig } from './types'
 import type { MarkBookingPaidInput, MarkBookingPaidResult } from '../supabase/bookingPayments'
@@ -60,6 +61,13 @@ export type NewebPayCourseSyncResult =
   | { courseSync: 'inserted' | 'updated' | 'already_paid'; userId: string; courseId: string }
   | { courseSync: 'failed'; userId: string | null; courseId: string | null; error: string }
 
+export type NewebPayDivinationSyncResult =
+  | { divinationSync: 'skipped_not_divination' }
+  | { divinationSync: 'skipped_missing_divination_context' }
+  | { divinationSync: 'updated' | 'already_paid' | 'not_found'; readingId: string }
+  | { divinationSync: 'invalid_state'; readingId: string; status: string | null }
+  | { divinationSync: 'failed'; readingId: string | null; error: string }
+
 export type NewebPayNotifyErrorMetadata = {
   status: string
   merchantId: string
@@ -80,6 +88,7 @@ type GetPaymentByMerchantOrderNoHandler = (merchantOrderNo: string) => Promise<P
 type QueryNewebPayTradeHandler = (input: QueryNewebPayTradeInput) => Promise<NewebPayQueryResult>
 type MarkBookingPaidHandler = (input: MarkBookingPaidInput) => Promise<MarkBookingPaidResult>
 type MarkCoursePaidHandler = (input: MarkCoursePaidInput) => Promise<MarkCoursePaidResult>
+type SyncDivinationReadingHandler = typeof syncDivinationReadingAfterPayment
 
 type NewebPayPaymentMatchValidationResult =
   | { ok: true; payment: PaymentRecord; localAmount: number; providerAmount: number }
@@ -116,6 +125,10 @@ function getString(value: unknown) {
 function getOptionalString(value: unknown) {
   const text = getString(value).trim()
   return text || undefined
+}
+
+function hasText(value: string | null | undefined): value is string {
+  return typeof value === 'string' && value.trim().length > 0
 }
 
 function getAmount(value: unknown) {
@@ -340,6 +353,69 @@ export async function syncNewebPayCourseAfterPayment({
       courseSync: 'failed',
       userId: payment.userId,
       courseId: payment.itemId,
+      error: error instanceof Error ? error.message : 'unknown_error',
+    }
+  }
+}
+
+export async function syncNewebPayDivinationAfterPayment({
+  payment,
+  merchantOrderNo,
+  syncDivinationReading = syncDivinationReadingAfterPayment,
+}: {
+  payment: PaymentPaidContext
+  merchantOrderNo: string
+  syncDivinationReading?: SyncDivinationReadingHandler
+}): Promise<NewebPayDivinationSyncResult> {
+  if (payment.itemType !== 'ai_divination') {
+    return {
+      divinationSync: 'skipped_not_divination',
+    }
+  }
+
+  if (!hasText(payment.id) || !hasText(payment.itemId) || !hasText(merchantOrderNo)) {
+    return {
+      divinationSync: 'skipped_missing_divination_context',
+    }
+  }
+
+  try {
+    const result = await syncDivinationReading({
+      paymentId: payment.id,
+      itemType: payment.itemType,
+      itemId: payment.itemId,
+      merchantOrderNo,
+      paidAt: payment.paidAt,
+    })
+
+    if (result.result === 'skipped_not_divination') {
+      return {
+        divinationSync: 'skipped_not_divination',
+      }
+    }
+
+    if (result.result === 'skipped_missing_divination_context') {
+      return {
+        divinationSync: 'skipped_missing_divination_context',
+      }
+    }
+
+    if (result.result === 'invalid_state') {
+      return {
+        divinationSync: 'invalid_state',
+        readingId: result.readingId,
+        status: result.status,
+      }
+    }
+
+    return {
+      divinationSync: result.result,
+      readingId: result.readingId,
+    }
+  } catch (error) {
+    return {
+      divinationSync: 'failed',
+      readingId: payment.itemId,
       error: error instanceof Error ? error.message : 'unknown_error',
     }
   }

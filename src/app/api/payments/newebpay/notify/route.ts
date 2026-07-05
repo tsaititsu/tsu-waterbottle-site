@@ -9,6 +9,7 @@ import {
   persistNewebPayNotifyPaymentResult,
   syncNewebPayBookingAfterPayment,
   syncNewebPayCourseAfterPayment,
+  syncNewebPayDivinationAfterPayment,
 } from '@/lib/newebpay/notify'
 import { queryNewebPayTrade } from '@/lib/newebpay/query'
 import { markBookingPaidById } from '@/lib/supabase/bookingPayments'
@@ -151,6 +152,56 @@ async function syncCourseAfterPayment(input: {
   return courseSync.courseSync
 }
 
+async function syncDivinationAfterPayment(input: {
+  merchantOrderNo: string
+  paymentResult: string
+  payment: Parameters<typeof syncNewebPayDivinationAfterPayment>[0]['payment']
+}) {
+  const divinationSync = await syncNewebPayDivinationAfterPayment({
+    payment: input.payment,
+    merchantOrderNo: input.merchantOrderNo,
+  })
+
+  if (divinationSync.divinationSync === 'skipped_not_divination') {
+    return divinationSync.divinationSync
+  }
+
+  if (divinationSync.divinationSync === 'skipped_missing_divination_context') {
+    console.info('NewebPay divination sync skipped', {
+      merchantOrderNo: input.merchantOrderNo,
+      paymentResult: input.paymentResult,
+      paymentId: input.payment.id,
+      itemType: input.payment.itemType,
+      itemId: input.payment.itemId,
+      divinationSync: divinationSync.divinationSync,
+    })
+    return divinationSync.divinationSync
+  }
+
+  if (divinationSync.divinationSync === 'failed') {
+    console.warn('NewebPay divination sync failed', {
+      merchantOrderNo: input.merchantOrderNo,
+      paymentResult: input.paymentResult,
+      paymentId: input.payment.id,
+      itemType: input.payment.itemType,
+      itemId: input.payment.itemId,
+      divinationSync: divinationSync.divinationSync,
+      error: divinationSync.error,
+    })
+    return divinationSync.divinationSync
+  }
+
+  console.info('NewebPay divination sync completed', {
+    merchantOrderNo: input.merchantOrderNo,
+    paymentResult: input.paymentResult,
+    paymentId: input.payment.id,
+    itemType: input.payment.itemType,
+    itemId: divinationSync.readingId,
+    divinationSync: divinationSync.divinationSync,
+  })
+  return divinationSync.divinationSync
+}
+
 function getNotifyQueryMerchantOrderNo(request: Request) {
   const value = new URL(request.url).searchParams.get('merchantOrderNo')?.trim()
   return value || null
@@ -271,6 +322,11 @@ export async function POST(request: Request) {
         paymentResult: paymentPersistence.result,
         payment: paymentPersistence.payment,
       })
+      const divinationSync = await syncDivinationAfterPayment({
+        merchantOrderNo: result.merchantOrderNo,
+        paymentResult: paymentPersistence.result,
+        payment: paymentPersistence.payment,
+      })
 
       return NextResponse.json({
         ok: true,
@@ -278,6 +334,7 @@ export async function POST(request: Request) {
         result: paymentPersistence.result,
         bookingSync,
         courseSync,
+        divinationSync,
       })
     } catch (error) {
       return notifyPaymentUpdateError(error, result)
@@ -362,6 +419,11 @@ export async function POST(request: Request) {
           paymentResult: fallbackResult.result,
           payment: fallbackResult.payment,
         })
+        const divinationSync = await syncDivinationAfterPayment({
+          merchantOrderNo: fallbackResult.query.merchantOrderNo,
+          paymentResult: fallbackResult.result,
+          payment: fallbackResult.payment,
+        })
 
         return NextResponse.json({
           ok: true,
@@ -369,6 +431,7 @@ export async function POST(request: Request) {
           result: fallbackResult.result,
           bookingSync,
           courseSync,
+          divinationSync,
         })
       } catch (fallbackError) {
         console.warn('NewebPay notify query fallback failed', {

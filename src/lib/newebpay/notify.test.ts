@@ -10,6 +10,7 @@ import {
   persistNewebPayNotifyPaymentResult,
   syncNewebPayBookingAfterPayment,
   syncNewebPayCourseAfterPayment,
+  syncNewebPayDivinationAfterPayment,
   validateNewebPayPaymentMatch,
 } from './notify'
 import type { PaymentPaidContext, PaymentRecord } from '../supabase/payments'
@@ -551,6 +552,58 @@ async function runQueryFallbackAssertions() {
     })
   }
 
+  let fallbackDivinationSyncInput: unknown
+  const divinationReadingId = '2df1a8da-3893-4b81-8d00-774a9cc0e472'
+  const divinationFallback = await persistNewebPayNotifyQueryFallback({
+    merchantOrderNo: 'WB20260703172530A1B2',
+    config,
+    getPaymentByMerchantOrderNo: async () => createPaymentRecord({
+      itemType: 'ai_divination',
+      itemId: divinationReadingId,
+      itemName: '紫微牌卡占卜單次',
+      amountTwd: 1,
+      rawPayload: {
+        amount: 1,
+        itemType: 'ai_divination',
+        readingId: divinationReadingId,
+        merchantOrderNo: 'WB20260703172530A1B2',
+      },
+    }),
+    queryNewebPayTrade: async () => successQuery,
+    markPaymentPaid: async () => ({
+      result: 'updated',
+      payment: createPaymentPaidContext({
+        itemType: 'ai_divination',
+        itemId: divinationReadingId,
+      }),
+    }),
+  })
+
+  assert.equal(divinationFallback.ok, true)
+  assert.equal('payment' in divinationFallback && divinationFallback.payment.itemType, 'ai_divination')
+  if ('payment' in divinationFallback) {
+    const divinationFallbackSync = await syncNewebPayDivinationAfterPayment({
+      payment: divinationFallback.payment,
+      merchantOrderNo: divinationFallback.query.merchantOrderNo,
+      syncDivinationReading: async (input) => {
+        fallbackDivinationSyncInput = input
+        return { result: 'updated', readingId: input.itemId || '' }
+      },
+    })
+
+    assert.deepEqual(divinationFallbackSync, {
+      divinationSync: 'updated',
+      readingId: divinationReadingId,
+    })
+    assert.deepEqual(fallbackDivinationSyncInput, {
+      paymentId: 'payment-1',
+      itemType: 'ai_divination',
+      itemId: divinationReadingId,
+      merchantOrderNo: 'WB20260703172530A1B2',
+      paidAt: '2026-07-04 16:00:00',
+    })
+  }
+
   let markCalled = false
   const notPaid = await persistNewebPayNotifyQueryFallback({
     merchantOrderNo: 'WB20260703172530A1B2',
@@ -812,11 +865,146 @@ async function runCourseSyncAssertions() {
   assert.equal(smokeCourseSyncCalled, false)
 }
 
+async function runDivinationSyncAssertions() {
+  const readingId = '2df1a8da-3893-4b81-8d00-774a9cc0e472'
+  let divinationSyncInput: unknown
+  const updated = await syncNewebPayDivinationAfterPayment({
+    payment: createPaymentPaidContext({
+      itemType: 'ai_divination',
+      itemId: readingId,
+    }),
+    merchantOrderNo: 'WB20260703172530A1B2',
+    syncDivinationReading: async (input) => {
+      divinationSyncInput = input
+      return { result: 'updated', readingId: input.itemId || '' }
+    },
+  })
+
+  assert.deepEqual(updated, {
+    divinationSync: 'updated',
+    readingId,
+  })
+  assert.deepEqual(divinationSyncInput, {
+    paymentId: 'payment-1',
+    itemType: 'ai_divination',
+    itemId: readingId,
+    merchantOrderNo: 'WB20260703172530A1B2',
+    paidAt: '2026-07-04 16:00:00',
+  })
+
+  const alreadyPaid = await syncNewebPayDivinationAfterPayment({
+    payment: createPaymentPaidContext({
+      itemType: 'ai_divination',
+      itemId: readingId,
+    }),
+    merchantOrderNo: 'WB20260703172530A1B2',
+    syncDivinationReading: async (input) => ({ result: 'already_paid', readingId: input.itemId || '' }),
+  })
+
+  assert.deepEqual(alreadyPaid, {
+    divinationSync: 'already_paid',
+    readingId,
+  })
+
+  const notFound = await syncNewebPayDivinationAfterPayment({
+    payment: createPaymentPaidContext({
+      itemType: 'ai_divination',
+      itemId: readingId,
+    }),
+    merchantOrderNo: 'WB20260703172530A1B2',
+    syncDivinationReading: async (input) => ({ result: 'not_found', readingId: input.itemId || '' }),
+  })
+
+  assert.deepEqual(notFound, {
+    divinationSync: 'not_found',
+    readingId,
+  })
+
+  const invalidState = await syncNewebPayDivinationAfterPayment({
+    payment: createPaymentPaidContext({
+      itemType: 'ai_divination',
+      itemId: readingId,
+    }),
+    merchantOrderNo: 'WB20260703172530A1B2',
+    syncDivinationReading: async (input) => ({
+      result: 'invalid_state',
+      readingId: input.itemId || '',
+      status: 'canceled',
+    }),
+  })
+
+  assert.deepEqual(invalidState, {
+    divinationSync: 'invalid_state',
+    readingId,
+    status: 'canceled',
+  })
+
+  for (const payment of [
+    createPaymentPaidContext({ itemType: 'ai_divination', itemId: null }),
+    createPaymentPaidContext({ itemType: 'ai_divination', itemId: '   ' }),
+  ]) {
+    let called = false
+    const result = await syncNewebPayDivinationAfterPayment({
+      payment,
+      merchantOrderNo: 'WB20260703172530A1B2',
+      syncDivinationReading: async () => {
+        called = true
+        throw new Error('should_not_call')
+      },
+    })
+
+    assert.deepEqual(result, {
+      divinationSync: 'skipped_missing_divination_context',
+    })
+    assert.equal(called, false)
+  }
+
+  let missingOrderCalled = false
+  const missingOrder = await syncNewebPayDivinationAfterPayment({
+    payment: createPaymentPaidContext({
+      itemType: 'ai_divination',
+      itemId: readingId,
+    }),
+    merchantOrderNo: '',
+    syncDivinationReading: async () => {
+      missingOrderCalled = true
+      throw new Error('should_not_call')
+    },
+  })
+
+  assert.deepEqual(missingOrder, {
+    divinationSync: 'skipped_missing_divination_context',
+  })
+  assert.equal(missingOrderCalled, false)
+
+  for (const payment of [
+    createPaymentPaidContext({ bookingId: 'booking-1', itemType: 'booking', itemId: 'booking-1' }),
+    createPaymentPaidContext({ userId: 'user-course-1', itemType: 'course', itemId: 'course-1' }),
+    createPaymentPaidContext(),
+  ]) {
+    let called = false
+    const result = await syncNewebPayDivinationAfterPayment({
+      payment,
+      merchantOrderNo: 'WB20260703172530A1B2',
+      syncDivinationReading: async () => {
+        called = true
+        throw new Error('should_not_call')
+      },
+    })
+
+    assert.deepEqual(result, {
+      divinationSync: 'skipped_not_divination',
+    })
+    assert.equal(called, false)
+  }
+}
+
 Promise.all([
   runPaymentPersistenceAssertions(),
   runQueryFallbackAssertions(),
   runBookingSyncAssertions(),
   runCourseSyncAssertions(),
+  runDivinationSyncAssertions(),
 ]).catch((error) => {
   console.error(error)
   process.exitCode = 1
