@@ -1,4 +1,5 @@
 import { createTradeSha, encryptTradeInfo } from './crypto'
+import { AI_DIVINATION_ITEM_KEY, buildDivinationPaymentPayload } from './divinationPayment'
 import { generateNewebPayMerchantOrderNo } from './orderNo'
 import { getNewebPayPaymentItem, type NewebPayPaymentItemKey } from './paymentItems'
 import type { NewebPayConfig } from './types'
@@ -17,6 +18,16 @@ export type NewebPayBookingPaymentContext = {
 export type NewebPayBookingIdResolution =
   | { ok: true; bookingId: string | null }
   | { ok: false; error: 'booking_id_required' | 'invalid_booking_id' | 'booking_id_not_allowed' }
+
+export type NewebPayDivinationReadingIdResolution =
+  | { ok: true; readingId: string | null }
+  | {
+      ok: false
+      error:
+        | 'divination_reading_id_required'
+        | 'invalid_divination_reading_id'
+        | 'divination_reading_id_not_allowed'
+    }
 
 export type NewebPayBookingPaymentValidationResult =
   | { ok: true }
@@ -50,6 +61,7 @@ export type NewebPayPendingPaymentMetadata = {
     itemDesc: string
     merchantOrderNo: string
     bookingId?: string
+    readingId?: string
   }
 }
 
@@ -67,6 +79,7 @@ type BuildNewebPayPendingPaymentMetadataInput = {
   paymentMode: NewebPayPaymentMode
   merchantOrderNo: string
   bookingId?: string | null
+  readingId?: string | null
 }
 
 const allowedSources = new Set<NewebPayPaymentSource>(['booking', 'ai_divination', 'ai_chart', 'manual_test'])
@@ -80,11 +93,23 @@ export function isNewebPayPaymentMode(mode: unknown): mode is NewebPayPaymentMod
   return typeof mode === 'string' && allowedPaymentModes.has(mode as NewebPayPaymentMode)
 }
 
-export function isValidNewebPayBookingId(value: unknown): value is string {
+export function isValidNewebPayUuid(value: unknown): value is string {
   return (
     typeof value === 'string' &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.trim())
   )
+}
+
+export function isValidNewebPayBookingId(value: unknown): value is string {
+  return isValidNewebPayUuid(value)
+}
+
+export function isValidNewebPayDivinationReadingId(value: unknown): value is string {
+  return isValidNewebPayUuid(value)
+}
+
+function hasNonEmptyValue(value: unknown) {
+  return value !== undefined && value !== null && (typeof value !== 'string' || value.trim() !== '')
 }
 
 export function resolveNewebPayBookingIdForPayment(input: {
@@ -92,10 +117,7 @@ export function resolveNewebPayBookingIdForPayment(input: {
   source?: NewebPayPaymentSource
   bookingId?: unknown
 }): NewebPayBookingIdResolution {
-  const hasBookingId =
-    input.bookingId !== undefined &&
-    input.bookingId !== null &&
-    (typeof input.bookingId !== 'string' || input.bookingId.trim() !== '')
+  const hasBookingId = hasNonEmptyValue(input.bookingId)
 
   if (input.itemKey === 'newebpay_live_smoke_test_1') {
     return hasBookingId ? { ok: false, error: 'booking_id_not_allowed' } : { ok: true, bookingId: null }
@@ -118,6 +140,29 @@ export function resolveNewebPayBookingIdForPayment(input: {
   }
 
   return { ok: true, bookingId: input.bookingId.trim() }
+}
+
+export function resolveNewebPayDivinationReadingIdForPayment(input: {
+  itemKey: NewebPayPaymentItemKey
+  readingId?: unknown
+}): NewebPayDivinationReadingIdResolution {
+  const hasReadingId = hasNonEmptyValue(input.readingId)
+
+  if (input.itemKey !== AI_DIVINATION_ITEM_KEY) {
+    return hasReadingId
+      ? { ok: false, error: 'divination_reading_id_not_allowed' }
+      : { ok: true, readingId: null }
+  }
+
+  if (!hasReadingId) {
+    return { ok: false, error: 'divination_reading_id_required' }
+  }
+
+  if (!isValidNewebPayDivinationReadingId(input.readingId)) {
+    return { ok: false, error: 'invalid_divination_reading_id' }
+  }
+
+  return { ok: true, readingId: input.readingId.trim() }
 }
 
 export function validateNewebPayBookingPayment(input: {
@@ -161,16 +206,43 @@ function buildMerchantOrderUrl(siteUrl: string, pathname: string, merchantOrderN
   return url.toString()
 }
 
+function buildClientBackUrl(siteUrl: string, itemKey: NewebPayPaymentItemKey) {
+  if (itemKey === AI_DIVINATION_ITEM_KEY) {
+    return `${siteUrl}/ai-divination`
+  }
+
+  return `${siteUrl}/booking`
+}
+
 export function buildNewebPayPendingPaymentMetadata({
   itemKey,
   source,
   paymentMode,
   merchantOrderNo,
   bookingId,
+  readingId,
 }: BuildNewebPayPendingPaymentMetadataInput): NewebPayPendingPaymentMetadata {
   const item = getNewebPayPaymentItem(itemKey)
   if (!item) {
     throw new Error('Unsupported NewebPay payment item')
+  }
+
+  if (item.itemKey === AI_DIVINATION_ITEM_KEY) {
+    const divinationPayload = buildDivinationPaymentPayload({
+      readingId: readingId ?? '',
+      merchantOrderNo,
+      paymentMode,
+    })
+
+    return {
+      itemType: divinationPayload.itemType,
+      itemId: divinationPayload.itemId,
+      bookingId: null,
+      rawPayload: {
+        ...divinationPayload.rawPayload,
+        itemDesc: item.itemDesc,
+      },
+    }
   }
 
   const target = getPendingPaymentTarget(item.itemKey, bookingId)
@@ -211,7 +283,7 @@ export function createNewebPayMpgPaymentData({
     ItemDesc: item.itemDesc,
     ReturnURL: buildMerchantOrderUrl(config.siteUrl, '/payment/newebpay/return', merchantOrderNo),
     NotifyURL: buildMerchantOrderUrl(config.siteUrl, '/api/payments/newebpay/notify', merchantOrderNo),
-    ClientBackURL: `${config.siteUrl}/booking`,
+    ClientBackURL: buildClientBackUrl(config.siteUrl, item.itemKey),
     LangType: 'zh-tw',
   }
 

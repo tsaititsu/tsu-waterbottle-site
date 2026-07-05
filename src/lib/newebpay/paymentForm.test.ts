@@ -7,6 +7,7 @@ import {
   isNewebPayPaymentMode,
   isNewebPayPaymentSource,
   resolveNewebPayBookingIdForPayment,
+  resolveNewebPayDivinationReadingIdForPayment,
   validateNewebPayBookingPayment,
 } from './paymentForm'
 import { getNewebPayPaymentItem } from './paymentItems'
@@ -35,6 +36,11 @@ assert.deepEqual(getNewebPayPaymentItem('newebpay_live_smoke_test_1'), {
   itemDesc: '藍新正式環境測試付款',
   amount: 1,
 })
+assert.deepEqual(getNewebPayPaymentItem('ai_divination_single'), {
+  itemKey: 'ai_divination_single',
+  itemDesc: '紫微牌卡占卜單次',
+  amount: 50,
+})
 assert.equal(getNewebPayPaymentItem('unknown_item'), null)
 
 const orderNo = generateNewebPayMerchantOrderNo(new Date(2026, 6, 3, 17, 25, 30), 'A1B2')
@@ -43,6 +49,7 @@ assert.equal(orderNo, 'WB20260703172530A1B2')
 assert.match(orderNo, /^[A-Z0-9_]{1,30}$/)
 
 assert.equal(isNewebPayPaymentSource('booking'), true)
+assert.equal(isNewebPayPaymentSource('ai_divination'), true)
 assert.equal(isNewebPayPaymentSource('manual_test'), true)
 assert.equal(isNewebPayPaymentSource('external'), false)
 assert.equal(isNewebPayPaymentMode('credit'), true)
@@ -50,6 +57,7 @@ assert.equal(isNewebPayPaymentMode('merchant_default'), true)
 assert.equal(isNewebPayPaymentMode('linepay'), false)
 
 const bookingId = '550e8400-e29b-41d4-a716-446655440000'
+const readingId = '2df1a8da-3893-4b81-8d00-774a9cc0e472'
 
 assert.deepEqual(
   resolveNewebPayBookingIdForPayment({
@@ -88,6 +96,39 @@ assert.deepEqual(
     bookingId,
   }),
   { ok: false, error: 'booking_id_not_allowed' },
+)
+assert.deepEqual(
+  resolveNewebPayDivinationReadingIdForPayment({
+    itemKey: 'ai_divination_single',
+  }),
+  { ok: false, error: 'divination_reading_id_required' },
+)
+assert.deepEqual(
+  resolveNewebPayDivinationReadingIdForPayment({
+    itemKey: 'ai_divination_single',
+    readingId: 'not-a-uuid',
+  }),
+  { ok: false, error: 'invalid_divination_reading_id' },
+)
+assert.deepEqual(
+  resolveNewebPayDivinationReadingIdForPayment({
+    itemKey: 'ai_divination_single',
+    readingId,
+  }),
+  { ok: true, readingId },
+)
+assert.deepEqual(
+  resolveNewebPayDivinationReadingIdForPayment({
+    itemKey: 'booking_consultation_60',
+    readingId,
+  }),
+  { ok: false, error: 'divination_reading_id_not_allowed' },
+)
+assert.deepEqual(
+  resolveNewebPayDivinationReadingIdForPayment({
+    itemKey: 'newebpay_live_smoke_test_1',
+  }),
+  { ok: true, readingId: null },
 )
 
 assert.deepEqual(
@@ -182,6 +223,22 @@ assert.equal(decryptedSmoke.get('ItemDesc'), '藍新正式環境測試付款')
 assert.equal(decryptedSmoke.get('CREDIT'), '1')
 assert.equal(decryptedSmoke.has('LINEPAY'), false)
 
+const divinationData = createNewebPayMpgPaymentData({
+  itemKey: 'ai_divination_single',
+  config,
+  now: new Date(2026, 6, 3, 17, 25, 30),
+  merchantOrderNo: 'WB20260703172530D5E6',
+})
+const decryptedDivination = new URLSearchParams(decryptTradeInfo(divinationData.fields.TradeInfo, hashKey, hashIv))
+
+assert.equal(divinationData.itemKey, 'ai_divination_single')
+assert.equal(divinationData.amount, 50)
+assert.equal(decryptedDivination.get('Amt'), '50')
+assert.equal(decryptedDivination.get('ItemDesc'), '紫微牌卡占卜單次')
+assert.equal(decryptedDivination.get('CREDIT'), '1')
+assert.equal(decryptedDivination.get('ClientBackURL'), 'http://localhost:3000/ai-divination')
+assert.equal(decryptedDivination.has('LINEPAY'), false)
+
 const smokePendingPaymentMetadata = buildNewebPayPendingPaymentMetadata({
   itemKey: 'newebpay_live_smoke_test_1',
   source: 'manual_test',
@@ -201,6 +258,34 @@ assert.deepEqual(smokePendingPaymentMetadata.rawPayload, {
 })
 assert.equal('TradeInfo' in smokePendingPaymentMetadata.rawPayload, false)
 assert.equal('TradeSha' in smokePendingPaymentMetadata.rawPayload, false)
+
+const divinationPendingPaymentMetadata = buildNewebPayPendingPaymentMetadata({
+  itemKey: 'ai_divination_single',
+  source: 'ai_divination',
+  paymentMode: 'credit',
+  merchantOrderNo: divinationData.merchantOrderNo,
+  readingId,
+})
+
+assert.equal(divinationPendingPaymentMetadata.itemType, 'ai_divination')
+assert.equal(divinationPendingPaymentMetadata.itemId, readingId)
+assert.equal(divinationPendingPaymentMetadata.bookingId, null)
+assert.deepEqual(divinationPendingPaymentMetadata.rawPayload, {
+  itemKey: 'ai_divination_single',
+  itemType: 'ai_divination',
+  readingId,
+  amount: 50,
+  source: 'ai_divination',
+  paymentMode: 'credit',
+  merchantOrderNo: divinationData.merchantOrderNo,
+  itemDesc: '紫微牌卡占卜單次',
+})
+assert.equal('TradeInfo' in divinationPendingPaymentMetadata.rawPayload, false)
+assert.equal('TradeSha' in divinationPendingPaymentMetadata.rawPayload, false)
+assert.equal('HashKey' in divinationPendingPaymentMetadata.rawPayload, false)
+assert.equal('HashIV' in divinationPendingPaymentMetadata.rawPayload, false)
+assert.equal('question' in divinationPendingPaymentMetadata.rawPayload, false)
+assert.equal('interpretation' in divinationPendingPaymentMetadata.rawPayload, false)
 
 const bookingPendingPaymentMetadata = buildNewebPayPendingPaymentMetadata({
   itemKey: 'booking_consultation_60',

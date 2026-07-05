@@ -1,4 +1,9 @@
-export type NewebPayPaymentItemKey = 'booking_consultation_60' | 'newebpay_live_smoke_test_1'
+import { AI_DIVINATION_AMOUNT_TWD, AI_DIVINATION_ITEM_KEY } from './divinationPayment'
+
+export type NewebPayPaymentItemKey =
+  | 'booking_consultation_60'
+  | 'newebpay_live_smoke_test_1'
+  | typeof AI_DIVINATION_ITEM_KEY
 
 export type NewebPayPaymentItem = {
   itemKey: NewebPayPaymentItemKey
@@ -16,6 +21,11 @@ const paymentItems: Record<NewebPayPaymentItemKey, NewebPayPaymentItem> = {
     itemKey: 'newebpay_live_smoke_test_1',
     itemDesc: '藍新正式環境測試付款',
     amount: 1,
+  },
+  [AI_DIVINATION_ITEM_KEY]: {
+    itemKey: AI_DIVINATION_ITEM_KEY,
+    itemDesc: '紫微牌卡占卜單次',
+    amount: AI_DIVINATION_AMOUNT_TWD,
   },
 }
 

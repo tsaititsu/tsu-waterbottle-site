@@ -3,6 +3,8 @@ import {
   buildDivinationPaidUpdatePayload,
   buildPendingDivinationReadingPayload,
   decideDivinationPaidUpdate,
+  mapDivinationReadingPaymentContext,
+  validateDivinationReadingPayment,
   type DivinationReadingPaidSyncRow,
 } from './divinationReadings'
 
@@ -133,6 +135,60 @@ assert.deepEqual(decideDivinationPaidUpdate(canceledReading), {
   result: 'invalid_state',
   status: 'canceled',
 })
+
+const paymentContext = mapDivinationReadingPaymentContext({
+  id: '2df1a8da-3893-4b81-8d00-774a9cc0e472',
+  status: 'pending_payment',
+  payment_id: null,
+  merchant_order_no: null,
+})
+
+assert.deepEqual(paymentContext, {
+  id: '2df1a8da-3893-4b81-8d00-774a9cc0e472',
+  status: 'pending_payment',
+  paymentId: null,
+  merchantOrderNo: null,
+})
+assert.deepEqual(validateDivinationReadingPayment(null), {
+  ok: false,
+  error: 'divination_reading_not_found',
+})
+assert.deepEqual(validateDivinationReadingPayment(paymentContext), { ok: true })
+assert.deepEqual(
+  validateDivinationReadingPayment({
+    ...paymentContext,
+    status: null,
+  }),
+  { ok: true },
+)
+assert.deepEqual(
+  validateDivinationReadingPayment({
+    ...paymentContext,
+    status: 'paid',
+  }),
+  { ok: false, error: 'divination_reading_not_payable' },
+)
+assert.deepEqual(
+  validateDivinationReadingPayment({
+    ...paymentContext,
+    status: 'completed',
+  }),
+  { ok: false, error: 'divination_reading_not_payable' },
+)
+assert.deepEqual(
+  validateDivinationReadingPayment({
+    ...paymentContext,
+    paymentId: '4db88892-e602-40e3-9bcd-4595a0dcfb95',
+  }),
+  { ok: false, error: 'divination_reading_not_payable' },
+)
+assert.deepEqual(
+  validateDivinationReadingPayment({
+    ...paymentContext,
+    merchantOrderNo: 'WB20260705143000ABCD',
+  }),
+  { ok: false, error: 'divination_reading_not_payable' },
+)
 
 assert.equal('TradeInfo' in pendingPayload, false)
 assert.equal('TradeSha' in pendingPayload, false)

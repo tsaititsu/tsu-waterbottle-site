@@ -54,11 +54,29 @@ export type DivinationReadingPaidSyncRow = {
   payment_id?: string | null
 }
 
+export type DivinationReadingPaymentContext = {
+  id: string
+  status: DivinationReadingStatus | null
+  paymentId: string | null
+  merchantOrderNo: string | null
+}
+
+export type DivinationReadingPaymentContextRow = {
+  id: string
+  status: DivinationReadingStatus | null
+  payment_id: string | null
+  merchant_order_no: string | null
+}
+
 export type DivinationPaidDecision =
   | { result: 'not_found' }
   | { result: 'should_update' }
   | { result: 'already_paid' }
   | { result: 'invalid_state'; status: DivinationReadingStatus | null }
+
+export type DivinationReadingPaymentValidationResult =
+  | { ok: true }
+  | { ok: false; error: 'divination_reading_not_found' | 'divination_reading_not_payable' }
 
 export type MarkDivinationReadingPaidInput = {
   readingId: string
@@ -135,6 +153,54 @@ export function decideDivinationPaidUpdate(
   if (existing.status === 'canceled') return { result: 'invalid_state', status: existing.status }
 
   return { result: 'already_paid' }
+}
+
+export function mapDivinationReadingPaymentContext(
+  row: DivinationReadingPaymentContextRow,
+): DivinationReadingPaymentContext {
+  return {
+    id: row.id,
+    status: row.status,
+    paymentId: row.payment_id,
+    merchantOrderNo: row.merchant_order_no,
+  }
+}
+
+export function validateDivinationReadingPayment(
+  reading: DivinationReadingPaymentContext | null,
+): DivinationReadingPaymentValidationResult {
+  if (!reading) {
+    return { ok: false, error: 'divination_reading_not_found' }
+  }
+
+  if (
+    reading.paymentId !== null ||
+    reading.merchantOrderNo !== null ||
+    (reading.status !== 'pending_payment' && reading.status !== null)
+  ) {
+    return { ok: false, error: 'divination_reading_not_payable' }
+  }
+
+  return { ok: true }
+}
+
+export async function getDivinationReadingPaymentContext(
+  readingId: string,
+): Promise<DivinationReadingPaymentContext | null> {
+  assertRequiredText(readingId, 'readingId')
+
+  const supabase = getSupabaseAdmin()
+  const { data, error } = await supabase
+    .from('divination_readings')
+    .select('id,status,payment_id,merchant_order_no')
+    .eq('id', readingId)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return data ? mapDivinationReadingPaymentContext(data as DivinationReadingPaymentContextRow) : null
 }
 
 export async function markDivinationReadingPaidByPayment(

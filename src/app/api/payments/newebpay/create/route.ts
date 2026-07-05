@@ -6,12 +6,17 @@ import {
   isNewebPayPaymentMode,
   isNewebPayPaymentSource,
   resolveNewebPayBookingIdForPayment,
+  resolveNewebPayDivinationReadingIdForPayment,
   type NewebPayPaymentMode,
   type NewebPayPaymentSource,
   validateNewebPayBookingPayment,
 } from '@/lib/newebpay/paymentForm'
 import { getNewebPayPaymentItem } from '@/lib/newebpay/paymentItems'
 import { getSupabaseBookingPaymentContext } from '@/lib/supabase/bookings'
+import {
+  getDivinationReadingPaymentContext,
+  validateDivinationReadingPayment,
+} from '@/lib/supabase/divinationReadings'
 import { createPendingPayment } from '@/lib/supabase/payments'
 
 type CreateNewebPayPaymentRequest = {
@@ -19,6 +24,7 @@ type CreateNewebPayPaymentRequest = {
   source?: unknown
   paymentMode?: unknown
   bookingId?: unknown
+  readingId?: unknown
 }
 
 function paymentConfigErrorResponse() {
@@ -45,6 +51,15 @@ function bookingLookupErrorResponse(input: { bookingId: string; error: unknown }
   })
 
   return NextResponse.json({ ok: false, error: 'booking_lookup_failed' }, { status: 500 })
+}
+
+function divinationReadingLookupErrorResponse(input: { readingId: string; error: unknown }) {
+  console.error('藍新付款占卜 reading 查詢失敗', {
+    readingId: input.readingId,
+    error: input.error instanceof Error ? input.error.message : 'unknown_error',
+  })
+
+  return NextResponse.json({ ok: false, error: 'divination_reading_lookup_failed' }, { status: 500 })
 }
 
 export async function POST(request: Request) {
@@ -80,6 +95,16 @@ export async function POST(request: Request) {
   }
 
   const bookingId = bookingIdResolution.bookingId
+  const readingIdResolution = resolveNewebPayDivinationReadingIdForPayment({
+    itemKey: item.itemKey,
+    readingId: body?.readingId,
+  })
+
+  if (!readingIdResolution.ok) {
+    return NextResponse.json({ ok: false, error: readingIdResolution.error }, { status: 400 })
+  }
+
+  const readingId = readingIdResolution.readingId
 
   if (bookingId) {
     let booking
@@ -100,6 +125,22 @@ export async function POST(request: Request) {
     }
   }
 
+  if (readingId) {
+    let reading
+
+    try {
+      reading = await getDivinationReadingPaymentContext(readingId)
+    } catch (error) {
+      return divinationReadingLookupErrorResponse({ readingId, error })
+    }
+
+    const readingValidation = validateDivinationReadingPayment(reading)
+
+    if (!readingValidation.ok) {
+      return NextResponse.json({ ok: false, error: readingValidation.error }, { status: 400 })
+    }
+  }
+
   try {
     const config = getNewebPayConfig()
     const paymentData = createNewebPayMpgPaymentData({
@@ -113,6 +154,7 @@ export async function POST(request: Request) {
       paymentMode,
       merchantOrderNo: paymentData.merchantOrderNo,
       bookingId,
+      readingId,
     })
 
     try {
