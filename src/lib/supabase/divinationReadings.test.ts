@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict'
 import {
   buildDivinationPaidUpdatePayload,
+  buildDivinationPendingPaymentLinkPayload,
   buildPendingDivinationReadingPayload,
+  decideDivinationPendingPaymentLink,
   decideDivinationPaidUpdate,
   mapDivinationReadingPaymentContext,
   validateDivinationReadingPayment,
   type DivinationReadingPaidSyncRow,
+  type DivinationReadingStatus,
 } from './divinationReadings'
 
 const pendingPayload = buildPendingDivinationReadingPayload(
@@ -114,6 +117,32 @@ assert.deepEqual(paidPayload, {
   updated_at: '2026-07-05T12:13:00.000Z',
 })
 
+const pendingPaymentLinkPayload = buildDivinationPendingPaymentLinkPayload(
+  {
+    paymentId: 'payment-link-1',
+    merchantOrderNo: 'WB20260705130000LINK',
+  },
+  '2026-07-05T13:00:00.000Z',
+)
+
+assert.deepEqual(pendingPaymentLinkPayload, {
+  payment_id: 'payment-link-1',
+  merchant_order_no: 'WB20260705130000LINK',
+  updated_at: '2026-07-05T13:00:00.000Z',
+})
+assert.equal('status' in pendingPaymentLinkPayload, false)
+assert.equal('question' in pendingPaymentLinkPayload, false)
+assert.equal('interpretation' in pendingPaymentLinkPayload, false)
+assert.equal('paid_at' in pendingPaymentLinkPayload, false)
+assert.equal('interpreted_at' in pendingPaymentLinkPayload, false)
+assert.equal('TradeInfo' in pendingPaymentLinkPayload, false)
+assert.equal('TradeSha' in pendingPaymentLinkPayload, false)
+assert.equal('HashKey' in pendingPaymentLinkPayload, false)
+assert.equal('HashIV' in pendingPaymentLinkPayload, false)
+assert.equal('booking_id' in pendingPaymentLinkPayload, false)
+assert.equal('course_id' in pendingPaymentLinkPayload, false)
+assert.equal('product_id' in pendingPaymentLinkPayload, false)
+
 const paidPayloadWithDefaultDate = buildDivinationPaidUpdatePayload(
   {
     paymentId: 'payment-2',
@@ -173,6 +202,67 @@ assert.deepEqual(decideDivinationPaidUpdate(canceledReading), {
   result: 'invalid_state',
   status: 'canceled',
 })
+
+assert.deepEqual(decideDivinationPendingPaymentLink(null), { result: 'not_found' })
+assert.deepEqual(
+  decideDivinationPendingPaymentLink({
+    id: 'reading-link-1',
+    status: 'pending_payment',
+    payment_id: null,
+    merchant_order_no: null,
+  }),
+  { result: 'should_link' },
+)
+assert.deepEqual(
+  decideDivinationPendingPaymentLink({
+    id: 'reading-link-2',
+    status: null,
+    payment_id: null,
+    merchant_order_no: null,
+  }),
+  { result: 'should_link' },
+)
+assert.deepEqual(
+  decideDivinationPendingPaymentLink({
+    id: 'reading-link-3',
+    status: 'pending_payment',
+    payment_id: 'payment-link-3',
+    merchant_order_no: null,
+  }),
+  { result: 'already_linked' },
+)
+assert.deepEqual(
+  decideDivinationPendingPaymentLink({
+    id: 'reading-link-4',
+    status: 'pending_payment',
+    payment_id: null,
+    merchant_order_no: 'WB20260705130400LINK',
+  }),
+  { result: 'already_linked' },
+)
+
+const notPayableLinkStatuses: DivinationReadingStatus[] = [
+  'paid',
+  'interpreting',
+  'completed',
+  'failed',
+  'canceled',
+]
+
+for (const status of notPayableLinkStatuses) {
+  assert.deepEqual(
+    decideDivinationPendingPaymentLink({
+      id: `reading-link-${status}`,
+      status,
+      payment_id: null,
+      merchant_order_no: null,
+    }),
+    {
+      result: 'not_payable',
+      status,
+    },
+  )
+}
 
 const paymentContext = mapDivinationReadingPaymentContext({
   id: '2df1a8da-3893-4b81-8d00-774a9cc0e472',
@@ -239,6 +329,9 @@ assert.equal('product_id' in pendingPayload, false)
 assert.equal('booking_status' in paidPayload, false)
 assert.equal('course_purchase_id' in paidPayload, false)
 assert.equal('spiritual_product' in paidPayload, false)
+assert.equal('booking_status' in pendingPaymentLinkPayload, false)
+assert.equal('course_purchase_id' in pendingPaymentLinkPayload, false)
+assert.equal('spiritual_product' in pendingPaymentLinkPayload, false)
 
 assert.throws(
   () =>
@@ -260,6 +353,24 @@ assert.throws(
 assert.throws(
   () =>
     buildDivinationPaidUpdatePayload({
+      paymentId: 'payment-1',
+      merchantOrderNo: '',
+    }),
+  /merchantOrderNo/,
+)
+
+assert.throws(
+  () =>
+    buildDivinationPendingPaymentLinkPayload({
+      paymentId: '',
+      merchantOrderNo: 'WB20260705121212ABCD',
+    }),
+  /paymentId/,
+)
+
+assert.throws(
+  () =>
+    buildDivinationPendingPaymentLinkPayload({
       paymentId: 'payment-1',
       merchantOrderNo: '',
     }),

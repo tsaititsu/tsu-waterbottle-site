@@ -53,6 +53,17 @@ export type DivinationPaidUpdatePayload = {
   updated_at: string
 }
 
+export type BuildDivinationPendingPaymentLinkPayloadInput = {
+  paymentId: string
+  merchantOrderNo: string
+}
+
+export type DivinationPendingPaymentLinkPayload = {
+  payment_id: string
+  merchant_order_no: string
+  updated_at: string
+}
+
 export type DivinationReadingPaidSyncRow = {
   id: string
   status: DivinationReadingStatus | null
@@ -79,6 +90,12 @@ export type DivinationPaidDecision =
   | { result: 'already_paid' }
   | { result: 'invalid_state'; status: DivinationReadingStatus | null }
 
+export type DivinationPendingPaymentLinkDecision =
+  | { result: 'not_found' }
+  | { result: 'should_link' }
+  | { result: 'already_linked' }
+  | { result: 'not_payable'; status: DivinationReadingStatus | null }
+
 export type DivinationReadingPaymentValidationResult =
   | { ok: true }
   | { ok: false; error: 'divination_reading_not_found' | 'divination_reading_not_payable' }
@@ -95,6 +112,18 @@ export type MarkDivinationReadingPaidResult =
   | { result: 'already_paid'; readingId: string }
   | { result: 'not_found'; readingId: string }
   | { result: 'invalid_state'; readingId: string; status: DivinationReadingStatus | null }
+
+export type LinkDivinationReadingPendingPaymentInput = {
+  readingId: string
+  paymentId: string
+  merchantOrderNo: string
+}
+
+export type LinkDivinationReadingPendingPaymentResult =
+  | { result: 'linked'; readingId: string }
+  | { result: 'already_linked'; readingId: string }
+  | { result: 'not_found'; readingId: string }
+  | { result: 'not_payable'; readingId: string; status: DivinationReadingStatus | null }
 
 function assertRequiredText(value: string, fieldName: string) {
   if (!value.trim()) {
@@ -175,6 +204,20 @@ export function buildDivinationPaidUpdatePayload(
   }
 }
 
+export function buildDivinationPendingPaymentLinkPayload(
+  input: BuildDivinationPendingPaymentLinkPayloadInput,
+  now = new Date().toISOString(),
+): DivinationPendingPaymentLinkPayload {
+  assertRequiredText(input.paymentId, 'paymentId')
+  assertRequiredText(input.merchantOrderNo, 'merchantOrderNo')
+
+  return {
+    payment_id: input.paymentId,
+    merchant_order_no: input.merchantOrderNo,
+    updated_at: now,
+  }
+}
+
 export function decideDivinationPaidUpdate(
   existing: Pick<DivinationReadingPaidSyncRow, 'id' | 'status' | 'payment_id'> | null,
 ): DivinationPaidDecision {
@@ -183,6 +226,27 @@ export function decideDivinationPaidUpdate(
   if (existing.status === 'canceled') return { result: 'invalid_state', status: existing.status }
 
   return { result: 'already_paid' }
+}
+
+export function decideDivinationPendingPaymentLink(
+  existing: {
+    id: string
+    status: DivinationReadingStatus | null
+    payment_id?: string | null
+    merchant_order_no?: string | null
+  } | null,
+): DivinationPendingPaymentLinkDecision {
+  if (!existing) return { result: 'not_found' }
+
+  if (existing.status !== 'pending_payment' && existing.status !== null) {
+    return { result: 'not_payable', status: existing.status }
+  }
+
+  if (existing.payment_id || existing.merchant_order_no) {
+    return { result: 'already_linked' }
+  }
+
+  return { result: 'should_link' }
 }
 
 export function mapDivinationReadingPaymentContext(
@@ -231,6 +295,70 @@ export async function getDivinationReadingPaymentContext(
   }
 
   return data ? mapDivinationReadingPaymentContext(data as DivinationReadingPaymentContextRow) : null
+}
+
+export async function linkDivinationReadingPendingPayment(
+  input: LinkDivinationReadingPendingPaymentInput,
+): Promise<LinkDivinationReadingPendingPaymentResult> {
+  assertRequiredText(input.readingId, 'readingId')
+  assertRequiredText(input.paymentId, 'paymentId')
+  assertRequiredText(input.merchantOrderNo, 'merchantOrderNo')
+
+  const supabase = getSupabaseAdmin()
+  const { data: existingReading, error: selectError } = await supabase
+    .from('divination_readings')
+    .select('id,status,payment_id,merchant_order_no')
+    .eq('id', input.readingId)
+    .maybeSingle()
+
+  if (selectError) {
+    throw new Error(selectError.message)
+  }
+
+  const decision = decideDivinationPendingPaymentLink(
+    existingReading as DivinationReadingPaymentContextRow | null,
+  )
+
+  if (decision.result === 'not_found') {
+    return {
+      result: 'not_found',
+      readingId: input.readingId,
+    }
+  }
+
+  if (decision.result === 'not_payable') {
+    return {
+      result: 'not_payable',
+      readingId: input.readingId,
+      status: decision.status,
+    }
+  }
+
+  if (decision.result === 'already_linked') {
+    return {
+      result: 'already_linked',
+      readingId: input.readingId,
+    }
+  }
+
+  const { error: updateError } = await supabase
+    .from('divination_readings')
+    .update(
+      buildDivinationPendingPaymentLinkPayload({
+        paymentId: input.paymentId,
+        merchantOrderNo: input.merchantOrderNo,
+      }),
+    )
+    .eq('id', input.readingId)
+
+  if (updateError) {
+    throw new Error(updateError.message)
+  }
+
+  return {
+    result: 'linked',
+    readingId: input.readingId,
+  }
 }
 
 export async function markDivinationReadingPaidByPayment(
