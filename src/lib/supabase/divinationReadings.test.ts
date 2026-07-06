@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict'
 import {
+  buildDivinationCompletedUpdatePayload,
+  buildDivinationFailedUpdatePayload,
+  buildDivinationInterpretingUpdatePayload,
   buildDivinationPaidUpdatePayload,
   buildDivinationPendingPaymentLinkPayload,
   buildPendingDivinationReadingPayload,
+  decideDivinationInterpretationStart,
   decideDivinationPendingPaymentLink,
   decideDivinationPaidUpdate,
   mapDivinationReadingPaymentContext,
@@ -143,6 +147,87 @@ assert.equal('booking_id' in pendingPaymentLinkPayload, false)
 assert.equal('course_id' in pendingPaymentLinkPayload, false)
 assert.equal('product_id' in pendingPaymentLinkPayload, false)
 
+const interpretingPayload = buildDivinationInterpretingUpdatePayload('2026-07-05T13:10:00.000Z')
+
+assert.deepEqual(interpretingPayload, {
+  status: 'interpreting',
+  updated_at: '2026-07-05T13:10:00.000Z',
+})
+assert.equal('payment_id' in interpretingPayload, false)
+assert.equal('merchant_order_no' in interpretingPayload, false)
+assert.equal('paid_at' in interpretingPayload, false)
+assert.equal('interpretation' in interpretingPayload, false)
+assert.equal('interpreted_at' in interpretingPayload, false)
+assert.equal('question' in interpretingPayload, false)
+
+const completedPayload = buildDivinationCompletedUpdatePayload(
+  {
+    interpretation: {
+      summary: '先穩住節奏，再做選擇。',
+      cards: ['紫微星'],
+    },
+    resultSummary: '先穩住節奏，再做選擇。',
+    interpretedAt: '2026-07-05T13:20:00.000Z',
+  },
+  '2026-07-05T13:21:00.000Z',
+)
+
+assert.deepEqual(completedPayload, {
+  status: 'completed',
+  interpretation: {
+    summary: '先穩住節奏，再做選擇。',
+    cards: ['紫微星'],
+  },
+  result_summary: '先穩住節奏，再做選擇。',
+  interpreted_at: '2026-07-05T13:20:00.000Z',
+  updated_at: '2026-07-05T13:21:00.000Z',
+  error_message: null,
+})
+assert.equal('payment_id' in completedPayload, false)
+assert.equal('merchant_order_no' in completedPayload, false)
+assert.equal('paid_at' in completedPayload, false)
+assert.equal('question' in completedPayload, false)
+assert.equal('TradeInfo' in completedPayload, false)
+assert.equal('TradeSha' in completedPayload, false)
+assert.equal('HashKey' in completedPayload, false)
+assert.equal('HashIV' in completedPayload, false)
+
+const completedPayloadWithoutSummary = buildDivinationCompletedUpdatePayload(
+  {
+    interpretation: {
+      summary: '完成解讀。',
+    },
+    resultSummary: '   ',
+    interpretedAt: null,
+  },
+  '2026-07-05T13:22:00.000Z',
+)
+
+assert.equal(completedPayloadWithoutSummary.interpreted_at, '2026-07-05T13:22:00.000Z')
+assert.equal('result_summary' in completedPayloadWithoutSummary, false)
+
+const failedPayload = buildDivinationFailedUpdatePayload(
+  {
+    errorMessage: 'OpenAI 解讀暫時失敗',
+  },
+  '2026-07-05T13:30:00.000Z',
+)
+
+assert.deepEqual(failedPayload, {
+  status: 'failed',
+  error_message: 'OpenAI 解讀暫時失敗',
+  updated_at: '2026-07-05T13:30:00.000Z',
+})
+assert.equal('payment_id' in failedPayload, false)
+assert.equal('merchant_order_no' in failedPayload, false)
+assert.equal('paid_at' in failedPayload, false)
+assert.equal('interpretation' in failedPayload, false)
+assert.equal('interpreted_at' in failedPayload, false)
+assert.equal('TradeInfo' in failedPayload, false)
+assert.equal('TradeSha' in failedPayload, false)
+assert.equal('HashKey' in failedPayload, false)
+assert.equal('HashIV' in failedPayload, false)
+
 const paidPayloadWithDefaultDate = buildDivinationPaidUpdatePayload(
   {
     paymentId: 'payment-2',
@@ -191,6 +276,10 @@ const canceledReading: DivinationReadingPaidSyncRow = {
   status: 'canceled',
 }
 
+const completedInterpretation = {
+  summary: '已完成的解讀',
+}
+
 assert.deepEqual(decideDivinationPaidUpdate(null), { result: 'not_found' })
 assert.deepEqual(decideDivinationPaidUpdate(pendingReading), { result: 'should_update' })
 assert.deepEqual(decideDivinationPaidUpdate(nullStatusReading), { result: 'should_update' })
@@ -202,6 +291,77 @@ assert.deepEqual(decideDivinationPaidUpdate(canceledReading), {
   result: 'invalid_state',
   status: 'canceled',
 })
+
+assert.deepEqual(decideDivinationInterpretationStart(null), { result: 'not_found' })
+assert.deepEqual(
+  decideDivinationInterpretationStart({
+    id: 'reading-interpret-1',
+    status: 'paid',
+  }),
+  { result: 'should_interpret' },
+)
+assert.deepEqual(
+  decideDivinationInterpretationStart({
+    id: 'reading-interpret-2',
+    status: 'pending_payment',
+  }),
+  { result: 'payment_required' },
+)
+assert.deepEqual(
+  decideDivinationInterpretationStart({
+    id: 'reading-interpret-3',
+    status: null,
+  }),
+  { result: 'payment_required' },
+)
+assert.deepEqual(
+  decideDivinationInterpretationStart({
+    id: 'reading-interpret-4',
+    status: 'interpreting',
+  }),
+  { result: 'already_interpreting' },
+)
+assert.deepEqual(
+  decideDivinationInterpretationStart({
+    id: 'reading-interpret-5',
+    status: 'completed',
+    interpretation: completedInterpretation,
+  }),
+  {
+    result: 'already_completed',
+    interpretation: completedInterpretation,
+  },
+)
+assert.deepEqual(
+  decideDivinationInterpretationStart({
+    id: 'reading-interpret-6',
+    status: 'completed',
+  }),
+  {
+    result: 'already_completed',
+    interpretation: null,
+  },
+)
+assert.deepEqual(
+  decideDivinationInterpretationStart({
+    id: 'reading-interpret-7',
+    status: 'failed',
+  }),
+  {
+    result: 'invalid_state',
+    status: 'failed',
+  },
+)
+assert.deepEqual(
+  decideDivinationInterpretationStart({
+    id: 'reading-interpret-8',
+    status: 'canceled',
+  }),
+  {
+    result: 'invalid_state',
+    status: 'canceled',
+  },
+)
 
 assert.deepEqual(decideDivinationPendingPaymentLink(null), { result: 'not_found' })
 assert.deepEqual(
@@ -332,6 +492,15 @@ assert.equal('spiritual_product' in paidPayload, false)
 assert.equal('booking_status' in pendingPaymentLinkPayload, false)
 assert.equal('course_purchase_id' in pendingPaymentLinkPayload, false)
 assert.equal('spiritual_product' in pendingPaymentLinkPayload, false)
+assert.equal('booking_status' in interpretingPayload, false)
+assert.equal('course_purchase_id' in interpretingPayload, false)
+assert.equal('spiritual_product' in interpretingPayload, false)
+assert.equal('booking_status' in completedPayload, false)
+assert.equal('course_purchase_id' in completedPayload, false)
+assert.equal('spiritual_product' in completedPayload, false)
+assert.equal('booking_status' in failedPayload, false)
+assert.equal('course_purchase_id' in failedPayload, false)
+assert.equal('spiritual_product' in failedPayload, false)
 
 assert.throws(
   () =>
@@ -375,4 +544,12 @@ assert.throws(
       merchantOrderNo: '',
     }),
   /merchantOrderNo/,
+)
+
+assert.throws(
+  () =>
+    buildDivinationFailedUpdatePayload({
+      errorMessage: '',
+    }),
+  /errorMessage/,
 )

@@ -64,6 +64,36 @@ export type DivinationPendingPaymentLinkPayload = {
   updated_at: string
 }
 
+export type DivinationInterpretingUpdatePayload = {
+  status: 'interpreting'
+  updated_at: string
+}
+
+export type BuildDivinationCompletedUpdatePayloadInput = {
+  interpretation: Record<string, unknown>
+  resultSummary?: string | null
+  interpretedAt?: string | null
+}
+
+export type DivinationCompletedUpdatePayload = {
+  status: 'completed'
+  interpretation: Record<string, unknown>
+  interpreted_at: string
+  updated_at: string
+  error_message: null
+  result_summary?: string
+}
+
+export type BuildDivinationFailedUpdatePayloadInput = {
+  errorMessage: string
+}
+
+export type DivinationFailedUpdatePayload = {
+  status: 'failed'
+  error_message: string
+  updated_at: string
+}
+
 export type DivinationReadingPaidSyncRow = {
   id: string
   status: DivinationReadingStatus | null
@@ -95,6 +125,14 @@ export type DivinationPendingPaymentLinkDecision =
   | { result: 'should_link' }
   | { result: 'already_linked' }
   | { result: 'not_payable'; status: DivinationReadingStatus | null }
+
+export type DivinationInterpretationStartDecision =
+  | { result: 'not_found' }
+  | { result: 'should_interpret' }
+  | { result: 'payment_required' }
+  | { result: 'already_interpreting' }
+  | { result: 'already_completed'; interpretation: unknown | null }
+  | { result: 'invalid_state'; status: DivinationReadingStatus | null }
 
 export type DivinationReadingPaymentValidationResult =
   | { ok: true }
@@ -138,6 +176,11 @@ function normalizeOptionalText(value: string | null | undefined) {
 
 function resolveTimestamp(value: string | null | undefined, now: string) {
   return value?.trim() || now
+}
+
+function normalizeRequiredText(value: string, fieldName: string) {
+  assertRequiredText(value, fieldName)
+  return value.trim()
 }
 
 function sanitizeDivinationReadingRawPayload(rawPayload?: Record<string, unknown>) {
@@ -218,6 +261,47 @@ export function buildDivinationPendingPaymentLinkPayload(
   }
 }
 
+export function buildDivinationInterpretingUpdatePayload(
+  now = new Date().toISOString(),
+): DivinationInterpretingUpdatePayload {
+  return {
+    status: 'interpreting',
+    updated_at: now,
+  }
+}
+
+export function buildDivinationCompletedUpdatePayload(
+  input: BuildDivinationCompletedUpdatePayloadInput,
+  now = new Date().toISOString(),
+): DivinationCompletedUpdatePayload {
+  const interpretedAt = resolveTimestamp(input.interpretedAt, now)
+  const resultSummary = normalizeOptionalText(input.resultSummary)
+  const payload: DivinationCompletedUpdatePayload = {
+    status: 'completed',
+    interpretation: input.interpretation,
+    interpreted_at: interpretedAt,
+    updated_at: now,
+    error_message: null,
+  }
+
+  if (resultSummary) {
+    payload.result_summary = resultSummary
+  }
+
+  return payload
+}
+
+export function buildDivinationFailedUpdatePayload(
+  input: BuildDivinationFailedUpdatePayloadInput,
+  now = new Date().toISOString(),
+): DivinationFailedUpdatePayload {
+  return {
+    status: 'failed',
+    error_message: normalizeRequiredText(input.errorMessage, 'errorMessage'),
+    updated_at: now,
+  }
+}
+
 export function decideDivinationPaidUpdate(
   existing: Pick<DivinationReadingPaidSyncRow, 'id' | 'status' | 'payment_id'> | null,
 ): DivinationPaidDecision {
@@ -247,6 +331,37 @@ export function decideDivinationPendingPaymentLink(
   }
 
   return { result: 'should_link' }
+}
+
+export function decideDivinationInterpretationStart(
+  existing: {
+    id: string
+    status: DivinationReadingStatus | null
+    interpretation?: unknown | null
+  } | null,
+): DivinationInterpretationStartDecision {
+  if (!existing) return { result: 'not_found' }
+
+  if (existing.status === 'paid') {
+    return { result: 'should_interpret' }
+  }
+
+  if (existing.status === 'pending_payment' || existing.status === null) {
+    return { result: 'payment_required' }
+  }
+
+  if (existing.status === 'interpreting') {
+    return { result: 'already_interpreting' }
+  }
+
+  if (existing.status === 'completed') {
+    return {
+      result: 'already_completed',
+      interpretation: existing.interpretation ?? null,
+    }
+  }
+
+  return { result: 'invalid_state', status: existing.status }
 }
 
 export function mapDivinationReadingPaymentContext(
