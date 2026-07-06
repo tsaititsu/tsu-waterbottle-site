@@ -34,6 +34,10 @@ type PaymentRequiredState = {
   amountTwd: number
 }
 
+type StoredReadingSession = DivinationReadingSession & {
+  autoMockPaid?: boolean
+}
+
 const initialMessage = "請先依照抽牌方式開始抽牌。"
 const shufflingMessage = "洗牌中..."
 const autoShufflingMessage = "系統正在為你洗牌與抽牌..."
@@ -99,6 +103,61 @@ function getRandomPosition(): DivinationPosition {
 
 function getRandomCardIndex() {
   return Math.floor(Math.random() * ziweiCards.length)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function readStoredReadingSession(): Partial<StoredReadingSession> | null {
+  if (typeof window === "undefined") return null
+
+  const rawSession = window.sessionStorage.getItem(readingSessionStorageKey)
+  if (!rawSession) return null
+
+  try {
+    const parsed = JSON.parse(rawSession)
+    return isRecord(parsed) ? (parsed as Partial<StoredReadingSession>) : null
+  } catch {
+    return null
+  }
+}
+
+function updateStoredReadingSessionDrawState(input: {
+  readingId: string
+  question: string
+  drawMode: DivinationDrawMode
+  localUserId: string
+  cardId: string
+  position: DivinationPosition
+}) {
+  if (typeof window === "undefined") return
+
+  const existing = readStoredReadingSession()
+  const base = existing?.readingId === input.readingId ? existing : null
+  const nextSession: StoredReadingSession = {
+    ...(base ?? {}),
+    readingId: input.readingId,
+    question: input.question,
+    drawMode: input.drawMode,
+    localUserId: input.localUserId,
+    cardId: input.cardId,
+    position: input.position,
+  }
+
+  window.sessionStorage.setItem(readingSessionStorageKey, JSON.stringify(nextSession))
+}
+
+function clearStoredReadingSessionDrawState(readingId: string) {
+  if (typeof window === "undefined") return
+
+  const existing = readStoredReadingSession()
+  if (!existing || existing.readingId !== readingId) return
+
+  const nextSession = { ...existing }
+  delete nextSession.cardId
+  delete nextSession.position
+  window.sessionStorage.setItem(readingSessionStorageKey, JSON.stringify(nextSession))
 }
 
 function DivinationConsentNotice({
@@ -226,6 +285,24 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     : null
   const hasCompletedInterpretation = Boolean(confirmedCard && confirmedPosition && interpretation)
 
+  function persistDrawState(selectedCard: ZiweiCard, selectedPosition: DivinationPosition) {
+    if (!readingId || !trimmedQuestion || !drawMode) return
+
+    updateStoredReadingSessionDrawState({
+      readingId,
+      question: trimmedQuestion,
+      drawMode,
+      localUserId,
+      cardId: selectedCard.id,
+      position: selectedPosition,
+    })
+  }
+
+  function clearPersistedDrawState() {
+    if (!readingId) return
+    clearStoredReadingSessionDrawState(readingId)
+  }
+
   useEffect(() => {
     return () => {
       if (shuffleTimerRef.current) {
@@ -262,7 +339,21 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     savedFollowUpDraftReadingIdRef.current = ""
     setErrorMessage("")
     setMessage(initialMessage)
-  }, [readingSession?.readingId, trimmedQuestion, drawMode])
+
+    const restoredCardId = readingSession?.cardId?.trim()
+    const restoredPosition = readingSession?.position ?? null
+    const restoredCardIndex = restoredCardId
+      ? ziweiCards.findIndex((card) => card.id === restoredCardId)
+      : -1
+
+    if (restoredCardIndex >= 0 && restoredPosition) {
+      setStarted(true)
+      setPendingIndex(restoredCardIndex)
+      setPendingPosition(restoredPosition)
+      setHasAcceptedTerms(isManualMode)
+      setMessage(pendingMessage)
+    }
+  }, [readingSession?.readingId, readingSession?.cardId, readingSession?.position, trimmedQuestion, drawMode, isManualMode])
 
   function startShuffle() {
     if (!canDraw || !isManualMode) {
@@ -277,6 +368,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     }
 
     interpretRequestRef.current += 1
+    clearPersistedDrawState()
     setStarted(true)
     setShuffling(true)
     setPendingIndex(null)
@@ -306,6 +398,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
   function pickCard(index: number) {
     if (!canDraw || !isManualMode || !started || shuffling || isInterpreting || hasResultPreview) return
 
+    clearPersistedDrawState()
     setPendingIndex(index)
     setPendingPosition(getRandomPosition())
     setHasAcceptedTerms(false)
@@ -326,6 +419,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
   function changeCard() {
     if (!canDraw || shuffling || isInterpreting) return
 
+    clearPersistedDrawState()
     setPendingIndex(null)
     setPendingPosition(null)
     setHasAcceptedTerms(false)
@@ -359,6 +453,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     }
 
     interpretRequestRef.current += 1
+    clearPersistedDrawState()
     setStarted(true)
     setShuffling(true)
     setPendingIndex(null)
@@ -431,6 +526,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setPaymentRequired(null)
     setErrorMessage("")
     setMessage(options?.mockPaid ? "支付與解讀中..." : "開始解讀中...")
+    persistDrawState(selectedCard, selectedPosition)
 
     try {
       const interpretResponse = await fetch("/api/divination/interpret", {

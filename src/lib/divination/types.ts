@@ -94,6 +94,8 @@ export type DivinationReadingSession = {
   question: string
   drawMode: DivinationDrawMode
   localUserId: string
+  cardId?: string | null
+  position?: DivinationPosition | null
   entitlement?: DivinationLocalEntitlement
   mockPaymentGate?: DivinationMockPaymentGate
   followUpContext?: DivinationFollowUpContext

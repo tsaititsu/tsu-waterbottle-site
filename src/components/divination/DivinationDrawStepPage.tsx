@@ -75,6 +75,11 @@ function parseReadingSession(value: string | null): StoredReadingSession | null 
       question: parsed.question,
       drawMode: parsed.drawMode,
       localUserId: parsed.localUserId,
+      cardId: typeof parsed.cardId === "string" ? parsed.cardId : null,
+      position:
+        parsed.position === "upright" || parsed.position === "reversed"
+          ? (parsed.position as DivinationPosition)
+          : null,
       entitlement: parsed.entitlement,
       mockPaymentGate: parsed.mockPaymentGate,
       followUpContext: parseFollowUpContext(parsed.followUpContext),
