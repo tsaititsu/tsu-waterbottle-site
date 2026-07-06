@@ -5,11 +5,13 @@ import {
   buildPendingAiChartReportPayload,
   decideAiChartReportPaidUpdate,
   decideAiChartReportPendingPaymentLink,
+  getAiChartReportPaymentContext,
+  linkAiChartReportPendingPayment,
   markAiChartReportPaidByPayment,
   type AiChartReportPaymentStatus,
 } from './aiChartReports'
 
-type MockSupabaseClient = NonNullable<Parameters<typeof markAiChartReportPaidByPayment>[1]>
+type MockSupabaseClient = NonNullable<Parameters<typeof getAiChartReportPaymentContext>[1]>
 type MockSupabaseResponse = {
   data: unknown | null
   error: { message: string } | null
@@ -306,6 +308,149 @@ assert.throws(
 )
 
 async function runAsyncHelperTests() {
+  const contextMock = createMockSupabase({
+    data: {
+      id: 'report-context-1',
+      payment_status: 'pending',
+      payment_id: null,
+      merchant_order_no: null,
+      amount_twd: 100,
+    },
+    error: null,
+  })
+  const context = await getAiChartReportPaymentContext('report-context-1', contextMock.supabase)
+
+  assert.deepEqual(context, {
+    id: 'report-context-1',
+    paymentStatus: 'pending',
+    paymentId: null,
+    merchantOrderNo: null,
+    amountTwd: 100,
+  })
+  assert.deepEqual(contextMock.calls.tables, ['ai_chart_reports'])
+  assert.deepEqual(contextMock.calls.selects, ['id,payment_status,payment_id,merchant_order_no,amount_twd'])
+  assert.deepEqual(contextMock.calls.eqs, [['id', 'report-context-1']])
+  assert.equal(contextMock.calls.selects[0].includes('report_content'), false)
+  assert.equal(contextMock.calls.selects[0].includes('chart_profile_id'), false)
+  assert.equal(contextMock.calls.selects[0].includes('birth'), false)
+  assert.equal(contextMock.calls.selects[0].includes('ziwei_payload'), false)
+  assert.equal(contextMock.calls.selects[0].includes('raw_payload'), false)
+
+  const linkedMock = createMockSupabase({
+    data: {
+      id: 'report-link-1',
+      payment_status: 'pending',
+      payment_id: null,
+      merchant_order_no: null,
+      amount_twd: 100,
+    },
+    error: null,
+  })
+  const linkedResult = await linkAiChartReportPendingPayment(
+    {
+      reportId: 'report-link-1',
+      paymentId: 'payment-link-1',
+      merchantOrderNo: 'WB20260706164000AICH',
+    },
+    linkedMock.supabase,
+  )
+
+  assert.deepEqual(linkedResult, {
+    result: 'linked',
+    reportId: 'report-link-1',
+  })
+  assert.deepEqual(linkedMock.calls.tables, ['ai_chart_reports', 'ai_chart_reports'])
+  assert.deepEqual(linkedMock.calls.selects, ['id,payment_status,payment_id,merchant_order_no,amount_twd'])
+  assert.deepEqual(linkedMock.calls.eqs, [
+    ['id', 'report-link-1'],
+    ['id', 'report-link-1'],
+  ])
+  assert.equal(linkedMock.calls.updates.length, 1)
+  assert.equal(linkedMock.calls.updates[0].payment_id, 'payment-link-1')
+  assert.equal(linkedMock.calls.updates[0].merchant_order_no, 'WB20260706164000AICH')
+  assert.equal(typeof linkedMock.calls.updates[0].updated_at, 'string')
+  assert.equal('payment_status' in linkedMock.calls.updates[0], false)
+  assert.equal('paid_at' in linkedMock.calls.updates[0], false)
+  assert.equal('completed_at' in linkedMock.calls.updates[0], false)
+  assert.equal('report_content' in linkedMock.calls.updates[0], false)
+  assert.equal('status' in linkedMock.calls.updates[0], false)
+  assert.equal('chart_profile_id' in linkedMock.calls.updates[0], false)
+  assert.equal('user_id' in linkedMock.calls.updates[0], false)
+  assertNoUnsafePaymentKeys(linkedMock.calls.updates[0])
+  assertNoOtherProductKeys(linkedMock.calls.updates[0])
+
+  const alreadyLinkedMock = createMockSupabase({
+    data: {
+      id: 'report-link-2',
+      payment_status: 'pending',
+      payment_id: 'payment-existing',
+      merchant_order_no: null,
+      amount_twd: 100,
+    },
+    error: null,
+  })
+  const alreadyLinkedResult = await linkAiChartReportPendingPayment(
+    {
+      reportId: 'report-link-2',
+      paymentId: 'payment-link-2',
+      merchantOrderNo: 'WB20260706164100AICH',
+    },
+    alreadyLinkedMock.supabase,
+  )
+
+  assert.deepEqual(alreadyLinkedResult, {
+    result: 'already_linked',
+    reportId: 'report-link-2',
+  })
+  assert.equal(alreadyLinkedMock.calls.updates.length, 0)
+
+  const notFoundLinkMock = createMockSupabase({
+    data: null,
+    error: null,
+  })
+  const notFoundLinkResult = await linkAiChartReportPendingPayment(
+    {
+      reportId: 'report-link-missing',
+      paymentId: 'payment-link-3',
+      merchantOrderNo: 'WB20260706164200AICH',
+    },
+    notFoundLinkMock.supabase,
+  )
+
+  assert.deepEqual(notFoundLinkResult, {
+    result: 'not_found',
+    reportId: 'report-link-missing',
+  })
+  assert.equal(notFoundLinkMock.calls.updates.length, 0)
+
+  for (const paymentStatus of ['paid', 'failed', 'canceled', 'refunded'] satisfies AiChartReportPaymentStatus[]) {
+    const notPayableMock = createMockSupabase({
+      data: {
+        id: `report-link-${paymentStatus}`,
+        payment_status: paymentStatus,
+        payment_id: null,
+        merchant_order_no: null,
+        amount_twd: 100,
+      },
+      error: null,
+    })
+    const notPayableResult = await linkAiChartReportPendingPayment(
+      {
+        reportId: `report-link-${paymentStatus}`,
+        paymentId: 'payment-link-4',
+        merchantOrderNo: 'WB20260706164300AICH',
+      },
+      notPayableMock.supabase,
+    )
+
+    assert.deepEqual(notPayableResult, {
+      result: 'not_payable',
+      reportId: `report-link-${paymentStatus}`,
+      paymentStatus,
+    })
+    assert.equal(notPayableMock.calls.updates.length, 0)
+  }
+
   const updatedMock = createMockSupabase({
     data: {
       id: 'report-async-1',

@@ -74,6 +74,34 @@ export type MarkAiChartReportPaidResult =
   | { result: 'not_found'; reportId: string }
   | { result: 'invalid_state'; reportId: string; paymentStatus: AiChartReportPaymentStatus | null }
 
+export type AiChartReportPaymentContext = {
+  id: string
+  paymentStatus: AiChartReportPaymentStatus | null
+  paymentId: string | null
+  merchantOrderNo: string | null
+  amountTwd: number | null
+}
+
+export type AiChartReportPaymentContextRow = {
+  id: string
+  payment_status: AiChartReportPaymentStatus | null
+  payment_id: string | null
+  merchant_order_no: string | null
+  amount_twd: number | null
+}
+
+export type LinkAiChartReportPendingPaymentInput = {
+  reportId: string
+  paymentId: string
+  merchantOrderNo: string
+}
+
+export type LinkAiChartReportPendingPaymentResult =
+  | { result: 'linked'; reportId: string }
+  | { result: 'already_linked'; reportId: string }
+  | { result: 'not_found'; reportId: string }
+  | { result: 'not_payable'; reportId: string; paymentStatus: AiChartReportPaymentStatus | null }
+
 type SupabaseAdminClient = ReturnType<typeof getSupabaseAdmin>
 
 function assertRequiredText(value: string, fieldName: string) {
@@ -188,6 +216,99 @@ export function decideAiChartReportPaidUpdate(
   }
 
   return { result: 'invalid_state', paymentStatus }
+}
+
+export function mapAiChartReportPaymentContext(
+  row: AiChartReportPaymentContextRow,
+): AiChartReportPaymentContext {
+  return {
+    id: row.id,
+    paymentStatus: row.payment_status,
+    paymentId: row.payment_id,
+    merchantOrderNo: row.merchant_order_no,
+    amountTwd: row.amount_twd,
+  }
+}
+
+export async function getAiChartReportPaymentContext(
+  reportId: string,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<AiChartReportPaymentContext | null> {
+  assertRequiredText(reportId, 'reportId')
+
+  const { data, error } = await supabase
+    .from('ai_chart_reports')
+    .select('id,payment_status,payment_id,merchant_order_no,amount_twd')
+    .eq('id', reportId)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return data ? mapAiChartReportPaymentContext(data as AiChartReportPaymentContextRow) : null
+}
+
+export async function linkAiChartReportPendingPayment(
+  input: LinkAiChartReportPendingPaymentInput,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<LinkAiChartReportPendingPaymentResult> {
+  assertRequiredText(input.reportId, 'reportId')
+  assertRequiredText(input.paymentId, 'paymentId')
+  assertRequiredText(input.merchantOrderNo, 'merchantOrderNo')
+
+  const existingReport = await getAiChartReportPaymentContext(input.reportId, supabase)
+  const decision = decideAiChartReportPendingPaymentLink(
+    existingReport
+      ? {
+          id: existingReport.id,
+          payment_status: existingReport.paymentStatus,
+          payment_id: existingReport.paymentId,
+          merchant_order_no: existingReport.merchantOrderNo,
+        }
+      : null,
+  )
+
+  if (decision.result === 'not_found') {
+    return {
+      result: 'not_found',
+      reportId: input.reportId,
+    }
+  }
+
+  if (decision.result === 'already_linked') {
+    return {
+      result: 'already_linked',
+      reportId: input.reportId,
+    }
+  }
+
+  if (decision.result === 'not_payable') {
+    return {
+      result: 'not_payable',
+      reportId: input.reportId,
+      paymentStatus: decision.paymentStatus,
+    }
+  }
+
+  const { error: updateError } = await supabase
+    .from('ai_chart_reports')
+    .update(
+      buildAiChartReportPendingPaymentLinkPayload({
+        paymentId: input.paymentId,
+        merchantOrderNo: input.merchantOrderNo,
+      }),
+    )
+    .eq('id', input.reportId)
+
+  if (updateError) {
+    throw new Error(updateError.message)
+  }
+
+  return {
+    result: 'linked',
+    reportId: input.reportId,
+  }
 }
 
 export async function markAiChartReportPaidByPayment(
