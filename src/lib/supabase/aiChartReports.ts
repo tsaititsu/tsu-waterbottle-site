@@ -1,3 +1,5 @@
+import { getSupabaseAdmin } from './admin'
+
 export type AiChartReportPaymentStatus = 'pending' | 'paid' | 'failed' | 'canceled' | 'refunded'
 
 export type BuildPendingAiChartReportPayloadInput = {
@@ -58,6 +60,21 @@ export type AiChartReportPaidDecision =
   | { result: 'should_update' }
   | { result: 'already_paid' }
   | { result: 'invalid_state'; paymentStatus: AiChartReportPaymentStatus | null }
+
+export type MarkAiChartReportPaidInput = {
+  reportId: string
+  paymentId: string
+  merchantOrderNo: string
+  paidAt?: string | null
+}
+
+export type MarkAiChartReportPaidResult =
+  | { result: 'updated'; reportId: string }
+  | { result: 'already_paid'; reportId: string }
+  | { result: 'not_found'; reportId: string }
+  | { result: 'invalid_state'; reportId: string; paymentStatus: AiChartReportPaymentStatus | null }
+
+type SupabaseAdminClient = ReturnType<typeof getSupabaseAdmin>
 
 function assertRequiredText(value: string, fieldName: string) {
   if (!value.trim()) {
@@ -171,4 +188,69 @@ export function decideAiChartReportPaidUpdate(
   }
 
   return { result: 'invalid_state', paymentStatus }
+}
+
+export async function markAiChartReportPaidByPayment(
+  input: MarkAiChartReportPaidInput,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<MarkAiChartReportPaidResult> {
+  assertRequiredText(input.reportId, 'reportId')
+  assertRequiredText(input.paymentId, 'paymentId')
+  assertRequiredText(input.merchantOrderNo, 'merchantOrderNo')
+
+  const { data: existingReport, error: selectError } = await supabase
+    .from('ai_chart_reports')
+    .select('id,payment_status')
+    .eq('id', input.reportId)
+    .maybeSingle()
+
+  if (selectError) {
+    throw new Error(selectError.message)
+  }
+
+  const decision = decideAiChartReportPaidUpdate(
+    existingReport as { id: string; payment_status?: AiChartReportPaymentStatus | null } | null,
+  )
+
+  if (decision.result === 'not_found') {
+    return {
+      result: 'not_found',
+      reportId: input.reportId,
+    }
+  }
+
+  if (decision.result === 'already_paid') {
+    return {
+      result: 'already_paid',
+      reportId: input.reportId,
+    }
+  }
+
+  if (decision.result === 'invalid_state') {
+    return {
+      result: 'invalid_state',
+      reportId: input.reportId,
+      paymentStatus: decision.paymentStatus,
+    }
+  }
+
+  const { error: updateError } = await supabase
+    .from('ai_chart_reports')
+    .update(
+      buildAiChartReportPaidUpdatePayload({
+        paymentId: input.paymentId,
+        merchantOrderNo: input.merchantOrderNo,
+        paidAt: input.paidAt,
+      }),
+    )
+    .eq('id', input.reportId)
+
+  if (updateError) {
+    throw new Error(updateError.message)
+  }
+
+  return {
+    result: 'updated',
+    reportId: input.reportId,
+  }
 }

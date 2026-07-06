@@ -5,8 +5,64 @@ import {
   buildPendingAiChartReportPayload,
   decideAiChartReportPaidUpdate,
   decideAiChartReportPendingPaymentLink,
+  markAiChartReportPaidByPayment,
   type AiChartReportPaymentStatus,
 } from './aiChartReports'
+
+type MockSupabaseClient = NonNullable<Parameters<typeof markAiChartReportPaidByPayment>[1]>
+type MockSupabaseResponse = {
+  data: unknown | null
+  error: { message: string } | null
+}
+type MockSupabaseCalls = {
+  tables: string[]
+  selects: string[]
+  updates: Record<string, unknown>[]
+  eqs: Array<[string, unknown]>
+}
+
+function createMockSupabase(response: MockSupabaseResponse): {
+  supabase: MockSupabaseClient
+  calls: MockSupabaseCalls
+} {
+  const calls: MockSupabaseCalls = {
+    tables: [],
+    selects: [],
+    updates: [],
+    eqs: [],
+  }
+
+  const chain = {
+    error: null,
+    select(columns: string) {
+      calls.selects.push(columns)
+      return chain
+    },
+    update(payload: Record<string, unknown>) {
+      calls.updates.push(payload)
+      return chain
+    },
+    eq(column: string, value: unknown) {
+      calls.eqs.push([column, value])
+      return chain
+    },
+    async maybeSingle() {
+      return response
+    },
+  }
+
+  const supabase = {
+    from(table: string) {
+      calls.tables.push(table)
+      return chain
+    },
+  }
+
+  return {
+    supabase: supabase as unknown as MockSupabaseClient,
+    calls,
+  }
+}
 
 function assertNoUnsafePaymentKeys(payload: Record<string, unknown>) {
   assert.equal('TradeInfo' in payload, false)
@@ -248,3 +304,116 @@ assert.throws(
     }),
   /merchantOrderNo/,
 )
+
+async function runAsyncHelperTests() {
+  const updatedMock = createMockSupabase({
+    data: {
+      id: 'report-async-1',
+      payment_status: 'pending',
+    },
+    error: null,
+  })
+  const updatedResult = await markAiChartReportPaidByPayment(
+    {
+      reportId: 'report-async-1',
+      paymentId: 'payment-async-1',
+      merchantOrderNo: 'WB20260706165000AICH',
+      paidAt: '2026-07-06T16:50:00.000Z',
+    },
+    updatedMock.supabase,
+  )
+
+  assert.deepEqual(updatedResult, {
+    result: 'updated',
+    reportId: 'report-async-1',
+  })
+  assert.deepEqual(updatedMock.calls.tables, ['ai_chart_reports', 'ai_chart_reports'])
+  assert.deepEqual(updatedMock.calls.selects, ['id,payment_status'])
+  assert.deepEqual(updatedMock.calls.eqs, [
+    ['id', 'report-async-1'],
+    ['id', 'report-async-1'],
+  ])
+  assert.equal(updatedMock.calls.updates.length, 1)
+  assert.equal(updatedMock.calls.updates[0].payment_id, 'payment-async-1')
+  assert.equal(updatedMock.calls.updates[0].merchant_order_no, 'WB20260706165000AICH')
+  assert.equal(updatedMock.calls.updates[0].payment_status, 'paid')
+  assert.equal(updatedMock.calls.updates[0].paid_at, '2026-07-06T16:50:00.000Z')
+  assert.equal(updatedMock.calls.updates[0].error_message, null)
+  assert.equal('report_content' in updatedMock.calls.updates[0], false)
+  assert.equal('completed_at' in updatedMock.calls.updates[0], false)
+  assert.equal('status' in updatedMock.calls.updates[0], false)
+  assert.equal('chart_profile_id' in updatedMock.calls.updates[0], false)
+  assert.equal('user_id' in updatedMock.calls.updates[0], false)
+  assertNoUnsafePaymentKeys(updatedMock.calls.updates[0])
+
+  const alreadyPaidMock = createMockSupabase({
+    data: {
+      id: 'report-async-2',
+      payment_status: 'paid',
+    },
+    error: null,
+  })
+  const alreadyPaidResult = await markAiChartReportPaidByPayment(
+    {
+      reportId: 'report-async-2',
+      paymentId: 'payment-async-2',
+      merchantOrderNo: 'WB20260706165100AICH',
+    },
+    alreadyPaidMock.supabase,
+  )
+
+  assert.deepEqual(alreadyPaidResult, {
+    result: 'already_paid',
+    reportId: 'report-async-2',
+  })
+  assert.equal(alreadyPaidMock.calls.updates.length, 0)
+
+  const notFoundMock = createMockSupabase({
+    data: null,
+    error: null,
+  })
+  const notFoundResult = await markAiChartReportPaidByPayment(
+    {
+      reportId: 'report-missing',
+      paymentId: 'payment-async-3',
+      merchantOrderNo: 'WB20260706165200AICH',
+    },
+    notFoundMock.supabase,
+  )
+
+  assert.deepEqual(notFoundResult, {
+    result: 'not_found',
+    reportId: 'report-missing',
+  })
+  assert.equal(notFoundMock.calls.updates.length, 0)
+
+  for (const paymentStatus of ['failed', 'canceled', 'refunded'] satisfies AiChartReportPaymentStatus[]) {
+    const invalidStateMock = createMockSupabase({
+      data: {
+        id: `report-async-${paymentStatus}`,
+        payment_status: paymentStatus,
+      },
+      error: null,
+    })
+    const invalidStateResult = await markAiChartReportPaidByPayment(
+      {
+        reportId: `report-async-${paymentStatus}`,
+        paymentId: 'payment-async-4',
+        merchantOrderNo: 'WB20260706165300AICH',
+      },
+      invalidStateMock.supabase,
+    )
+
+    assert.deepEqual(invalidStateResult, {
+      result: 'invalid_state',
+      reportId: `report-async-${paymentStatus}`,
+      paymentStatus,
+    })
+    assert.equal(invalidStateMock.calls.updates.length, 0)
+  }
+}
+
+runAsyncHelperTests().catch((error) => {
+  console.error(error)
+  process.exit(1)
+})
