@@ -8,6 +8,7 @@ import {
   parseNewebPayNotifyPayload,
   persistNewebPayNotifyQueryFallback,
   persistNewebPayNotifyPaymentResult,
+  syncNewebPayAiChartAfterPayment,
   syncNewebPayBookingAfterPayment,
   syncNewebPayCourseAfterPayment,
   syncNewebPayDivinationAfterPayment,
@@ -604,6 +605,58 @@ async function runQueryFallbackAssertions() {
     })
   }
 
+  let fallbackAiChartSyncInput: unknown
+  const aiChartReportId = '2df1a8da-3893-4b81-8d00-774a9cc0e472'
+  const aiChartFallback = await persistNewebPayNotifyQueryFallback({
+    merchantOrderNo: 'WB20260703172530A1B2',
+    config,
+    getPaymentByMerchantOrderNo: async () => createPaymentRecord({
+      itemType: 'ai_chart_report',
+      itemId: aiChartReportId,
+      itemName: 'AI 命盤分析',
+      amountTwd: 1,
+      rawPayload: {
+        amount: 1,
+        itemType: 'ai_chart_report',
+        reportId: aiChartReportId,
+        merchantOrderNo: 'WB20260703172530A1B2',
+      },
+    }),
+    queryNewebPayTrade: async () => successQuery,
+    markPaymentPaid: async () => ({
+      result: 'updated',
+      payment: createPaymentPaidContext({
+        itemType: 'ai_chart_report',
+        itemId: aiChartReportId,
+      }),
+    }),
+  })
+
+  assert.equal(aiChartFallback.ok, true)
+  assert.equal('payment' in aiChartFallback && aiChartFallback.payment.itemType, 'ai_chart_report')
+  if ('payment' in aiChartFallback) {
+    const aiChartFallbackSync = await syncNewebPayAiChartAfterPayment({
+      payment: aiChartFallback.payment,
+      merchantOrderNo: aiChartFallback.query.merchantOrderNo,
+      syncAiChartReport: async (input) => {
+        fallbackAiChartSyncInput = input
+        return { result: 'updated', reportId: input.itemId || '' }
+      },
+    })
+
+    assert.deepEqual(aiChartFallbackSync, {
+      aiChartSync: 'updated',
+      reportId: aiChartReportId,
+    })
+    assert.deepEqual(fallbackAiChartSyncInput, {
+      paymentId: 'payment-1',
+      itemType: 'ai_chart_report',
+      itemId: aiChartReportId,
+      merchantOrderNo: 'WB20260703172530A1B2',
+      paidAt: '2026-07-04 16:00:00',
+    })
+  }
+
   let markCalled = false
   const notPaid = await persistNewebPayNotifyQueryFallback({
     merchantOrderNo: 'WB20260703172530A1B2',
@@ -999,12 +1052,148 @@ async function runDivinationSyncAssertions() {
   }
 }
 
+async function runAiChartSyncAssertions() {
+  const reportId = '2df1a8da-3893-4b81-8d00-774a9cc0e472'
+  let aiChartSyncInput: unknown
+  const updated = await syncNewebPayAiChartAfterPayment({
+    payment: createPaymentPaidContext({
+      itemType: 'ai_chart_report',
+      itemId: reportId,
+    }),
+    merchantOrderNo: 'WB20260703172530A1B2',
+    syncAiChartReport: async (input) => {
+      aiChartSyncInput = input
+      return { result: 'updated', reportId: input.itemId || '' }
+    },
+  })
+
+  assert.deepEqual(updated, {
+    aiChartSync: 'updated',
+    reportId,
+  })
+  assert.deepEqual(aiChartSyncInput, {
+    paymentId: 'payment-1',
+    itemType: 'ai_chart_report',
+    itemId: reportId,
+    merchantOrderNo: 'WB20260703172530A1B2',
+    paidAt: '2026-07-04 16:00:00',
+  })
+
+  const alreadyPaid = await syncNewebPayAiChartAfterPayment({
+    payment: createPaymentPaidContext({
+      itemType: 'ai_chart_report',
+      itemId: reportId,
+    }),
+    merchantOrderNo: 'WB20260703172530A1B2',
+    syncAiChartReport: async (input) => ({ result: 'already_paid', reportId: input.itemId || '' }),
+  })
+
+  assert.deepEqual(alreadyPaid, {
+    aiChartSync: 'already_paid',
+    reportId,
+  })
+
+  const notFound = await syncNewebPayAiChartAfterPayment({
+    payment: createPaymentPaidContext({
+      itemType: 'ai_chart_report',
+      itemId: reportId,
+    }),
+    merchantOrderNo: 'WB20260703172530A1B2',
+    syncAiChartReport: async (input) => ({ result: 'not_found', reportId: input.itemId || '' }),
+  })
+
+  assert.deepEqual(notFound, {
+    aiChartSync: 'not_found',
+    reportId,
+  })
+
+  const invalidState = await syncNewebPayAiChartAfterPayment({
+    payment: createPaymentPaidContext({
+      itemType: 'ai_chart_report',
+      itemId: reportId,
+    }),
+    merchantOrderNo: 'WB20260703172530A1B2',
+    syncAiChartReport: async (input) => ({
+      result: 'invalid_state',
+      reportId: input.itemId || '',
+      paymentStatus: 'failed',
+    }),
+  })
+
+  assert.deepEqual(invalidState, {
+    aiChartSync: 'invalid_state',
+    reportId,
+    paymentStatus: 'failed',
+  })
+
+  for (const payment of [
+    createPaymentPaidContext({ itemType: 'ai_chart_report', itemId: null }),
+    createPaymentPaidContext({ itemType: 'ai_chart_report', itemId: '   ' }),
+  ]) {
+    let called = false
+    const result = await syncNewebPayAiChartAfterPayment({
+      payment,
+      merchantOrderNo: 'WB20260703172530A1B2',
+      syncAiChartReport: async () => {
+        called = true
+        throw new Error('should_not_call')
+      },
+    })
+
+    assert.deepEqual(result, {
+      aiChartSync: 'skipped_missing_ai_chart_context',
+    })
+    assert.equal(called, false)
+  }
+
+  let missingOrderCalled = false
+  const missingOrder = await syncNewebPayAiChartAfterPayment({
+    payment: createPaymentPaidContext({
+      itemType: 'ai_chart_report',
+      itemId: reportId,
+    }),
+    merchantOrderNo: '',
+    syncAiChartReport: async () => {
+      missingOrderCalled = true
+      throw new Error('should_not_call')
+    },
+  })
+
+  assert.deepEqual(missingOrder, {
+    aiChartSync: 'skipped_missing_ai_chart_context',
+  })
+  assert.equal(missingOrderCalled, false)
+
+  for (const payment of [
+    createPaymentPaidContext({ bookingId: 'booking-1', itemType: 'booking', itemId: 'booking-1' }),
+    createPaymentPaidContext({ userId: 'user-course-1', itemType: 'course', itemId: 'course-1' }),
+    createPaymentPaidContext({ itemType: 'ai_divination', itemId: 'reading-1' }),
+    createPaymentPaidContext(),
+  ]) {
+    let called = false
+    const result = await syncNewebPayAiChartAfterPayment({
+      payment,
+      merchantOrderNo: 'WB20260703172530A1B2',
+      syncAiChartReport: async () => {
+        called = true
+        throw new Error('should_not_call')
+      },
+    })
+
+    assert.deepEqual(result, {
+      aiChartSync: 'skipped_not_ai_chart',
+    })
+    assert.equal(called, false)
+  }
+}
+
 Promise.all([
   runPaymentPersistenceAssertions(),
   runQueryFallbackAssertions(),
   runBookingSyncAssertions(),
   runCourseSyncAssertions(),
   runDivinationSyncAssertions(),
+  runAiChartSyncAssertions(),
 ]).catch((error) => {
   console.error(error)
   process.exitCode = 1

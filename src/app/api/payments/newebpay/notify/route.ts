@@ -7,6 +7,7 @@ import {
   parseNewebPayNotifyPayload,
   persistNewebPayNotifyQueryFallback,
   persistNewebPayNotifyPaymentResult,
+  syncNewebPayAiChartAfterPayment,
   syncNewebPayBookingAfterPayment,
   syncNewebPayCourseAfterPayment,
   syncNewebPayDivinationAfterPayment,
@@ -202,6 +203,69 @@ async function syncDivinationAfterPayment(input: {
   return divinationSync.divinationSync
 }
 
+async function syncAiChartAfterPayment(input: {
+  merchantOrderNo: string
+  paymentResult: string
+  payment: Parameters<typeof syncNewebPayAiChartAfterPayment>[0]['payment']
+}) {
+  const aiChartSync = await syncNewebPayAiChartAfterPayment({
+    payment: input.payment,
+    merchantOrderNo: input.merchantOrderNo,
+  })
+
+  if (aiChartSync.aiChartSync === 'skipped_not_ai_chart') {
+    return aiChartSync.aiChartSync
+  }
+
+  if (aiChartSync.aiChartSync === 'skipped_missing_ai_chart_context') {
+    console.info('NewebPay AI chart sync skipped', {
+      merchantOrderNo: input.merchantOrderNo,
+      paymentResult: input.paymentResult,
+      paymentId: input.payment.id,
+      itemType: input.payment.itemType,
+      itemId: input.payment.itemId,
+      aiChartSync: aiChartSync.aiChartSync,
+    })
+    return aiChartSync.aiChartSync
+  }
+
+  if (aiChartSync.aiChartSync === 'failed') {
+    console.warn('NewebPay AI chart sync failed', {
+      merchantOrderNo: input.merchantOrderNo,
+      paymentResult: input.paymentResult,
+      paymentId: input.payment.id,
+      itemType: input.payment.itemType,
+      itemId: input.payment.itemId,
+      aiChartSync: aiChartSync.aiChartSync,
+      error: aiChartSync.error,
+    })
+    return aiChartSync.aiChartSync
+  }
+
+  if (aiChartSync.aiChartSync === 'invalid_state') {
+    console.warn('NewebPay AI chart sync invalid state', {
+      merchantOrderNo: input.merchantOrderNo,
+      paymentResult: input.paymentResult,
+      paymentId: input.payment.id,
+      itemType: input.payment.itemType,
+      itemId: aiChartSync.reportId,
+      aiChartSync: aiChartSync.aiChartSync,
+      paymentStatus: aiChartSync.paymentStatus,
+    })
+    return aiChartSync.aiChartSync
+  }
+
+  console.info('NewebPay AI chart sync completed', {
+    merchantOrderNo: input.merchantOrderNo,
+    paymentResult: input.paymentResult,
+    paymentId: input.payment.id,
+    itemType: input.payment.itemType,
+    itemId: aiChartSync.reportId,
+    aiChartSync: aiChartSync.aiChartSync,
+  })
+  return aiChartSync.aiChartSync
+}
+
 function getNotifyQueryMerchantOrderNo(request: Request) {
   const value = new URL(request.url).searchParams.get('merchantOrderNo')?.trim()
   return value || null
@@ -327,6 +391,11 @@ export async function POST(request: Request) {
         paymentResult: paymentPersistence.result,
         payment: paymentPersistence.payment,
       })
+      const aiChartSync = await syncAiChartAfterPayment({
+        merchantOrderNo: result.merchantOrderNo,
+        paymentResult: paymentPersistence.result,
+        payment: paymentPersistence.payment,
+      })
 
       return NextResponse.json({
         ok: true,
@@ -335,6 +404,7 @@ export async function POST(request: Request) {
         bookingSync,
         courseSync,
         divinationSync,
+        aiChartSync,
       })
     } catch (error) {
       return notifyPaymentUpdateError(error, result)
@@ -424,6 +494,11 @@ export async function POST(request: Request) {
           paymentResult: fallbackResult.result,
           payment: fallbackResult.payment,
         })
+        const aiChartSync = await syncAiChartAfterPayment({
+          merchantOrderNo: fallbackResult.query.merchantOrderNo,
+          paymentResult: fallbackResult.result,
+          payment: fallbackResult.payment,
+        })
 
         return NextResponse.json({
           ok: true,
@@ -432,6 +507,7 @@ export async function POST(request: Request) {
           bookingSync,
           courseSync,
           divinationSync,
+          aiChartSync,
         })
       } catch (fallbackError) {
         console.warn('NewebPay notify query fallback failed', {
