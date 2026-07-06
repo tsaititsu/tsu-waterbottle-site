@@ -20,6 +20,10 @@ import type {
   DivinationPosition,
   DivinationReadingSession,
 } from "@/lib/divination/types"
+import {
+  buildNewebPayClientFormFields,
+  type NewebPayClientFormField,
+} from "@/lib/newebpay/clientForm"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
@@ -210,13 +214,17 @@ function getNewebPayCheckoutErrorMessage(error?: string) {
   return "線上付款資料建立失敗，請稍後再試。"
 }
 
-function submitNewebPayForm(paymentData: Extract<NewebPayCreateResponse, { ok: true }>) {
+function submitNewebPayForm(formData: {
+  action: string
+  method: "POST"
+  fields: NewebPayClientFormField[]
+}) {
   const form = document.createElement("form")
-  form.method = paymentData.method
-  form.action = paymentData.action
+  form.method = formData.method
+  form.action = formData.action
   form.style.display = "none"
 
-  for (const [name, value] of Object.entries(paymentData.fields)) {
+  for (const { name, value } of formData.fields) {
     const input = document.createElement("input")
     input.type = "hidden"
     input.name = name
@@ -722,13 +730,24 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
         return
       }
 
+      const formFields = buildNewebPayClientFormFields(data.fields)
+      if (!formFields.ok) {
+        setErrorMessage("線上付款資料不完整，請稍後再試。")
+        setMessage(paymentRequired?.message || "本次 AI 占卜解讀需 NT$50。")
+        return
+      }
+
       updateStoredReadingSessionMerchantOrderNo({
         readingId,
         merchantOrderNo: data.merchantOrderNo,
       })
       setMessage("正在前往藍新金流付款頁...")
       shouldSubmitForm = true
-      submitNewebPayForm(data)
+      submitNewebPayForm({
+        action: data.action,
+        method: data.method,
+        fields: formFields.fields,
+      })
     } catch {
       setErrorMessage("線上付款資料建立失敗，請稍後再試。")
       setMessage(paymentRequired?.message || "本次 AI 占卜解讀需 NT$50。")
