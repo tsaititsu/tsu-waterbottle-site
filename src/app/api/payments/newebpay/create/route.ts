@@ -5,15 +5,19 @@ import {
   createNewebPayMpgPaymentData,
   isNewebPayPaymentMode,
   isNewebPayPaymentSource,
+  resolveNewebPayAiChartReportPendingPaymentLink,
+  resolveNewebPayAiChartReportIdForPayment,
   resolveNewebPayDivinationPendingPaymentLink,
   resolveNewebPayBookingIdForPayment,
   resolveNewebPayDivinationReadingIdForPayment,
   type NewebPayPaymentMode,
   type NewebPayPaymentSource,
+  validateNewebPayAiChartReportPayment,
   validateNewebPayBookingPayment,
 } from '@/lib/newebpay/paymentForm'
 import { getNewebPayPaymentItem } from '@/lib/newebpay/paymentItems'
 import { getSupabaseBookingPaymentContext } from '@/lib/supabase/bookings'
+import { getAiChartReportPaymentContext, linkAiChartReportPendingPayment } from '@/lib/supabase/aiChartReports'
 import {
   getDivinationReadingPaymentContext,
   linkDivinationReadingPendingPayment,
@@ -27,6 +31,7 @@ type CreateNewebPayPaymentRequest = {
   paymentMode?: unknown
   bookingId?: unknown
   readingId?: unknown
+  reportId?: unknown
 }
 
 function paymentConfigErrorResponse() {
@@ -64,6 +69,15 @@ function divinationReadingLookupErrorResponse(input: { readingId: string; error:
   return NextResponse.json({ ok: false, error: 'divination_reading_lookup_failed' }, { status: 500 })
 }
 
+function aiChartReportLookupErrorResponse(input: { reportId: string; error: unknown }) {
+  console.error('藍新付款 AI 命盤 report 查詢失敗', {
+    reportId: input.reportId,
+    error: input.error instanceof Error ? input.error.message : 'unknown_error',
+  })
+
+  return NextResponse.json({ ok: false, error: 'ai_chart_report_lookup_failed' }, { status: 500 })
+}
+
 function divinationPaymentLinkErrorResponse(input: {
   readingId: string
   paymentId: string
@@ -78,6 +92,22 @@ function divinationPaymentLinkErrorResponse(input: {
   })
 
   return NextResponse.json({ ok: false, error: 'divination_payment_link_failed' }, { status: 500 })
+}
+
+function aiChartPaymentLinkErrorResponse(input: {
+  reportId: string
+  paymentId: string
+  merchantOrderNo: string
+  error: unknown
+}) {
+  console.error('藍新 AI 命盤 payment link 失敗', {
+    reportId: input.reportId,
+    paymentId: input.paymentId,
+    merchantOrderNo: input.merchantOrderNo,
+    error: input.error instanceof Error ? input.error.message : 'unknown_error',
+  })
+
+  return NextResponse.json({ ok: false, error: 'ai_chart_payment_link_failed' }, { status: 500 })
 }
 
 function divinationPaymentLinkResultResponse(input: {
@@ -97,6 +127,27 @@ function divinationPaymentLinkResultResponse(input: {
 
   return NextResponse.json(
     { ok: false, error: resolution.ok ? 'divination_payment_link_failed' : resolution.error },
+    { status: 400 },
+  )
+}
+
+function aiChartPaymentLinkResultResponse(input: {
+  reportId: string
+  paymentId: string
+  merchantOrderNo: string
+  result: 'already_linked' | 'not_found' | 'not_payable'
+}) {
+  const resolution = resolveNewebPayAiChartReportPendingPaymentLink(input.result)
+
+  console.warn('藍新 AI 命盤 payment link 未完成', {
+    reportId: input.reportId,
+    paymentId: input.paymentId,
+    merchantOrderNo: input.merchantOrderNo,
+    result: input.result,
+  })
+
+  return NextResponse.json(
+    { ok: false, error: resolution.ok ? 'ai_chart_payment_link_failed' : resolution.error },
     { status: 400 },
   )
 }
@@ -144,6 +195,16 @@ export async function POST(request: Request) {
   }
 
   const readingId = readingIdResolution.readingId
+  const reportIdResolution = resolveNewebPayAiChartReportIdForPayment({
+    itemKey: item.itemKey,
+    reportId: body?.reportId,
+  })
+
+  if (!reportIdResolution.ok) {
+    return NextResponse.json({ ok: false, error: reportIdResolution.error }, { status: 400 })
+  }
+
+  const reportId = reportIdResolution.reportId
 
   if (bookingId) {
     let booking
@@ -180,6 +241,25 @@ export async function POST(request: Request) {
     }
   }
 
+  if (reportId) {
+    let report
+
+    try {
+      report = await getAiChartReportPaymentContext(reportId)
+    } catch (error) {
+      return aiChartReportLookupErrorResponse({ reportId, error })
+    }
+
+    const reportValidation = validateNewebPayAiChartReportPayment({
+      report,
+      expectedAmountTwd: item.amount,
+    })
+
+    if (!reportValidation.ok) {
+      return NextResponse.json({ ok: false, error: reportValidation.error }, { status: 400 })
+    }
+  }
+
   try {
     const config = getNewebPayConfig()
     const paymentData = createNewebPayMpgPaymentData({
@@ -194,6 +274,7 @@ export async function POST(request: Request) {
       merchantOrderNo: paymentData.merchantOrderNo,
       bookingId,
       readingId,
+      reportId,
     })
 
     let pendingPayment: Awaited<ReturnType<typeof createPendingPayment>>
@@ -236,6 +317,32 @@ export async function POST(request: Request) {
       } catch (error) {
         return divinationPaymentLinkErrorResponse({
           readingId,
+          paymentId: pendingPayment.id,
+          merchantOrderNo: paymentData.merchantOrderNo,
+          error,
+        })
+      }
+    }
+
+    if (reportId) {
+      try {
+        const linkResult = await linkAiChartReportPendingPayment({
+          reportId,
+          paymentId: pendingPayment.id,
+          merchantOrderNo: paymentData.merchantOrderNo,
+        })
+
+        if (linkResult.result !== 'linked') {
+          return aiChartPaymentLinkResultResponse({
+            reportId,
+            paymentId: pendingPayment.id,
+            merchantOrderNo: paymentData.merchantOrderNo,
+            result: linkResult.result,
+          })
+        }
+      } catch (error) {
+        return aiChartPaymentLinkErrorResponse({
+          reportId,
           paymentId: pendingPayment.id,
           merchantOrderNo: paymentData.merchantOrderNo,
           error,

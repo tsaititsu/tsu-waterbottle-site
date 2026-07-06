@@ -6,9 +6,12 @@ import {
   createNewebPayMpgPaymentData,
   isNewebPayPaymentMode,
   isNewebPayPaymentSource,
+  resolveNewebPayAiChartReportPendingPaymentLink,
+  resolveNewebPayAiChartReportIdForPayment,
   resolveNewebPayDivinationPendingPaymentLink,
   resolveNewebPayBookingIdForPayment,
   resolveNewebPayDivinationReadingIdForPayment,
+  validateNewebPayAiChartReportPayment,
   validateNewebPayBookingPayment,
 } from './paymentForm'
 import { getNewebPayPaymentItem } from './paymentItems'
@@ -42,6 +45,11 @@ assert.deepEqual(getNewebPayPaymentItem('ai_divination_single'), {
   itemDesc: '紫微牌卡占卜單次',
   amount: 50,
 })
+assert.deepEqual(getNewebPayPaymentItem('ai_chart_report_single'), {
+  itemKey: 'ai_chart_report_single',
+  itemDesc: 'AI 命盤分析',
+  amount: 100,
+})
 assert.equal(getNewebPayPaymentItem('unknown_item'), null)
 
 const orderNo = generateNewebPayMerchantOrderNo(new Date(2026, 6, 3, 17, 25, 30), 'A1B2')
@@ -51,6 +59,7 @@ assert.match(orderNo, /^[A-Z0-9_]{1,30}$/)
 
 assert.equal(isNewebPayPaymentSource('booking'), true)
 assert.equal(isNewebPayPaymentSource('ai_divination'), true)
+assert.equal(isNewebPayPaymentSource('ai_chart_report'), true)
 assert.equal(isNewebPayPaymentSource('manual_test'), true)
 assert.equal(isNewebPayPaymentSource('external'), false)
 assert.equal(isNewebPayPaymentMode('credit'), true)
@@ -59,6 +68,7 @@ assert.equal(isNewebPayPaymentMode('linepay'), false)
 
 const bookingId = '550e8400-e29b-41d4-a716-446655440000'
 const readingId = '2df1a8da-3893-4b81-8d00-774a9cc0e472'
+const reportId = '6ed0a8fa-c0c4-4fd7-9d2b-052822c9248c'
 
 assert.deepEqual(
   resolveNewebPayBookingIdForPayment({
@@ -138,6 +148,46 @@ assert.deepEqual(
   }),
   { ok: true, readingId: null },
 )
+assert.deepEqual(
+  resolveNewebPayAiChartReportIdForPayment({
+    itemKey: 'ai_chart_report_single',
+  }),
+  { ok: false, error: 'ai_chart_report_id_required' },
+)
+assert.deepEqual(
+  resolveNewebPayAiChartReportIdForPayment({
+    itemKey: 'ai_chart_report_single',
+    reportId: 'not-a-uuid',
+  }),
+  { ok: false, error: 'invalid_ai_chart_report_id' },
+)
+assert.deepEqual(
+  resolveNewebPayAiChartReportIdForPayment({
+    itemKey: 'ai_chart_report_single',
+    reportId,
+  }),
+  { ok: true, reportId },
+)
+assert.deepEqual(
+  resolveNewebPayAiChartReportIdForPayment({
+    itemKey: 'booking_consultation_60',
+    reportId,
+  }),
+  { ok: false, error: 'ai_chart_report_id_not_allowed' },
+)
+assert.deepEqual(
+  resolveNewebPayAiChartReportIdForPayment({
+    itemKey: 'newebpay_live_smoke_test_1',
+    reportId,
+  }),
+  { ok: false, error: 'ai_chart_report_id_not_allowed' },
+)
+assert.deepEqual(
+  resolveNewebPayAiChartReportIdForPayment({
+    itemKey: 'newebpay_live_smoke_test_1',
+  }),
+  { ok: true, reportId: null },
+)
 
 assert.deepEqual(
   validateNewebPayBookingPayment({
@@ -183,6 +233,79 @@ assert.deepEqual(
   { ok: true },
 )
 
+assert.deepEqual(
+  validateNewebPayAiChartReportPayment({
+    report: null,
+    expectedAmountTwd: 100,
+  }),
+  { ok: false, error: 'ai_chart_report_not_found' },
+)
+assert.deepEqual(
+  validateNewebPayAiChartReportPayment({
+    report: {
+      id: reportId,
+      amountTwd: 99,
+      paymentStatus: 'pending',
+      paymentId: null,
+      merchantOrderNo: null,
+    },
+    expectedAmountTwd: 100,
+  }),
+  { ok: false, error: 'ai_chart_report_not_payable' },
+)
+assert.deepEqual(
+  validateNewebPayAiChartReportPayment({
+    report: {
+      id: reportId,
+      amountTwd: 100,
+      paymentStatus: 'pending',
+      paymentId: 'payment-existing',
+      merchantOrderNo: null,
+    },
+    expectedAmountTwd: 100,
+  }),
+  { ok: false, error: 'ai_chart_report_already_linked' },
+)
+assert.deepEqual(
+  validateNewebPayAiChartReportPayment({
+    report: {
+      id: reportId,
+      amountTwd: 100,
+      paymentStatus: 'paid',
+      paymentId: null,
+      merchantOrderNo: null,
+    },
+    expectedAmountTwd: 100,
+  }),
+  { ok: false, error: 'ai_chart_report_not_payable' },
+)
+assert.deepEqual(
+  validateNewebPayAiChartReportPayment({
+    report: {
+      id: reportId,
+      amountTwd: 100,
+      paymentStatus: 'pending',
+      paymentId: null,
+      merchantOrderNo: null,
+    },
+    expectedAmountTwd: 100,
+  }),
+  { ok: true },
+)
+assert.deepEqual(
+  validateNewebPayAiChartReportPayment({
+    report: {
+      id: reportId,
+      amountTwd: 100,
+      paymentStatus: null,
+      paymentId: null,
+      merchantOrderNo: null,
+    },
+    expectedAmountTwd: 100,
+  }),
+  { ok: true },
+)
+
 assert.deepEqual(resolveNewebPayDivinationPendingPaymentLink('linked'), { ok: true })
 assert.deepEqual(resolveNewebPayDivinationPendingPaymentLink('already_linked'), {
   ok: false,
@@ -195,6 +318,19 @@ assert.deepEqual(resolveNewebPayDivinationPendingPaymentLink('not_found'), {
 assert.deepEqual(resolveNewebPayDivinationPendingPaymentLink('not_payable'), {
   ok: false,
   error: 'divination_reading_not_payable',
+})
+assert.deepEqual(resolveNewebPayAiChartReportPendingPaymentLink('linked'), { ok: true })
+assert.deepEqual(resolveNewebPayAiChartReportPendingPaymentLink('already_linked'), {
+  ok: false,
+  error: 'ai_chart_report_already_linked',
+})
+assert.deepEqual(resolveNewebPayAiChartReportPendingPaymentLink('not_found'), {
+  ok: false,
+  error: 'ai_chart_report_not_found',
+})
+assert.deepEqual(resolveNewebPayAiChartReportPendingPaymentLink('not_payable'), {
+  ok: false,
+  error: 'ai_chart_report_not_payable',
 })
 
 const data = createNewebPayMpgPaymentData({
@@ -261,6 +397,22 @@ assert.equal(decryptedDivination.get('CREDIT'), '1')
 assert.equal(decryptedDivination.get('ClientBackURL'), 'http://localhost:3000/ai-divination')
 assert.equal(decryptedDivination.has('LINEPAY'), false)
 
+const aiChartData = createNewebPayMpgPaymentData({
+  itemKey: 'ai_chart_report_single',
+  config,
+  now: new Date(2026, 6, 3, 17, 25, 30),
+  merchantOrderNo: 'WB20260703172530AICH',
+})
+const decryptedAiChart = new URLSearchParams(decryptTradeInfo(aiChartData.fields.TradeInfo, hashKey, hashIv))
+
+assert.equal(aiChartData.itemKey, 'ai_chart_report_single')
+assert.equal(aiChartData.amount, 100)
+assert.equal(decryptedAiChart.get('Amt'), '100')
+assert.equal(decryptedAiChart.get('ItemDesc'), 'AI 命盤分析')
+assert.equal(decryptedAiChart.get('CREDIT'), '1')
+assert.equal(decryptedAiChart.get('ClientBackURL'), 'http://localhost:3000/ai-chart')
+assert.equal(decryptedAiChart.has('LINEPAY'), false)
+
 const smokePendingPaymentMetadata = buildNewebPayPendingPaymentMetadata({
   itemKey: 'newebpay_live_smoke_test_1',
   source: 'manual_test',
@@ -314,6 +466,41 @@ assert.equal('merchant_order_no' in divinationPendingPaymentMetadata.rawPayload,
 assert.equal('bookingId' in divinationPendingPaymentMetadata.rawPayload, false)
 assert.equal('courseId' in divinationPendingPaymentMetadata.rawPayload, false)
 assert.equal('productId' in divinationPendingPaymentMetadata.rawPayload, false)
+
+const aiChartPendingPaymentMetadata = buildNewebPayPendingPaymentMetadata({
+  itemKey: 'ai_chart_report_single',
+  source: 'ai_chart_report',
+  paymentMode: 'credit',
+  merchantOrderNo: aiChartData.merchantOrderNo,
+  reportId,
+})
+
+assert.equal(aiChartPendingPaymentMetadata.itemType, 'ai_chart_report')
+assert.equal(aiChartPendingPaymentMetadata.itemId, reportId)
+assert.equal(aiChartPendingPaymentMetadata.bookingId, null)
+assert.deepEqual(aiChartPendingPaymentMetadata.rawPayload, {
+  itemKey: 'ai_chart_report_single',
+  itemType: 'ai_chart_report',
+  reportId,
+  amount: 100,
+  source: 'ai_chart_report',
+  paymentMode: 'credit',
+  merchantOrderNo: aiChartData.merchantOrderNo,
+  itemDesc: 'AI 命盤分析',
+})
+assert.equal('TradeInfo' in aiChartPendingPaymentMetadata.rawPayload, false)
+assert.equal('TradeSha' in aiChartPendingPaymentMetadata.rawPayload, false)
+assert.equal('HashKey' in aiChartPendingPaymentMetadata.rawPayload, false)
+assert.equal('HashIV' in aiChartPendingPaymentMetadata.rawPayload, false)
+assert.equal('birthData' in aiChartPendingPaymentMetadata.rawPayload, false)
+assert.equal('chartPayload' in aiChartPendingPaymentMetadata.rawPayload, false)
+assert.equal('report_content' in aiChartPendingPaymentMetadata.rawPayload, false)
+assert.equal('reportContent' in aiChartPendingPaymentMetadata.rawPayload, false)
+assert.equal('creditCard' in aiChartPendingPaymentMetadata.rawPayload, false)
+assert.equal('bookingId' in aiChartPendingPaymentMetadata.rawPayload, false)
+assert.equal('readingId' in aiChartPendingPaymentMetadata.rawPayload, false)
+assert.equal('courseId' in aiChartPendingPaymentMetadata.rawPayload, false)
+assert.equal('productId' in aiChartPendingPaymentMetadata.rawPayload, false)
 
 const bookingPendingPaymentMetadata = buildNewebPayPendingPaymentMetadata({
   itemKey: 'booking_consultation_60',

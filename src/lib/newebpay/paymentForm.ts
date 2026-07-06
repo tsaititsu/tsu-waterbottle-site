@@ -1,10 +1,11 @@
 import { createTradeSha, encryptTradeInfo } from './crypto'
+import { AI_CHART_REPORT_ITEM_KEY, buildAiChartReportPaymentPayload } from './aiChartPayment'
 import { AI_DIVINATION_ITEM_KEY, buildDivinationPaymentPayload } from './divinationPayment'
 import { generateNewebPayMerchantOrderNo } from './orderNo'
 import { getNewebPayPaymentItem, type NewebPayPaymentItemKey } from './paymentItems'
 import type { NewebPayConfig } from './types'
 
-export type NewebPayPaymentSource = 'booking' | 'ai_divination' | 'ai_chart' | 'manual_test'
+export type NewebPayPaymentSource = 'booking' | 'ai_divination' | 'ai_chart' | 'ai_chart_report' | 'manual_test'
 export type NewebPayPaymentMode = 'credit' | 'merchant_default'
 
 export type NewebPayBookingPaymentContext = {
@@ -29,9 +30,34 @@ export type NewebPayDivinationReadingIdResolution =
         | 'divination_reading_id_not_allowed'
     }
 
+export type NewebPayAiChartReportIdResolution =
+  | { ok: true; reportId: string | null }
+  | {
+      ok: false
+      error:
+        | 'ai_chart_report_id_required'
+        | 'invalid_ai_chart_report_id'
+        | 'ai_chart_report_id_not_allowed'
+    }
+
 export type NewebPayBookingPaymentValidationResult =
   | { ok: true }
   | { ok: false; error: 'booking_not_found' | 'booking_amount_mismatch' | 'booking_already_paid' }
+
+export type NewebPayAiChartReportPaymentContext = {
+  id: string
+  amountTwd: number | null
+  paymentStatus: string | null
+  paymentId?: string | null
+  merchantOrderNo?: string | null
+}
+
+export type NewebPayAiChartReportPaymentValidationResult =
+  | { ok: true }
+  | {
+      ok: false
+      error: 'ai_chart_report_not_found' | 'ai_chart_report_not_payable' | 'ai_chart_report_already_linked'
+    }
 
 export type NewebPayDivinationPendingPaymentLinkResult =
   | 'linked'
@@ -47,6 +73,22 @@ export type NewebPayDivinationPendingPaymentLinkResolution =
         | 'divination_reading_already_linked'
         | 'divination_reading_not_found'
         | 'divination_reading_not_payable'
+    }
+
+export type NewebPayAiChartReportPendingPaymentLinkResult =
+  | 'linked'
+  | 'already_linked'
+  | 'not_found'
+  | 'not_payable'
+
+export type NewebPayAiChartReportPendingPaymentLinkResolution =
+  | { ok: true }
+  | {
+      ok: false
+      error:
+        | 'ai_chart_report_already_linked'
+        | 'ai_chart_report_not_found'
+        | 'ai_chart_report_not_payable'
     }
 
 export type NewebPayMpgPaymentFields = {
@@ -78,6 +120,7 @@ export type NewebPayPendingPaymentMetadata = {
     merchantOrderNo: string
     bookingId?: string
     readingId?: string
+    reportId?: string
   }
 }
 
@@ -96,9 +139,16 @@ type BuildNewebPayPendingPaymentMetadataInput = {
   merchantOrderNo: string
   bookingId?: string | null
   readingId?: string | null
+  reportId?: string | null
 }
 
-const allowedSources = new Set<NewebPayPaymentSource>(['booking', 'ai_divination', 'ai_chart', 'manual_test'])
+const allowedSources = new Set<NewebPayPaymentSource>([
+  'booking',
+  'ai_divination',
+  'ai_chart',
+  'ai_chart_report',
+  'manual_test',
+])
 const allowedPaymentModes = new Set<NewebPayPaymentMode>(['credit', 'merchant_default'])
 
 export function isNewebPayPaymentSource(source: unknown): source is NewebPayPaymentSource {
@@ -121,6 +171,10 @@ export function isValidNewebPayBookingId(value: unknown): value is string {
 }
 
 export function isValidNewebPayDivinationReadingId(value: unknown): value is string {
+  return isValidNewebPayUuid(value)
+}
+
+export function isValidNewebPayAiChartReportId(value: unknown): value is string {
   return isValidNewebPayUuid(value)
 }
 
@@ -181,6 +235,29 @@ export function resolveNewebPayDivinationReadingIdForPayment(input: {
   return { ok: true, readingId: input.readingId.trim() }
 }
 
+export function resolveNewebPayAiChartReportIdForPayment(input: {
+  itemKey: NewebPayPaymentItemKey
+  reportId?: unknown
+}): NewebPayAiChartReportIdResolution {
+  const hasReportId = hasNonEmptyValue(input.reportId)
+
+  if (input.itemKey !== AI_CHART_REPORT_ITEM_KEY) {
+    return hasReportId
+      ? { ok: false, error: 'ai_chart_report_id_not_allowed' }
+      : { ok: true, reportId: null }
+  }
+
+  if (!hasReportId) {
+    return { ok: false, error: 'ai_chart_report_id_required' }
+  }
+
+  if (!isValidNewebPayAiChartReportId(input.reportId)) {
+    return { ok: false, error: 'invalid_ai_chart_report_id' }
+  }
+
+  return { ok: true, reportId: input.reportId.trim() }
+}
+
 export function validateNewebPayBookingPayment(input: {
   booking: NewebPayBookingPaymentContext | null
   expectedAmountTwd: number
@@ -200,6 +277,29 @@ export function validateNewebPayBookingPayment(input: {
   return { ok: true }
 }
 
+export function validateNewebPayAiChartReportPayment(input: {
+  report: NewebPayAiChartReportPaymentContext | null
+  expectedAmountTwd: number
+}): NewebPayAiChartReportPaymentValidationResult {
+  if (!input.report) {
+    return { ok: false, error: 'ai_chart_report_not_found' }
+  }
+
+  if (input.report.amountTwd !== input.expectedAmountTwd) {
+    return { ok: false, error: 'ai_chart_report_not_payable' }
+  }
+
+  if (input.report.paymentId || input.report.merchantOrderNo) {
+    return { ok: false, error: 'ai_chart_report_already_linked' }
+  }
+
+  if (input.report.paymentStatus !== 'pending' && input.report.paymentStatus !== null) {
+    return { ok: false, error: 'ai_chart_report_not_payable' }
+  }
+
+  return { ok: true }
+}
+
 export function resolveNewebPayDivinationPendingPaymentLink(
   result: NewebPayDivinationPendingPaymentLinkResult,
 ): NewebPayDivinationPendingPaymentLinkResolution {
@@ -211,6 +311,25 @@ export function resolveNewebPayDivinationPendingPaymentLink(
     already_linked: 'divination_reading_already_linked',
     not_found: 'divination_reading_not_found',
     not_payable: 'divination_reading_not_payable',
+  } as const
+
+  return {
+    ok: false,
+    error: errorByResult[result],
+  }
+}
+
+export function resolveNewebPayAiChartReportPendingPaymentLink(
+  result: NewebPayAiChartReportPendingPaymentLinkResult,
+): NewebPayAiChartReportPendingPaymentLinkResolution {
+  if (result === 'linked') {
+    return { ok: true }
+  }
+
+  const errorByResult = {
+    already_linked: 'ai_chart_report_already_linked',
+    not_found: 'ai_chart_report_not_found',
+    not_payable: 'ai_chart_report_not_payable',
   } as const
 
   return {
@@ -246,6 +365,10 @@ function buildClientBackUrl(siteUrl: string, itemKey: NewebPayPaymentItemKey) {
     return `${siteUrl}/ai-divination`
   }
 
+  if (itemKey === AI_CHART_REPORT_ITEM_KEY) {
+    return `${siteUrl}/ai-chart`
+  }
+
   return `${siteUrl}/booking`
 }
 
@@ -256,6 +379,7 @@ export function buildNewebPayPendingPaymentMetadata({
   merchantOrderNo,
   bookingId,
   readingId,
+  reportId,
 }: BuildNewebPayPendingPaymentMetadataInput): NewebPayPendingPaymentMetadata {
   const item = getNewebPayPaymentItem(itemKey)
   if (!item) {
@@ -275,6 +399,24 @@ export function buildNewebPayPendingPaymentMetadata({
       bookingId: null,
       rawPayload: {
         ...divinationPayload.rawPayload,
+        itemDesc: item.itemDesc,
+      },
+    }
+  }
+
+  if (item.itemKey === AI_CHART_REPORT_ITEM_KEY) {
+    const aiChartPayload = buildAiChartReportPaymentPayload({
+      reportId: reportId ?? '',
+      merchantOrderNo,
+      paymentMode,
+    })
+
+    return {
+      itemType: aiChartPayload.itemType,
+      itemId: aiChartPayload.itemId,
+      bookingId: null,
+      rawPayload: {
+        ...aiChartPayload.rawPayload,
         itemDesc: item.itemDesc,
       },
     }
