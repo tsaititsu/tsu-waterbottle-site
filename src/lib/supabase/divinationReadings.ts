@@ -114,6 +114,18 @@ export type DivinationReadingPaymentContextRow = {
   merchant_order_no: string | null
 }
 
+export type DivinationReadingInterpretationContext = {
+  id: string
+  status: DivinationReadingStatus | null
+  interpretation: unknown | null
+}
+
+export type DivinationReadingInterpretationContextRow = {
+  id: string
+  status: DivinationReadingStatus | null
+  interpretation: unknown | null
+}
+
 export type DivinationPaidDecision =
   | { result: 'not_found' }
   | { result: 'should_update' }
@@ -162,6 +174,12 @@ export type LinkDivinationReadingPendingPaymentResult =
   | { result: 'already_linked'; readingId: string }
   | { result: 'not_found'; readingId: string }
   | { result: 'not_payable'; readingId: string; status: DivinationReadingStatus | null }
+
+export type MarkDivinationReadingInterpretationResult =
+  | { result: 'updated'; readingId: string }
+  | { result: 'not_found'; readingId: string }
+
+type SupabaseAdminClient = ReturnType<typeof getSupabaseAdmin>
 
 function assertRequiredText(value: string, fieldName: string) {
   if (!value.trim()) {
@@ -375,6 +393,16 @@ export function mapDivinationReadingPaymentContext(
   }
 }
 
+export function mapDivinationReadingInterpretationContext(
+  row: DivinationReadingInterpretationContextRow,
+): DivinationReadingInterpretationContext {
+  return {
+    id: row.id,
+    status: row.status,
+    interpretation: row.interpretation ?? null,
+  }
+}
+
 export function validateDivinationReadingPayment(
   reading: DivinationReadingPaymentContext | null,
 ): DivinationReadingPaymentValidationResult {
@@ -391,6 +419,25 @@ export function validateDivinationReadingPayment(
   }
 
   return { ok: true }
+}
+
+export async function getDivinationReadingForInterpretation(
+  readingId: string,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<DivinationReadingInterpretationContext | null> {
+  assertRequiredText(readingId, 'readingId')
+
+  const { data, error } = await supabase
+    .from('divination_readings')
+    .select('id,status,interpretation')
+    .eq('id', readingId)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return data ? mapDivinationReadingInterpretationContext(data as DivinationReadingInterpretationContextRow) : null
 }
 
 export async function getDivinationReadingPaymentContext(
@@ -410,6 +457,76 @@ export async function getDivinationReadingPaymentContext(
   }
 
   return data ? mapDivinationReadingPaymentContext(data as DivinationReadingPaymentContextRow) : null
+}
+
+async function updateDivinationReadingForInterpretation(
+  input: {
+    readingId: string
+    payload: DivinationInterpretingUpdatePayload | DivinationCompletedUpdatePayload | DivinationFailedUpdatePayload
+  },
+  supabase: SupabaseAdminClient,
+): Promise<MarkDivinationReadingInterpretationResult> {
+  assertRequiredText(input.readingId, 'readingId')
+
+  const { data, error } = await supabase
+    .from('divination_readings')
+    .update(input.payload)
+    .eq('id', input.readingId)
+    .select('id')
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return data ? { result: 'updated', readingId: input.readingId } : { result: 'not_found', readingId: input.readingId }
+}
+
+export async function markDivinationReadingInterpreting(
+  readingId: string,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<MarkDivinationReadingInterpretationResult> {
+  return updateDivinationReadingForInterpretation(
+    {
+      readingId,
+      payload: buildDivinationInterpretingUpdatePayload(),
+    },
+    supabase,
+  )
+}
+
+export async function markDivinationReadingCompleted(
+  input: {
+    readingId: string
+    interpretation: Record<string, unknown>
+    resultSummary?: string | null
+    interpretedAt?: string | null
+  },
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<MarkDivinationReadingInterpretationResult> {
+  return updateDivinationReadingForInterpretation(
+    {
+      readingId: input.readingId,
+      payload: buildDivinationCompletedUpdatePayload(input),
+    },
+    supabase,
+  )
+}
+
+export async function markDivinationReadingFailed(
+  input: {
+    readingId: string
+    errorMessage: string
+  },
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<MarkDivinationReadingInterpretationResult> {
+  return updateDivinationReadingForInterpretation(
+    {
+      readingId: input.readingId,
+      payload: buildDivinationFailedUpdatePayload(input),
+    },
+    supabase,
+  )
 }
 
 export async function linkDivinationReadingPendingPayment(

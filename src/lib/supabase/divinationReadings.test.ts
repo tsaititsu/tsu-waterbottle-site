@@ -9,11 +9,92 @@ import {
   decideDivinationInterpretationStart,
   decideDivinationPendingPaymentLink,
   decideDivinationPaidUpdate,
+  getDivinationReadingForInterpretation,
   mapDivinationReadingPaymentContext,
+  markDivinationReadingCompleted,
+  markDivinationReadingFailed,
+  markDivinationReadingInterpreting,
   validateDivinationReadingPayment,
   type DivinationReadingPaidSyncRow,
   type DivinationReadingStatus,
 } from './divinationReadings'
+
+type MockSupabaseClient = NonNullable<Parameters<typeof getDivinationReadingForInterpretation>[1]>
+type MockSupabaseResponse = {
+  data: unknown | null
+  error: { message: string } | null
+}
+type MockSupabaseCalls = {
+  tables: string[]
+  selects: string[]
+  updates: Record<string, unknown>[]
+  eqs: Array<[string, unknown]>
+}
+
+function createMockSupabase(response: MockSupabaseResponse): {
+  supabase: MockSupabaseClient
+  calls: MockSupabaseCalls
+} {
+  const calls: MockSupabaseCalls = {
+    tables: [],
+    selects: [],
+    updates: [],
+    eqs: [],
+  }
+  const chain = {
+    select(columns: string) {
+      calls.selects.push(columns)
+      return chain
+    },
+    update(payload: Record<string, unknown>) {
+      calls.updates.push(payload)
+      return chain
+    },
+    eq(column: string, value: unknown) {
+      calls.eqs.push([column, value])
+      return chain
+    },
+    async maybeSingle() {
+      return response
+    },
+  }
+  const supabase = {
+    from(table: string) {
+      calls.tables.push(table)
+      return chain
+    },
+  }
+
+  return {
+    supabase: supabase as unknown as MockSupabaseClient,
+    calls,
+  }
+}
+
+function assertNoUnsafeSelect(calls: MockSupabaseCalls) {
+  for (const columns of calls.selects) {
+    assert.equal(columns.includes('question'), false)
+    assert.equal(columns.includes('raw_payload'), false)
+    assert.equal(columns.includes('payment_id'), false)
+    assert.equal(columns.includes('merchant_order_no'), false)
+    assert.equal(columns.includes('paid_at'), false)
+  }
+}
+
+function assertNoUnsafeUpdatePayload(payload: Record<string, unknown>) {
+  assert.equal('payment_id' in payload, false)
+  assert.equal('merchant_order_no' in payload, false)
+  assert.equal('paid_at' in payload, false)
+  assert.equal('question' in payload, false)
+  assert.equal('raw_payload' in payload, false)
+  assert.equal('TradeInfo' in payload, false)
+  assert.equal('TradeSha' in payload, false)
+  assert.equal('HashKey' in payload, false)
+  assert.equal('HashIV' in payload, false)
+  assert.equal('booking_id' in payload, false)
+  assert.equal('course_id' in payload, false)
+  assert.equal('product_id' in payload, false)
+}
 
 const pendingPayload = buildPendingDivinationReadingPayload(
   {
@@ -553,3 +634,133 @@ assert.throws(
     }),
   /errorMessage/,
 )
+
+async function main() {
+  const readingId = 'ec34c86a-d6e2-424e-9a37-48cef981b3bc'
+  const existingInterpretation = {
+    summary: '已完成的解讀',
+  }
+  const getMock = createMockSupabase({
+    data: {
+      id: readingId,
+      status: 'completed',
+      interpretation: existingInterpretation,
+    },
+    error: null,
+  })
+  const interpretationContext = await getDivinationReadingForInterpretation(readingId, getMock.supabase)
+
+  assert.deepEqual(interpretationContext, {
+    id: readingId,
+    status: 'completed',
+    interpretation: existingInterpretation,
+  })
+  assert.deepEqual(getMock.calls.tables, ['divination_readings'])
+  assert.deepEqual(getMock.calls.selects, ['id,status,interpretation'])
+  assert.deepEqual(getMock.calls.eqs, [['id', readingId]])
+  assert.equal(getMock.calls.updates.length, 0)
+  assertNoUnsafeSelect(getMock.calls)
+
+  const missingGetMock = createMockSupabase({
+    data: null,
+    error: null,
+  })
+
+  assert.equal(await getDivinationReadingForInterpretation(readingId, missingGetMock.supabase), null)
+
+  const interpretingMock = createMockSupabase({
+    data: { id: readingId },
+    error: null,
+  })
+  const interpretingResult = await markDivinationReadingInterpreting(readingId, interpretingMock.supabase)
+
+  assert.deepEqual(interpretingResult, { result: 'updated', readingId })
+  assert.deepEqual(interpretingMock.calls.tables, ['divination_readings'])
+  assert.deepEqual(interpretingMock.calls.eqs, [['id', readingId]])
+  assert.deepEqual(interpretingMock.calls.selects, ['id'])
+  assert.equal(interpretingMock.calls.updates.length, 1)
+  assert.equal(interpretingMock.calls.updates[0].status, 'interpreting')
+  assert.equal(typeof interpretingMock.calls.updates[0].updated_at, 'string')
+  assertNoUnsafeSelect(interpretingMock.calls)
+  assertNoUnsafeUpdatePayload(interpretingMock.calls.updates[0])
+
+  const completedMock = createMockSupabase({
+    data: { id: readingId },
+    error: null,
+  })
+  const completedResult = await markDivinationReadingCompleted(
+    {
+      readingId,
+      interpretation: {
+        summary: '完成解讀',
+      },
+      resultSummary: '完成解讀',
+      interpretedAt: '2026-07-05T14:00:00.000Z',
+    },
+    completedMock.supabase,
+  )
+
+  assert.deepEqual(completedResult, { result: 'updated', readingId })
+  assert.equal(completedMock.calls.updates.length, 1)
+  assert.deepEqual(completedMock.calls.updates[0], {
+    status: 'completed',
+    interpretation: {
+      summary: '完成解讀',
+    },
+    result_summary: '完成解讀',
+    interpreted_at: '2026-07-05T14:00:00.000Z',
+    updated_at: completedMock.calls.updates[0].updated_at,
+    error_message: null,
+  })
+  assert.equal(typeof completedMock.calls.updates[0].updated_at, 'string')
+  assertNoUnsafeSelect(completedMock.calls)
+  assertNoUnsafeUpdatePayload(completedMock.calls.updates[0])
+
+  const failedMock = createMockSupabase({
+    data: { id: readingId },
+    error: null,
+  })
+  const failedResult = await markDivinationReadingFailed(
+    {
+      readingId,
+      errorMessage: '解讀暫時失敗',
+    },
+    failedMock.supabase,
+  )
+
+  assert.deepEqual(failedResult, { result: 'updated', readingId })
+  assert.equal(failedMock.calls.updates.length, 1)
+  assert.equal(failedMock.calls.updates[0].status, 'failed')
+  assert.equal(failedMock.calls.updates[0].error_message, '解讀暫時失敗')
+  assert.equal(typeof failedMock.calls.updates[0].updated_at, 'string')
+  assertNoUnsafeSelect(failedMock.calls)
+  assertNoUnsafeUpdatePayload(failedMock.calls.updates[0])
+
+  const notFoundMock = createMockSupabase({
+    data: null,
+    error: null,
+  })
+  const notFoundResult = await markDivinationReadingFailed(
+    {
+      readingId,
+      errorMessage: '找不到資料',
+    },
+    notFoundMock.supabase,
+  )
+
+  assert.deepEqual(notFoundResult, { result: 'not_found', readingId })
+  assert.equal(notFoundMock.calls.updates.length, 1)
+  assertNoUnsafeUpdatePayload(notFoundMock.calls.updates[0])
+
+  const errorMock = createMockSupabase({
+    data: null,
+    error: { message: 'select failed' },
+  })
+
+  await assert.rejects(() => getDivinationReadingForInterpretation(readingId, errorMock.supabase), /select failed/)
+}
+
+main().catch((error) => {
+  console.error(error)
+  process.exit(1)
+})
