@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from './admin'
 
 export type AiChartReportPaymentStatus = 'pending' | 'paid' | 'failed' | 'canceled' | 'refunded'
+export const AI_CHART_REPORT_DEFAULT_AMOUNT_TWD = 100
 
 export type BuildPendingAiChartReportPayloadInput = {
   userId?: string | null
@@ -9,6 +10,20 @@ export type BuildPendingAiChartReportPayloadInput = {
   productName: string
   amountTwd: number
   reportContent?: string | null
+}
+
+export type CreatePendingAiChartReportInput = {
+  userId?: string | null
+  chartProfileId?: string | null
+  title: string
+  productName: string
+  amountTwd?: number
+  reportContent?: string | null
+}
+
+export type CreatePendingAiChartReportResult = {
+  id: string
+  paymentStatus: AiChartReportPaymentStatus | null
 }
 
 export type PendingAiChartReportPayload = {
@@ -101,6 +116,11 @@ export type LinkAiChartReportPendingPaymentResult =
   | { result: 'already_linked'; reportId: string }
   | { result: 'not_found'; reportId: string }
   | { result: 'not_payable'; reportId: string; paymentStatus: AiChartReportPaymentStatus | null }
+
+export type CreatePendingAiChartReportRow = {
+  id: string
+  payment_status: AiChartReportPaymentStatus | null
+}
 
 type SupabaseAdminClient = ReturnType<typeof getSupabaseAdmin>
 
@@ -227,6 +247,41 @@ export function mapAiChartReportPaymentContext(
     paymentId: row.payment_id,
     merchantOrderNo: row.merchant_order_no,
     amountTwd: row.amount_twd,
+  }
+}
+
+export async function createPendingAiChartReport(
+  input: CreatePendingAiChartReportInput,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<CreatePendingAiChartReportResult> {
+  const payload = buildPendingAiChartReportPayload({
+    userId: input.userId,
+    chartProfileId: input.chartProfileId,
+    title: input.title,
+    productName: input.productName,
+    amountTwd: input.amountTwd ?? AI_CHART_REPORT_DEFAULT_AMOUNT_TWD,
+    reportContent: input.reportContent,
+  })
+
+  const { data, error } = await supabase
+    .from('ai_chart_reports')
+    .insert(payload)
+    .select('id,payment_status')
+    .single()
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  if (!data) {
+    throw new Error('ai_chart_report_create_failed')
+  }
+
+  const row = data as CreatePendingAiChartReportRow
+
+  return {
+    id: row.id,
+    paymentStatus: row.payment_status,
   }
 }
 

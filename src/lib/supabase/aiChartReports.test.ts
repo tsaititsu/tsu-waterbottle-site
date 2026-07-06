@@ -3,6 +3,7 @@ import {
   buildAiChartReportPaidUpdatePayload,
   buildAiChartReportPendingPaymentLinkPayload,
   buildPendingAiChartReportPayload,
+  createPendingAiChartReport,
   decideAiChartReportPaidUpdate,
   decideAiChartReportPendingPaymentLink,
   getAiChartReportPaymentContext,
@@ -19,6 +20,7 @@ type MockSupabaseResponse = {
 type MockSupabaseCalls = {
   tables: string[]
   selects: string[]
+  inserts: Record<string, unknown>[]
   updates: Record<string, unknown>[]
   eqs: Array<[string, unknown]>
 }
@@ -30,6 +32,7 @@ function createMockSupabase(response: MockSupabaseResponse): {
   const calls: MockSupabaseCalls = {
     tables: [],
     selects: [],
+    inserts: [],
     updates: [],
     eqs: [],
   }
@@ -38,6 +41,10 @@ function createMockSupabase(response: MockSupabaseResponse): {
     error: null,
     select(columns: string) {
       calls.selects.push(columns)
+      return chain
+    },
+    insert(payload: Record<string, unknown>) {
+      calls.inserts.push(payload)
       return chain
     },
     update(payload: Record<string, unknown>) {
@@ -49,6 +56,9 @@ function createMockSupabase(response: MockSupabaseResponse): {
       return chain
     },
     async maybeSingle() {
+      return response
+    },
+    async single() {
       return response
     },
   }
@@ -74,6 +84,12 @@ function assertNoUnsafePaymentKeys(payload: Record<string, unknown>) {
   assert.equal('creditCard' in payload, false)
   assert.equal('cardNumber' in payload, false)
   assert.equal('birthData' in payload, false)
+  assert.equal('birthDate' in payload, false)
+  assert.equal('birthTime' in payload, false)
+  assert.equal('birthPlace' in payload, false)
+  assert.equal('ziwei_payload' in payload, false)
+  assert.equal('ziweiPayload' in payload, false)
+  assert.equal('chartPayload' in payload, false)
   assert.equal('raw_payload' in payload, false)
   assert.equal('payment_form' in payload, false)
 }
@@ -308,6 +324,110 @@ assert.throws(
 )
 
 async function runAsyncHelperTests() {
+  const createMock = createMockSupabase({
+    data: {
+      id: 'report-created-1',
+      payment_status: 'pending',
+    },
+    error: null,
+  })
+  const createResult = await createPendingAiChartReport(
+    {
+      title: '紫微命盤完整分析',
+      productName: 'AI 命盤分析',
+    },
+    createMock.supabase,
+  )
+
+  assert.deepEqual(createResult, {
+    id: 'report-created-1',
+    paymentStatus: 'pending',
+  })
+  assert.deepEqual(createMock.calls.tables, ['ai_chart_reports'])
+  assert.deepEqual(createMock.calls.selects, ['id,payment_status'])
+  assert.equal(createMock.calls.inserts.length, 1)
+  assert.equal(createMock.calls.inserts[0].user_id, null)
+  assert.equal(createMock.calls.inserts[0].chart_profile_id, null)
+  assert.equal(createMock.calls.inserts[0].title, '紫微命盤完整分析')
+  assert.equal(createMock.calls.inserts[0].product_name, 'AI 命盤分析')
+  assert.equal(createMock.calls.inserts[0].amount_twd, 100)
+  assert.equal(createMock.calls.inserts[0].status, 'pending')
+  assert.equal(createMock.calls.inserts[0].payment_status, 'pending')
+  assert.equal(createMock.calls.inserts[0].report_content, null)
+  assert.equal(typeof createMock.calls.inserts[0].updated_at, 'string')
+  assert.equal('payment_id' in createMock.calls.inserts[0], false)
+  assert.equal('merchant_order_no' in createMock.calls.inserts[0], false)
+  assert.equal('paid_at' in createMock.calls.inserts[0], false)
+  assert.equal('completed_at' in createMock.calls.inserts[0], false)
+  assertNoUnsafePaymentKeys(createMock.calls.inserts[0])
+  assertNoOtherProductKeys(createMock.calls.inserts[0])
+
+  const createWithNullableInputsMock = createMockSupabase({
+    data: {
+      id: 'report-created-2',
+      payment_status: 'pending',
+    },
+    error: null,
+  })
+  await createPendingAiChartReport(
+    {
+      userId: null,
+      chartProfileId: null,
+      title: 'AI 命盤分析',
+      productName: '紫微命盤完整分析',
+      amountTwd: 100,
+      reportContent: null,
+    },
+    createWithNullableInputsMock.supabase,
+  )
+
+  assert.equal(createWithNullableInputsMock.calls.inserts[0].user_id, null)
+  assert.equal(createWithNullableInputsMock.calls.inserts[0].chart_profile_id, null)
+  assert.equal(createWithNullableInputsMock.calls.inserts[0].report_content, null)
+  assert.deepEqual(createWithNullableInputsMock.calls.tables, ['ai_chart_reports'])
+
+  const createWithSummaryMock = createMockSupabase({
+    data: {
+      id: 'report-created-3',
+      payment_status: 'pending',
+    },
+    error: null,
+  })
+  await createPendingAiChartReport(
+    {
+      userId: 'user-1',
+      chartProfileId: null,
+      title: 'AI 命盤分析',
+      productName: '紫微命盤完整分析',
+      reportContent: '付款前安全摘要',
+    },
+    createWithSummaryMock.supabase,
+  )
+
+  assert.equal(createWithSummaryMock.calls.inserts[0].user_id, 'user-1')
+  assert.equal(createWithSummaryMock.calls.inserts[0].chart_profile_id, null)
+  assert.equal(createWithSummaryMock.calls.inserts[0].report_content, '付款前安全摘要')
+  assert.equal(createWithSummaryMock.calls.inserts[0].amount_twd, 100)
+  assertNoUnsafePaymentKeys(createWithSummaryMock.calls.inserts[0])
+
+  const createFailureMock = createMockSupabase({
+    data: null,
+    error: { message: 'insert_failed' },
+  })
+
+  await assert.rejects(
+    () =>
+      createPendingAiChartReport(
+        {
+          title: 'AI 命盤分析',
+          productName: '紫微命盤完整分析',
+        },
+        createFailureMock.supabase,
+      ),
+    /insert_failed/,
+  )
+  assert.equal(createFailureMock.calls.inserts.length, 1)
+
   const contextMock = createMockSupabase({
     data: {
       id: 'report-context-1',
