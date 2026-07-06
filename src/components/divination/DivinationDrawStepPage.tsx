@@ -75,11 +75,13 @@ function parseReadingSession(value: string | null): StoredReadingSession | null 
       question: parsed.question,
       drawMode: parsed.drawMode,
       localUserId: parsed.localUserId,
+      persisted: parsed.persisted === true,
       cardId: typeof parsed.cardId === "string" ? parsed.cardId : null,
       position:
         parsed.position === "upright" || parsed.position === "reversed"
           ? (parsed.position as DivinationPosition)
           : null,
+      merchantOrderNo: typeof parsed.merchantOrderNo === "string" ? parsed.merchantOrderNo : null,
       entitlement: parsed.entitlement,
       mockPaymentGate: parsed.mockPaymentGate,
       followUpContext: parseFollowUpContext(parsed.followUpContext),

@@ -94,8 +94,10 @@ export type DivinationReadingSession = {
   question: string
   drawMode: DivinationDrawMode
   localUserId: string
+  persisted?: boolean
   cardId?: string | null
   position?: DivinationPosition | null
+  merchantOrderNo?: string | null
   entitlement?: DivinationLocalEntitlement
   mockPaymentGate?: DivinationMockPaymentGate
   followUpContext?: DivinationFollowUpContext
@@ -104,6 +106,7 @@ export type DivinationReadingSession = {
 export type CreateDivinationReadingSuccessResponse = {
   ok: true
   reading: DivinationReadingPreview
+  persisted?: boolean
   entitlement?: DivinationLocalEntitlement
   mockPaymentGate?: DivinationMockPaymentGate
 }

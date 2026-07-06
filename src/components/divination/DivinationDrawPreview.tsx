@@ -34,6 +34,27 @@ type PaymentRequiredState = {
   amountTwd: number
 }
 
+type NewebPayCreateResponse =
+  | {
+      ok: true
+      action: string
+      method: "POST"
+      merchantOrderNo: string
+      itemKey: string
+      amount: number
+      fields: {
+        MerchantID: string
+        TradeInfo: string
+        TradeSha: string
+        Version: string
+      }
+    }
+  | {
+      ok: false
+      error: string
+      message?: string
+    }
+
 type StoredReadingSession = DivinationReadingSession & {
   autoMockPaid?: boolean
 }
@@ -46,6 +67,7 @@ const pendingMessage = "你選到一張牌。請確認是不是這張。"
 const resultReadyMessage = "已產生牌義解讀預覽。"
 const blockedMessage = "請先在上方填寫問題，並選擇手動抽牌或自動抽牌。"
 const readingSessionStorageKey = "divination_reading_session"
+const isNewebPayEnabled = process.env.NEXT_PUBLIC_ENABLE_NEWEBPAY === "true"
 
 const positionLabels: Record<DivinationPosition, string> = {
   upright: "正位",
@@ -128,6 +150,7 @@ function updateStoredReadingSessionDrawState(input: {
   question: string
   drawMode: DivinationDrawMode
   localUserId: string
+  persisted: boolean
   cardId: string
   position: DivinationPosition
 }) {
@@ -141,6 +164,7 @@ function updateStoredReadingSessionDrawState(input: {
     question: input.question,
     drawMode: input.drawMode,
     localUserId: input.localUserId,
+    persisted: input.persisted,
     cardId: input.cardId,
     position: input.position,
   }
@@ -158,6 +182,50 @@ function clearStoredReadingSessionDrawState(readingId: string) {
   delete nextSession.cardId
   delete nextSession.position
   window.sessionStorage.setItem(readingSessionStorageKey, JSON.stringify(nextSession))
+}
+
+function updateStoredReadingSessionMerchantOrderNo(input: {
+  readingId: string
+  merchantOrderNo: string
+}) {
+  if (typeof window === "undefined") return
+
+  const existing = readStoredReadingSession()
+  if (!existing || existing.readingId !== input.readingId) return
+
+  window.sessionStorage.setItem(
+    readingSessionStorageKey,
+    JSON.stringify({
+      ...existing,
+      merchantOrderNo: input.merchantOrderNo,
+    })
+  )
+}
+
+function getNewebPayCheckoutErrorMessage(error?: string) {
+  if (error === "divination_reading_not_payable" || error === "divination_reading_already_linked") {
+    return "這筆占卜已建立付款資料，請回到付款頁完成付款，或重新開始一筆占卜。"
+  }
+
+  return "線上付款資料建立失敗，請稍後再試。"
+}
+
+function submitNewebPayForm(paymentData: Extract<NewebPayCreateResponse, { ok: true }>) {
+  const form = document.createElement("form")
+  form.method = paymentData.method
+  form.action = paymentData.action
+  form.style.display = "none"
+
+  for (const [name, value] of Object.entries(paymentData.fields)) {
+    const input = document.createElement("input")
+    input.type = "hidden"
+    input.name = name
+    input.value = value
+    form.appendChild(input)
+  }
+
+  document.body.appendChild(form)
+  form.submit()
 }
 
 function DivinationConsentNotice({
@@ -256,6 +324,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
   const [displayThread, setDisplayThread] = useState<DivinationFollowUpDisplayThread | null>(null)
   const [isInterpreting, setIsInterpreting] = useState(false)
   const [isMockPaying, setIsMockPaying] = useState(false)
+  const [isNewebPayCheckingOut, setIsNewebPayCheckingOut] = useState(false)
   const [paymentRequired, setPaymentRequired] = useState<PaymentRequiredState | null>(null)
   const [hasAcceptedTerms, setHasAcceptedTerms] = useState(false)
   const [hoveredCardIndex, setHoveredCardIndex] = useState<number | null>(null)
@@ -273,6 +342,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
   const drawMode = readingSession?.drawMode ?? null
   const readingId = readingSession?.readingId ?? ""
   const localUserId = readingSession?.localUserId ?? ""
+  const isPersistedReading = readingSession?.persisted === true
   const canDraw = Boolean(trimmedQuestion && drawMode && readingId)
   const isManualMode = drawMode === "manual"
   const isAutoMode = drawMode === "auto"
@@ -293,6 +363,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
       question: trimmedQuestion,
       drawMode,
       localUserId,
+      persisted: isPersistedReading,
       cardId: selectedCard.id,
       position: selectedPosition,
     })
@@ -330,6 +401,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setDisplayThread(null)
     setIsInterpreting(false)
     setIsMockPaying(false)
+    setIsNewebPayCheckingOut(false)
     setPaymentRequired(null)
     setHasAcceptedTerms(false)
     setHoveredCardIndex(null)
@@ -383,6 +455,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setDisplayThread(null)
     setIsInterpreting(false)
     setIsMockPaying(false)
+    setIsNewebPayCheckingOut(false)
     setPaymentRequired(null)
     setHasAcceptedTerms(false)
     setHoveredCardIndex(null)
@@ -468,6 +541,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     setDisplayThread(null)
     setIsInterpreting(false)
     setIsMockPaying(false)
+    setIsNewebPayCheckingOut(false)
     setPaymentRequired(null)
     setHasAcceptedTerms(false)
     setHoveredCardIndex(null)
@@ -487,7 +561,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
       setMessage("已為你抽出牌卡，正在產生解讀……")
 
       if (autoCard) {
-        void interpretCard(autoCard, autoPosition, { auto: true, mockPaid: autoMockPaid })
+        void interpretCard(autoCard, autoPosition, { auto: true, mockPaid: autoMockPaid && !isPersistedReading })
       }
     }, drawDelayMs)
   }
@@ -603,6 +677,68 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     }
   }
 
+  async function handleNewebPayDivinationCheckout() {
+    if (!pendingCard || !pendingPosition) {
+      setErrorMessage("請先選一張牌。")
+      return
+    }
+
+    if (!readingId) {
+      setErrorMessage("缺少占卜紀錄，請重新開始一筆占卜。")
+      return
+    }
+
+    if (!isPersistedReading) {
+      setErrorMessage("這筆占卜目前仍是本機測試流程。")
+      return
+    }
+
+    if (isNewebPayCheckingOut || !isNewebPayEnabled) return
+
+    persistDrawState(pendingCard, pendingPosition)
+    setIsNewebPayCheckingOut(true)
+    setErrorMessage("")
+    setMessage("正在建立線上付款資料...")
+
+    let shouldSubmitForm = false
+
+    try {
+      const response = await fetch("/api/payments/newebpay/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemKey: "ai_divination_single",
+          source: "ai_divination",
+          paymentMode: "credit",
+          readingId,
+        }),
+      })
+      const data = (await response.json().catch(() => null)) as NewebPayCreateResponse | null
+
+      if (!response.ok || !data?.ok) {
+        const error = data && !data.ok ? data.error : undefined
+        setErrorMessage(getNewebPayCheckoutErrorMessage(error))
+        setMessage(paymentRequired?.message || "本次 AI 占卜解讀需 NT$50。")
+        return
+      }
+
+      updateStoredReadingSessionMerchantOrderNo({
+        readingId,
+        merchantOrderNo: data.merchantOrderNo,
+      })
+      setMessage("正在前往藍新金流付款頁...")
+      shouldSubmitForm = true
+      submitNewebPayForm(data)
+    } catch {
+      setErrorMessage("線上付款資料建立失敗，請稍後再試。")
+      setMessage(paymentRequired?.message || "本次 AI 占卜解讀需 NT$50。")
+    } finally {
+      if (!shouldSubmitForm) {
+        setIsNewebPayCheckingOut(false)
+      }
+    }
+  }
+
   async function confirmCard() {
     if (!pendingCard || !pendingPosition) {
       setErrorMessage("請先選一張牌。")
@@ -614,7 +750,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
       return
     }
 
-    await interpretCard(pendingCard, pendingPosition, { mockPaid: true })
+    await interpretCard(pendingCard, pendingPosition, { mockPaid: !isPersistedReading })
   }
 
   async function handleMockPaidInterpret() {
@@ -622,6 +758,8 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
       setErrorMessage("請先選一張牌。")
       return
     }
+
+    if (isPersistedReading) return
 
     if (isInterpreting || isMockPaying) return
 
@@ -960,22 +1098,41 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
               ) : null}
               {isManualMode && paymentRequired ? (
                 <p className="rounded-lg border border-darkGold/20 bg-lightGold/40 p-3 text-sm text-textDark">
-                  本次 AI 占卜解讀需 NT$50。
+                  {isPersistedReading
+                    ? "本次 AI 占卜解讀需 NT$50，請完成線上付款後再產生解讀。"
+                    : "本次 AI 占卜解讀需 NT$50。"}
                 </p>
               ) : null}
               <div className="grid gap-3 sm:grid-cols-2">
-                <button
-                  type="button"
-                  onClick={confirmCard}
-                  disabled={isInterpreting || (isManualMode && !hasAcceptedTerms)}
-                  className="rounded-full bg-deepPurple px-5 py-3 font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isInterpreting || isMockPaying
-                    ? "支付與解讀中..."
-                    : paymentRequired
-                      ? `支付 NT$${paymentRequired.amountTwd} 開始解讀（本機測試）`
-                      : "支付 NT$50 開始解讀（本機測試）"}
-                </button>
+                {paymentRequired && isPersistedReading ? (
+                  <button
+                    type="button"
+                    onClick={handleNewebPayDivinationCheckout}
+                    disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled}
+                    className="rounded-full bg-deepPurple px-5 py-3 font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isNewebPayCheckingOut
+                      ? "建立線上付款資料中..."
+                      : isNewebPayEnabled
+                        ? `信用卡線上付款 NT$${paymentRequired.amountTwd}`
+                        : "線上付款尚未啟用"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={confirmCard}
+                    disabled={isInterpreting || (isManualMode && !hasAcceptedTerms)}
+                    className="rounded-full bg-deepPurple px-5 py-3 font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isInterpreting || isMockPaying
+                      ? "支付與解讀中..."
+                      : paymentRequired
+                        ? `支付 NT$${paymentRequired.amountTwd} 開始解讀（本機測試）`
+                        : isPersistedReading
+                          ? "開始 AI 解讀"
+                          : "支付 NT$50 開始解讀（本機測試）"}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={isAutoMode ? startAutoDraw : changeCard}
@@ -990,17 +1147,36 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
 
           {isAutoMode && pendingCard && pendingPosition && !hasResultPreview && paymentRequired ? (
             <div className="grid w-full max-w-2xl gap-2 rounded-2xl border border-borderSoft bg-white p-4 text-textDark">
-              <p className="text-sm text-textMuted">本次 AI 占卜解讀需 NT$50。</p>
-              <button
-                type="button"
-                onClick={handleMockPaidInterpret}
-                disabled={isInterpreting || isMockPaying}
-                className="justify-self-start rounded-full bg-deepPurple px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isInterpreting || isMockPaying
-                  ? "支付與解讀中..."
-                  : `支付 NT$${paymentRequired.amountTwd} 開始解讀（本機測試）`}
-              </button>
+              <p className="text-sm text-textMuted">
+                {isPersistedReading
+                  ? "本次 AI 占卜解讀需 NT$50，請完成線上付款後再產生解讀。"
+                  : "本次 AI 占卜解讀需 NT$50。"}
+              </p>
+              {isPersistedReading ? (
+                <button
+                  type="button"
+                  onClick={handleNewebPayDivinationCheckout}
+                  disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled}
+                  className="justify-self-start rounded-full bg-deepPurple px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isNewebPayCheckingOut
+                    ? "建立線上付款資料中..."
+                    : isNewebPayEnabled
+                      ? `信用卡線上付款 NT$${paymentRequired.amountTwd}`
+                      : "線上付款尚未啟用"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleMockPaidInterpret}
+                  disabled={isInterpreting || isMockPaying}
+                  className="justify-self-start rounded-full bg-deepPurple px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isInterpreting || isMockPaying
+                    ? "支付與解讀中..."
+                    : `支付 NT$${paymentRequired.amountTwd} 開始解讀（本機測試）`}
+                </button>
+              )}
             </div>
           ) : null}
 

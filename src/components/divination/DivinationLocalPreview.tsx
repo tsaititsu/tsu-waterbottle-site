@@ -122,6 +122,7 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
         question: input.question,
         drawMode: input.drawMode,
         localUserId,
+        persisted: data.persisted === true,
       } satisfies DivinationReadingSession
     }
 
@@ -153,7 +154,9 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
             : undefined
           const readingSession = followUpContext ? { ...session, followUpContext } : session
 
-          saveReadingSession(readingSession, { autoMockPaid: payload.mode === "auto" && payload.mockPaid === true })
+          saveReadingSession(readingSession, {
+            autoMockPaid: payload.mode === "auto" && payload.mockPaid === true && readingSession.persisted !== true,
+          })
           router.push("/ai-divination/draw")
         }
       }
