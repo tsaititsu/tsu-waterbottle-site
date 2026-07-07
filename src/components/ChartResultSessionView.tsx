@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { ActionButton } from './ActionButton'
+import { saveAiChartPaymentSession } from '@/lib/ai-chart/paymentSession'
 import { savePendingChartInput } from '@/lib/mockPayment'
 import { createZiweiGptPayload, type ChartInput, type ZiweiGptPayload } from '@/features/ziwei-chart/package'
 import { OriginalZiweiChartView } from '@/features/ziwei-chart/components/OriginalZiweiChartView'
@@ -16,6 +17,9 @@ const selectedPlan = {
   title: '紫微命盤完整分析｜完整解析命盤個性分析',
   amount: 100
 }
+const AI_CHART_REPORT_TITLE = 'AI 命盤分析'
+const AI_CHART_REPORT_PRODUCT_NAME = 'AI 命盤分析'
+const isNewebPayCheckoutEnabled = process.env.NEXT_PUBLIC_ENABLE_NEWEBPAY === 'true'
 
 type ChartSession = {
   input: ChartInput
@@ -23,6 +27,18 @@ type ChartSession = {
   selectedCategory: string
   birthOrder?: string
 }
+
+type CreateAiChartReportResponse =
+  | {
+      ok: true
+      reportId: string
+      paymentStatus: 'pending'
+      amountTwd: number
+    }
+  | {
+      ok: false
+      error: string
+    }
 
 function chartId(input: ChartInput) {
   return `${input.name || '未命名'}-${input.solarDate}-${input.timeIndex}-${input.gender}`
@@ -63,6 +79,8 @@ export function ChartResultSessionView() {
   const [hasLoadedChartNotes, setHasLoadedChartNotes] = useState(false)
   const [hasAcceptedPaidNotice, setHasAcceptedPaidNotice] = useState(false)
   const [formError, setFormError] = useState('')
+  const [paymentSetupMessage, setPaymentSetupMessage] = useState('')
+  const [isCreatingPendingReport, setIsCreatingPendingReport] = useState(false)
   const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
@@ -130,6 +148,7 @@ export function ChartResultSessionView() {
       setChartInput(nextInput)
       persistSession(nextInput)
       setFormError('')
+      setPaymentSetupMessage('')
     } catch (error) {
       setFormError(error instanceof Error ? `命盤產生失敗：${error.message}` : '命盤產生失敗，請確認資料後再試一次。')
     }
@@ -149,13 +168,23 @@ export function ChartResultSessionView() {
     })
   }
 
-  const preparePaidInterpretation = () => {
+  const validatePaidInterpretationReadiness = () => {
     if (!chartInput || !chartPayload || !session) {
       setFormError('請先回到新增命盤頁產生命盤，再進行付款。')
+      setPaymentSetupMessage('')
       return false
     }
     if (!hasAcceptedPaidNotice) {
       setFormError('請先閱讀並勾選同意 AI 命盤分析服務說明、付款與退款規則及服務條款。')
+      setPaymentSetupMessage('')
+      return false
+    }
+
+    return true
+  }
+
+  const preparePaidInterpretation = () => {
+    if (!validatePaidInterpretationReadiness() || !chartInput || !session) {
       return false
     }
 
@@ -165,8 +194,51 @@ export function ChartResultSessionView() {
       birthOrder: session.birthOrder,
       analysisTitle: selectedPlan.title
     })
+    setPaymentSetupMessage('')
     setFormError('')
     return true
+  }
+
+  const createPendingReportForCheckout = async () => {
+    if (!validatePaidInterpretationReadiness()) {
+      return
+    }
+
+    setIsCreatingPendingReport(true)
+    setFormError('')
+    setPaymentSetupMessage('')
+
+    try {
+      const response = await fetch('/api/ai-chart/reports/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          title: AI_CHART_REPORT_TITLE,
+          productName: AI_CHART_REPORT_PRODUCT_NAME,
+          amountTwd: selectedPlan.amount
+        })
+      })
+      const data = (await response.json().catch(() => null)) as CreateAiChartReportResponse | null
+
+      if (!response.ok || !data?.ok || data.paymentStatus !== 'pending' || data.amountTwd !== selectedPlan.amount) {
+        throw new Error(data && !data.ok ? data.error : 'ai_chart_report_create_failed')
+      }
+
+      saveAiChartPaymentSession({
+        reportId: data.reportId,
+        amountTwd: selectedPlan.amount,
+        returnPath: `/ai-chart/result/${data.reportId}`
+      })
+      setPaymentSetupMessage('付款資料已建立，下一步將前往線上付款。')
+      setFormError('')
+    } catch {
+      setFormError('付款資料建立失敗，請稍後再試。')
+      setPaymentSetupMessage('')
+    } finally {
+      setIsCreatingPendingReport(false)
+    }
   }
 
   const goBackToForm = () => {
@@ -228,6 +300,7 @@ export function ChartResultSessionView() {
                 onChange={(event) => {
                   setHasAcceptedPaidNotice(event.target.checked)
                   if (event.target.checked) setFormError('')
+                  setPaymentSetupMessage('')
                 }}
                 onClick={(event) => event.stopPropagation()}
                 type="checkbox"
@@ -275,16 +348,28 @@ export function ChartResultSessionView() {
         </details>
 
         {formError && <p className="text-sm font-semibold text-deepPurple">{formError}</p>}
+        {paymentSetupMessage && <p className="text-sm font-semibold text-darkGold">{paymentSetupMessage}</p>}
 
-        <ActionButton
-          amount={selectedPlan.amount}
-          className="focus-ring inline-flex w-full justify-center rounded-xl bg-deepPurple px-5 py-3 font-semibold text-white sm:w-auto"
-          itemName={selectedPlan.title}
-          itemType="ai-chart"
-          beforeStart={preparePaidInterpretation}
-        >
-          前往付款 NT${selectedPlan.amount}
-        </ActionButton>
+        {isNewebPayCheckoutEnabled ? (
+          <button
+            className="focus-ring inline-flex w-full justify-center rounded-xl bg-deepPurple px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
+            disabled={isCreatingPendingReport}
+            onClick={() => void createPendingReportForCheckout()}
+            type="button"
+          >
+            {isCreatingPendingReport ? '建立付款資料中...' : `前往付款 NT$${selectedPlan.amount}`}
+          </button>
+        ) : (
+          <ActionButton
+            amount={selectedPlan.amount}
+            className="focus-ring inline-flex w-full justify-center rounded-xl bg-deepPurple px-5 py-3 font-semibold text-white sm:w-auto"
+            itemName={selectedPlan.title}
+            itemType="ai-chart"
+            beforeStart={preparePaidInterpretation}
+          >
+            前往付款 NT${selectedPlan.amount}
+          </ActionButton>
+        )}
       </div>
     </div>
   )
