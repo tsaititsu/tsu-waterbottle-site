@@ -129,6 +129,34 @@ export type LinkProductOrderPaymentResult = {
   paymentId: string
 }
 
+export type ProductOrderLinePayPreflightItem = {
+  name: string
+  quantity: number
+  amount: number
+}
+
+export type ProductOrderLinePayPreflightContext = {
+  id: string
+  status: string | null
+  payment_status: string | null
+  total_amount: number | null
+  currency: 'TWD'
+  items: ProductOrderLinePayPreflightItem[]
+}
+
+type ProductOrderLinePayPreflightRow = {
+  id: string
+  order_status: string | null
+  payment_status: string | null
+  total_amount_twd: number | null
+}
+
+type ProductOrderLinePayPreflightItemRow = {
+  product_name: string | null
+  quantity: number | null
+  unit_price_twd: number | null
+}
+
 type SupabaseAdminClient = ReturnType<typeof getSupabaseAdmin>
 
 const UNSAFE_PRODUCT_SNAPSHOT_KEYS = new Set([
@@ -415,6 +443,56 @@ export async function getProductOrderForPayment(
   }
 
   return data ? mapProductOrderPaymentContext(data as ProductOrderPaymentContextRow) : null
+}
+
+export async function getProductOrderLinePayPreflightContext(
+  orderId: string,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<ProductOrderLinePayPreflightContext | null> {
+  const normalizedOrderId = assertValidUuid(orderId, 'orderId')
+
+  const { data: orderData, error: orderError } = await supabase
+    .from('product_orders')
+    .select('id,order_status,payment_status,total_amount_twd')
+    .eq('id', normalizedOrderId)
+    .maybeSingle()
+
+  if (orderError) {
+    throw new Error('product_order_lookup_failed')
+  }
+
+  if (!orderData) {
+    return null
+  }
+
+  const { data: itemData, error: itemError } = await supabase
+    .from('product_order_items')
+    .select('product_name,quantity,unit_price_twd')
+    .eq('order_id', normalizedOrderId)
+
+  if (itemError) {
+    throw new Error('product_order_lookup_failed')
+  }
+
+  const order = orderData as ProductOrderLinePayPreflightRow
+  const items = (itemData ?? []).map((item) => {
+    const row = item as ProductOrderLinePayPreflightItemRow
+
+    return {
+      name: row.product_name ?? '',
+      quantity: row.quantity ?? 0,
+      amount: row.unit_price_twd ?? 0,
+    }
+  })
+
+  return {
+    id: order.id,
+    status: order.order_status,
+    payment_status: order.payment_status,
+    total_amount: order.total_amount_twd,
+    currency: 'TWD',
+    items,
+  }
 }
 
 export async function linkProductOrderPayment(
