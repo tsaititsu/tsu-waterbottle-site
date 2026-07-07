@@ -51,6 +51,18 @@ test('exports getLinePayServerConfig', () => {
   assert.equal(typeof linePay.getLinePayServerConfig, 'function')
 })
 
+test('exports buildLinePayRequestPaymentMetadata', () => {
+  assert.equal(typeof linePay.buildLinePayRequestPaymentMetadata, 'function')
+})
+
+test('exports buildLinePayConfirmPaymentMetadata', () => {
+  assert.equal(typeof linePay.buildLinePayConfirmPaymentMetadata, 'function')
+})
+
+test('exports mergeLinePayPaymentMetadata', () => {
+  assert.equal(typeof linePay.mergeLinePayPaymentMetadata, 'function')
+})
+
 test('barrel import does not read environment variables', () => {
   const before = process.env.LINE_PAY_CHANNEL_SECRET
 
