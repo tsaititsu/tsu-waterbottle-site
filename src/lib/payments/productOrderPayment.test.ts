@@ -5,6 +5,7 @@ import {
   PRODUCT_ORDER_PAYMENT_ITEM_KEY,
   PRODUCT_ORDER_PAYMENT_ITEM_TYPE,
   PRODUCT_ORDER_PAYMENT_SOURCE,
+  updateProductOrderLinePayPaymentMetadata,
   validateProductOrderPayableForNewebpay,
   type ProductOrderForPayment,
 } from './productOrderPayment'
@@ -109,6 +110,27 @@ function assertNoUnsafeKeys(value: unknown) {
   assert.equal(serialized.includes('recipient_email'), false)
   assert.equal(serialized.includes('transactionId'), false)
   assert.equal(serialized.includes('paymentUrl'), false)
+}
+
+function assertNoSecretOrCustomerKeys(value: unknown) {
+  const serialized = JSON.stringify(value)
+
+  assert.equal(serialized.includes('TradeInfo'), false)
+  assert.equal(serialized.includes('TradeSha'), false)
+  assert.equal(serialized.includes('HashKey'), false)
+  assert.equal(serialized.includes('HashIV'), false)
+  assert.equal(serialized.includes('channelSecret'), false)
+  assert.equal(serialized.includes('channelId'), false)
+  assert.equal(serialized.includes('creditCard'), false)
+  assert.equal(serialized.includes('cardNumber'), false)
+  assert.equal(serialized.includes('paymentForm'), false)
+  assert.equal(serialized.includes('customer_phone'), false)
+  assert.equal(serialized.includes('customerPhone'), false)
+  assert.equal(serialized.includes('customer_email'), false)
+  assert.equal(serialized.includes('customerEmail'), false)
+  assert.equal(serialized.includes('address'), false)
+  assert.equal(serialized.includes('recipient_phone'), false)
+  assert.equal(serialized.includes('recipient_email'), false)
 }
 
 assert.doesNotThrow(() => validateProductOrderPayableForNewebpay(payableOrder))
@@ -430,6 +452,78 @@ async function runAsyncHelperTests() {
             throw new Error('must not create')
           },
         },
+      ),
+    /invalid_product_order_line_pay_metadata/,
+  )
+
+  const metadataUpdateMock = createMockSupabase({})
+  const updateResult = await updateProductOrderLinePayPaymentMetadata(
+    {
+      paymentId,
+      metadata: {
+        linePay: {
+          orderId: 'LP_product_order_c0bd4cbf-64db-4e2d-a1d7-e2215d96802b_20260707153000',
+          sourceType: 'product_order',
+          sourceId: payableOrder.id,
+          transactionId: '2026070700000000001',
+          paymentUrl: {
+            web: 'https://line-pay.example.com/web',
+            app: 'line://pay/payment/test',
+          },
+          request: {
+            returnCode: '0000',
+            returnMessage: 'Success.',
+          },
+        },
+      },
+    },
+    metadataUpdateMock.supabase,
+  )
+
+  assert.deepEqual(updateResult, {
+    paymentId,
+  })
+  assert.deepEqual(metadataUpdateMock.calls.tables, ['payments'])
+  assert.equal(metadataUpdateMock.calls.updates.length, 1)
+  assert.deepEqual(metadataUpdateMock.calls.updates[0].raw_payload, {
+    linePay: {
+      orderId: 'LP_product_order_c0bd4cbf-64db-4e2d-a1d7-e2215d96802b_20260707153000',
+      sourceType: 'product_order',
+      sourceId: payableOrder.id,
+      transactionId: '2026070700000000001',
+      paymentUrl: {
+        web: 'https://line-pay.example.com/web',
+        app: 'line://pay/payment/test',
+      },
+      request: {
+        returnCode: '0000',
+        returnMessage: 'Success.',
+      },
+    },
+  })
+  assert.equal(typeof metadataUpdateMock.calls.updates[0].updated_at, 'string')
+  assert.equal('status' in metadataUpdateMock.calls.updates[0], false)
+  assert.equal('paid_at' in metadataUpdateMock.calls.updates[0], false)
+  assert.equal('provider_trade_no' in metadataUpdateMock.calls.updates[0], false)
+  assert.deepEqual(metadataUpdateMock.calls.eqs, [
+    ['id', paymentId],
+    ['provider', 'line_pay'],
+    ['status', 'pending'],
+  ])
+  assertNoSecretOrCustomerKeys(metadataUpdateMock.calls.updates[0])
+
+  await assert.rejects(
+    () =>
+      updateProductOrderLinePayPaymentMetadata(
+        {
+          paymentId,
+          metadata: {
+            linePay: {
+              channelSecret: 'unsafe',
+            },
+          },
+        },
+        metadataUpdateMock.supabase,
       ),
     /invalid_product_order_line_pay_metadata/,
   )

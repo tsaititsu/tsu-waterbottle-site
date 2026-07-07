@@ -1,6 +1,7 @@
 import type { ProductOrderPaymentContext } from '../supabase/productOrders'
 import { createPendingPayment, type PaymentRecord } from '../supabase/payments'
 import { linkProductOrderPendingPayment } from '../supabase/productOrders'
+import { getSupabaseAdmin } from '../supabase/admin'
 
 export const PRODUCT_ORDER_PAYMENT_ITEM_KEY = 'spiritual_product_order'
 export const PRODUCT_ORDER_PAYMENT_ITEM_TYPE = 'spiritual_product_order'
@@ -53,12 +54,33 @@ export type CreateProductOrderLinePayPendingPaymentDeps = {
   linkProductOrderPendingPayment?: typeof linkProductOrderPendingPayment
 }
 
+export type UpdateProductOrderLinePayPaymentMetadataInput = {
+  paymentId: string
+  metadata: Record<string, unknown>
+}
+
+export type UpdateProductOrderLinePayPaymentMetadataResult = {
+  paymentId: string
+}
+
 const PRODUCT_ORDER_ITEM_DESC_MAX_LENGTH = 50
+const BLOCKED_LINE_PAY_METADATA_KEY_PATTERN =
+  /channelSecret|channelId|TradeInfo|TradeSha|HashKey|HashIV|signature|headers|phone|email|address|creditCard|cardNumber|paymentForm/i
 
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     value.trim(),
   )
+}
+
+function assertUuid(value: string, errorCode: string) {
+  const trimmed = normalizeRequiredText(value, errorCode)
+
+  if (!isUuid(trimmed)) {
+    throw new Error(errorCode)
+  }
+
+  return trimmed
 }
 
 function truncateText(value: string, maxLength: number) {
@@ -91,6 +113,32 @@ function buildProductOrderLinePayRawPayload(
       sourceType: 'product_order',
       sourceId,
     },
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function assertSafeLinePayMetadata(value: unknown): asserts value is Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new Error('invalid_product_order_line_pay_metadata')
+  }
+
+  for (const [key, entry] of Object.entries(value)) {
+    if (BLOCKED_LINE_PAY_METADATA_KEY_PATTERN.test(key)) {
+      throw new Error('invalid_product_order_line_pay_metadata')
+    }
+
+    if (Array.isArray(entry)) {
+      for (const item of entry) {
+        if (isRecord(item)) {
+          assertSafeLinePayMetadata(item)
+        }
+      }
+    } else if (isRecord(entry)) {
+      assertSafeLinePayMetadata(entry)
+    }
   }
 }
 
@@ -177,5 +225,32 @@ export async function createProductOrderLinePayPendingPayment(
   return {
     paymentId: payment.id,
     merchantOrderNo,
+  }
+}
+
+export async function updateProductOrderLinePayPaymentMetadata(
+  input: UpdateProductOrderLinePayPaymentMetadataInput,
+  supabase = getSupabaseAdmin(),
+): Promise<UpdateProductOrderLinePayPaymentMetadataResult> {
+  const paymentId = assertUuid(input.paymentId, 'invalid_product_order_line_pay_payment_id')
+
+  assertSafeLinePayMetadata(input.metadata)
+
+  const { error } = await supabase
+    .from('payments')
+    .update({
+      raw_payload: input.metadata,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', paymentId)
+    .eq('provider', 'line_pay')
+    .eq('status', 'pending')
+
+  if (error) {
+    throw new Error('product_order_payment_metadata_update_failed')
+  }
+
+  return {
+    paymentId,
   }
 }

@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server'
 import {
+  buildLinePayRequestPaymentMetadata,
   buildLinePayOrderId,
   buildLinePayRequestPayload,
+  createLinePayNonce,
   getLinePayServerConfig,
+  mergeLinePayPaymentMetadata,
+  type LinePayEnvironment,
+  type LinePayRequestPayloadInput,
   type LinePayServerEnv,
 } from '../../../../../lib/linePay'
 
@@ -52,11 +57,42 @@ export type ProductOrderLinePayPaymentCreator = (
   input: ProductOrderLinePayPaymentCreatorInput,
 ) => Promise<ProductOrderLinePayPaymentCreatorResult>
 
+export type ProductOrderLinePayRequesterInput = {
+  environment: LinePayEnvironment
+  channelId: string
+  channelSecret: string
+  nonce: string
+  payloadInput: LinePayRequestPayloadInput
+}
+
+export type ProductOrderLinePayRequesterResult = {
+  returnCode: string
+  returnMessage?: string | null
+  transactionId: string
+  paymentUrlWeb: string
+  paymentUrlApp: string | null
+}
+
+export type ProductOrderLinePayRequester = (
+  input: ProductOrderLinePayRequesterInput,
+) => Promise<ProductOrderLinePayRequesterResult>
+
+export type ProductOrderLinePayPaymentMetadataUpdaterInput = {
+  paymentId: string
+  metadata: Record<string, unknown>
+}
+
+export type ProductOrderLinePayPaymentMetadataUpdater = (
+  input: ProductOrderLinePayPaymentMetadataUpdaterInput,
+) => Promise<unknown>
+
 export type HandleProductOrderLinePayRequestInput = {
   request: Request
   env: LinePayServerEnv
   productOrderReader?: ProductOrderLinePayReader
   paymentCreator?: ProductOrderLinePayPaymentCreator
+  paymentMetadataUpdater?: ProductOrderLinePayPaymentMetadataUpdater
+  linePayRequester?: ProductOrderLinePayRequester
   now?: number | string
 }
 
@@ -174,6 +210,8 @@ export async function handleProductOrderLinePayRequest({
   env,
   productOrderReader,
   paymentCreator,
+  paymentMetadataUpdater,
+  linePayRequester,
   now,
 }: HandleProductOrderLinePayRequestInput): Promise<Response> {
   if (request.method !== 'POST') {
@@ -227,7 +265,7 @@ export async function handleProductOrderLinePayRequest({
     sourceId: productOrderId,
     timestamp: now ?? Date.now(),
   })
-  const payload = buildLinePayRequestPayload({
+  const payloadInput: LinePayRequestPayloadInput = {
     orderId,
     amount,
     currency: 'TWD',
@@ -238,7 +276,8 @@ export async function handleProductOrderLinePayRequest({
     })),
     confirmUrl: config.confirmUrl,
     cancelUrl: config.cancelUrl,
-  })
+  }
+  const payload = buildLinePayRequestPayload(payloadInput)
   const metadata: ProductOrderLinePayPaymentMetadata = {
     linePay: {
       orderId,
@@ -249,6 +288,14 @@ export async function handleProductOrderLinePayRequest({
 
   if (typeof paymentCreator !== 'function') {
     return createErrorResponse('product_order_payment_creator_missing', 500)
+  }
+
+  if (typeof linePayRequester !== 'function') {
+    return createErrorResponse('product_order_line_pay_requester_missing', 500)
+  }
+
+  if (typeof paymentMetadataUpdater !== 'function') {
+    return createErrorResponse('product_order_payment_metadata_update_missing', 500)
   }
 
   let pendingPayment: ProductOrderLinePayPaymentCreatorResult
@@ -266,19 +313,53 @@ export async function handleProductOrderLinePayRequest({
     return createErrorResponse('product_order_line_pay_payment_create_failed', 500)
   }
 
+  let linePayRequest: ProductOrderLinePayRequesterResult
+
+  try {
+    linePayRequest = await linePayRequester({
+      environment: config.environment,
+      channelId: config.channelId,
+      channelSecret: config.channelSecret,
+      nonce: createLinePayNonce(),
+      payloadInput,
+    })
+  } catch {
+    return createErrorResponse('product_order_line_pay_request_failed', 500)
+  }
+
+  const requestMetadata = buildLinePayRequestPaymentMetadata({
+    transactionId: linePayRequest.transactionId,
+    paymentUrlWeb: linePayRequest.paymentUrlWeb,
+    paymentUrlApp: linePayRequest.paymentUrlApp ?? undefined,
+    returnCode: linePayRequest.returnCode,
+    returnMessage: linePayRequest.returnMessage,
+  })
+  const mergedMetadata = mergeLinePayPaymentMetadata(metadata, requestMetadata)
+
+  try {
+    await paymentMetadataUpdater({
+      paymentId: pendingPayment.paymentId,
+      metadata: mergedMetadata,
+    })
+  } catch {
+    return createErrorResponse('product_order_payment_metadata_update_failed', 500)
+  }
+
   return NextResponse.json(
     {
-      ok: false,
-      error: 'line_pay_product_order_request_not_implemented',
-      preflight: true,
-      dryRun: true,
-      pendingPayment: true,
+      ok: true,
+      provider: 'line_pay',
       paymentId: pendingPayment.paymentId,
       orderId: payload.orderId,
+      transactionId: linePayRequest.transactionId,
+      paymentUrl: {
+        web: linePayRequest.paymentUrlWeb,
+        app: linePayRequest.paymentUrlApp,
+      },
       amount: payload.amount,
       currency: payload.currency,
       itemCount: payload.packages[0]?.products.length ?? 0,
     },
-    { status: 501 },
+    { status: 200 },
   )
 }
