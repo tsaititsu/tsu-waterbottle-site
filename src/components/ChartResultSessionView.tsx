@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { ActionButton } from './ActionButton'
 import { saveAiChartPaymentSession } from '@/lib/ai-chart/paymentSession'
 import { savePendingChartInput } from '@/lib/mockPayment'
+import { buildNewebPayClientFormFields } from '@/lib/newebpay/clientForm'
 import { createZiweiGptPayload, type ChartInput, type ZiweiGptPayload } from '@/features/ziwei-chart/package'
 import { OriginalZiweiChartView } from '@/features/ziwei-chart/components/OriginalZiweiChartView'
 
@@ -40,6 +41,19 @@ type CreateAiChartReportResponse =
       error: string
     }
 
+type CreateAiChartNewebPayPaymentResponse =
+  | {
+      ok: true
+      merchantOrderNo: string
+      amount: number
+      action: string
+      fields: unknown
+    }
+  | {
+      ok: false
+      error: string
+    }
+
 function chartId(input: ChartInput) {
   return `${input.name || '未命名'}-${input.solarDate}-${input.timeIndex}-${input.gender}`
 }
@@ -68,6 +82,27 @@ function parseChartSession(raw: string | null): ChartSession | null {
   } catch {
     return null
   }
+}
+
+function submitNewebPayForm(input: {
+  action: string
+  fields: Array<{ name: string; value: string }>
+}) {
+  const form = document.createElement('form')
+  form.method = 'POST'
+  form.action = input.action
+  form.style.display = 'none'
+
+  for (const field of input.fields) {
+    const element = document.createElement('input')
+    element.type = 'hidden'
+    element.name = field.name
+    element.value = field.value
+    form.appendChild(element)
+  }
+
+  document.body.appendChild(form)
+  form.submit()
 }
 
 export function ChartResultSessionView() {
@@ -208,8 +243,10 @@ export function ChartResultSessionView() {
     setFormError('')
     setPaymentSetupMessage('')
 
+    let reportId = ''
+
     try {
-      const response = await fetch('/api/ai-chart/reports/create', {
+      const reportResponse = await fetch('/api/ai-chart/reports/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -220,21 +257,85 @@ export function ChartResultSessionView() {
           amountTwd: selectedPlan.amount
         })
       })
-      const data = (await response.json().catch(() => null)) as CreateAiChartReportResponse | null
+      const reportData = (await reportResponse.json().catch(() => null)) as CreateAiChartReportResponse | null
 
-      if (!response.ok || !data?.ok || data.paymentStatus !== 'pending' || data.amountTwd !== selectedPlan.amount) {
-        throw new Error(data && !data.ok ? data.error : 'ai_chart_report_create_failed')
+      if (
+        !reportResponse.ok ||
+        !reportData?.ok ||
+        reportData.paymentStatus !== 'pending' ||
+        reportData.amountTwd !== selectedPlan.amount
+      ) {
+        throw new Error(reportData && !reportData.ok ? reportData.error : 'ai_chart_report_create_failed')
+      }
+
+      reportId = reportData.reportId
+    } catch {
+      setFormError('付款資料建立失敗，請稍後再試。')
+      setPaymentSetupMessage('')
+      setIsCreatingPendingReport(false)
+      return
+    }
+
+    try {
+      const paymentResponse = await fetch('/api/payments/newebpay/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          itemKey: 'ai_chart_report_single',
+          source: 'ai_chart_report',
+          paymentMode: 'credit',
+          reportId
+        })
+      })
+      const paymentData = (await paymentResponse.json().catch(() => null)) as CreateAiChartNewebPayPaymentResponse | null
+
+      if (!paymentResponse.ok || !paymentData?.ok) {
+        const error = paymentData && !paymentData.ok ? paymentData.error : 'ai_chart_payment_create_failed'
+        if (error === 'ai_chart_report_already_linked' || error === 'ai_chart_report_not_payable') {
+          setFormError('這筆命盤分析已建立付款資料，請回到付款頁完成付款，或重新開始一筆分析。')
+        } else {
+          setFormError('線上付款資料建立失敗，請稍後再試。')
+        }
+        setPaymentSetupMessage('')
+        return
+      }
+
+      if (
+        typeof paymentData.action !== 'string' ||
+        paymentData.action.trim().length === 0 ||
+        typeof paymentData.merchantOrderNo !== 'string' ||
+        paymentData.merchantOrderNo.trim().length === 0 ||
+        paymentData.amount !== selectedPlan.amount
+      ) {
+        setFormError('線上付款資料建立失敗，請稍後再試。')
+        setPaymentSetupMessage('')
+        return
+      }
+
+      const formFields = buildNewebPayClientFormFields(paymentData.fields)
+
+      if (!formFields.ok) {
+        setFormError('線上付款資料建立失敗，請稍後再試。')
+        setPaymentSetupMessage('')
+        return
       }
 
       saveAiChartPaymentSession({
-        reportId: data.reportId,
+        reportId,
+        merchantOrderNo: paymentData.merchantOrderNo,
         amountTwd: selectedPlan.amount,
-        returnPath: `/ai-chart/result/${data.reportId}`
+        returnPath: `/ai-chart/result/${reportId}`
       })
-      setPaymentSetupMessage('付款資料已建立，下一步將前往線上付款。')
+      setPaymentSetupMessage('正在前往線上付款。')
       setFormError('')
+      submitNewebPayForm({
+        action: paymentData.action,
+        fields: formFields.fields
+      })
     } catch {
-      setFormError('付款資料建立失敗，請稍後再試。')
+      setFormError('線上付款資料建立失敗，請稍後再試。')
       setPaymentSetupMessage('')
     } finally {
       setIsCreatingPendingReport(false)
