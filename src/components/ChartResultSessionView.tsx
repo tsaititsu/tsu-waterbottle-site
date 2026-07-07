@@ -20,7 +20,7 @@ const selectedPlan = {
 }
 const AI_CHART_REPORT_TITLE = 'AI 命盤分析'
 const AI_CHART_REPORT_PRODUCT_NAME = 'AI 命盤分析'
-const isNewebPayCheckoutEnabled = process.env.NEXT_PUBLIC_ENABLE_NEWEBPAY === 'true'
+const isAiChartNewebPayCheckoutEnabled = process.env.NEXT_PUBLIC_ENABLE_AI_CHART_NEWEBPAY === 'true'
 
 type ChartSession = {
   input: ChartInput
@@ -451,7 +451,7 @@ export function ChartResultSessionView() {
         {formError && <p className="text-sm font-semibold text-deepPurple">{formError}</p>}
         {paymentSetupMessage && <p className="text-sm font-semibold text-darkGold">{paymentSetupMessage}</p>}
 
-        {isNewebPayCheckoutEnabled ? (
+        {isAiChartNewebPayCheckoutEnabled ? (
           <button
             className="focus-ring inline-flex w-full justify-center rounded-xl bg-deepPurple px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
             disabled={isCreatingPendingReport}
