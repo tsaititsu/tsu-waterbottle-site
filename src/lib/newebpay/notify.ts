@@ -3,9 +3,11 @@ import { syncAiChartReportAfterPayment } from './aiChartSync'
 import { syncDivinationReadingAfterPayment } from './divinationSync'
 import type { NewebPayQueryResult, QueryNewebPayTradeInput } from './query'
 import type { NewebPayConfig } from './types'
+import { PRODUCT_ORDER_PAYMENT_ITEM_TYPE } from '../payments/productOrderPayment'
 import type { MarkBookingPaidInput, MarkBookingPaidResult } from '../supabase/bookingPayments'
 import type { MarkCoursePaidInput, MarkCoursePaidResult } from '../supabase/coursePurchases'
 import type { MarkPaymentPaidInput, MarkPaymentPaidResult, PaymentPaidContext, PaymentRecord } from '../supabase/payments'
+import { syncProductOrderAfterPaymentPaid } from '../supabase/productOrderSync'
 
 export type NewebPayNotifyResult = {
   status: string
@@ -76,6 +78,15 @@ export type NewebPayAiChartSyncResult =
   | { aiChartSync: 'invalid_state'; reportId: string; paymentStatus: string | null }
   | { aiChartSync: 'failed'; reportId: string | null; error: string }
 
+export type NewebPayProductOrderSyncResult =
+  | { productOrderSync: 'skipped_not_product_order' }
+  | { productOrderSync: 'skipped_missing_product_order_context' }
+  | {
+      productOrderSync: 'synced' | 'already_paid' | 'not_found' | 'payment_mismatch' | 'invalid_state'
+      orderId: string
+    }
+  | { productOrderSync: 'failed'; orderId: string | null; error: string }
+
 export type NewebPayNotifyErrorMetadata = {
   status: string
   merchantId: string
@@ -98,6 +109,7 @@ type MarkBookingPaidHandler = (input: MarkBookingPaidInput) => Promise<MarkBooki
 type MarkCoursePaidHandler = (input: MarkCoursePaidInput) => Promise<MarkCoursePaidResult>
 type SyncDivinationReadingHandler = typeof syncDivinationReadingAfterPayment
 type SyncAiChartReportHandler = typeof syncAiChartReportAfterPayment
+type SyncProductOrderHandler = typeof syncProductOrderAfterPaymentPaid
 
 type NewebPayPaymentMatchValidationResult =
   | { ok: true; payment: PaymentRecord; localAmount: number; providerAmount: number }
@@ -489,6 +501,52 @@ export async function syncNewebPayAiChartAfterPayment({
       aiChartSync: 'failed',
       reportId: payment.itemId,
       error: error instanceof Error ? error.message : 'unknown_error',
+    }
+  }
+}
+
+export async function syncNewebPayProductOrderAfterPayment({
+  payment,
+  syncProductOrder = syncProductOrderAfterPaymentPaid,
+}: {
+  payment: PaymentPaidContext
+  syncProductOrder?: SyncProductOrderHandler
+}): Promise<NewebPayProductOrderSyncResult> {
+  if (payment.itemType !== PRODUCT_ORDER_PAYMENT_ITEM_TYPE) {
+    return {
+      productOrderSync: 'skipped_not_product_order',
+    }
+  }
+
+  if (!hasText(payment.id) || !hasText(payment.itemId)) {
+    return {
+      productOrderSync: 'skipped_missing_product_order_context',
+    }
+  }
+
+  try {
+    const result = await syncProductOrder({
+      paymentId: payment.id,
+      orderId: payment.itemId,
+    })
+
+    if (result.result === 'failed') {
+      return {
+        productOrderSync: 'failed',
+        orderId: result.orderId,
+        error: result.error,
+      }
+    }
+
+    return {
+      productOrderSync: result.result,
+      orderId: result.orderId,
+    }
+  } catch {
+    return {
+      productOrderSync: 'failed',
+      orderId: payment.itemId,
+      error: 'product_order_paid_sync_failed',
     }
   }
 }

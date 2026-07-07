@@ -12,6 +12,7 @@ import {
   syncNewebPayBookingAfterPayment,
   syncNewebPayCourseAfterPayment,
   syncNewebPayDivinationAfterPayment,
+  syncNewebPayProductOrderAfterPayment,
   validateNewebPayPaymentMatch,
 } from './notify'
 import type { PaymentPaidContext, PaymentRecord } from '../supabase/payments'
@@ -657,6 +658,54 @@ async function runQueryFallbackAssertions() {
     })
   }
 
+  let fallbackProductOrderSyncInput: unknown
+  const productOrderId = '65e395bd-b7dd-4692-bf65-f817b1fd2caa'
+  const productOrderFallback = await persistNewebPayNotifyQueryFallback({
+    merchantOrderNo: 'WB20260703172530A1B2',
+    config,
+    getPaymentByMerchantOrderNo: async () => createPaymentRecord({
+      itemType: 'spiritual_product_order',
+      itemId: productOrderId,
+      itemName: '開運商品訂單',
+      amountTwd: 1,
+      rawPayload: {
+        amount: 1,
+        itemType: 'spiritual_product_order',
+        orderId: productOrderId,
+        merchantOrderNo: 'WB20260703172530A1B2',
+      },
+    }),
+    queryNewebPayTrade: async () => successQuery,
+    markPaymentPaid: async () => ({
+      result: 'updated',
+      payment: createPaymentPaidContext({
+        itemType: 'spiritual_product_order',
+        itemId: productOrderId,
+      }),
+    }),
+  })
+
+  assert.equal(productOrderFallback.ok, true)
+  assert.equal('payment' in productOrderFallback && productOrderFallback.payment.itemType, 'spiritual_product_order')
+  if ('payment' in productOrderFallback) {
+    const productOrderFallbackSync = await syncNewebPayProductOrderAfterPayment({
+      payment: productOrderFallback.payment,
+      syncProductOrder: async (input) => {
+        fallbackProductOrderSyncInput = input
+        return { result: 'synced', orderId: input.orderId }
+      },
+    })
+
+    assert.deepEqual(productOrderFallbackSync, {
+      productOrderSync: 'synced',
+      orderId: productOrderId,
+    })
+    assert.deepEqual(fallbackProductOrderSyncInput, {
+      paymentId: 'payment-1',
+      orderId: productOrderId,
+    })
+  }
+
   let markCalled = false
   const notPaid = await persistNewebPayNotifyQueryFallback({
     merchantOrderNo: 'WB20260703172530A1B2',
@@ -1187,6 +1236,163 @@ async function runAiChartSyncAssertions() {
   }
 }
 
+async function runProductOrderSyncAssertions() {
+  const orderId = '65e395bd-b7dd-4692-bf65-f817b1fd2caa'
+  let productOrderSyncInput: unknown
+  const synced = await syncNewebPayProductOrderAfterPayment({
+    payment: createPaymentPaidContext({
+      itemType: 'spiritual_product_order',
+      itemId: orderId,
+    }),
+    syncProductOrder: async (input) => {
+      productOrderSyncInput = input
+      return { result: 'synced', orderId: input.orderId }
+    },
+  })
+
+  assert.deepEqual(synced, {
+    productOrderSync: 'synced',
+    orderId,
+  })
+  assert.deepEqual(productOrderSyncInput, {
+    paymentId: 'payment-1',
+    orderId,
+  })
+
+  const alreadyPaid = await syncNewebPayProductOrderAfterPayment({
+    payment: createPaymentPaidContext({
+      itemType: 'spiritual_product_order',
+      itemId: orderId,
+    }),
+    syncProductOrder: async (input) => ({ result: 'already_paid', orderId: input.orderId }),
+  })
+
+  assert.deepEqual(alreadyPaid, {
+    productOrderSync: 'already_paid',
+    orderId,
+  })
+
+  const notFound = await syncNewebPayProductOrderAfterPayment({
+    payment: createPaymentPaidContext({
+      itemType: 'spiritual_product_order',
+      itemId: orderId,
+    }),
+    syncProductOrder: async (input) => ({ result: 'not_found', orderId: input.orderId }),
+  })
+
+  assert.deepEqual(notFound, {
+    productOrderSync: 'not_found',
+    orderId,
+  })
+
+  const paymentMismatch = await syncNewebPayProductOrderAfterPayment({
+    payment: createPaymentPaidContext({
+      itemType: 'spiritual_product_order',
+      itemId: orderId,
+    }),
+    syncProductOrder: async (input) => ({ result: 'payment_mismatch', orderId: input.orderId }),
+  })
+
+  assert.deepEqual(paymentMismatch, {
+    productOrderSync: 'payment_mismatch',
+    orderId,
+  })
+
+  const invalidState = await syncNewebPayProductOrderAfterPayment({
+    payment: createPaymentPaidContext({
+      itemType: 'spiritual_product_order',
+      itemId: orderId,
+    }),
+    syncProductOrder: async (input) => ({ result: 'invalid_state', orderId: input.orderId }),
+  })
+
+  assert.deepEqual(invalidState, {
+    productOrderSync: 'invalid_state',
+    orderId,
+  })
+
+  const failed = await syncNewebPayProductOrderAfterPayment({
+    payment: createPaymentPaidContext({
+      itemType: 'spiritual_product_order',
+      itemId: orderId,
+    }),
+    syncProductOrder: async (input) => ({
+      result: 'failed',
+      orderId: input.orderId,
+      error: 'product_order_paid_sync_update_failed',
+    }),
+  })
+
+  assert.deepEqual(failed, {
+    productOrderSync: 'failed',
+    orderId,
+    error: 'product_order_paid_sync_update_failed',
+  })
+
+  const thrown = await syncNewebPayProductOrderAfterPayment({
+    payment: createPaymentPaidContext({
+      itemType: 'spiritual_product_order',
+      itemId: orderId,
+    }),
+    syncProductOrder: async () => {
+      throw new Error('raw_payload TradeInfo TradeSha')
+    },
+  })
+
+  assert.deepEqual(thrown, {
+    productOrderSync: 'failed',
+    orderId,
+    error: 'product_order_paid_sync_failed',
+  })
+  const serializedThrown = JSON.stringify(thrown)
+  assert.equal(serializedThrown.includes('raw_payload'), false)
+  assert.equal(serializedThrown.includes('TradeInfo'), false)
+  assert.equal(serializedThrown.includes('TradeSha'), false)
+  assert.equal(serializedThrown.includes('HashKey'), false)
+  assert.equal(serializedThrown.includes('HashIV'), false)
+
+  for (const payment of [
+    createPaymentPaidContext({ itemType: 'spiritual_product_order', itemId: null }),
+    createPaymentPaidContext({ itemType: 'spiritual_product_order', itemId: '   ' }),
+  ]) {
+    let called = false
+    const result = await syncNewebPayProductOrderAfterPayment({
+      payment,
+      syncProductOrder: async () => {
+        called = true
+        throw new Error('should_not_call')
+      },
+    })
+
+    assert.deepEqual(result, {
+      productOrderSync: 'skipped_missing_product_order_context',
+    })
+    assert.equal(called, false)
+  }
+
+  for (const payment of [
+    createPaymentPaidContext({ bookingId: 'booking-1', itemType: 'booking', itemId: 'booking-1' }),
+    createPaymentPaidContext({ userId: 'user-course-1', itemType: 'course', itemId: 'course-1' }),
+    createPaymentPaidContext({ itemType: 'ai_divination', itemId: 'reading-1' }),
+    createPaymentPaidContext({ itemType: 'ai_chart_report', itemId: 'report-1' }),
+    createPaymentPaidContext(),
+  ]) {
+    let called = false
+    const result = await syncNewebPayProductOrderAfterPayment({
+      payment,
+      syncProductOrder: async () => {
+        called = true
+        throw new Error('should_not_call')
+      },
+    })
+
+    assert.deepEqual(result, {
+      productOrderSync: 'skipped_not_product_order',
+    })
+    assert.equal(called, false)
+  }
+}
+
 Promise.all([
   runPaymentPersistenceAssertions(),
   runQueryFallbackAssertions(),
@@ -1194,6 +1400,7 @@ Promise.all([
   runCourseSyncAssertions(),
   runDivinationSyncAssertions(),
   runAiChartSyncAssertions(),
+  runProductOrderSyncAssertions(),
 ]).catch((error) => {
   console.error(error)
   process.exitCode = 1

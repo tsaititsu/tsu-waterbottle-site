@@ -11,6 +11,7 @@ import {
   syncNewebPayBookingAfterPayment,
   syncNewebPayCourseAfterPayment,
   syncNewebPayDivinationAfterPayment,
+  syncNewebPayProductOrderAfterPayment,
 } from '@/lib/newebpay/notify'
 import { queryNewebPayTrade } from '@/lib/newebpay/query'
 import { markBookingPaidById } from '@/lib/supabase/bookingPayments'
@@ -266,6 +267,71 @@ async function syncAiChartAfterPayment(input: {
   return aiChartSync.aiChartSync
 }
 
+async function syncProductOrderAfterPayment(input: {
+  merchantOrderNo: string
+  paymentResult: string
+  payment: Parameters<typeof syncNewebPayProductOrderAfterPayment>[0]['payment']
+}) {
+  const productOrderSync = await syncNewebPayProductOrderAfterPayment({
+    payment: input.payment,
+  })
+
+  if (productOrderSync.productOrderSync === 'skipped_not_product_order') {
+    return productOrderSync.productOrderSync
+  }
+
+  if (productOrderSync.productOrderSync === 'skipped_missing_product_order_context') {
+    console.info('NewebPay product order sync skipped', {
+      merchantOrderNo: input.merchantOrderNo,
+      paymentResult: input.paymentResult,
+      paymentId: input.payment.id,
+      itemType: input.payment.itemType,
+      itemId: input.payment.itemId,
+      productOrderSync: productOrderSync.productOrderSync,
+    })
+    return productOrderSync.productOrderSync
+  }
+
+  if (productOrderSync.productOrderSync === 'failed') {
+    console.warn('NewebPay product order sync failed', {
+      merchantOrderNo: input.merchantOrderNo,
+      paymentResult: input.paymentResult,
+      paymentId: input.payment.id,
+      itemType: input.payment.itemType,
+      itemId: input.payment.itemId,
+      orderId: productOrderSync.orderId,
+      productOrderSync: productOrderSync.productOrderSync,
+      error: productOrderSync.error,
+    })
+    return productOrderSync.productOrderSync
+  }
+
+  if (
+    productOrderSync.productOrderSync === 'payment_mismatch' ||
+    productOrderSync.productOrderSync === 'invalid_state'
+  ) {
+    console.warn('NewebPay product order sync needs review', {
+      merchantOrderNo: input.merchantOrderNo,
+      paymentResult: input.paymentResult,
+      paymentId: input.payment.id,
+      itemType: input.payment.itemType,
+      itemId: productOrderSync.orderId,
+      productOrderSync: productOrderSync.productOrderSync,
+    })
+    return productOrderSync.productOrderSync
+  }
+
+  console.info('NewebPay product order sync completed', {
+    merchantOrderNo: input.merchantOrderNo,
+    paymentResult: input.paymentResult,
+    paymentId: input.payment.id,
+    itemType: input.payment.itemType,
+    itemId: productOrderSync.orderId,
+    productOrderSync: productOrderSync.productOrderSync,
+  })
+  return productOrderSync.productOrderSync
+}
+
 function getNotifyQueryMerchantOrderNo(request: Request) {
   const value = new URL(request.url).searchParams.get('merchantOrderNo')?.trim()
   return value || null
@@ -396,6 +462,11 @@ export async function POST(request: Request) {
         paymentResult: paymentPersistence.result,
         payment: paymentPersistence.payment,
       })
+      const productOrderSync = await syncProductOrderAfterPayment({
+        merchantOrderNo: result.merchantOrderNo,
+        paymentResult: paymentPersistence.result,
+        payment: paymentPersistence.payment,
+      })
 
       return NextResponse.json({
         ok: true,
@@ -405,6 +476,7 @@ export async function POST(request: Request) {
         courseSync,
         divinationSync,
         aiChartSync,
+        productOrderSync,
       })
     } catch (error) {
       return notifyPaymentUpdateError(error, result)
@@ -499,6 +571,11 @@ export async function POST(request: Request) {
           paymentResult: fallbackResult.result,
           payment: fallbackResult.payment,
         })
+        const productOrderSync = await syncProductOrderAfterPayment({
+          merchantOrderNo: fallbackResult.query.merchantOrderNo,
+          paymentResult: fallbackResult.result,
+          payment: fallbackResult.payment,
+        })
 
         return NextResponse.json({
           ok: true,
@@ -508,6 +585,7 @@ export async function POST(request: Request) {
           courseSync,
           divinationSync,
           aiChartSync,
+          productOrderSync,
         })
       } catch (fallbackError) {
         console.warn('NewebPay notify query fallback failed', {
