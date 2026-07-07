@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server'
-import { getLinePayServerConfig, type LinePayServerEnv } from '../../../../../lib/linePay'
+import {
+  buildLinePayOrderId,
+  buildLinePayRequestPayload,
+  getLinePayServerConfig,
+  type LinePayServerEnv,
+} from '../../../../../lib/linePay'
 
 export type ProductOrderLinePayPreflightItem = {
   name: string
@@ -24,6 +29,7 @@ export type HandleProductOrderLinePayRequestInput = {
   request: Request
   env: LinePayServerEnv
   productOrderReader?: ProductOrderLinePayReader
+  now?: number | string
 }
 
 type ProductOrderLinePayRequestBody = {
@@ -132,6 +138,7 @@ export async function handleProductOrderLinePayRequest({
   request,
   env,
   productOrderReader,
+  now,
 }: HandleProductOrderLinePayRequestInput): Promise<Response> {
   if (request.method !== 'POST') {
     return createErrorResponse('method_not_allowed', 405)
@@ -174,11 +181,39 @@ export async function handleProductOrderLinePayRequest({
     return createErrorResponse(preflightError.error, preflightError.status)
   }
 
+  const payableOrder = order as ProductOrderLinePayPreflightContext & {
+    total_amount: number
+    currency: 'TWD'
+  }
+  const amount = payableOrder.total_amount
+  const orderId = buildLinePayOrderId({
+    sourceType: 'product_order',
+    sourceId: productOrderId,
+    timestamp: now ?? Date.now(),
+  })
+  const payload = buildLinePayRequestPayload({
+    orderId,
+    amount,
+    currency: 'TWD',
+    products: payableOrder.items.map((item) => ({
+      name: item.name,
+      quantity: item.quantity,
+      price: item.amount,
+    })),
+    confirmUrl: config.confirmUrl,
+    cancelUrl: config.cancelUrl,
+  })
+
   return NextResponse.json(
     {
       ok: false,
       error: 'line_pay_product_order_request_not_implemented',
       preflight: true,
+      dryRun: true,
+      orderId: payload.orderId,
+      amount: payload.amount,
+      currency: payload.currency,
+      itemCount: payload.packages[0]?.products.length ?? 0,
     },
     { status: 501 },
   )

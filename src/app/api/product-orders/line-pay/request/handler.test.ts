@@ -4,7 +4,7 @@ import {
   type ProductOrderLinePayPreflightContext,
   type ProductOrderLinePayReader,
 } from './handler'
-import type { LinePayServerEnv } from '../../../../../lib/linePay'
+import { extractSourceIdFromLinePayOrderId, type LinePayServerEnv } from '../../../../../lib/linePay'
 
 const fullEnv: LinePayServerEnv = {
   NEXT_PUBLIC_ENABLE_LINE_PAY: 'true',
@@ -14,6 +14,7 @@ const fullEnv: LinePayServerEnv = {
   LINE_PAY_CONFIRM_URL: 'https://example.com/api/payments/line-pay/confirm',
   LINE_PAY_CANCEL_URL: 'https://example.com/payment/cancel',
 }
+const dryRunTimestamp = '20260707153000'
 
 const tests: Array<{ name: string; fn: () => Promise<void> }> = []
 
@@ -69,15 +70,18 @@ async function callHandler({
   body = { productOrderId: 'product-order-1' },
   env = fullEnv,
   productOrderReader = createReader(payableOrder()),
+  now = dryRunTimestamp,
 }: {
   body?: unknown
   env?: LinePayServerEnv
   productOrderReader?: ProductOrderLinePayReader
+  now?: number | string
 } = {}) {
   return handleProductOrderLinePayRequest({
     request: createRequest(body),
     env,
     productOrderReader,
+    now,
   })
 }
 
@@ -266,16 +270,63 @@ test('item subtotal mismatch returns invalid_product_order_items_total', async (
   })
 })
 
-test('preflight success returns not implemented with preflight true', async () => {
+test('preflight success creates dry-run orderId and summary response', async () => {
   const response = await callHandler()
+  const json = await readJson(response)
+  const orderId = String(json.orderId)
+
+  assert.equal(response.status, 501)
+  assert.equal(json.ok, false)
+  assert.equal(json.error, 'line_pay_product_order_request_not_implemented')
+  assert.equal(json.preflight, true)
+  assert.equal(json.dryRun, true)
+  assert.equal(orderId, `LP_product_order_product-order-1_${dryRunTimestamp}`)
+  assert.equal(json.amount, 1500)
+  assert.equal(json.currency, 'TWD')
+  assert.equal(json.itemCount, 1)
+})
+
+test('dry-run orderId contains product_order source type, trimmed sourceId, and fixed timestamp', async () => {
+  const response = await callHandler({
+    body: {
+      productOrderId: '  product-order-1  ',
+    },
+  })
+  const json = await readJson(response)
+  const parsed = extractSourceIdFromLinePayOrderId(json.orderId)
+
+  assert.equal(parsed.sourceType, 'product_order')
+  assert.equal(parsed.sourceId, 'product-order-1')
+  assert.equal(parsed.timestamp, dryRunTimestamp)
+})
+
+test('dry-run request payload summary uses order amount, TWD currency, and item count', async () => {
+  const response = await callHandler({
+    productOrderReader: createReader(
+      payableOrder({
+        total_amount: 2000,
+        items: [
+          {
+            name: '人緣符',
+            quantity: 1,
+            amount: 1500,
+          },
+          {
+            name: '開運小物',
+            quantity: 1,
+            amount: 500,
+          },
+        ],
+      }),
+    ),
+  })
   const json = await readJson(response)
 
   assert.equal(response.status, 501)
-  assert.deepEqual(json, {
-    ok: false,
-    error: 'line_pay_product_order_request_not_implemented',
-    preflight: true,
-  })
+  assert.equal(json.dryRun, true)
+  assert.equal(json.amount, 2000)
+  assert.equal(json.currency, 'TWD')
+  assert.equal(json.itemCount, 2)
 })
 
 test('preflight success calls productOrderReader with trimmed productOrderId', async () => {
@@ -290,6 +341,7 @@ test('preflight success calls productOrderReader with trimmed productOrderId', a
 
   assert.equal(response.status, 501)
   assert.equal(json.preflight, true)
+  assert.equal(json.dryRun, true)
   assert.deepEqual(calls, ['product-order-1'])
 })
 
@@ -364,6 +416,17 @@ test('response does not expose secret or customer fields', async () => {
   assertSafeResponse(json)
 })
 
+test('response does not expose full LINE Pay request payload', async () => {
+  const response = await callHandler()
+  const json = await readJson(response)
+
+  assert.equal('packages' in json, false)
+  assert.equal('products' in json, false)
+  assert.equal('redirectUrls' in json, false)
+  assert.equal('confirmUrl' in json, false)
+  assert.equal('cancelUrl' in json, false)
+})
+
 test('handler does not call LINE Pay API or global fetch', async () => {
   const originalFetch = globalThis.fetch
   let called = false
@@ -389,9 +452,8 @@ test('handler source does not include payment creation or mark paid behavior', a
   const source = String(handleProductOrderLinePayRequest)
 
   assert.equal(source.includes('requestLinePayPayment'), false)
-  assert.equal(source.includes('buildLinePayRequestPayload'), false)
-  assert.equal(source.includes('buildLinePayOrderId'), false)
   assert.equal(source.includes('createPayment'), false)
+  assert.equal(source.includes('metadata'), false)
   assert.equal(source.includes('update'), false)
   assert.equal(source.includes('markPaid'), false)
 })
