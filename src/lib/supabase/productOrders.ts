@@ -87,6 +87,48 @@ export type ProductOrderCreatedRow = {
   total_amount_twd: number
 }
 
+export type ProductOrderPaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded' | 'canceled'
+export type ProductOrderOrderStatus = 'pending_payment' | 'paid' | 'preparing' | 'shipped' | 'completed' | 'canceled'
+export type ProductOrderShippingStatus = 'not_shipped' | 'preparing' | 'shipped' | 'delivered' | 'failed' | 'returned'
+
+export type ProductOrderPaymentContext = {
+  id: string
+  orderNo: string
+  totalAmountTwd: number
+  paymentMethod: ProductOrderPaymentMethod | string | null
+  paymentStatus: ProductOrderPaymentStatus | string | null
+  orderStatus: ProductOrderOrderStatus | string | null
+  shippingStatus: ProductOrderShippingStatus | string | null
+  paymentId: string | null
+}
+
+export type ProductOrderPaymentContextRow = {
+  id: string
+  order_no: string
+  total_amount_twd: number
+  payment_method: ProductOrderPaymentMethod | string | null
+  payment_status: ProductOrderPaymentStatus | string | null
+  order_status: ProductOrderOrderStatus | string | null
+  shipping_status: ProductOrderShippingStatus | string | null
+  payment_id: string | null
+}
+
+export type ProductOrderPaymentLinkPayload = {
+  payment_id: string
+  payment_method: 'newebpay'
+  updated_at: string
+}
+
+export type LinkProductOrderPaymentInput = {
+  orderId: string
+  paymentId: string
+}
+
+export type LinkProductOrderPaymentResult = {
+  orderId: string
+  paymentId: string
+}
+
 type SupabaseAdminClient = ReturnType<typeof getSupabaseAdmin>
 
 const UNSAFE_PRODUCT_SNAPSHOT_KEYS = new Set([
@@ -114,6 +156,22 @@ function normalizeRequiredText(value: string, fieldName: string) {
 
   if (!trimmed) {
     throw new Error(`${fieldName} must not be blank`)
+  }
+
+  return trimmed
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value.trim(),
+  )
+}
+
+function assertValidUuid(value: string, fieldName: string) {
+  const trimmed = normalizeRequiredText(value, fieldName)
+
+  if (!isUuid(trimmed)) {
+    throw new Error('invalid_product_order_payment_input')
   }
 
   return trimmed
@@ -272,6 +330,30 @@ export function buildProductShippingInfoPayload(
   }
 }
 
+export function mapProductOrderPaymentContext(row: ProductOrderPaymentContextRow): ProductOrderPaymentContext {
+  return {
+    id: row.id,
+    orderNo: row.order_no,
+    totalAmountTwd: row.total_amount_twd,
+    paymentMethod: row.payment_method,
+    paymentStatus: row.payment_status,
+    orderStatus: row.order_status,
+    shippingStatus: row.shipping_status,
+    paymentId: row.payment_id,
+  }
+}
+
+export function buildProductOrderPaymentLinkPayload(
+  input: Pick<LinkProductOrderPaymentInput, 'paymentId'>,
+  now = new Date().toISOString(),
+): ProductOrderPaymentLinkPayload {
+  return {
+    payment_id: assertValidUuid(input.paymentId, 'paymentId'),
+    payment_method: 'newebpay',
+    updated_at: now,
+  }
+}
+
 export async function createProductOrder(
   input: CreateProductOrderInput,
   supabase: SupabaseAdminClient = getSupabaseAdmin(),
@@ -313,5 +395,61 @@ export async function createProductOrder(
     orderId: orderRow.id,
     orderNo: orderRow.order_no,
     totalAmountTwd: orderRow.total_amount_twd,
+  }
+}
+
+export async function getProductOrderForPayment(
+  orderId: string,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<ProductOrderPaymentContext | null> {
+  const normalizedOrderId = assertValidUuid(orderId, 'orderId')
+
+  const { data, error } = await supabase
+    .from('product_orders')
+    .select('id,order_no,total_amount_twd,payment_method,payment_status,order_status,shipping_status,payment_id')
+    .eq('id', normalizedOrderId)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error('product_order_lookup_failed')
+  }
+
+  return data ? mapProductOrderPaymentContext(data as ProductOrderPaymentContextRow) : null
+}
+
+export async function linkProductOrderPayment(
+  input: LinkProductOrderPaymentInput,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<LinkProductOrderPaymentResult> {
+  const orderId = assertValidUuid(input.orderId, 'orderId')
+  const paymentId = assertValidUuid(input.paymentId, 'paymentId')
+  const order = await getProductOrderForPayment(orderId, supabase)
+
+  if (!order) {
+    throw new Error('product_order_not_found')
+  }
+
+  if (
+    order.paymentStatus !== 'pending' ||
+    order.orderStatus !== 'pending_payment' ||
+    (order.paymentId !== null && order.paymentId !== paymentId)
+  ) {
+    throw new Error('product_order_not_payable')
+  }
+
+  const { error } = await supabase
+    .from('product_orders')
+    .update(buildProductOrderPaymentLinkPayload({ paymentId }))
+    .eq('id', orderId)
+    .eq('payment_status', 'pending')
+    .eq('order_status', 'pending_payment')
+
+  if (error) {
+    throw new Error('product_order_payment_link_failed')
+  }
+
+  return {
+    orderId,
+    paymentId,
   }
 }
