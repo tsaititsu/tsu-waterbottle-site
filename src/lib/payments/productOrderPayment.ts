@@ -63,6 +63,26 @@ export type UpdateProductOrderLinePayPaymentMetadataResult = {
   paymentId: string
 }
 
+export type ProductOrderLinePayConfirmPaymentContext = {
+  id: string
+  provider: string | null
+  status: string | null
+  amount: number | null
+  currency: string | null
+  merchant_order_no: string | null
+  raw_payload: Record<string, unknown> | null
+}
+
+type ProductOrderLinePayConfirmPaymentRow = {
+  id: string
+  provider: string | null
+  status: string | null
+  amount_twd: number | null
+  currency: string | null
+  merchant_order_no: string | null
+  raw_payload: Record<string, unknown> | null
+}
+
 const PRODUCT_ORDER_ITEM_DESC_MAX_LENGTH = 50
 const BLOCKED_LINE_PAY_METADATA_KEY_PATTERN =
   /channelSecret|channelId|TradeInfo|TradeSha|HashKey|HashIV|signature|headers|phone|email|address|creditCard|cardNumber|paymentForm/i
@@ -252,5 +272,39 @@ export async function updateProductOrderLinePayPaymentMetadata(
 
   return {
     paymentId,
+  }
+}
+
+export async function getProductOrderLinePayConfirmPaymentContext(
+  input: { orderId: string },
+  supabase = getSupabaseAdmin(),
+): Promise<ProductOrderLinePayConfirmPaymentContext | null> {
+  const orderId = normalizeRequiredText(input.orderId, 'invalid_line_pay_order_id')
+
+  const { data, error } = await supabase
+    .from('payments')
+    .select('id,provider,status,amount_twd,currency,merchant_order_no,raw_payload')
+    .eq('merchant_order_no', orderId)
+    .eq('provider', 'line_pay')
+    .maybeSingle()
+
+  if (error) {
+    throw new Error('line_pay_payment_lookup_failed')
+  }
+
+  if (!data) {
+    return null
+  }
+
+  const row = data as ProductOrderLinePayConfirmPaymentRow
+
+  return {
+    id: row.id,
+    provider: row.provider,
+    status: row.status,
+    amount: row.amount_twd,
+    currency: row.currency,
+    merchant_order_no: row.merchant_order_no,
+    raw_payload: row.raw_payload,
   }
 }

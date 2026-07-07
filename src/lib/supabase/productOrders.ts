@@ -150,7 +150,24 @@ export type ProductOrderLinePayPreflightContext = {
   items: ProductOrderLinePayPreflightItem[]
 }
 
+export type ProductOrderLinePayConfirmContext = {
+  id: string
+  status: string | null
+  payment_status: string | null
+  payment_id: string | null
+  total_amount: number | null
+  currency: 'TWD'
+}
+
 type ProductOrderLinePayPreflightRow = {
+  id: string
+  order_status: string | null
+  payment_status: string | null
+  payment_id: string | null
+  total_amount_twd: number | null
+}
+
+type ProductOrderLinePayConfirmRow = {
   id: string
   order_status: string | null
   payment_status: string | null
@@ -510,6 +527,38 @@ export async function getProductOrderLinePayPreflightContext(
     total_amount: order.total_amount_twd,
     currency: 'TWD',
     items,
+  }
+}
+
+export async function getProductOrderLinePayConfirmContext(
+  input: { productOrderId: string },
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<ProductOrderLinePayConfirmContext | null> {
+  const normalizedOrderId = assertValidUuid(input.productOrderId, 'productOrderId')
+
+  const { data, error } = await supabase
+    .from('product_orders')
+    .select('id,order_status,payment_status,payment_id,total_amount_twd')
+    .eq('id', normalizedOrderId)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error('product_order_lookup_failed')
+  }
+
+  if (!data) {
+    return null
+  }
+
+  const order = data as ProductOrderLinePayConfirmRow
+
+  return {
+    id: order.id,
+    status: order.order_status,
+    payment_status: order.payment_status,
+    payment_id: order.payment_id,
+    total_amount: order.total_amount_twd,
+    currency: 'TWD',
   }
 }
 
