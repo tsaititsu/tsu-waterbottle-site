@@ -105,6 +105,39 @@ export type AiChartReportPaymentContextRow = {
   amount_twd: number | null
 }
 
+export type AiChartReportResultContext = {
+  id: string
+  title: string | null
+  productName: string | null
+  amountTwd: number | null
+  status: string | null
+  paymentStatus: AiChartReportPaymentStatus | null
+  reportContent: string | null
+  paidAt: string | null
+  completedAt: string | null
+  errorMessage: string | null
+}
+
+export type AiChartReportResultContextRow = {
+  id: string
+  title: string | null
+  product_name: string | null
+  amount_twd: number | null
+  status: string | null
+  payment_status: AiChartReportPaymentStatus | null
+  report_content: string | null
+  paid_at: string | null
+  completed_at: string | null
+  error_message: string | null
+}
+
+export type AiChartReportResultAccessDecision =
+  | { result: 'not_found' }
+  | { result: 'payment_required' }
+  | { result: 'paid_missing_content' }
+  | { result: 'ready'; reportContent: string }
+  | { result: 'invalid_state'; paymentStatus: AiChartReportPaymentStatus | null }
+
 export type LinkAiChartReportPendingPaymentInput = {
   reportId: string
   paymentId: string
@@ -250,6 +283,49 @@ export function mapAiChartReportPaymentContext(
   }
 }
 
+export function mapAiChartReportResultContext(
+  row: AiChartReportResultContextRow,
+): AiChartReportResultContext {
+  return {
+    id: row.id,
+    title: row.title,
+    productName: row.product_name,
+    amountTwd: row.amount_twd,
+    status: row.status,
+    paymentStatus: row.payment_status,
+    reportContent: row.report_content,
+    paidAt: row.paid_at,
+    completedAt: row.completed_at,
+    errorMessage: row.error_message,
+  }
+}
+
+export function decideAiChartReportResultAccess(
+  report: AiChartReportResultContext | null,
+): AiChartReportResultAccessDecision {
+  if (!report) return { result: 'not_found' }
+
+  if (report.paymentStatus === 'pending' || report.paymentStatus === null) {
+    return { result: 'payment_required' }
+  }
+
+  if (report.paymentStatus === 'paid') {
+    if (report.reportContent?.trim()) {
+      return {
+        result: 'ready',
+        reportContent: report.reportContent,
+      }
+    }
+
+    return { result: 'paid_missing_content' }
+  }
+
+  return {
+    result: 'invalid_state',
+    paymentStatus: report.paymentStatus,
+  }
+}
+
 export async function createPendingAiChartReport(
   input: CreatePendingAiChartReportInput,
   supabase: SupabaseAdminClient = getSupabaseAdmin(),
@@ -302,6 +378,25 @@ export async function getAiChartReportPaymentContext(
   }
 
   return data ? mapAiChartReportPaymentContext(data as AiChartReportPaymentContextRow) : null
+}
+
+export async function getAiChartReportResultById(
+  reportId: string,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<AiChartReportResultContext | null> {
+  assertRequiredText(reportId, 'reportId')
+
+  const { data, error } = await supabase
+    .from('ai_chart_reports')
+    .select('id,title,product_name,amount_twd,status,payment_status,report_content,paid_at,completed_at,error_message')
+    .eq('id', reportId)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return data ? mapAiChartReportResultContext(data as AiChartReportResultContextRow) : null
 }
 
 export async function linkAiChartReportPendingPayment(

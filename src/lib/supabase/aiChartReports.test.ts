@@ -4,11 +4,14 @@ import {
   buildAiChartReportPendingPaymentLinkPayload,
   buildPendingAiChartReportPayload,
   createPendingAiChartReport,
+  decideAiChartReportResultAccess,
   decideAiChartReportPaidUpdate,
   decideAiChartReportPendingPaymentLink,
+  getAiChartReportResultById,
   getAiChartReportPaymentContext,
   linkAiChartReportPendingPayment,
   markAiChartReportPaidByPayment,
+  type AiChartReportResultContext,
   type AiChartReportPaymentStatus,
 } from './aiChartReports'
 
@@ -100,6 +103,37 @@ function assertNoOtherProductKeys(payload: Record<string, unknown>) {
   assert.equal('divination_reading_id' in payload, false)
   assert.equal('spiritual_product_id' in payload, false)
   assert.equal('product_id' in payload, false)
+}
+
+function assertResultSelectIsSafe(columns: string) {
+  assert.equal(columns.includes('user_id'), false)
+  assert.equal(columns.includes('chart_profile_id'), false)
+  assert.equal(columns.includes('birth'), false)
+  assert.equal(columns.includes('ziwei_payload'), false)
+  assert.equal(columns.includes('chart_payload'), false)
+  assert.equal(columns.includes('raw_payload'), false)
+  assert.equal(columns.includes('TradeInfo'), false)
+  assert.equal(columns.includes('TradeSha'), false)
+  assert.equal(columns.includes('HashKey'), false)
+  assert.equal(columns.includes('HashIV'), false)
+}
+
+function createResultReport(
+  paymentStatus: AiChartReportPaymentStatus | null,
+  reportContent: string | null,
+): AiChartReportResultContext {
+  return {
+    id: 'report-result-1',
+    title: 'AI 命盤分析',
+    productName: 'AI 命盤分析',
+    amountTwd: 100,
+    status: 'pending',
+    paymentStatus,
+    reportContent,
+    paidAt: null,
+    completedAt: null,
+    errorMessage: null,
+  }
 }
 
 const pendingReportPayload = buildPendingAiChartReportPayload(
@@ -288,6 +322,34 @@ for (const paymentStatus of ['failed', 'canceled', 'refunded'] satisfies AiChart
   )
 }
 
+assert.deepEqual(decideAiChartReportResultAccess(null), { result: 'not_found' })
+assert.deepEqual(decideAiChartReportResultAccess(createResultReport('pending', null)), {
+  result: 'payment_required',
+})
+assert.deepEqual(decideAiChartReportResultAccess(createResultReport(null, null)), {
+  result: 'payment_required',
+})
+assert.deepEqual(decideAiChartReportResultAccess(createResultReport('paid', '短測試報告內容')), {
+  result: 'ready',
+  reportContent: '短測試報告內容',
+})
+assert.deepEqual(decideAiChartReportResultAccess(createResultReport('paid', null)), {
+  result: 'paid_missing_content',
+})
+assert.deepEqual(decideAiChartReportResultAccess(createResultReport('paid', '')), {
+  result: 'paid_missing_content',
+})
+assert.deepEqual(decideAiChartReportResultAccess(createResultReport('paid', '   ')), {
+  result: 'paid_missing_content',
+})
+
+for (const paymentStatus of ['failed', 'canceled', 'refunded'] satisfies AiChartReportPaymentStatus[]) {
+  assert.deepEqual(decideAiChartReportResultAccess(createResultReport(paymentStatus, '短測試報告內容')), {
+    result: 'invalid_state',
+    paymentStatus,
+  })
+}
+
 assert.throws(
   () =>
     buildPendingAiChartReportPayload({
@@ -455,6 +517,56 @@ async function runAsyncHelperTests() {
   assert.equal(contextMock.calls.selects[0].includes('birth'), false)
   assert.equal(contextMock.calls.selects[0].includes('ziwei_payload'), false)
   assert.equal(contextMock.calls.selects[0].includes('raw_payload'), false)
+
+  const resultContextMock = createMockSupabase({
+    data: {
+      id: 'report-result-1',
+      title: 'AI 命盤分析',
+      product_name: 'AI 命盤分析',
+      amount_twd: 100,
+      status: 'pending',
+      payment_status: 'paid',
+      report_content: '短測試報告內容',
+      paid_at: '2026-07-06T17:00:00.000Z',
+      completed_at: null,
+      error_message: null,
+    },
+    error: null,
+  })
+  const resultContext = await getAiChartReportResultById('report-result-1', resultContextMock.supabase)
+
+  assert.deepEqual(resultContext, {
+    id: 'report-result-1',
+    title: 'AI 命盤分析',
+    productName: 'AI 命盤分析',
+    amountTwd: 100,
+    status: 'pending',
+    paymentStatus: 'paid',
+    reportContent: '短測試報告內容',
+    paidAt: '2026-07-06T17:00:00.000Z',
+    completedAt: null,
+    errorMessage: null,
+  })
+  assert.deepEqual(resultContextMock.calls.tables, ['ai_chart_reports'])
+  assert.deepEqual(resultContextMock.calls.selects, [
+    'id,title,product_name,amount_twd,status,payment_status,report_content,paid_at,completed_at,error_message',
+  ])
+  assert.deepEqual(resultContextMock.calls.eqs, [['id', 'report-result-1']])
+  assertResultSelectIsSafe(resultContextMock.calls.selects[0])
+  assertNoUnsafePaymentKeys(resultContext as unknown as Record<string, unknown>)
+  assertNoOtherProductKeys(resultContext as unknown as Record<string, unknown>)
+
+  const missingResultContextMock = createMockSupabase({
+    data: null,
+    error: null,
+  })
+  const missingResultContext = await getAiChartReportResultById('report-result-missing', missingResultContextMock.supabase)
+
+  assert.equal(missingResultContext, null)
+  assert.deepEqual(missingResultContextMock.calls.selects, [
+    'id,title,product_name,amount_twd,status,payment_status,report_content,paid_at,completed_at,error_message',
+  ])
+  assertResultSelectIsSafe(missingResultContextMock.calls.selects[0])
 
   const linkedMock = createMockSupabase({
     data: {
