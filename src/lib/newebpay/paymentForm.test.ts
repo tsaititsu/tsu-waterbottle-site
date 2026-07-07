@@ -11,10 +11,16 @@ import {
   resolveNewebPayDivinationPendingPaymentLink,
   resolveNewebPayBookingIdForPayment,
   resolveNewebPayDivinationReadingIdForPayment,
+  resolveNewebPayProductOrderIdForPayment,
   validateNewebPayAiChartReportPayment,
   validateNewebPayBookingPayment,
 } from './paymentForm'
 import { getNewebPayPaymentItem } from './paymentItems'
+import {
+  PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+  PRODUCT_ORDER_PAYMENT_ITEM_TYPE,
+  PRODUCT_ORDER_PAYMENT_SOURCE,
+} from '../payments/productOrderPayment'
 import type { NewebPayConfig } from './types'
 
 const hashKey = '12345678901234567890123456789012'
@@ -50,6 +56,11 @@ assert.deepEqual(getNewebPayPaymentItem('ai_chart_report_single'), {
   itemDesc: 'AI 命盤分析',
   amount: 100,
 })
+assert.deepEqual(getNewebPayPaymentItem(PRODUCT_ORDER_PAYMENT_ITEM_KEY), {
+  itemKey: PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+  itemDesc: '開運商品訂單',
+  amount: 0,
+})
 assert.equal(getNewebPayPaymentItem('unknown_item'), null)
 
 const orderNo = generateNewebPayMerchantOrderNo(new Date(2026, 6, 3, 17, 25, 30), 'A1B2')
@@ -60,6 +71,7 @@ assert.match(orderNo, /^[A-Z0-9_]{1,30}$/)
 assert.equal(isNewebPayPaymentSource('booking'), true)
 assert.equal(isNewebPayPaymentSource('ai_divination'), true)
 assert.equal(isNewebPayPaymentSource('ai_chart_report'), true)
+assert.equal(isNewebPayPaymentSource(PRODUCT_ORDER_PAYMENT_SOURCE), true)
 assert.equal(isNewebPayPaymentSource('manual_test'), true)
 assert.equal(isNewebPayPaymentSource('external'), false)
 assert.equal(isNewebPayPaymentMode('credit'), true)
@@ -69,6 +81,8 @@ assert.equal(isNewebPayPaymentMode('linepay'), false)
 const bookingId = '550e8400-e29b-41d4-a716-446655440000'
 const readingId = '2df1a8da-3893-4b81-8d00-774a9cc0e472'
 const reportId = '6ed0a8fa-c0c4-4fd7-9d2b-052822c9248c'
+const orderId = 'c0bd4cbf-64db-4e2d-a1d7-e2215d96802b'
+const productOrderNo = 'PO202607071442240CDE'
 
 assert.deepEqual(
   resolveNewebPayBookingIdForPayment({
@@ -187,6 +201,39 @@ assert.deepEqual(
     itemKey: 'newebpay_live_smoke_test_1',
   }),
   { ok: true, reportId: null },
+)
+assert.deepEqual(
+  resolveNewebPayProductOrderIdForPayment({
+    itemKey: PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+  }),
+  { ok: false, error: 'invalid_product_order_payment_input' },
+)
+assert.deepEqual(
+  resolveNewebPayProductOrderIdForPayment({
+    itemKey: PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+    orderId: 'not-a-uuid',
+  }),
+  { ok: false, error: 'invalid_product_order_payment_input' },
+)
+assert.deepEqual(
+  resolveNewebPayProductOrderIdForPayment({
+    itemKey: PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+    orderId,
+  }),
+  { ok: true, orderId },
+)
+assert.deepEqual(
+  resolveNewebPayProductOrderIdForPayment({
+    itemKey: 'booking_consultation_60',
+    orderId,
+  }),
+  { ok: false, error: 'invalid_product_order_payment_input' },
+)
+assert.deepEqual(
+  resolveNewebPayProductOrderIdForPayment({
+    itemKey: 'booking_consultation_60',
+  }),
+  { ok: true, orderId: null },
 )
 
 assert.deepEqual(
@@ -413,6 +460,37 @@ assert.equal(decryptedAiChart.get('CREDIT'), '1')
 assert.equal(decryptedAiChart.get('ClientBackURL'), 'http://localhost:3000/ai-chart')
 assert.equal(decryptedAiChart.has('LINEPAY'), false)
 
+assert.throws(
+  () =>
+    createNewebPayMpgPaymentData({
+      itemKey: PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+      config,
+      now: new Date(2026, 6, 3, 17, 25, 30),
+      merchantOrderNo: 'WB20260703172530PROD',
+    }),
+  /Invalid NewebPay payment item amount or description/,
+)
+
+const productOrderData = createNewebPayMpgPaymentData({
+  itemKey: PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+  config,
+  amount: 1500,
+  itemDesc: `開運商品訂單 ${productOrderNo}`,
+  now: new Date(2026, 6, 3, 17, 25, 30),
+  merchantOrderNo: 'WB20260703172530PROD',
+})
+const decryptedProductOrder = new URLSearchParams(
+  decryptTradeInfo(productOrderData.fields.TradeInfo, hashKey, hashIv),
+)
+
+assert.equal(productOrderData.itemKey, PRODUCT_ORDER_PAYMENT_ITEM_KEY)
+assert.equal(productOrderData.amount, 1500)
+assert.equal(decryptedProductOrder.get('Amt'), '1500')
+assert.equal(decryptedProductOrder.get('ItemDesc'), `開運商品訂單 ${productOrderNo}`)
+assert.equal(decryptedProductOrder.get('CREDIT'), '1')
+assert.equal(decryptedProductOrder.get('ClientBackURL'), 'http://localhost:3000/cart')
+assert.equal(decryptedProductOrder.has('LINEPAY'), false)
+
 const smokePendingPaymentMetadata = buildNewebPayPendingPaymentMetadata({
   itemKey: 'newebpay_live_smoke_test_1',
   source: 'manual_test',
@@ -501,6 +579,51 @@ assert.equal('bookingId' in aiChartPendingPaymentMetadata.rawPayload, false)
 assert.equal('readingId' in aiChartPendingPaymentMetadata.rawPayload, false)
 assert.equal('courseId' in aiChartPendingPaymentMetadata.rawPayload, false)
 assert.equal('productId' in aiChartPendingPaymentMetadata.rawPayload, false)
+
+const productOrderPendingPaymentMetadata = buildNewebPayPendingPaymentMetadata({
+  itemKey: PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+  source: PRODUCT_ORDER_PAYMENT_SOURCE,
+  paymentMode: 'credit',
+  merchantOrderNo: productOrderData.merchantOrderNo,
+  productOrderPayment: {
+    itemKey: PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+    itemType: PRODUCT_ORDER_PAYMENT_ITEM_TYPE,
+    itemId: orderId,
+    amountTwd: 1500,
+    itemDesc: `開運商品訂單 ${productOrderNo}`,
+    rawPayload: {
+      itemKey: PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+      itemType: PRODUCT_ORDER_PAYMENT_ITEM_TYPE,
+      source: PRODUCT_ORDER_PAYMENT_SOURCE,
+      orderId,
+      orderNo: productOrderNo,
+      amount: 1500,
+    },
+  },
+})
+
+assert.equal(productOrderPendingPaymentMetadata.itemType, PRODUCT_ORDER_PAYMENT_ITEM_TYPE)
+assert.equal(productOrderPendingPaymentMetadata.itemId, orderId)
+assert.equal(productOrderPendingPaymentMetadata.bookingId, null)
+assert.deepEqual(productOrderPendingPaymentMetadata.rawPayload, {
+  itemKey: PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+  itemType: PRODUCT_ORDER_PAYMENT_ITEM_TYPE,
+  source: PRODUCT_ORDER_PAYMENT_SOURCE,
+  orderId,
+  orderNo: productOrderNo,
+  amount: 1500,
+  paymentMode: 'credit',
+  itemDesc: `開運商品訂單 ${productOrderNo}`,
+  merchantOrderNo: productOrderData.merchantOrderNo,
+})
+assert.equal('TradeInfo' in productOrderPendingPaymentMetadata.rawPayload, false)
+assert.equal('TradeSha' in productOrderPendingPaymentMetadata.rawPayload, false)
+assert.equal('HashKey' in productOrderPendingPaymentMetadata.rawPayload, false)
+assert.equal('HashIV' in productOrderPendingPaymentMetadata.rawPayload, false)
+assert.equal('customerPhone' in productOrderPendingPaymentMetadata.rawPayload, false)
+assert.equal('customerEmail' in productOrderPendingPaymentMetadata.rawPayload, false)
+assert.equal('address' in productOrderPendingPaymentMetadata.rawPayload, false)
+assert.equal('shipment' in productOrderPendingPaymentMetadata.rawPayload, false)
 
 const bookingPendingPaymentMetadata = buildNewebPayPendingPaymentMetadata({
   itemKey: 'booking_consultation_60',

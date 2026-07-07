@@ -4,8 +4,18 @@ import { AI_DIVINATION_ITEM_KEY, buildDivinationPaymentPayload } from './divinat
 import { generateNewebPayMerchantOrderNo } from './orderNo'
 import { getNewebPayPaymentItem, type NewebPayPaymentItemKey } from './paymentItems'
 import type { NewebPayConfig } from './types'
+import {
+  PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+  type ProductOrderPaymentMapping,
+} from '../payments/productOrderPayment'
 
-export type NewebPayPaymentSource = 'booking' | 'ai_divination' | 'ai_chart' | 'ai_chart_report' | 'manual_test'
+export type NewebPayPaymentSource =
+  | 'booking'
+  | 'ai_divination'
+  | 'ai_chart'
+  | 'ai_chart_report'
+  | 'product_order'
+  | 'manual_test'
 export type NewebPayPaymentMode = 'credit' | 'merchant_default'
 
 export type NewebPayBookingPaymentContext = {
@@ -39,6 +49,10 @@ export type NewebPayAiChartReportIdResolution =
         | 'invalid_ai_chart_report_id'
         | 'ai_chart_report_id_not_allowed'
     }
+
+export type NewebPayProductOrderIdResolution =
+  | { ok: true; orderId: string | null }
+  | { ok: false; error: 'invalid_product_order_payment_input' }
 
 export type NewebPayBookingPaymentValidationResult =
   | { ok: true }
@@ -121,6 +135,9 @@ export type NewebPayPendingPaymentMetadata = {
     bookingId?: string
     readingId?: string
     reportId?: string
+    orderId?: string
+    orderNo?: string
+    itemType?: string
   }
 }
 
@@ -128,6 +145,8 @@ type CreateNewebPayMpgPaymentDataInput = {
   itemKey: NewebPayPaymentItemKey
   config: NewebPayConfig
   paymentMode?: NewebPayPaymentMode
+  amount?: number
+  itemDesc?: string
   now?: Date
   merchantOrderNo?: string
 }
@@ -140,6 +159,7 @@ type BuildNewebPayPendingPaymentMetadataInput = {
   bookingId?: string | null
   readingId?: string | null
   reportId?: string | null
+  productOrderPayment?: ProductOrderPaymentMapping | null
 }
 
 const allowedSources = new Set<NewebPayPaymentSource>([
@@ -147,6 +167,7 @@ const allowedSources = new Set<NewebPayPaymentSource>([
   'ai_divination',
   'ai_chart',
   'ai_chart_report',
+  'product_order',
   'manual_test',
 ])
 const allowedPaymentModes = new Set<NewebPayPaymentMode>(['credit', 'merchant_default'])
@@ -175,6 +196,10 @@ export function isValidNewebPayDivinationReadingId(value: unknown): value is str
 }
 
 export function isValidNewebPayAiChartReportId(value: unknown): value is string {
+  return isValidNewebPayUuid(value)
+}
+
+export function isValidNewebPayProductOrderId(value: unknown): value is string {
   return isValidNewebPayUuid(value)
 }
 
@@ -256,6 +281,23 @@ export function resolveNewebPayAiChartReportIdForPayment(input: {
   }
 
   return { ok: true, reportId: input.reportId.trim() }
+}
+
+export function resolveNewebPayProductOrderIdForPayment(input: {
+  itemKey: NewebPayPaymentItemKey
+  orderId?: unknown
+}): NewebPayProductOrderIdResolution {
+  const hasOrderId = hasNonEmptyValue(input.orderId)
+
+  if (input.itemKey !== PRODUCT_ORDER_PAYMENT_ITEM_KEY) {
+    return hasOrderId ? { ok: false, error: 'invalid_product_order_payment_input' } : { ok: true, orderId: null }
+  }
+
+  if (!hasOrderId || !isValidNewebPayProductOrderId(input.orderId)) {
+    return { ok: false, error: 'invalid_product_order_payment_input' }
+  }
+
+  return { ok: true, orderId: input.orderId.trim() }
 }
 
 export function validateNewebPayBookingPayment(input: {
@@ -369,6 +411,10 @@ function buildClientBackUrl(siteUrl: string, itemKey: NewebPayPaymentItemKey) {
     return `${siteUrl}/ai-chart`
   }
 
+  if (itemKey === PRODUCT_ORDER_PAYMENT_ITEM_KEY) {
+    return `${siteUrl}/cart`
+  }
+
   return `${siteUrl}/booking`
 }
 
@@ -380,6 +426,7 @@ export function buildNewebPayPendingPaymentMetadata({
   bookingId,
   readingId,
   reportId,
+  productOrderPayment,
 }: BuildNewebPayPendingPaymentMetadataInput): NewebPayPendingPaymentMetadata {
   const item = getNewebPayPaymentItem(itemKey)
   if (!item) {
@@ -422,6 +469,24 @@ export function buildNewebPayPendingPaymentMetadata({
     }
   }
 
+  if (item.itemKey === PRODUCT_ORDER_PAYMENT_ITEM_KEY) {
+    if (!productOrderPayment) {
+      throw new Error('invalid_product_order_payment_input')
+    }
+
+    return {
+      itemType: productOrderPayment.itemType,
+      itemId: productOrderPayment.itemId,
+      bookingId: null,
+      rawPayload: {
+        ...productOrderPayment.rawPayload,
+        paymentMode,
+        itemDesc: productOrderPayment.itemDesc,
+        merchantOrderNo,
+      },
+    }
+  }
+
   const target = getPendingPaymentTarget(item.itemKey, bookingId)
 
   return {
@@ -442,6 +507,8 @@ export function createNewebPayMpgPaymentData({
   itemKey,
   config,
   paymentMode = 'credit',
+  amount,
+  itemDesc,
   now = new Date(),
   merchantOrderNo = generateNewebPayMerchantOrderNo(now),
 }: CreateNewebPayMpgPaymentDataInput): NewebPayMpgPaymentData {
@@ -450,14 +517,21 @@ export function createNewebPayMpgPaymentData({
     throw new Error('Unsupported NewebPay payment item')
   }
 
+  const paymentAmount = amount ?? item.amount
+  const paymentItemDesc = itemDesc ?? item.itemDesc
+
+  if (!Number.isInteger(paymentAmount) || paymentAmount <= 0 || !paymentItemDesc.trim()) {
+    throw new Error('Invalid NewebPay payment item amount or description')
+  }
+
   const tradeInfoParams: Record<string, string | number> = {
     MerchantID: config.merchantId,
     RespondType: 'JSON',
     TimeStamp: Math.floor(now.getTime() / 1000),
     Version: config.version,
     MerchantOrderNo: merchantOrderNo,
-    Amt: item.amount,
-    ItemDesc: item.itemDesc,
+    Amt: paymentAmount,
+    ItemDesc: paymentItemDesc,
     ReturnURL: buildMerchantOrderUrl(config.siteUrl, '/payment/newebpay/return', merchantOrderNo),
     NotifyURL: buildMerchantOrderUrl(config.siteUrl, '/api/payments/newebpay/notify', merchantOrderNo),
     ClientBackURL: buildClientBackUrl(config.siteUrl, item.itemKey),
@@ -475,7 +549,7 @@ export function createNewebPayMpgPaymentData({
     method: 'POST',
     merchantOrderNo,
     itemKey: item.itemKey,
-    amount: item.amount,
+    amount: paymentAmount,
     fields: {
       MerchantID: config.merchantId,
       TradeInfo: tradeInfo,
