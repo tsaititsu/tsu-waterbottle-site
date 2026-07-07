@@ -32,6 +32,7 @@
 ### Possible drafts
 
 - `divination_readings_patch.sql`
+- `migrations/20260707_line_pay_provider_schema_draft.sql` - draft, not executed; prepares `product_orders.payment_method` for future `line_pay` support.
 
 ### Pending confirmation
 
