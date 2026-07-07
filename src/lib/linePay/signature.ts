@@ -11,6 +11,10 @@ export type BuildLinePaySignatureInput = {
   nonce: string
 }
 
+export type BuildLinePayRequestHeadersInput = BuildLinePaySignatureInput & {
+  channelId: string
+}
+
 export function buildLinePaySignature(input: BuildLinePaySignatureInput) {
   const channelSecret = input.channelSecret.trim()
 
@@ -38,4 +42,21 @@ export function buildLinePaySignature(input: BuildLinePaySignatureInput) {
       : `${channelSecret}${input.apiPath}${input.bodyText ?? ''}${nonce}`
 
   return createHmac('sha256', channelSecret).update(message).digest('base64')
+}
+
+export function buildLinePayRequestHeaders(input: BuildLinePayRequestHeadersInput) {
+  const channelId = input.channelId.trim()
+
+  if (!channelId) {
+    throw new Error('invalid_line_pay_credentials')
+  }
+
+  const signature = buildLinePaySignature(input)
+
+  return {
+    'Content-Type': 'application/json',
+    'X-LINE-ChannelId': channelId,
+    'X-LINE-Authorization': signature,
+    'X-LINE-Authorization-Nonce': input.nonce.trim(),
+  }
 }

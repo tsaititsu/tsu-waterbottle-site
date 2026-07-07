@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
-import { buildLinePaySignature } from './signature'
+import { buildLinePayRequestHeaders, buildLinePaySignature } from './signature'
 
+const channelId = 'test_channel_id'
 const channelSecret = 'test_channel_secret'
 const nonce = '4fd35eb8-5812-4f2e-b1b3-dffdfeb9ec2d'
 
@@ -157,4 +158,66 @@ test('signature does not output channelSecret', () => {
   })
 
   assert.equal(signature.includes(channelSecret), false)
+})
+
+test('request headers contain required LINE Pay headers', () => {
+  const headers = buildLinePayRequestHeaders({
+    channelId,
+    channelSecret,
+    method: 'POST',
+    apiPath: '/v3/payments/request',
+    bodyText: '{}',
+    nonce,
+  })
+
+  assert.equal(headers['Content-Type'], 'application/json')
+  assert.equal(headers['X-LINE-ChannelId'], channelId)
+  assert.equal(typeof headers['X-LINE-Authorization'], 'string')
+  assert.equal(headers['X-LINE-Authorization-Nonce'], nonce)
+})
+
+test('request authorization header equals buildLinePaySignature output', () => {
+  const signatureInput = {
+    channelSecret,
+    method: 'POST',
+    apiPath: '/v3/payments/request',
+    bodyText: '{}',
+    nonce,
+  } as const
+  const headers = buildLinePayRequestHeaders({
+    channelId,
+    ...signatureInput,
+  })
+
+  assert.equal(headers['X-LINE-Authorization'], buildLinePaySignature(signatureInput))
+})
+
+test('request headers do not include channelSecret', () => {
+  const headers = buildLinePayRequestHeaders({
+    channelId,
+    channelSecret,
+    method: 'POST',
+    apiPath: '/v3/payments/request',
+    bodyText: '{}',
+    nonce,
+  })
+
+  assert.equal(Object.keys(headers).includes('channelSecret'), false)
+  assert.equal(Object.values(headers).includes(channelSecret), false)
+  assert.equal(JSON.stringify(headers).includes(channelSecret), false)
+})
+
+test('empty channelId throws safe credentials error', () => {
+  assert.throws(
+    () =>
+      buildLinePayRequestHeaders({
+        channelId: '  ',
+        channelSecret,
+        method: 'POST',
+        apiPath: '/v3/payments/request',
+        bodyText: '{}',
+        nonce,
+      }),
+    /invalid_line_pay_credentials/,
+  )
 })
