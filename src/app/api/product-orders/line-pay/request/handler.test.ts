@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import {
   handleProductOrderLinePayRequest,
+  type ProductOrderLinePayPaymentCreator,
+  type ProductOrderLinePayPaymentCreatorInput,
   type ProductOrderLinePayPreflightContext,
   type ProductOrderLinePayReader,
 } from './handler'
@@ -43,6 +45,7 @@ function payableOrder(
     id: 'product-order-1',
     status: 'pending_payment',
     payment_status: 'pending',
+    payment_id: null,
     total_amount: 1500,
     currency: 'TWD',
     items: [
@@ -66,21 +69,37 @@ function createReader(
   }
 }
 
+function createPaymentCreator(
+  calls: ProductOrderLinePayPaymentCreatorInput[] = [],
+  paymentId = 'payment-line-pay-1',
+): ProductOrderLinePayPaymentCreator {
+  return async (input) => {
+    calls.push(input)
+    return {
+      paymentId,
+      merchantOrderNo: input.merchantOrderNo,
+    }
+  }
+}
+
 async function callHandler({
   body = { productOrderId: 'product-order-1' },
   env = fullEnv,
   productOrderReader = createReader(payableOrder()),
+  paymentCreator = createPaymentCreator(),
   now = dryRunTimestamp,
 }: {
   body?: unknown
   env?: LinePayServerEnv
   productOrderReader?: ProductOrderLinePayReader
+  paymentCreator?: ProductOrderLinePayPaymentCreator
   now?: number | string
 } = {}) {
   return handleProductOrderLinePayRequest({
     request: createRequest(body),
     env,
     productOrderReader,
+    paymentCreator,
     now,
   })
 }
@@ -98,6 +117,8 @@ function assertSafeResponse(payload: Record<string, unknown>) {
   assert.equal(text.includes('phone'), false)
   assert.equal(text.includes('email'), false)
   assert.equal(text.includes('address'), false)
+  assert.equal(text.includes('transactionId'), false)
+  assert.equal(text.includes('paymentUrl'), false)
 }
 
 test('body missing productOrderId returns missing_product_order_id', async () => {
@@ -112,10 +133,12 @@ test('body missing productOrderId returns missing_product_order_id', async () =>
 })
 
 test('disabled LINE Pay returns line_pay_disabled', async () => {
+  const paymentCalls: ProductOrderLinePayPaymentCreatorInput[] = []
   const response = await callHandler({
     env: {
       NEXT_PUBLIC_ENABLE_LINE_PAY: 'false',
     },
+    paymentCreator: createPaymentCreator(paymentCalls),
   })
   const json = await readJson(response)
 
@@ -124,6 +147,7 @@ test('disabled LINE Pay returns line_pay_disabled', async () => {
     ok: false,
     error: 'line_pay_disabled',
   })
+  assert.equal(paymentCalls.length, 0)
 })
 
 test('missing productOrderReader returns product_order_reader_missing', async () => {
@@ -141,8 +165,10 @@ test('missing productOrderReader returns product_order_reader_missing', async ()
 })
 
 test('missing product order returns product_order_not_found', async () => {
+  const paymentCalls: ProductOrderLinePayPaymentCreatorInput[] = []
   const response = await callHandler({
     productOrderReader: createReader(null),
+    paymentCreator: createPaymentCreator(paymentCalls),
   })
   const json = await readJson(response)
 
@@ -151,6 +177,7 @@ test('missing product order returns product_order_not_found', async () => {
     ok: false,
     error: 'product_order_not_found',
   })
+  assert.equal(paymentCalls.length, 0)
 })
 
 test('productOrderReader failure returns safe lookup error', async () => {
@@ -169,8 +196,10 @@ test('productOrderReader failure returns safe lookup error', async () => {
 })
 
 test('not payable order status returns product_order_not_payable', async () => {
+  const paymentCalls: ProductOrderLinePayPaymentCreatorInput[] = []
   const response = await callHandler({
     productOrderReader: createReader(payableOrder({ status: 'canceled' })),
+    paymentCreator: createPaymentCreator(paymentCalls),
   })
   const json = await readJson(response)
 
@@ -179,11 +208,14 @@ test('not payable order status returns product_order_not_payable', async () => {
     ok: false,
     error: 'product_order_not_payable',
   })
+  assert.equal(paymentCalls.length, 0)
 })
 
 test('paid payment status returns product_order_already_paid', async () => {
+  const paymentCalls: ProductOrderLinePayPaymentCreatorInput[] = []
   const response = await callHandler({
     productOrderReader: createReader(payableOrder({ payment_status: 'paid' })),
+    paymentCreator: createPaymentCreator(paymentCalls),
   })
   const json = await readJson(response)
 
@@ -192,6 +224,23 @@ test('paid payment status returns product_order_already_paid', async () => {
     ok: false,
     error: 'product_order_already_paid',
   })
+  assert.equal(paymentCalls.length, 0)
+})
+
+test('already linked payment returns product_order_not_payable before payment creation', async () => {
+  const paymentCalls: ProductOrderLinePayPaymentCreatorInput[] = []
+  const response = await callHandler({
+    productOrderReader: createReader(payableOrder({ payment_id: 'existing-payment-id' })),
+    paymentCreator: createPaymentCreator(paymentCalls),
+  })
+  const json = await readJson(response)
+
+  assert.equal(response.status, 409)
+  assert.deepEqual(json, {
+    ok: false,
+    error: 'product_order_not_payable',
+  })
+  assert.equal(paymentCalls.length, 0)
 })
 
 test('non-positive total amount returns invalid_product_order_amount', async () => {
@@ -270,7 +319,7 @@ test('item subtotal mismatch returns invalid_product_order_items_total', async (
   })
 })
 
-test('preflight success creates dry-run orderId and summary response', async () => {
+test('preflight success creates pending payment and summary response', async () => {
   const response = await callHandler()
   const json = await readJson(response)
   const orderId = String(json.orderId)
@@ -280,6 +329,8 @@ test('preflight success creates dry-run orderId and summary response', async () 
   assert.equal(json.error, 'line_pay_product_order_request_not_implemented')
   assert.equal(json.preflight, true)
   assert.equal(json.dryRun, true)
+  assert.equal(json.pendingPayment, true)
+  assert.equal(json.paymentId, 'payment-line-pay-1')
   assert.equal(orderId, `LP_product_order_product-order-1_${dryRunTimestamp}`)
   assert.equal(json.amount, 1500)
   assert.equal(json.currency, 'TWD')
@@ -324,6 +375,7 @@ test('dry-run request payload summary uses order amount, TWD currency, and item 
 
   assert.equal(response.status, 501)
   assert.equal(json.dryRun, true)
+  assert.equal(json.pendingPayment, true)
   assert.equal(json.amount, 2000)
   assert.equal(json.currency, 'TWD')
   assert.equal(json.itemCount, 2)
@@ -342,7 +394,62 @@ test('preflight success calls productOrderReader with trimmed productOrderId', a
   assert.equal(response.status, 501)
   assert.equal(json.preflight, true)
   assert.equal(json.dryRun, true)
+  assert.equal(json.pendingPayment, true)
   assert.deepEqual(calls, ['product-order-1'])
+})
+
+test('preflight success calls paymentCreator with line_pay payment input', async () => {
+  const paymentCalls: ProductOrderLinePayPaymentCreatorInput[] = []
+  const response = await callHandler({
+    paymentCreator: createPaymentCreator(paymentCalls, 'payment-line-pay-2'),
+  })
+  const json = await readJson(response)
+
+  assert.equal(response.status, 501)
+  assert.equal(json.paymentId, 'payment-line-pay-2')
+  assert.equal(paymentCalls.length, 1)
+  assert.equal(paymentCalls[0].provider, 'line_pay')
+  assert.equal(paymentCalls[0].amount, 1500)
+  assert.equal(paymentCalls[0].currency, 'TWD')
+  assert.equal(paymentCalls[0].merchantOrderNo, `LP_product_order_product-order-1_${dryRunTimestamp}`)
+  assert.deepEqual(paymentCalls[0].metadata, {
+    linePay: {
+      orderId: `LP_product_order_product-order-1_${dryRunTimestamp}`,
+      sourceType: 'product_order',
+      sourceId: 'product-order-1',
+    },
+  })
+})
+
+test('paymentCreator missing returns safe error after preflight', async () => {
+  const response = await handleProductOrderLinePayRequest({
+    request: createRequest({ productOrderId: 'product-order-1' }),
+    env: fullEnv,
+    productOrderReader: createReader(payableOrder()),
+    now: dryRunTimestamp,
+  })
+  const json = await readJson(response)
+
+  assert.equal(response.status, 500)
+  assert.deepEqual(json, {
+    ok: false,
+    error: 'product_order_payment_creator_missing',
+  })
+})
+
+test('paymentCreator failure returns safe create failed error', async () => {
+  const response = await callHandler({
+    paymentCreator: async () => {
+      throw new Error('raw payment insert detail')
+    },
+  })
+  const json = await readJson(response)
+
+  assert.equal(response.status, 500)
+  assert.deepEqual(json, {
+    ok: false,
+    error: 'product_order_line_pay_payment_create_failed',
+  })
 })
 
 test('enabled LINE Pay without channelId returns safe config error', async () => {
@@ -425,6 +532,8 @@ test('response does not expose full LINE Pay request payload', async () => {
   assert.equal('redirectUrls' in json, false)
   assert.equal('confirmUrl' in json, false)
   assert.equal('cancelUrl' in json, false)
+  assert.equal('transactionId' in json, false)
+  assert.equal('paymentUrl' in json, false)
 })
 
 test('handler does not call LINE Pay API or global fetch', async () => {
@@ -452,10 +561,10 @@ test('handler source does not include payment creation or mark paid behavior', a
   const source = String(handleProductOrderLinePayRequest)
 
   assert.equal(source.includes('requestLinePayPayment'), false)
-  assert.equal(source.includes('createPayment'), false)
-  assert.equal(source.includes('metadata'), false)
   assert.equal(source.includes('update'), false)
   assert.equal(source.includes('markPaid'), false)
+  assert.equal(source.includes('transactionId'), false)
+  assert.equal(source.includes('paymentUrl'), false)
 })
 
 async function runTests() {

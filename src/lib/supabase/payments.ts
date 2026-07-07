@@ -1,6 +1,6 @@
 import { getSupabaseAdmin } from './admin'
 
-export type PaymentProvider = 'newebpay'
+export type PaymentProvider = 'newebpay' | 'line_pay'
 
 export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'cancelled'
 

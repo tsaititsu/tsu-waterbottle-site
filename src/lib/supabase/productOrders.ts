@@ -129,6 +129,11 @@ export type LinkProductOrderPaymentResult = {
   paymentId: string
 }
 
+export type ProductOrderPaymentIdLinkPayload = {
+  payment_id: string
+  updated_at: string
+}
+
 export type ProductOrderLinePayPreflightItem = {
   name: string
   quantity: number
@@ -139,6 +144,7 @@ export type ProductOrderLinePayPreflightContext = {
   id: string
   status: string | null
   payment_status: string | null
+  payment_id: string | null
   total_amount: number | null
   currency: 'TWD'
   items: ProductOrderLinePayPreflightItem[]
@@ -148,6 +154,7 @@ type ProductOrderLinePayPreflightRow = {
   id: string
   order_status: string | null
   payment_status: string | null
+  payment_id: string | null
   total_amount_twd: number | null
 }
 
@@ -382,6 +389,16 @@ export function buildProductOrderPaymentLinkPayload(
   }
 }
 
+export function buildProductOrderPaymentIdLinkPayload(
+  input: Pick<LinkProductOrderPaymentInput, 'paymentId'>,
+  now = new Date().toISOString(),
+): ProductOrderPaymentIdLinkPayload {
+  return {
+    payment_id: assertValidUuid(input.paymentId, 'paymentId'),
+    updated_at: now,
+  }
+}
+
 export async function createProductOrder(
   input: CreateProductOrderInput,
   supabase: SupabaseAdminClient = getSupabaseAdmin(),
@@ -453,7 +470,7 @@ export async function getProductOrderLinePayPreflightContext(
 
   const { data: orderData, error: orderError } = await supabase
     .from('product_orders')
-    .select('id,order_status,payment_status,total_amount_twd')
+    .select('id,order_status,payment_status,payment_id,total_amount_twd')
     .eq('id', normalizedOrderId)
     .maybeSingle()
 
@@ -489,6 +506,7 @@ export async function getProductOrderLinePayPreflightContext(
     id: order.id,
     status: order.order_status,
     payment_status: order.payment_status,
+    payment_id: order.payment_id,
     total_amount: order.total_amount_twd,
     currency: 'TWD',
     items,
@@ -518,6 +536,43 @@ export async function linkProductOrderPayment(
   const { error } = await supabase
     .from('product_orders')
     .update(buildProductOrderPaymentLinkPayload({ paymentId }))
+    .eq('id', orderId)
+    .eq('payment_status', 'pending')
+    .eq('order_status', 'pending_payment')
+
+  if (error) {
+    throw new Error('product_order_payment_link_failed')
+  }
+
+  return {
+    orderId,
+    paymentId,
+  }
+}
+
+export async function linkProductOrderPendingPayment(
+  input: LinkProductOrderPaymentInput,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<LinkProductOrderPaymentResult> {
+  const orderId = assertValidUuid(input.orderId, 'orderId')
+  const paymentId = assertValidUuid(input.paymentId, 'paymentId')
+  const order = await getProductOrderForPayment(orderId, supabase)
+
+  if (!order) {
+    throw new Error('product_order_not_found')
+  }
+
+  if (
+    order.paymentStatus !== 'pending' ||
+    order.orderStatus !== 'pending_payment' ||
+    (order.paymentId !== null && order.paymentId !== paymentId)
+  ) {
+    throw new Error('product_order_not_payable')
+  }
+
+  const { error } = await supabase
+    .from('product_orders')
+    .update(buildProductOrderPaymentIdLinkPayload({ paymentId }))
     .eq('id', orderId)
     .eq('payment_status', 'pending')
     .eq('order_status', 'pending_payment')

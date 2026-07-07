@@ -16,6 +16,7 @@ export type ProductOrderLinePayPreflightContext = {
   id: string
   status: string | null
   payment_status: string | null
+  payment_id?: string | null
   total_amount: number | null
   currency?: string | null
   items: ProductOrderLinePayPreflightItem[]
@@ -25,10 +26,37 @@ export type ProductOrderLinePayReader = (
   productOrderId: string,
 ) => Promise<ProductOrderLinePayPreflightContext | null>
 
+export type ProductOrderLinePayPaymentMetadata = {
+  linePay: {
+    orderId: string
+    sourceType: 'product_order'
+    sourceId: string
+  }
+}
+
+export type ProductOrderLinePayPaymentCreatorInput = {
+  productOrderId: string
+  amount: number
+  currency: 'TWD'
+  provider: 'line_pay'
+  merchantOrderNo: string
+  metadata: ProductOrderLinePayPaymentMetadata
+}
+
+export type ProductOrderLinePayPaymentCreatorResult = {
+  paymentId: string
+  merchantOrderNo: string
+}
+
+export type ProductOrderLinePayPaymentCreator = (
+  input: ProductOrderLinePayPaymentCreatorInput,
+) => Promise<ProductOrderLinePayPaymentCreatorResult>
+
 export type HandleProductOrderLinePayRequestInput = {
   request: Request
   env: LinePayServerEnv
   productOrderReader?: ProductOrderLinePayReader
+  paymentCreator?: ProductOrderLinePayPaymentCreator
   now?: number | string
 }
 
@@ -77,6 +105,13 @@ function validateProductOrderPreflight(order: ProductOrderLinePayPreflightContex
   }
 
   if (order.status !== 'pending_payment' || order.payment_status !== 'pending') {
+    return {
+      error: 'product_order_not_payable',
+      status: 409,
+    }
+  }
+
+  if (order.payment_id) {
     return {
       error: 'product_order_not_payable',
       status: 409,
@@ -138,6 +173,7 @@ export async function handleProductOrderLinePayRequest({
   request,
   env,
   productOrderReader,
+  paymentCreator,
   now,
 }: HandleProductOrderLinePayRequestInput): Promise<Response> {
   if (request.method !== 'POST') {
@@ -203,6 +239,32 @@ export async function handleProductOrderLinePayRequest({
     confirmUrl: config.confirmUrl,
     cancelUrl: config.cancelUrl,
   })
+  const metadata: ProductOrderLinePayPaymentMetadata = {
+    linePay: {
+      orderId,
+      sourceType: 'product_order',
+      sourceId: productOrderId,
+    },
+  }
+
+  if (typeof paymentCreator !== 'function') {
+    return createErrorResponse('product_order_payment_creator_missing', 500)
+  }
+
+  let pendingPayment: ProductOrderLinePayPaymentCreatorResult
+
+  try {
+    pendingPayment = await paymentCreator({
+      productOrderId,
+      amount,
+      currency: payload.currency,
+      provider: 'line_pay',
+      merchantOrderNo: orderId,
+      metadata,
+    })
+  } catch {
+    return createErrorResponse('product_order_line_pay_payment_create_failed', 500)
+  }
 
   return NextResponse.json(
     {
@@ -210,6 +272,8 @@ export async function handleProductOrderLinePayRequest({
       error: 'line_pay_product_order_request_not_implemented',
       preflight: true,
       dryRun: true,
+      pendingPayment: true,
+      paymentId: pendingPayment.paymentId,
       orderId: payload.orderId,
       amount: payload.amount,
       currency: payload.currency,

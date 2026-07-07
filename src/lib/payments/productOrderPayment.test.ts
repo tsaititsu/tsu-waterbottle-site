@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import {
   buildProductOrderPaymentMapping,
+  createProductOrderLinePayPendingPayment,
   PRODUCT_ORDER_PAYMENT_ITEM_KEY,
   PRODUCT_ORDER_PAYMENT_ITEM_TYPE,
   PRODUCT_ORDER_PAYMENT_SOURCE,
@@ -9,6 +10,7 @@ import {
 } from './productOrderPayment'
 import {
   getProductOrderForPayment,
+  linkProductOrderPendingPayment,
   linkProductOrderPayment,
   type ProductOrderPaymentContextRow,
 } from '../supabase/productOrders'
@@ -105,6 +107,8 @@ function assertNoUnsafeKeys(value: unknown) {
   assert.equal(serialized.includes('address'), false)
   assert.equal(serialized.includes('recipient_phone'), false)
   assert.equal(serialized.includes('recipient_email'), false)
+  assert.equal(serialized.includes('transactionId'), false)
+  assert.equal(serialized.includes('paymentUrl'), false)
 }
 
 assert.doesNotThrow(() => validateProductOrderPayableForNewebpay(payableOrder))
@@ -315,6 +319,119 @@ async function runAsyncHelperTests() {
   await assert.rejects(
     () => linkProductOrderPayment({ orderId: payableOrder.id, paymentId }, updateFailureMock.supabase),
     /product_order_payment_link_failed/,
+  )
+
+  const linePayLinkMock = createMockSupabase({
+    selectData: {
+      id: payableOrder.id,
+      order_no: payableOrder.orderNo,
+      total_amount_twd: payableOrder.totalAmountTwd,
+      payment_method: 'newebpay',
+      payment_status: 'pending',
+      order_status: 'pending_payment',
+      shipping_status: 'not_shipped',
+      payment_id: null,
+    },
+  })
+  const linePayLinkResult = await linkProductOrderPendingPayment(
+    {
+      orderId: payableOrder.id,
+      paymentId,
+    },
+    linePayLinkMock.supabase,
+  )
+
+  assert.deepEqual(linePayLinkResult, {
+    orderId: payableOrder.id,
+    paymentId,
+  })
+  assert.equal(linePayLinkMock.calls.updates.length, 1)
+  assert.equal(linePayLinkMock.calls.updates[0].payment_id, paymentId)
+  assert.equal('payment_method' in linePayLinkMock.calls.updates[0], false)
+  assert.equal('payment_status' in linePayLinkMock.calls.updates[0], false)
+  assert.equal('order_status' in linePayLinkMock.calls.updates[0], false)
+  assertNoUnsafeKeys(linePayLinkMock.calls.updates[0])
+
+  const linePayPaymentCalls: Record<string, unknown>[] = []
+  const linePayLinkCalls: Record<string, unknown>[] = []
+  const linePayResult = await createProductOrderLinePayPendingPayment(
+    {
+      productOrderId: payableOrder.id,
+      amount: 1500,
+      currency: 'TWD',
+      provider: 'line_pay',
+      merchantOrderNo: 'LP_product_order_c0bd4cbf-64db-4e2d-a1d7-e2215d96802b_20260707153000',
+      metadata: {
+        linePay: {
+          orderId: 'LP_product_order_c0bd4cbf-64db-4e2d-a1d7-e2215d96802b_20260707153000',
+          sourceType: 'product_order',
+          sourceId: payableOrder.id,
+        },
+      },
+    },
+    {
+      createPendingPayment: async (input) => {
+        linePayPaymentCalls.push(input)
+        return {
+          id: paymentId,
+        } as never
+      },
+      linkProductOrderPendingPayment: async (input) => {
+        linePayLinkCalls.push(input)
+        return input
+      },
+    },
+  )
+
+  assert.deepEqual(linePayResult, {
+    paymentId,
+    merchantOrderNo: 'LP_product_order_c0bd4cbf-64db-4e2d-a1d7-e2215d96802b_20260707153000',
+  })
+  assert.equal(linePayPaymentCalls.length, 1)
+  assert.equal(linePayPaymentCalls[0].provider, 'line_pay')
+  assert.equal(linePayPaymentCalls[0].itemType, PRODUCT_ORDER_PAYMENT_ITEM_TYPE)
+  assert.equal(linePayPaymentCalls[0].itemId, payableOrder.id)
+  assert.equal(linePayPaymentCalls[0].amountTwd, 1500)
+  assert.equal(linePayPaymentCalls[0].merchantOrderNo, 'LP_product_order_c0bd4cbf-64db-4e2d-a1d7-e2215d96802b_20260707153000')
+  assert.deepEqual(linePayPaymentCalls[0].rawPayload, {
+    linePay: {
+      orderId: 'LP_product_order_c0bd4cbf-64db-4e2d-a1d7-e2215d96802b_20260707153000',
+      sourceType: 'product_order',
+      sourceId: payableOrder.id,
+    },
+  })
+  assertNoUnsafeKeys(linePayPaymentCalls[0])
+  assert.deepEqual(linePayLinkCalls, [
+    {
+      orderId: payableOrder.id,
+      paymentId,
+    },
+  ])
+
+  await assert.rejects(
+    () =>
+      createProductOrderLinePayPendingPayment(
+        {
+          productOrderId: payableOrder.id,
+          amount: 1500,
+          currency: 'TWD',
+          provider: 'line_pay',
+          merchantOrderNo: 'LP_product_order_c0bd4cbf-64db-4e2d-a1d7-e2215d96802b_20260707153000',
+          metadata: {
+            linePay: {
+              orderId: '',
+              sourceType: 'product_order',
+              sourceId: payableOrder.id,
+            },
+          },
+        },
+        {
+          createPendingPayment: async () => {
+            throw new Error('must not create')
+          },
+        },
+      ),
+    /invalid_product_order_line_pay_metadata/,
   )
 }
 

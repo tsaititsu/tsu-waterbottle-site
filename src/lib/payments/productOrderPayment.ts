@@ -1,4 +1,6 @@
 import type { ProductOrderPaymentContext } from '../supabase/productOrders'
+import { createPendingPayment, type PaymentRecord } from '../supabase/payments'
+import { linkProductOrderPendingPayment } from '../supabase/productOrders'
 
 export const PRODUCT_ORDER_PAYMENT_ITEM_KEY = 'spiritual_product_order'
 export const PRODUCT_ORDER_PAYMENT_ITEM_TYPE = 'spiritual_product_order'
@@ -24,6 +26,33 @@ export type ProductOrderPaymentMapping = {
   rawPayload: ProductOrderPaymentRawPayload
 }
 
+export type ProductOrderLinePayPaymentMetadata = {
+  linePay: {
+    orderId: string
+    sourceType: 'product_order'
+    sourceId: string
+  }
+}
+
+export type CreateProductOrderLinePayPendingPaymentInput = {
+  productOrderId: string
+  amount: number
+  currency: 'TWD'
+  provider: 'line_pay'
+  merchantOrderNo: string
+  metadata: ProductOrderLinePayPaymentMetadata
+}
+
+export type CreateProductOrderLinePayPendingPaymentResult = {
+  paymentId: string
+  merchantOrderNo: string
+}
+
+export type CreateProductOrderLinePayPendingPaymentDeps = {
+  createPendingPayment?: typeof createPendingPayment
+  linkProductOrderPendingPayment?: typeof linkProductOrderPendingPayment
+}
+
 const PRODUCT_ORDER_ITEM_DESC_MAX_LENGTH = 50
 
 function isUuid(value: string) {
@@ -34,6 +63,35 @@ function isUuid(value: string) {
 
 function truncateText(value: string, maxLength: number) {
   return value.length > maxLength ? value.slice(0, maxLength) : value
+}
+
+function normalizeRequiredText(value: string, errorCode: string) {
+  const trimmed = value.trim()
+
+  if (!trimmed) {
+    throw new Error(errorCode)
+  }
+
+  return trimmed
+}
+
+function buildProductOrderLinePayRawPayload(
+  input: CreateProductOrderLinePayPendingPaymentInput,
+): ProductOrderLinePayPaymentMetadata {
+  const orderId = normalizeRequiredText(input.metadata.linePay.orderId, 'invalid_product_order_line_pay_metadata')
+  const sourceId = normalizeRequiredText(input.metadata.linePay.sourceId, 'invalid_product_order_line_pay_metadata')
+
+  if (input.metadata.linePay.sourceType !== 'product_order') {
+    throw new Error('invalid_product_order_line_pay_metadata')
+  }
+
+  return {
+    linePay: {
+      orderId,
+      sourceType: 'product_order',
+      sourceId,
+    },
+  }
 }
 
 export function validateProductOrderPayableForNewebpay(order: ProductOrderForPayment | null) {
@@ -80,5 +138,44 @@ export function buildProductOrderPaymentMapping(order: ProductOrderForPayment): 
       orderNo,
       amount: order.totalAmountTwd,
     },
+  }
+}
+
+export async function createProductOrderLinePayPendingPayment(
+  input: CreateProductOrderLinePayPendingPaymentInput,
+  deps: CreateProductOrderLinePayPendingPaymentDeps = {},
+): Promise<CreateProductOrderLinePayPendingPaymentResult> {
+  const productOrderId = normalizeRequiredText(input.productOrderId, 'invalid_product_order_line_pay_input')
+  const merchantOrderNo = normalizeRequiredText(input.merchantOrderNo, 'invalid_product_order_line_pay_input')
+
+  if (input.provider !== 'line_pay' || input.currency !== 'TWD') {
+    throw new Error('invalid_product_order_line_pay_input')
+  }
+
+  if (!Number.isInteger(input.amount) || input.amount <= 0) {
+    throw new Error('invalid_product_order_line_pay_input')
+  }
+
+  const rawPayload = buildProductOrderLinePayRawPayload(input)
+  const createPayment = deps.createPendingPayment ?? createPendingPayment
+  const linkOrderPayment = deps.linkProductOrderPendingPayment ?? linkProductOrderPendingPayment
+  const payment = (await createPayment({
+    provider: 'line_pay',
+    itemType: PRODUCT_ORDER_PAYMENT_ITEM_TYPE,
+    itemId: productOrderId,
+    itemName: truncateText(`開運商品訂單 ${merchantOrderNo}`, PRODUCT_ORDER_ITEM_DESC_MAX_LENGTH),
+    merchantOrderNo,
+    amountTwd: input.amount,
+    rawPayload,
+  })) as Pick<PaymentRecord, 'id'>
+
+  await linkOrderPayment({
+    orderId: productOrderId,
+    paymentId: payment.id,
+  })
+
+  return {
+    paymentId: payment.id,
+    merchantOrderNo,
   }
 }
