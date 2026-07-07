@@ -64,6 +64,29 @@ export type AiChartReportPaidUpdatePayload = {
   error_message: null
 }
 
+export type BuildAiChartReportCompletedPayloadInput = {
+  reportContent: string
+  completedAt?: string | null
+}
+
+export type AiChartReportCompletedPayload = {
+  status: 'completed'
+  report_content: string
+  completed_at: string
+  updated_at: string
+  error_message: null
+}
+
+export type BuildAiChartReportFailedPayloadInput = {
+  errorMessage: string
+}
+
+export type AiChartReportFailedPayload = {
+  status: 'failed'
+  error_message: string
+  updated_at: string
+}
+
 export type AiChartReportPendingPaymentLinkDecision =
   | { result: 'not_found' }
   | { result: 'should_link' }
@@ -138,6 +161,17 @@ export type AiChartReportResultAccessDecision =
   | { result: 'ready'; reportContent: string }
   | { result: 'invalid_state'; paymentStatus: AiChartReportPaymentStatus | null }
 
+export type AiChartReportContentUpdateDecision =
+  | { result: 'not_found' }
+  | { result: 'payment_required' }
+  | { result: 'should_update' }
+  | { result: 'already_completed' }
+  | {
+      result: 'invalid_state'
+      status: string | null
+      paymentStatus: AiChartReportPaymentStatus | null
+    }
+
 export type LinkAiChartReportPendingPaymentInput = {
   reportId: string
   paymentId: string
@@ -154,6 +188,33 @@ export type CreatePendingAiChartReportRow = {
   id: string
   payment_status: AiChartReportPaymentStatus | null
 }
+
+export type MarkAiChartReportCompletedInput = {
+  reportId: string
+  reportContent: string
+  completedAt?: string | null
+}
+
+export type MarkAiChartReportCompletedResult =
+  | { result: 'updated'; reportId: string }
+  | { result: 'already_completed'; reportId: string }
+  | { result: 'payment_required'; reportId: string }
+  | { result: 'not_found'; reportId: string }
+  | {
+      result: 'invalid_state'
+      reportId: string
+      status: string | null
+      paymentStatus: AiChartReportPaymentStatus | null
+    }
+
+export type MarkAiChartReportFailedInput = {
+  reportId: string
+  errorMessage: string
+}
+
+export type MarkAiChartReportFailedResult =
+  | { result: 'updated'; reportId: string }
+  | { result: 'not_found'; reportId: string }
 
 type SupabaseAdminClient = ReturnType<typeof getSupabaseAdmin>
 
@@ -227,6 +288,30 @@ export function buildAiChartReportPaidUpdatePayload(
   }
 }
 
+export function buildAiChartReportCompletedPayload(
+  input: BuildAiChartReportCompletedPayloadInput,
+  now = new Date().toISOString(),
+): AiChartReportCompletedPayload {
+  return {
+    status: 'completed',
+    report_content: normalizeRequiredText(input.reportContent, 'reportContent'),
+    completed_at: resolveTimestamp(input.completedAt, now),
+    updated_at: now,
+    error_message: null,
+  }
+}
+
+export function buildAiChartReportFailedPayload(
+  input: BuildAiChartReportFailedPayloadInput,
+  now = new Date().toISOString(),
+): AiChartReportFailedPayload {
+  return {
+    status: 'failed',
+    error_message: normalizeRequiredText(input.errorMessage, 'errorMessage'),
+    updated_at: now,
+  }
+}
+
 export function decideAiChartReportPendingPaymentLink(
   existing: {
     id: string
@@ -269,6 +354,38 @@ export function decideAiChartReportPaidUpdate(
   }
 
   return { result: 'invalid_state', paymentStatus }
+}
+
+export function decideAiChartReportContentUpdate(
+  existing: {
+    id: string
+    payment_status?: AiChartReportPaymentStatus | null
+    status?: string | null
+    report_content?: string | null
+  } | null,
+): AiChartReportContentUpdateDecision {
+  if (!existing) return { result: 'not_found' }
+
+  const paymentStatus = existing.payment_status ?? null
+  const status = existing.status ?? null
+
+  if (paymentStatus !== 'paid') {
+    return { result: 'payment_required' }
+  }
+
+  if (status === 'failed' || status === 'canceled') {
+    return {
+      result: 'invalid_state',
+      status,
+      paymentStatus,
+    }
+  }
+
+  if (existing.report_content?.trim()) {
+    return { result: 'already_completed' }
+  }
+
+  return { result: 'should_update' }
 }
 
 export function mapAiChartReportPaymentContext(
@@ -512,6 +629,125 @@ export async function markAiChartReportPaidByPayment(
         paymentId: input.paymentId,
         merchantOrderNo: input.merchantOrderNo,
         paidAt: input.paidAt,
+      }),
+    )
+    .eq('id', input.reportId)
+
+  if (updateError) {
+    throw new Error(updateError.message)
+  }
+
+  return {
+    result: 'updated',
+    reportId: input.reportId,
+  }
+}
+
+export async function markAiChartReportCompleted(
+  input: MarkAiChartReportCompletedInput,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<MarkAiChartReportCompletedResult> {
+  assertRequiredText(input.reportId, 'reportId')
+  assertRequiredText(input.reportContent, 'reportContent')
+
+  const { data: existingReport, error: selectError } = await supabase
+    .from('ai_chart_reports')
+    .select('id,payment_status,status,report_content')
+    .eq('id', input.reportId)
+    .maybeSingle()
+
+  if (selectError) {
+    throw new Error(selectError.message)
+  }
+
+  const decision = decideAiChartReportContentUpdate(
+    existingReport as {
+      id: string
+      payment_status?: AiChartReportPaymentStatus | null
+      status?: string | null
+      report_content?: string | null
+    } | null,
+  )
+
+  if (decision.result === 'not_found') {
+    return {
+      result: 'not_found',
+      reportId: input.reportId,
+    }
+  }
+
+  if (decision.result === 'payment_required') {
+    return {
+      result: 'payment_required',
+      reportId: input.reportId,
+    }
+  }
+
+  if (decision.result === 'already_completed') {
+    return {
+      result: 'already_completed',
+      reportId: input.reportId,
+    }
+  }
+
+  if (decision.result === 'invalid_state') {
+    return {
+      result: 'invalid_state',
+      reportId: input.reportId,
+      status: decision.status,
+      paymentStatus: decision.paymentStatus,
+    }
+  }
+
+  const { error: updateError } = await supabase
+    .from('ai_chart_reports')
+    .update(
+      buildAiChartReportCompletedPayload({
+        reportContent: input.reportContent,
+        completedAt: input.completedAt,
+      }),
+    )
+    .eq('id', input.reportId)
+
+  if (updateError) {
+    throw new Error(updateError.message)
+  }
+
+  return {
+    result: 'updated',
+    reportId: input.reportId,
+  }
+}
+
+export async function markAiChartReportFailed(
+  input: MarkAiChartReportFailedInput,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<MarkAiChartReportFailedResult> {
+  assertRequiredText(input.reportId, 'reportId')
+  assertRequiredText(input.errorMessage, 'errorMessage')
+
+  const { data: existingReport, error: selectError } = await supabase
+    .from('ai_chart_reports')
+    .select('id')
+    .eq('id', input.reportId)
+    .maybeSingle()
+
+  if (selectError) {
+    throw new Error(selectError.message)
+  }
+
+  if (!existingReport) {
+    return {
+      result: 'not_found',
+      reportId: input.reportId,
+    }
+  }
+
+  const { error: updateError } = await supabase
+    .from('ai_chart_reports')
+    .update(
+      buildAiChartReportFailedPayload({
+        errorMessage: input.errorMessage,
       }),
     )
     .eq('id', input.reportId)

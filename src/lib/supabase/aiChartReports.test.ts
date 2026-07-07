@@ -1,15 +1,20 @@
 import assert from 'node:assert/strict'
 import {
+  buildAiChartReportCompletedPayload,
+  buildAiChartReportFailedPayload,
   buildAiChartReportPaidUpdatePayload,
   buildAiChartReportPendingPaymentLinkPayload,
   buildPendingAiChartReportPayload,
   createPendingAiChartReport,
+  decideAiChartReportContentUpdate,
   decideAiChartReportResultAccess,
   decideAiChartReportPaidUpdate,
   decideAiChartReportPendingPaymentLink,
   getAiChartReportResultById,
   getAiChartReportPaymentContext,
   linkAiChartReportPendingPayment,
+  markAiChartReportCompleted,
+  markAiChartReportFailed,
   markAiChartReportPaidByPayment,
   type AiChartReportResultContext,
   type AiChartReportPaymentStatus,
@@ -233,6 +238,61 @@ const paidUpdatePayloadWithDefaultDate = buildAiChartReportPaidUpdatePayload(
 
 assert.equal(paidUpdatePayloadWithDefaultDate.paid_at, '2026-07-06T10:22:00.000Z')
 
+const completedPayload = buildAiChartReportCompletedPayload(
+  {
+    reportContent: '短測試報告內容',
+    completedAt: '2026-07-06T10:30:00.000Z',
+  },
+  '2026-07-06T10:31:00.000Z',
+)
+
+assert.deepEqual(completedPayload, {
+  status: 'completed',
+  report_content: '短測試報告內容',
+  completed_at: '2026-07-06T10:30:00.000Z',
+  updated_at: '2026-07-06T10:31:00.000Z',
+  error_message: null,
+})
+assert.equal('payment_status' in completedPayload, false)
+assert.equal('payment_id' in completedPayload, false)
+assert.equal('merchant_order_no' in completedPayload, false)
+assert.equal('paid_at' in completedPayload, false)
+assert.equal('user_id' in completedPayload, false)
+assert.equal('chart_profile_id' in completedPayload, false)
+assertNoUnsafePaymentKeys(completedPayload)
+assertNoOtherProductKeys(completedPayload)
+
+const completedPayloadWithDefaultDate = buildAiChartReportCompletedPayload(
+  {
+    reportContent: '另一段短測試內容',
+    completedAt: null,
+  },
+  '2026-07-06T10:32:00.000Z',
+)
+
+assert.equal(completedPayloadWithDefaultDate.completed_at, '2026-07-06T10:32:00.000Z')
+
+const failedPayload = buildAiChartReportFailedPayload(
+  {
+    errorMessage: 'AI_CHART_REPORT_GENERATION_FAILED',
+  },
+  '2026-07-06T10:33:00.000Z',
+)
+
+assert.deepEqual(failedPayload, {
+  status: 'failed',
+  error_message: 'AI_CHART_REPORT_GENERATION_FAILED',
+  updated_at: '2026-07-06T10:33:00.000Z',
+})
+assert.equal('payment_status' in failedPayload, false)
+assert.equal('payment_id' in failedPayload, false)
+assert.equal('merchant_order_no' in failedPayload, false)
+assert.equal('paid_at' in failedPayload, false)
+assert.equal('completed_at' in failedPayload, false)
+assert.equal('report_content' in failedPayload, false)
+assertNoUnsafePaymentKeys(failedPayload)
+assertNoOtherProductKeys(failedPayload)
+
 assert.deepEqual(decideAiChartReportPendingPaymentLink(null), { result: 'not_found' })
 assert.deepEqual(
   decideAiChartReportPendingPaymentLink({
@@ -350,6 +410,69 @@ for (const paymentStatus of ['failed', 'canceled', 'refunded'] satisfies AiChart
   })
 }
 
+assert.deepEqual(decideAiChartReportContentUpdate(null), { result: 'not_found' })
+assert.deepEqual(
+  decideAiChartReportContentUpdate({
+    id: 'report-content-decision-1',
+    payment_status: 'pending',
+    status: 'pending',
+    report_content: null,
+  }),
+  { result: 'payment_required' },
+)
+assert.deepEqual(
+  decideAiChartReportContentUpdate({
+    id: 'report-content-decision-2',
+    payment_status: null,
+    status: 'pending',
+    report_content: null,
+  }),
+  { result: 'payment_required' },
+)
+assert.deepEqual(
+  decideAiChartReportContentUpdate({
+    id: 'report-content-decision-3',
+    payment_status: 'paid',
+    status: 'paid',
+    report_content: null,
+  }),
+  { result: 'should_update' },
+)
+assert.deepEqual(
+  decideAiChartReportContentUpdate({
+    id: 'report-content-decision-4',
+    payment_status: 'paid',
+    status: 'paid',
+    report_content: '   ',
+  }),
+  { result: 'should_update' },
+)
+assert.deepEqual(
+  decideAiChartReportContentUpdate({
+    id: 'report-content-decision-5',
+    payment_status: 'paid',
+    status: 'completed',
+    report_content: '短測試報告內容',
+  }),
+  { result: 'already_completed' },
+)
+
+for (const status of ['failed', 'canceled']) {
+  assert.deepEqual(
+    decideAiChartReportContentUpdate({
+      id: `report-content-decision-${status}`,
+      payment_status: 'paid',
+      status,
+      report_content: null,
+    }),
+    {
+      result: 'invalid_state',
+      status,
+      paymentStatus: 'paid',
+    },
+  )
+}
+
 assert.throws(
   () =>
     buildPendingAiChartReportPayload({
@@ -383,6 +506,20 @@ assert.throws(
       merchantOrderNo: '',
     }),
   /merchantOrderNo/,
+)
+assert.throws(
+  () =>
+    buildAiChartReportCompletedPayload({
+      reportContent: '',
+    }),
+  /reportContent/,
+)
+assert.throws(
+  () =>
+    buildAiChartReportFailedPayload({
+      errorMessage: '',
+    }),
+  /errorMessage/,
 )
 
 async function runAsyncHelperTests() {
@@ -788,6 +925,193 @@ async function runAsyncHelperTests() {
     })
     assert.equal(invalidStateMock.calls.updates.length, 0)
   }
+
+  const completedMock = createMockSupabase({
+    data: {
+      id: 'report-content-1',
+      payment_status: 'paid',
+      status: 'paid',
+      report_content: null,
+    },
+    error: null,
+  })
+  const completedResult = await markAiChartReportCompleted(
+    {
+      reportId: 'report-content-1',
+      reportContent: '短測試報告內容',
+      completedAt: '2026-07-06T17:10:00.000Z',
+    },
+    completedMock.supabase,
+  )
+
+  assert.deepEqual(completedResult, {
+    result: 'updated',
+    reportId: 'report-content-1',
+  })
+  assert.deepEqual(completedMock.calls.tables, ['ai_chart_reports', 'ai_chart_reports'])
+  assert.deepEqual(completedMock.calls.selects, ['id,payment_status,status,report_content'])
+  assert.deepEqual(completedMock.calls.eqs, [
+    ['id', 'report-content-1'],
+    ['id', 'report-content-1'],
+  ])
+  assert.equal(completedMock.calls.updates.length, 1)
+  assert.equal(completedMock.calls.updates[0].status, 'completed')
+  assert.equal(completedMock.calls.updates[0].report_content, '短測試報告內容')
+  assert.equal(completedMock.calls.updates[0].completed_at, '2026-07-06T17:10:00.000Z')
+  assert.equal(typeof completedMock.calls.updates[0].updated_at, 'string')
+  assert.equal(completedMock.calls.updates[0].error_message, null)
+  assert.equal('payment_status' in completedMock.calls.updates[0], false)
+  assert.equal('payment_id' in completedMock.calls.updates[0], false)
+  assert.equal('merchant_order_no' in completedMock.calls.updates[0], false)
+  assert.equal('paid_at' in completedMock.calls.updates[0], false)
+  assert.equal('user_id' in completedMock.calls.updates[0], false)
+  assert.equal('chart_profile_id' in completedMock.calls.updates[0], false)
+  assertNoUnsafePaymentKeys(completedMock.calls.updates[0])
+  assertNoOtherProductKeys(completedMock.calls.updates[0])
+
+  const alreadyCompletedMock = createMockSupabase({
+    data: {
+      id: 'report-content-2',
+      payment_status: 'paid',
+      status: 'completed',
+      report_content: '既有短測試內容',
+    },
+    error: null,
+  })
+  const alreadyCompletedResult = await markAiChartReportCompleted(
+    {
+      reportId: 'report-content-2',
+      reportContent: '新的短測試內容',
+    },
+    alreadyCompletedMock.supabase,
+  )
+
+  assert.deepEqual(alreadyCompletedResult, {
+    result: 'already_completed',
+    reportId: 'report-content-2',
+  })
+  assert.equal(alreadyCompletedMock.calls.updates.length, 0)
+
+  const notFoundCompletedMock = createMockSupabase({
+    data: null,
+    error: null,
+  })
+  const notFoundCompletedResult = await markAiChartReportCompleted(
+    {
+      reportId: 'report-content-missing',
+      reportContent: '短測試報告內容',
+    },
+    notFoundCompletedMock.supabase,
+  )
+
+  assert.deepEqual(notFoundCompletedResult, {
+    result: 'not_found',
+    reportId: 'report-content-missing',
+  })
+  assert.equal(notFoundCompletedMock.calls.updates.length, 0)
+
+  const paymentRequiredMock = createMockSupabase({
+    data: {
+      id: 'report-content-pending',
+      payment_status: 'pending',
+      status: 'pending',
+      report_content: null,
+    },
+    error: null,
+  })
+  const paymentRequiredResult = await markAiChartReportCompleted(
+    {
+      reportId: 'report-content-pending',
+      reportContent: '短測試報告內容',
+    },
+    paymentRequiredMock.supabase,
+  )
+
+  assert.deepEqual(paymentRequiredResult, {
+    result: 'payment_required',
+    reportId: 'report-content-pending',
+  })
+  assert.equal(paymentRequiredMock.calls.updates.length, 0)
+
+  const invalidContentStateMock = createMockSupabase({
+    data: {
+      id: 'report-content-failed',
+      payment_status: 'paid',
+      status: 'failed',
+      report_content: null,
+    },
+    error: null,
+  })
+  const invalidContentStateResult = await markAiChartReportCompleted(
+    {
+      reportId: 'report-content-failed',
+      reportContent: '短測試報告內容',
+    },
+    invalidContentStateMock.supabase,
+  )
+
+  assert.deepEqual(invalidContentStateResult, {
+    result: 'invalid_state',
+    reportId: 'report-content-failed',
+    status: 'failed',
+    paymentStatus: 'paid',
+  })
+  assert.equal(invalidContentStateMock.calls.updates.length, 0)
+
+  const failedMarkMock = createMockSupabase({
+    data: {
+      id: 'report-failed-1',
+    },
+    error: null,
+  })
+  const failedMarkResult = await markAiChartReportFailed(
+    {
+      reportId: 'report-failed-1',
+      errorMessage: 'AI_CHART_REPORT_GENERATION_FAILED',
+    },
+    failedMarkMock.supabase,
+  )
+
+  assert.deepEqual(failedMarkResult, {
+    result: 'updated',
+    reportId: 'report-failed-1',
+  })
+  assert.deepEqual(failedMarkMock.calls.tables, ['ai_chart_reports', 'ai_chart_reports'])
+  assert.deepEqual(failedMarkMock.calls.selects, ['id'])
+  assert.deepEqual(failedMarkMock.calls.eqs, [
+    ['id', 'report-failed-1'],
+    ['id', 'report-failed-1'],
+  ])
+  assert.equal(failedMarkMock.calls.updates.length, 1)
+  assert.equal(failedMarkMock.calls.updates[0].status, 'failed')
+  assert.equal(failedMarkMock.calls.updates[0].error_message, 'AI_CHART_REPORT_GENERATION_FAILED')
+  assert.equal(typeof failedMarkMock.calls.updates[0].updated_at, 'string')
+  assert.equal('payment_status' in failedMarkMock.calls.updates[0], false)
+  assert.equal('payment_id' in failedMarkMock.calls.updates[0], false)
+  assert.equal('merchant_order_no' in failedMarkMock.calls.updates[0], false)
+  assert.equal('paid_at' in failedMarkMock.calls.updates[0], false)
+  assert.equal('completed_at' in failedMarkMock.calls.updates[0], false)
+  assert.equal('report_content' in failedMarkMock.calls.updates[0], false)
+  assertNoUnsafePaymentKeys(failedMarkMock.calls.updates[0])
+  assertNoOtherProductKeys(failedMarkMock.calls.updates[0])
+
+  const failedNotFoundMock = createMockSupabase({
+    data: null,
+    error: null,
+  })
+  const failedNotFoundResult = await markAiChartReportFailed(
+    {
+      reportId: 'report-failed-missing',
+      errorMessage: 'AI_CHART_REPORT_GENERATION_FAILED',
+    },
+    failedNotFoundMock.supabase,
+  )
+
+  assert.deepEqual(failedNotFoundResult, {
+    result: 'not_found',
+    reportId: 'report-failed-missing',
+  })
+  assert.equal(failedNotFoundMock.calls.updates.length, 0)
 }
 
 runAsyncHelperTests().catch((error) => {
