@@ -63,6 +63,18 @@ test('exports mergeLinePayPaymentMetadata', () => {
   assert.equal(typeof linePay.mergeLinePayPaymentMetadata, 'function')
 })
 
+test('exports normalizeLinePayOrderId', () => {
+  assert.equal(typeof linePay.normalizeLinePayOrderId, 'function')
+})
+
+test('exports buildLinePayOrderId', () => {
+  assert.equal(typeof linePay.buildLinePayOrderId, 'function')
+})
+
+test('exports extractSourceIdFromLinePayOrderId', () => {
+  assert.equal(typeof linePay.extractSourceIdFromLinePayOrderId, 'function')
+})
+
 test('barrel import does not read environment variables', () => {
   const before = process.env.LINE_PAY_CHANNEL_SECRET
 
