@@ -77,6 +77,7 @@ assert.equal(isNewebPayPaymentSource('external'), false)
 assert.equal(isNewebPayPaymentMode('credit'), true)
 assert.equal(isNewebPayPaymentMode('merchant_default'), true)
 assert.equal(isNewebPayPaymentMode('apple_pay_test'), true)
+assert.equal(isNewebPayPaymentMode('product_order_apple_pay_test'), true)
 assert.equal(isNewebPayPaymentMode('linepay'), false)
 
 const bookingId = '550e8400-e29b-41d4-a716-446655440000'
@@ -529,6 +530,35 @@ assert.equal(decryptedProductOrder.has('WEBATM'), false)
 assert.equal(decryptedProductOrder.has('APPLEPAY'), false)
 assert.equal(decryptedProductOrder.has('ANDROIDPAY'), false)
 assert.equal(decryptedProductOrder.has('SAMSUNGPAY'), false)
+
+const productOrderApplePayTestData = createNewebPayMpgPaymentData({
+  itemKey: PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+  config,
+  paymentMode: 'product_order_apple_pay_test',
+  amount: 1,
+  itemDesc: 'Apple Pay 1 元商品測試',
+  now: new Date(2026, 6, 3, 17, 25, 30),
+  merchantOrderNo: 'WB20260703172530APRO',
+})
+const decryptedProductOrderApplePayTest = new URLSearchParams(
+  decryptTradeInfo(productOrderApplePayTestData.fields.TradeInfo, hashKey, hashIv),
+)
+
+assert.equal(productOrderApplePayTestData.itemKey, PRODUCT_ORDER_PAYMENT_ITEM_KEY)
+assert.equal(productOrderApplePayTestData.amount, 1)
+assert.equal(decryptedProductOrderApplePayTest.get('Amt'), '1')
+assert.equal(decryptedProductOrderApplePayTest.get('ItemDesc'), 'Apple Pay 1 元商品測試')
+assert.equal(decryptedProductOrderApplePayTest.get('APPLEPAY'), '1')
+assert.equal(decryptedProductOrderApplePayTest.get('InstFlag'), '0')
+assert.equal(decryptedProductOrderApplePayTest.get('ClientBackURL'), 'http://localhost:3000/cart')
+assert.equal(decryptedProductOrderApplePayTest.has('CREDIT'), false)
+assert.equal(decryptedProductOrderApplePayTest.has('LINEPAY'), false)
+assert.equal(decryptedProductOrderApplePayTest.has('VACC'), false)
+assert.equal(decryptedProductOrderApplePayTest.has('WEBATM'), false)
+assert.equal(decryptedProductOrderApplePayTest.has('CVS'), false)
+assert.equal(decryptedProductOrderApplePayTest.has('BARCODE'), false)
+assert.equal(decryptedProductOrderApplePayTest.has('ANDROIDPAY'), false)
+assert.equal(decryptedProductOrderApplePayTest.has('SAMSUNGPAY'), false)
 
 const smokePendingPaymentMetadata = buildNewebPayPendingPaymentMetadata({
   itemKey: 'newebpay_live_smoke_test_1',

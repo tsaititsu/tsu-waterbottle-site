@@ -380,6 +380,65 @@ test('product order success creates a pending payment and links the order', asyn
   assertNoUnsafeSerializedKeys(json)
 })
 
+test('product order Apple Pay test creates one dollar pending payment and links the order', async () => {
+  const { calls, deps } = createProductDeps({
+    order: {
+      ...payableOrder,
+      totalAmountTwd: 1,
+    },
+  })
+  const response = await handleCreateNewebPayPaymentRequest(
+    validBody({
+      paymentMode: 'product_order_apple_pay_test',
+    }),
+    deps,
+  )
+  const json = await readJson(response)
+
+  assert.equal(response.status, 200)
+  assert.equal(json.ok, true)
+  assert.equal(json.amount, 1)
+  assert.equal(json.itemKey, PRODUCT_ORDER_PAYMENT_ITEM_KEY)
+  assert.deepEqual(calls.productOrderLookups, [orderId])
+  assert.deepEqual(calls.productOrderLinks, [{ orderId, paymentId }])
+  assert.equal(calls.paymentDataInputs.length, 1)
+  assert.equal(calls.paymentDataInputs[0].paymentMode, 'product_order_apple_pay_test')
+  assert.equal(calls.paymentDataInputs[0].amount, 1)
+  assert.equal(calls.paymentDataInputs[0].itemDesc, `Apple Pay 1 元商品測試 ${orderNo}`)
+  assert.equal(calls.pendingPayments.length, 1)
+
+  const paymentInput = calls.pendingPayments[0]
+
+  assert.equal(paymentInput.provider, 'newebpay')
+  assert.equal(paymentInput.itemType, 'spiritual_product_order')
+  assert.equal(paymentInput.itemId, orderId)
+  assert.equal(paymentInput.amountTwd, 1)
+  assert.equal(paymentInput.rawPayload?.paymentMode, 'product_order_apple_pay_test')
+  assert.equal(paymentInput.rawPayload?.amount, 1)
+  assert.equal(paymentInput.rawPayload?.test_payment, true)
+  assert.equal(paymentInput.rawPayload?.product_apple_pay_one_dollar_test, true)
+  assert.equal(paymentInput.rawPayload?.test_price, 1)
+  assert.equal(JSON.stringify(paymentInput.rawPayload).includes('line_pay'), false)
+  assertNoUnsafeSerializedKeys(paymentInput.rawPayload)
+  assertNoUnsafeSerializedKeys(json)
+})
+
+test('product order Apple Pay test rejects non one dollar product orders', async () => {
+  const { calls, deps } = createProductDeps()
+  const response = await handleCreateNewebPayPaymentRequest(
+    validBody({
+      paymentMode: 'product_order_apple_pay_test',
+    }),
+    deps,
+  )
+  const json = await readJson(response)
+
+  assert.equal(response.status, 400)
+  assert.deepEqual(json, { ok: false, error: 'invalid_product_order_payment_input' })
+  assert.deepEqual(calls.pendingPayments, [])
+  assert.deepEqual(calls.productOrderLinks, [])
+})
+
 test('missing orderId is rejected before payment creation', async () => {
   const { calls, deps } = createProductDeps()
   const response = await handleCreateNewebPayPaymentRequest(validBody({ orderId: undefined }), deps)

@@ -2,6 +2,10 @@ import type { ProductOrderPaymentContext } from '../supabase/productOrders'
 import { createPendingPayment, type PaymentRecord } from '../supabase/payments'
 import { linkProductOrderPendingPayment } from '../supabase/productOrders'
 import { getSupabaseAdmin } from '../supabase/admin'
+import {
+  buildProductApplePayOneDollarTestMetadata,
+  TEMP_PRODUCT_APPLE_PAY_TEST_PRICE,
+} from '../products/productApplePayOneDollarTest'
 
 export const PRODUCT_ORDER_PAYMENT_ITEM_KEY = 'spiritual_product_order'
 export const PRODUCT_ORDER_PAYMENT_ITEM_TYPE = 'spiritual_product_order'
@@ -16,6 +20,11 @@ export type ProductOrderPaymentRawPayload = {
   orderId: string
   orderNo: string
   amount: number
+  test_payment?: boolean
+  product_apple_pay_one_dollar_test?: boolean
+  original_price?: number
+  original_total_amount?: number
+  test_price?: number
 }
 
 export type ProductOrderPaymentMapping = {
@@ -236,6 +245,30 @@ export function buildProductOrderPaymentMapping(order: ProductOrderForPayment): 
       orderId,
       orderNo,
       amount: order.totalAmountTwd,
+    },
+  }
+}
+
+export function buildProductOrderApplePayOneDollarTestPaymentMapping(
+  order: ProductOrderForPayment,
+): ProductOrderPaymentMapping {
+  const mapping = buildProductOrderPaymentMapping(order)
+
+  if (mapping.amountTwd !== TEMP_PRODUCT_APPLE_PAY_TEST_PRICE) {
+    throw new Error('invalid_product_order_payment_input')
+  }
+
+  const metadata = buildProductApplePayOneDollarTestMetadata({
+    originalPrice: mapping.amountTwd,
+    originalTotalAmount: mapping.amountTwd,
+  })
+
+  return {
+    ...mapping,
+    itemDesc: truncateText(`Apple Pay 1 元商品測試 ${order.orderNo.trim()}`, PRODUCT_ORDER_ITEM_DESC_MAX_LENGTH),
+    rawPayload: {
+      ...mapping.rawPayload,
+      ...metadata,
     },
   }
 }

@@ -60,14 +60,14 @@ function assertNoUnsafeSerializedKeys(value: unknown) {
   assert.equal(serialized.includes('raw_payload'), false)
 }
 
-test('creates a bank transfer product order from server product data', async () => {
+test('temporary Apple Pay test creates a one dollar product order from server product data', async () => {
   const calls: Record<string, unknown>[] = []
   const response = await handleCreateProductOrderRequest(
     validBody({
       items: [
         {
           productSlug: 'ren-yuan-fu',
-          quantity: 2,
+          quantity: 1,
           unitPriceTwd: 1,
           productName: 'client spoofed name',
           TradeInfo: 'unsafe',
@@ -80,7 +80,7 @@ test('creates a bank transfer product order from server product data', async () 
         return {
           orderId: 'order-1',
           orderNo: 'PO20260707143022A1B2',
-          totalAmountTwd: 3000,
+          totalAmountTwd: 1,
         }
       },
     },
@@ -92,7 +92,7 @@ test('creates a bank transfer product order from server product data', async () 
     ok: true,
     orderId: 'order-1',
     orderNo: 'PO20260707143022A1B2',
-    totalAmountTwd: 3000,
+    totalAmountTwd: 1,
     paymentMethod: 'bank_transfer',
     paymentStatus: 'pending',
     orderStatus: 'pending_payment',
@@ -102,13 +102,39 @@ test('creates a bank transfer product order from server product data', async () 
   assert.equal(calls[0].paymentMethod, 'bank_transfer')
   assert.equal((calls[0].items as Array<Record<string, unknown>>)[0].productSlug, 'ren-yuan-fu')
   assert.equal((calls[0].items as Array<Record<string, unknown>>)[0].productName, '人緣符')
-  assert.equal((calls[0].items as Array<Record<string, unknown>>)[0].unitPriceTwd, 1500)
-  assert.equal((calls[0].items as Array<Record<string, unknown>>)[0].quantity, 2)
+  assert.equal((calls[0].items as Array<Record<string, unknown>>)[0].unitPriceTwd, 1)
+  assert.equal((calls[0].items as Array<Record<string, unknown>>)[0].quantity, 1)
+  const productSnapshot = (calls[0].items as Array<Record<string, unknown>>)[0].productSnapshot as Record<string, unknown>
+  assert.equal(productSnapshot.priceTwd, 1)
+  assert.equal(productSnapshot.test_payment, true)
+  assert.equal(productSnapshot.product_apple_pay_one_dollar_test, true)
+  assert.equal(productSnapshot.original_price, 1500)
+  assert.equal(productSnapshot.original_total_amount, 1500)
   assert.equal('paymentId' in calls[0], false)
   assert.equal('shipment' in calls[0], false)
   assert.equal('shipments' in calls[0], false)
   assertNoUnsafeSerializedKeys(calls)
   assertNoUnsafeResponseKeys(json)
+})
+
+test('temporary Apple Pay test rejects multiple product quantities', async () => {
+  const response = await handleCreateProductOrderRequest(
+    validBody({
+      items: [
+        {
+          productSlug: 'ren-yuan-fu',
+          quantity: 2,
+        },
+      ],
+    }),
+  )
+  const json = await readJson(response)
+
+  assert.equal(response.status, 400)
+  assert.deepEqual(json, {
+    ok: false,
+    error: 'invalid_product_order_items',
+  })
 })
 
 test('creates a newebpay product order without creating a payment', async () => {
@@ -132,7 +158,7 @@ test('creates a newebpay product order without creating a payment', async () => 
           return {
             orderId: 'order-newebpay-1',
             orderNo: 'PO20260707143022B2C3',
-            totalAmountTwd: 1500,
+            totalAmountTwd: 1,
           }
         },
       },

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   CART_NEWEBPAY_BUTTON_LABEL,
+  CART_APPLE_PAY_TEST_BUTTON_LABEL,
   CART_NEWEBPAY_LOADING_MESSAGE,
   CART_NEWEBPAY_READY_MESSAGE,
   getCartNewebPayButtonState,
@@ -14,6 +15,7 @@ import {
   type CartNewebPayFormInput,
   type CartNewebPayPaymentRequestBody,
 } from './newebpayCheckout'
+import { TEMP_PRODUCT_APPLE_PAY_TEST_PAYMENT_MODE } from '../../lib/products/productApplePayOneDollarTest'
 
 const tests: Array<{ name: string; fn: () => void | Promise<void> }> = []
 
@@ -120,12 +122,22 @@ test('button state is visible and loading state is disabled', () => {
     label: CART_NEWEBPAY_BUTTON_LABEL,
     message: CART_NEWEBPAY_LOADING_MESSAGE,
   })
+  assert.deepEqual(getCartNewebPayButtonState(false, TEMP_PRODUCT_APPLE_PAY_TEST_PAYMENT_MODE), {
+    visible: true,
+    disabled: false,
+    label: CART_APPLE_PAY_TEST_BUTTON_LABEL,
+    message: '將前往藍新金流 Apple Pay 1 元測試付款頁。',
+  })
 })
 
 test('checkout errors map to friendly messages', () => {
   assert.equal(getNewebPayCartCheckoutErrorMessage('newebpay_cart_empty'), '購物車目前沒有可付款的開運商品。')
   assert.equal(getNewebPayCartCheckoutErrorMessage('newebpay_create_order_failed'), '商品訂單建立失敗，請稍後再試。')
   assert.equal(getNewebPayCartCheckoutErrorMessage('newebpay_payment_create_failed'), '信用卡付款資料建立失敗，請稍後再試。')
+  assert.equal(
+    getNewebPayCartCheckoutErrorMessage('newebpay_product_apple_pay_test_single_item_required'),
+    'Apple Pay 1 元測試請只保留 1 件商品。',
+  )
 })
 
 test('empty cart returns newebpay_cart_empty', async () => {
@@ -271,6 +283,80 @@ test('createNewebPayPayment body only includes productOrderId and credit mode', 
   assert.equal(JSON.stringify(paymentCalls).includes('wallet'), false)
 })
 
+test('Apple Pay test requires exactly one product item', async () => {
+  const paymentCalls: CartNewebPayPaymentRequestBody[] = []
+  const result = await startNewebPayCartCheckout({
+    cartItems: [
+      {
+        id: 'ren-yuan-fu',
+        itemName: '人緣符',
+        amount: 1,
+        quantity: 2,
+      },
+    ],
+    customerInfo,
+    paymentMode: TEMP_PRODUCT_APPLE_PAY_TEST_PAYMENT_MODE,
+    createProductOrder: createOrderOk(),
+    createNewebPayPayment: createNewebPayPaymentOk(paymentCalls),
+    submitNewebPayForm: submitFormOk(),
+  })
+
+  assert.deepEqual(result, {
+    ok: false,
+    provider: 'newebpay',
+    error: 'newebpay_product_apple_pay_test_single_item_required',
+  })
+  assert.deepEqual(paymentCalls, [])
+})
+
+test('Apple Pay test checkout sends product_order_apple_pay_test mode', async () => {
+  const paymentCalls: CartNewebPayPaymentRequestBody[] = []
+  const submitCalls: CartNewebPayFormInput[] = []
+  const result = await startNewebPayCartCheckout({
+    cartItems: [
+      {
+        id: 'ren-yuan-fu',
+        itemName: '人緣符',
+        amount: 1,
+        quantity: 1,
+      },
+    ],
+    customerInfo,
+    paymentMode: TEMP_PRODUCT_APPLE_PAY_TEST_PAYMENT_MODE,
+    createProductOrder: createOrderOk(),
+    createNewebPayPayment: async (body) => {
+      paymentCalls.push(body)
+      return {
+        ok: true,
+        provider: 'newebpay',
+        merchantOrderNo: 'WB20260708123456APPL',
+        itemKey: 'spiritual_product_order',
+        amount: 1,
+        action: 'https://ccore.newebpay.com/MPG/mpg_gateway',
+        method: 'POST',
+        fields: neWebPayFields,
+      }
+    },
+    submitNewebPayForm: submitFormOk(submitCalls),
+  })
+
+  assert.equal(result.ok, true)
+  if (!result.ok) throw new Error(result.error)
+  assert.equal(result.amount, 1)
+  assert.deepEqual(paymentCalls, [
+    {
+      productOrderId: 'product-order-1',
+      paymentMode: 'product_order_apple_pay_test',
+    },
+  ])
+  assert.deepEqual(Object.keys(paymentCalls[0]).sort(), ['paymentMode', 'productOrderId'])
+  assert.equal(JSON.stringify(paymentCalls).includes('linepay'), false)
+  assert.equal(JSON.stringify(paymentCalls).includes('atm'), false)
+  assert.equal(JSON.stringify(paymentCalls).includes('ANDROIDPAY'), false)
+  assert.equal(JSON.stringify(paymentCalls).includes('SAMSUNGPAY'), false)
+  assert.equal(submitCalls.length, 1)
+})
+
 test('createNewebPayPayment failure does not submit form', async () => {
   const submitCalls: CartNewebPayFormInput[] = []
   const result = await startNewebPayCartCheckout({
@@ -398,7 +484,6 @@ test('helper source does not enable linepay, atm, or wallet payments', () => {
     'linepay',
     'VACC',
     'WEBATM',
-    'APPLEPAY',
     'ANDROIDPAY',
     'SAMSUNGPAY',
     "provider: 'line_pay'",

@@ -2,10 +2,20 @@ import {
   buildNewebPayClientFormFields,
   type NewebPayClientFormField,
 } from '../../lib/newebpay/clientForm'
+import {
+  TEMP_PRODUCT_APPLE_PAY_TEST_PAYMENT_MODE,
+  validateProductApplePayOneDollarTestSingleItem,
+  type ProductApplePayOneDollarTestPaymentMode,
+} from '../../lib/products/productApplePayOneDollarTest'
 
 export const CART_NEWEBPAY_BUTTON_LABEL = '信用卡付款'
 export const CART_NEWEBPAY_READY_MESSAGE = '將前往藍新金流信用卡一次付清頁。'
 export const CART_NEWEBPAY_LOADING_MESSAGE = '正在建立信用卡付款資料...'
+export const CART_APPLE_PAY_TEST_BUTTON_LABEL = 'Apple Pay 付款（測試 NT$1）'
+export const CART_APPLE_PAY_TEST_READY_MESSAGE = '將前往藍新金流 Apple Pay 1 元測試付款頁。'
+export const CART_APPLE_PAY_TEST_LOADING_MESSAGE = '正在建立 Apple Pay 1 元測試付款資料...'
+
+export type CartNewebPayPaymentMode = 'credit' | ProductApplePayOneDollarTestPaymentMode
 
 export type CartNewebPayCheckoutItem = {
   id: string
@@ -48,7 +58,7 @@ export type CartNewebPayCreateProductOrderInput = {
 
 export type CartNewebPayPaymentRequestBody = {
   productOrderId: string
-  paymentMode: 'credit'
+  paymentMode: CartNewebPayPaymentMode
 }
 
 export type CartNewebPayFormInput = {
@@ -63,6 +73,7 @@ export type StartNewebPayCartCheckoutInput = {
   createProductOrder: (input: CartNewebPayCreateProductOrderInput) => Promise<unknown>
   createNewebPayPayment: (body: CartNewebPayPaymentRequestBody) => Promise<unknown>
   submitNewebPayForm: (input: CartNewebPayFormInput) => Promise<void> | void
+  paymentMode?: CartNewebPayPaymentMode
 }
 
 export type StartNewebPayCartCheckoutResult =
@@ -87,6 +98,7 @@ export type StartNewebPayCartCheckoutResult =
         | 'newebpay_payment_create_failed'
         | 'newebpay_form_fields_missing'
         | 'newebpay_form_submit_failed'
+        | 'newebpay_product_apple_pay_test_single_item_required'
     }
 
 export type StartNewebPayCartCheckoutError = Extract<StartNewebPayCartCheckoutResult, { ok: false }>['error']
@@ -94,8 +106,12 @@ export type StartNewebPayCartCheckoutError = Extract<StartNewebPayCartCheckoutRe
 export type CartNewebPayButtonState = {
   visible: boolean
   disabled: boolean
-  label: typeof CART_NEWEBPAY_BUTTON_LABEL
-  message: typeof CART_NEWEBPAY_READY_MESSAGE | typeof CART_NEWEBPAY_LOADING_MESSAGE
+  label: typeof CART_NEWEBPAY_BUTTON_LABEL | typeof CART_APPLE_PAY_TEST_BUTTON_LABEL
+  message:
+    | typeof CART_NEWEBPAY_READY_MESSAGE
+    | typeof CART_NEWEBPAY_LOADING_MESSAGE
+    | typeof CART_APPLE_PAY_TEST_READY_MESSAGE
+    | typeof CART_APPLE_PAY_TEST_LOADING_MESSAGE
 }
 
 function normalizeRequiredText(value: string | null | undefined) {
@@ -161,7 +177,19 @@ function buildCreateProductOrderInput(
   }
 }
 
-export function getCartNewebPayButtonState(isCheckingOut = false): CartNewebPayButtonState {
+export function getCartNewebPayButtonState(
+  isCheckingOut = false,
+  paymentMode: CartNewebPayPaymentMode = 'credit',
+): CartNewebPayButtonState {
+  if (paymentMode === TEMP_PRODUCT_APPLE_PAY_TEST_PAYMENT_MODE) {
+    return {
+      visible: true,
+      disabled: isCheckingOut,
+      label: CART_APPLE_PAY_TEST_BUTTON_LABEL,
+      message: isCheckingOut ? CART_APPLE_PAY_TEST_LOADING_MESSAGE : CART_APPLE_PAY_TEST_READY_MESSAGE,
+    }
+  }
+
   return {
     visible: true,
     disabled: isCheckingOut,
@@ -186,6 +214,8 @@ export function getNewebPayCartCheckoutErrorMessage(error: StartNewebPayCartChec
       return '信用卡付款表單資料不完整，請稍後再試。'
     case 'newebpay_form_submit_failed':
       return '無法前往藍新金流付款頁，請稍後再試。'
+    case 'newebpay_product_apple_pay_test_single_item_required':
+      return 'Apple Pay 1 元測試請只保留 1 件商品。'
   }
 }
 
@@ -195,12 +225,24 @@ export async function startNewebPayCartCheckout({
   createProductOrder,
   createNewebPayPayment,
   submitNewebPayForm,
+  paymentMode = 'credit',
 }: StartNewebPayCartCheckoutInput): Promise<StartNewebPayCartCheckoutResult> {
   if (!Array.isArray(cartItems) || cartItems.length === 0) {
     return {
       ok: false,
       provider: 'newebpay',
       error: 'newebpay_cart_empty',
+    }
+  }
+
+  if (
+    paymentMode === TEMP_PRODUCT_APPLE_PAY_TEST_PAYMENT_MODE &&
+    !validateProductApplePayOneDollarTestSingleItem(cartItems.map((item) => ({ ...item, type: 'spiritual_product' })))
+  ) {
+    return {
+      ok: false,
+      provider: 'newebpay',
+      error: 'newebpay_product_apple_pay_test_single_item_required',
     }
   }
 
@@ -245,7 +287,7 @@ export async function startNewebPayCartCheckout({
   try {
     paymentResponse = await createNewebPayPayment({
       productOrderId,
-      paymentMode: 'credit',
+      paymentMode,
     })
   } catch {
     return {
