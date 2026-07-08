@@ -81,7 +81,7 @@ const paidInput = buildMarkPaymentPaidInputFromNotify(parsedQuery, '2026-07-03T0
 assert.deepEqual(paidInput, {
   merchantOrderNo: 'WB20260703172530A1B2',
   providerTradeNo: '25070317253012345',
-  paidAt: '2026-07-03 17:30:00',
+  paidAt: '2026-07-03T09:30:00.000Z',
   notifyReceivedAt: '2026-07-03T09:31:00.000Z',
   rawPayload: {
     status: 'SUCCESS',
@@ -98,6 +98,12 @@ assert.equal(paidInput && 'bookingId' in paidInput, false)
 assert.equal(paidInput && 'bookingStatus' in paidInput.rawPayload, false)
 assert.equal(paidInput && 'paymentStatus' in paidInput.rawPayload, false)
 assert.equal(paidInput && 'rawResult' in paidInput.rawPayload, false)
+
+const paidInputWithoutValidPayTime = buildMarkPaymentPaidInputFromNotify(
+  { ...parsedQuery, payTime: 'invalid-pay-time' },
+  '2026-07-03T09:31:00.000Z',
+)
+assert.equal(paidInputWithoutValidPayTime?.paidAt, '2026-07-03T09:31:00.000Z')
 
 assert.throws(
   () => parseNewebPayNotifyPayload(createPayload(queryTradeInfo, { merchantId: 'WRONG_MERCHANT' })),
@@ -472,7 +478,7 @@ async function runQueryFallbackAssertions() {
   assert.deepEqual(markInput, {
     merchantOrderNo: 'WB20260703172530A1B2',
     providerTradeNo: '26070416000012345',
-    paidAt: '2026-07-04 16:00:00',
+    paidAt: '2026-07-04T08:00:00.000Z',
     notifyReceivedAt: '2026-07-04T08:01:00.000Z',
     rawPayload: {
       source: 'query_fallback',

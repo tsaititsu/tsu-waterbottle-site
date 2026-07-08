@@ -1,6 +1,7 @@
 import { decryptTradeInfo, getEncryptedTradeInfoDiagnostics, verifyTradeSha } from './crypto'
 import { syncAiChartReportAfterPayment } from './aiChartSync'
 import { syncDivinationReadingAfterPayment } from './divinationSync'
+import { parseNewebPayTaipeiPayTime } from './payTime'
 import type { NewebPayQueryResult, QueryNewebPayTradeInput } from './query'
 import type { NewebPayConfig } from './types'
 import { PRODUCT_ORDER_PAYMENT_ITEM_TYPE } from '../payments/productOrderPayment'
@@ -250,7 +251,7 @@ export function buildMarkPaymentPaidInputFromNotify(
   return {
     merchantOrderNo: result.merchantOrderNo,
     providerTradeNo: result.tradeNo ?? null,
-    paidAt: result.payTime ?? notifyReceivedAt,
+    paidAt: parseNewebPayTaipeiPayTime(result.payTime) ?? notifyReceivedAt,
     notifyReceivedAt,
     rawPayload: buildNewebPayNotifyRawPayload(result),
   }
@@ -719,7 +720,7 @@ export async function persistNewebPayNotifyQueryFallback({
   const updateResult = await markPaymentPaid({
     merchantOrderNo,
     providerTradeNo: query.tradeNo ?? null,
-    paidAt: query.payTime ?? notifyReceivedAt,
+    paidAt: parseNewebPayTaipeiPayTime(query.payTime) ?? notifyReceivedAt,
     notifyReceivedAt,
     rawPayload: buildNewebPayQueryFallbackRawPayload(query),
   })
