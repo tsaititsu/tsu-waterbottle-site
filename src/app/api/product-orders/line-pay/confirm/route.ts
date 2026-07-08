@@ -11,9 +11,13 @@ import {
   confirmLinePayPayment,
   getLinePayPaymentDetails,
 } from '../../../../../lib/linePay'
+import {
+  redirectLinePayHandlerResponseToCart,
+  resolveLinePayConfirmCartRedirectStatus,
+} from '../redirect'
 
 export async function GET(request: Request) {
-  return handleProductOrderLinePayConfirmRedirect({
+  const response = await handleProductOrderLinePayConfirmRedirect({
     request,
     env: process.env,
     paymentReader: getProductOrderLinePayConfirmPaymentContext,
@@ -47,5 +51,11 @@ export async function GET(request: Request) {
         orderId: input.productOrderId,
         paymentId: input.paymentId,
       }),
+  })
+
+  return redirectLinePayHandlerResponseToCart({
+    request,
+    response,
+    resolveStatus: resolveLinePayConfirmCartRedirectStatus,
   })
 }
