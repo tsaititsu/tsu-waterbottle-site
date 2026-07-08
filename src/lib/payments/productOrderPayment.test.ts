@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import {
-  buildProductOrderApplePayOneDollarTestPaymentMapping,
   buildProductOrderPaymentMapping,
   createProductOrderLinePayPendingPayment,
   getProductOrderLinePayCancelContext,
@@ -197,21 +196,6 @@ assert.deepEqual(Object.keys(mapping.rawPayload).sort(), [
   'source',
 ])
 assertNoUnsafeKeys(mapping)
-
-const applePayTestMapping = buildProductOrderApplePayOneDollarTestPaymentMapping({
-  ...payableOrder,
-  totalAmountTwd: 1,
-})
-
-assert.equal(applePayTestMapping.amountTwd, 1)
-assert.equal(applePayTestMapping.itemDesc, `Apple Pay 1 元商品測試 ${payableOrder.orderNo}`)
-assert.equal(applePayTestMapping.rawPayload.amount, 1)
-assert.equal(applePayTestMapping.rawPayload.test_payment, true)
-assert.equal(applePayTestMapping.rawPayload.product_apple_pay_one_dollar_test, true)
-assert.equal(applePayTestMapping.rawPayload.original_total_amount, 1)
-assert.equal(JSON.stringify(applePayTestMapping).includes('line_pay'), false)
-assert.throws(() => buildProductOrderApplePayOneDollarTestPaymentMapping(payableOrder), /invalid_product_order_payment_input/)
-assertNoUnsafeKeys(applePayTestMapping)
 
 const preparingShippingOrder = {
   ...payableOrder,

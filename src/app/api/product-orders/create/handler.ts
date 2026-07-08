@@ -1,12 +1,6 @@
 import { NextResponse } from 'next/server'
 import { spiritualProducts, type SpiritualProduct } from '../../../../lib/spiritualProducts'
 import {
-  buildProductApplePayOneDollarTestSnapshot,
-  getProductApplePayOneDollarTestPrice,
-  isProductApplePayOneDollarTestEnabled,
-  validateProductApplePayOneDollarTestSingleItem,
-} from '../../../../lib/products/productApplePayOneDollarTest'
-import {
   createProductOrder,
   type CreateProductOrderInput,
   type CreateProductOrderResult,
@@ -110,26 +104,6 @@ function buildProductSnapshot(product: SpiritualProduct): Record<string, unknown
 
 function parseItems(value: unknown): ProductOrderItemInput[] | null {
   if (!Array.isArray(value) || value.length === 0) return null
-  if (
-    isProductApplePayOneDollarTestEnabled() &&
-    !validateProductApplePayOneDollarTestSingleItem(
-      value.map((entry) => {
-        if (!isRecord(entry)) {
-          return {
-            amount: 0,
-            quantity: 0,
-          }
-        }
-
-        return {
-          amount: 0,
-          quantity: typeof entry.quantity === 'number' ? entry.quantity : 0,
-        }
-      }),
-    )
-  ) {
-    return null
-  }
 
   const items: ProductOrderItemInput[] = []
 
@@ -145,18 +119,13 @@ function parseItems(value: unknown): ProductOrderItemInput[] | null {
 
     const product = productBySlug.get(productSlug)
     if (!product) return null
-    const productSnapshot = buildProductSnapshot(product)
 
     items.push({
       productSlug: product.slug,
       productName: product.name,
-      unitPriceTwd: getProductApplePayOneDollarTestPrice(product.priceTwd),
+      unitPriceTwd: product.priceTwd,
       quantity,
-      productSnapshot: buildProductApplePayOneDollarTestSnapshot({
-        product,
-        productSnapshot,
-        quantity,
-      }),
+      productSnapshot: buildProductSnapshot(product),
     })
   }
 

@@ -13,14 +13,6 @@ import {
   type CartLinePayRequestBody,
 } from './linePayCheckout'
 import {
-  applyProductApplePayOneDollarTestToCartItem,
-  isProductApplePayOneDollarTestEnabled,
-  TEMP_PRODUCT_APPLE_PAY_TEST_NOTICE,
-  TEMP_PRODUCT_APPLE_PAY_TEST_PAYMENT_MODE,
-  TEMP_PRODUCT_APPLE_PAY_TEST_PRICE,
-  validateProductApplePayOneDollarTestSingleItem,
-} from '@/lib/products/productApplePayOneDollarTest'
-import {
   getCartNewebPayButtonState,
   getNewebPayCartCheckoutErrorMessage,
   startNewebPayCartCheckout,
@@ -86,34 +78,19 @@ function submitCartNewebPayForm(input: CartNewebPayFormInput) {
 }
 
 export default function CartPage() {
-  const { items, isLoaded, removeItem } = useCart()
+  const { items, isLoaded, removeItem, totalAmount, totalQuantity } = useCart()
   const [spiritualProductsAccepted, setSpiritualProductsAccepted] = useState(false)
   const [postOfficeShippingInfo, setPostOfficeShippingInfo] = useState<PostOfficeShippingInfo>(emptyPostOfficeShippingInfo)
   const [checkoutError, setCheckoutError] = useState('')
   const [isNewebPayCheckingOut, setIsNewebPayCheckingOut] = useState(false)
-  const [isProductApplePayTestCheckingOut, setIsProductApplePayTestCheckingOut] = useState(false)
   const [isLinePayCheckingOut, setIsLinePayCheckingOut] = useState(false)
   const [linePayReturnMessage, setLinePayReturnMessage] = useState<CartLinePayReturnMessage>(() =>
     buildLinePayReturnMessage(null),
   )
 
-  const isProductApplePayTestMode = isProductApplePayOneDollarTestEnabled()
-  const displayItems = useMemo(() => items.map(applyProductApplePayOneDollarTestToCartItem), [items])
-  const displayTotalQuantity = useMemo(
-    () => displayItems.reduce((total, item) => total + item.quantity, 0),
-    [displayItems],
-  )
-  const displayTotalAmount = useMemo(
-    () => displayItems.reduce((total, item) => total + item.amount * item.quantity, 0),
-    [displayItems],
-  )
-  const formattedTotal = useMemo(() => `NT$${displayTotalAmount.toLocaleString('zh-TW')}`, [displayTotalAmount])
-  const hasSpiritualProduct = displayItems.some((item) => item.type === 'spiritual_product')
+  const formattedTotal = useMemo(() => `NT$${totalAmount.toLocaleString('zh-TW')}`, [totalAmount])
+  const hasSpiritualProduct = items.some((item) => item.type === 'spiritual_product')
   const newebPayButtonState = getCartNewebPayButtonState(isNewebPayCheckingOut)
-  const productApplePayTestButtonState = getCartNewebPayButtonState(
-    isProductApplePayTestCheckingOut,
-    TEMP_PRODUCT_APPLE_PAY_TEST_PAYMENT_MODE,
-  )
   const linePayButtonState = getCartLinePayButtonState(undefined, isLinePayCheckingOut)
 
   const updatePostOfficeShippingInfo = (key: keyof PostOfficeShippingInfo, value: string) => {
@@ -194,7 +171,7 @@ export default function CartPage() {
     const shippingInfo = getValidatedShippingInfo()
     if (!shippingInfo) return
 
-    const productItems = displayItems.filter((item) => item.type === 'spiritual_product')
+    const productItems = items.filter((item) => item.type === 'spiritual_product')
     setIsLinePayCheckingOut(true)
     setCheckoutError('')
     savePostOfficeShippingInfo(shippingInfo)
@@ -267,7 +244,7 @@ export default function CartPage() {
     const shippingInfo = getValidatedShippingInfo()
     if (!shippingInfo) return
 
-    const productItems = displayItems.filter((item) => item.type === 'spiritual_product')
+    const productItems = items.filter((item) => item.type === 'spiritual_product')
     setIsNewebPayCheckingOut(true)
     setCheckoutError('')
     savePostOfficeShippingInfo(shippingInfo)
@@ -335,86 +312,6 @@ export default function CartPage() {
     }
   }
 
-  const handleProductApplePayTestCheckoutClick = async () => {
-    if (isProductApplePayTestCheckingOut) return
-
-    const shippingInfo = getValidatedShippingInfo()
-    if (!shippingInfo) return
-
-    const productItems = displayItems.filter((item) => item.type === 'spiritual_product')
-    if (!validateProductApplePayOneDollarTestSingleItem(productItems)) {
-      setCheckoutError('Apple Pay 1 元測試請只保留 1 件商品。')
-      return
-    }
-
-    setIsProductApplePayTestCheckingOut(true)
-    setCheckoutError('')
-    savePostOfficeShippingInfo(shippingInfo)
-
-    const result = await startNewebPayCartCheckout({
-      cartItems: productItems,
-      customerInfo: {
-        customerName: shippingInfo.recipientName,
-        customerPhone: shippingInfo.recipientPhone,
-        recipientName: shippingInfo.recipientName,
-        recipientPhone: shippingInfo.recipientPhone,
-        postalCode: shippingInfo.postalCode,
-        address: `${shippingInfo.city}${shippingInfo.district}${shippingInfo.address}`,
-        note: shippingInfo.note,
-      },
-      paymentMode: TEMP_PRODUCT_APPLE_PAY_TEST_PAYMENT_MODE,
-      createProductOrder: async (input: CartNewebPayCreateProductOrderInput) => {
-        const response = await fetch('/api/product-orders/create', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            ...input,
-            paymentMethod: 'newebpay',
-          }),
-        })
-        const data = await response.json().catch(() => null)
-
-        if (!response.ok || !data || data.ok !== true) {
-          throw new Error('newebpay_create_order_failed')
-        }
-
-        return {
-          ...data,
-          productOrderId: data.productOrderId ?? data.orderId,
-        }
-      },
-      createNewebPayPayment: async (body: CartNewebPayPaymentRequestBody) => {
-        const response = await fetch('/api/payments/newebpay/create', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            itemKey: 'spiritual_product_order',
-            source: 'product_order',
-            paymentMode: body.paymentMode,
-            orderId: body.productOrderId,
-          }),
-        })
-        const data = await response.json().catch(() => null)
-
-        if (!response.ok || !data || data.ok !== true) {
-          throw new Error('newebpay_payment_create_failed')
-        }
-
-        return data
-      },
-      submitNewebPayForm: submitCartNewebPayForm,
-    })
-
-    if (!result.ok) {
-      setCheckoutError(getNewebPayCartCheckoutErrorMessage(result.error))
-      setIsProductApplePayTestCheckingOut(false)
-    }
-  }
-
   return (
     <div className="bg-white py-12 md:py-16">
       <div className="section-shell grid gap-7">
@@ -428,16 +325,6 @@ export default function CartPage() {
           <section className={`rounded-2xl border p-5 shadow-soft ${getLinePayReturnMessageClassName(linePayReturnMessage.tone)}`}>
             <p className="font-serifTC text-xl font-semibold">{linePayReturnMessage.title}</p>
             <p className="mt-2 text-sm leading-6">{linePayReturnMessage.message}</p>
-          </section>
-        ) : null}
-
-        {isProductApplePayTestMode ? (
-          <section className="rounded-2xl border border-[#f0cf8a] bg-[#fff8e7] p-5 text-deepPurple shadow-soft">
-            <p className="font-serifTC text-xl font-semibold">Apple Pay 1 元商品測試</p>
-            <p className="mt-2 text-sm leading-6 text-textMuted">{TEMP_PRODUCT_APPLE_PAY_TEST_NOTICE}</p>
-            <p className="mt-2 text-sm leading-6 text-textMuted">
-              實刷前請確認購物車只有 1 件開運商品，測試金額固定為 NT${TEMP_PRODUCT_APPLE_PAY_TEST_PRICE}。
-            </p>
           </section>
         ) : null}
 
@@ -466,20 +353,11 @@ export default function CartPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {displayItems.map((item) => (
+                    {items.map((item) => (
                       <tr key={`${item.type}-${item.id}`} className="border-b border-borderSoft/70">
                         <td className="py-4 pr-4 font-semibold text-textDark">{item.itemName}</td>
                         <td className="py-4 pr-4">{typeLabel[item.type] ?? item.type}</td>
-                        <td className="py-4 pr-4">
-                          <div className="grid gap-1">
-                            <span>NT${item.amount.toLocaleString('zh-TW')}</span>
-                            {'originalAmountTwd' in item && typeof item.originalAmountTwd === 'number' ? (
-                              <span className="text-xs text-textMuted">
-                                原價 <span className="line-through">NT${item.originalAmountTwd.toLocaleString('zh-TW')}</span>
-                              </span>
-                            ) : null}
-                          </div>
-                        </td>
+                        <td className="py-4 pr-4">NT${item.amount.toLocaleString('zh-TW')}</td>
                         <td className="py-4 pr-4">{item.quantity}</td>
                         <td className="py-4 pr-4">未付款</td>
                         <td className="py-4">
@@ -640,24 +518,10 @@ export default function CartPage() {
 
               <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-borderSoft pt-6">
                 <div>
-                  <p className="text-sm text-textMuted">小計（{displayTotalQuantity} 件）</p>
+                  <p className="text-sm text-textMuted">小計（{totalQuantity} 件）</p>
                   <p className="mt-1 font-serifTC text-2xl font-semibold text-deepPurple">{formattedTotal}</p>
                 </div>
                 <div className="flex gap-3">
-                  {isProductApplePayTestMode && productApplePayTestButtonState.visible && hasSpiritualProduct ? (
-                    <div className="grid gap-2">
-                      <button
-                        aria-busy={isProductApplePayTestCheckingOut}
-                        className="focus-ring rounded-xl bg-black px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
-                        disabled={productApplePayTestButtonState.disabled}
-                        onClick={handleProductApplePayTestCheckoutClick}
-                        type="button"
-                      >
-                        {productApplePayTestButtonState.label}
-                      </button>
-                      <p className="max-w-48 text-xs leading-5 text-textMuted">{productApplePayTestButtonState.message}</p>
-                    </div>
-                  ) : null}
                   {newebPayButtonState.visible && hasSpiritualProduct ? (
                     <div className="grid gap-2">
                       <button
@@ -669,11 +533,7 @@ export default function CartPage() {
                       >
                         {newebPayButtonState.label}
                       </button>
-                      <p className="max-w-44 text-xs leading-5 text-textMuted">
-                        {isProductApplePayTestMode
-                          ? '目前為 Apple Pay 1 元測試，建議使用 Apple Pay 測試按鈕。'
-                          : newebPayButtonState.message}
-                      </p>
+                      <p className="max-w-44 text-xs leading-5 text-textMuted">{newebPayButtonState.message}</p>
                     </div>
                   ) : null}
                   {linePayButtonState.visible && hasSpiritualProduct ? (

@@ -4,11 +4,6 @@ import { useState } from 'react'
 import { ShoppingCart, Sparkles } from 'lucide-react'
 import { useCart } from '@/components/CartContext'
 import { spiritualProducts, type SpiritualProduct } from '@/lib/spiritualProducts'
-import {
-  getProductApplePayOneDollarTestPrice,
-  isProductApplePayOneDollarTestEnabled,
-  TEMP_PRODUCT_APPLE_PAY_TEST_NOTICE,
-} from '@/lib/products/productApplePayOneDollarTest'
 
 const careNotes = [
   '符咒請保持乾淨、乾燥，避免碰水、受潮或沾染髒污。',
@@ -87,8 +82,6 @@ function ProductCard({ product }: { product: SpiritualProduct }) {
   const [added, setAdded] = useState(false)
   const [hasAcceptedNotice, setHasAcceptedNotice] = useState(false)
   const [noticeError, setNoticeError] = useState('')
-  const isApplePayTestMode = isProductApplePayOneDollarTestEnabled()
-  const displayPriceTwd = getProductApplePayOneDollarTestPrice(product.priceTwd)
 
   const handleAddToCart = () => {
     if (!hasAcceptedNotice) {
@@ -100,7 +93,7 @@ function ProductCard({ product }: { product: SpiritualProduct }) {
       type: 'spiritual_product',
       id: product.slug,
       itemName: product.name,
-      amount: displayPriceTwd,
+      amount: product.priceTwd,
       quantity: 1,
     })
     setNoticeError('')
@@ -139,14 +132,7 @@ function ProductCard({ product }: { product: SpiritualProduct }) {
         </div>
 
         <div className="mt-auto pt-5">
-          <div className="grid gap-1">
-            <p className="font-serifTC text-2xl font-semibold text-textDark">NT${displayPriceTwd.toLocaleString('zh-TW')}</p>
-            {isApplePayTestMode ? (
-              <p className="text-sm text-textMuted">
-                原價 <span className="line-through">NT${product.priceTwd.toLocaleString('zh-TW')}</span>
-              </p>
-            ) : null}
-          </div>
+          <p className="font-serifTC text-2xl font-semibold text-textDark">NT${product.priceTwd.toLocaleString('zh-TW')}</p>
 
           <div className="mt-4 rounded-2xl border border-borderSoft bg-softPurple p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -225,13 +211,6 @@ export default function SpiritualProductsPage() {
 
       <section className="py-10 md:py-14">
         <div className="section-shell grid gap-8">
-          {isProductApplePayOneDollarTestEnabled() ? (
-            <section className="rounded-2xl border border-[#f0cf8a] bg-[#fff8e7] p-5 text-deepPurple shadow-soft">
-              <p className="font-serifTC text-xl font-semibold">Apple Pay 1 元測試模式</p>
-              <p className="mt-2 text-sm leading-6 text-textMuted">{TEMP_PRODUCT_APPLE_PAY_TEST_NOTICE}</p>
-            </section>
-          ) : null}
-
           <section className="rounded-2xl border border-borderSoft bg-softPurple p-6 md:p-8">
             <div className="grid gap-8 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
               <div>

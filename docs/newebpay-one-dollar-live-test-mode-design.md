@@ -91,37 +91,6 @@
 - 尚未套進正式商品 / 課程 / 占卜 / AI 命盤流程。
 - 測完需關閉全部測試 flag。
 
-### 22J-29 臨時商品 Apple Pay 1 元正式測試版
-
-已新增臨時商品測試流程：
-
-- 商品測試說明頁：`/apple-pay-test`
-- 商品前台：`/spiritual-products`
-- 購物車：`/cart`
-- 臨時 helper：`src/lib/products/productApplePayOneDollarTest.ts`
-- 文件：`docs/TEMP-product-apple-pay-one-dollar-test.md`
-
-目前狀態：
-
-- `TEMP_ENABLE_PRODUCT_APPLE_PAY_ONE_DOLLAR_TEST=true`
-- 商品前台顯示 NT$1，原價以刪除線保留。
-- cart 顯示 NT$1。
-- product_order 建立時 `total_amount` 與 item subtotal 都是 NT$1。
-- 測試期間 Apple Pay 付款限制只保留 1 件商品。
-- NewebPay payment mode 使用 `product_order_apple_pay_test`。
-- MPG payload 只送 `APPLEPAY=1` 與 `InstFlag=0`。
-
-不得送：
-
-- `CREDIT=1`
-- `LINEPAY=1`
-- `VACC=1`
-- `ANDROIDPAY=1`
-- `SAMSUNGPAY=1`
-- provider `line_pay`
-
-測完必須下一包 revert 回正式價格與正式商品流程。
-
 ## 四、測試模式行為
 
 ### 1. 課程付款

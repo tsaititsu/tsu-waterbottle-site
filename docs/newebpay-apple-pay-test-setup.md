@@ -22,24 +22,6 @@ Apple Pay 目前只做 1 元內部測試：
 - AI 命盤付款
 - 官方 LINE Pay `provider=line_pay`
 
-### 22J-29 商品正式流程臨時測試入口
-
-22J-29 另新增商品正式流程測試入口：
-
-- 說明頁：`/apple-pay-test`
-- 商品頁：`/spiritual-products`
-- 購物車：`/cart`
-- payment mode：`product_order_apple_pay_test`
-
-這條路線會建立正式 `product_order` 與 `provider=newebpay` pending payment，並等待既有 Notify paid sync `product_orders`。
-
-注意：
-
-- 這是臨時測試包，測完必須 revert。
-- 商品前台與 cart 暫時顯示 / 結帳 NT$1。
-- 實刷前需確認購物車只有 1 件商品。
-- 不使用 `/internal/newebpay/apple-pay-test` 作為主要商品測試入口。
-
 ## 二、測試用途
 
 此入口只用來確認 Apple Pay 內部實刷流程：

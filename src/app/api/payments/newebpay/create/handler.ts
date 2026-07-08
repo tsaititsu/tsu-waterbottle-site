@@ -28,18 +28,11 @@ import {
 } from '../../../../../lib/newebpay/paymentForm'
 import { getNewebPayPaymentItem } from '../../../../../lib/newebpay/paymentItems'
 import {
-  buildProductOrderApplePayOneDollarTestPaymentMapping,
   buildProductOrderPaymentMapping,
-  PRODUCT_ORDER_PAYMENT_ITEM_KEY,
-  PRODUCT_ORDER_PAYMENT_SOURCE,
   validateProductOrderPayableForNewebpay,
   type ProductOrderForPayment,
   type ProductOrderPaymentMapping,
 } from '../../../../../lib/payments/productOrderPayment'
-import {
-  isProductApplePayOneDollarTestEnabled,
-  TEMP_PRODUCT_APPLE_PAY_TEST_PAYMENT_MODE,
-} from '../../../../../lib/products/productApplePayOneDollarTest'
 import type { CreatePendingPaymentInput } from '../../../../../lib/supabase/payments'
 import type { NewebPayConfig } from '../../../../../lib/newebpay/types'
 import type { DivinationReadingPaymentContext } from '../../../../../lib/supabase/divinationReadings'
@@ -180,10 +173,6 @@ function applePayTestDisabledResponse() {
 
 function applePayTestInvalidRequestResponse() {
   return NextResponse.json({ ok: false, error: 'invalid_apple_pay_test_request' }, { status: 400 })
-}
-
-function productApplePayTestDisabledResponse() {
-  return NextResponse.json({ ok: false, error: 'product_apple_pay_test_disabled' }, { status: 403 })
 }
 
 function divinationPaymentLinkErrorResponse(input: {
@@ -327,17 +316,6 @@ export async function handleCreateNewebPayPaymentRequest(
     }
   }
 
-  if (
-    paymentMode === TEMP_PRODUCT_APPLE_PAY_TEST_PAYMENT_MODE &&
-    (item.itemKey !== PRODUCT_ORDER_PAYMENT_ITEM_KEY || source !== PRODUCT_ORDER_PAYMENT_SOURCE)
-  ) {
-    return NextResponse.json({ ok: false, error: 'invalid_product_order_payment_input' }, { status: 400 })
-  }
-
-  if (paymentMode === TEMP_PRODUCT_APPLE_PAY_TEST_PAYMENT_MODE && !isProductApplePayOneDollarTestEnabled()) {
-    return productApplePayTestDisabledResponse()
-  }
-
   const bookingIdResolution = resolveNewebPayBookingIdForPayment({
     itemKey: item.itemKey,
     source,
@@ -464,10 +442,7 @@ export async function handleCreateNewebPayPaymentRequest(
       if (!order) {
         throw new Error('product_order_not_found')
       }
-      productOrderPayment =
-        paymentMode === TEMP_PRODUCT_APPLE_PAY_TEST_PAYMENT_MODE
-          ? buildProductOrderApplePayOneDollarTestPaymentMapping(order)
-          : buildProductOrderPaymentMapping(order)
+      productOrderPayment = buildProductOrderPaymentMapping(order)
     } catch (error) {
       return productOrderValidationErrorResponse(error)
     }

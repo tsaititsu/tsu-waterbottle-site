@@ -5,7 +5,6 @@ import { generateNewebPayMerchantOrderNo } from './orderNo'
 import { getNewebPayPaymentItem, type NewebPayPaymentItemKey } from './paymentItems'
 import type { NewebPayConfig } from './types'
 import type { NewebPayApplePayTestPaymentMode } from './applePayTestPayment'
-import type { ProductApplePayOneDollarTestPaymentMode } from '../products/productApplePayOneDollarTest'
 import {
   PRODUCT_ORDER_PAYMENT_ITEM_KEY,
   type ProductOrderPaymentMapping,
@@ -19,10 +18,7 @@ export type NewebPayPaymentSource =
   | 'product_order'
   | 'manual_test'
 export type StandardNewebPayPaymentMode = 'credit' | 'merchant_default'
-export type NewebPayPaymentMode =
-  | StandardNewebPayPaymentMode
-  | NewebPayApplePayTestPaymentMode
-  | ProductApplePayOneDollarTestPaymentMode
+export type NewebPayPaymentMode = StandardNewebPayPaymentMode | NewebPayApplePayTestPaymentMode
 
 export type NewebPayBookingPaymentContext = {
   id: string
@@ -176,12 +172,7 @@ const allowedSources = new Set<NewebPayPaymentSource>([
   'product_order',
   'manual_test',
 ])
-const allowedPaymentModes = new Set<NewebPayPaymentMode>([
-  'credit',
-  'merchant_default',
-  'apple_pay_test',
-  'product_order_apple_pay_test',
-])
+const allowedPaymentModes = new Set<NewebPayPaymentMode>(['credit', 'merchant_default', 'apple_pay_test'])
 
 export function isNewebPayPaymentSource(source: unknown): source is NewebPayPaymentSource {
   return typeof source === 'string' && allowedSources.has(source as NewebPayPaymentSource)
@@ -192,7 +183,7 @@ export function isNewebPayPaymentMode(mode: unknown): mode is NewebPayPaymentMod
 }
 
 function assertStandardNewebPayPaymentMode(paymentMode: NewebPayPaymentMode): StandardNewebPayPaymentMode {
-  if (paymentMode === 'apple_pay_test' || paymentMode === 'product_order_apple_pay_test') {
+  if (paymentMode === 'apple_pay_test') {
     throw new Error('invalid_newebpay_payment_mode_for_item')
   }
 
@@ -562,7 +553,7 @@ export function createNewebPayMpgPaymentData({
     tradeInfoParams.CREDIT = 1
   }
 
-  if (paymentMode === 'apple_pay_test' || paymentMode === 'product_order_apple_pay_test') {
+  if (paymentMode === 'apple_pay_test') {
     tradeInfoParams.APPLEPAY = 1
   }
 
