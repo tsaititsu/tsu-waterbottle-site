@@ -21,6 +21,8 @@ export type HandleProductOrderLinePayConfirmRedirectInput = {
   requestStatusChecker?: ProductOrderLinePayRequestStatusChecker
   paymentDetailsGetter?: ProductOrderLinePayPaymentDetailsGetter
   paymentMetadataUpdater?: ProductOrderLinePayPaymentMetadataUpdater
+  paymentPaidMarker?: ProductOrderLinePayPaymentPaidMarker
+  productOrderPaidSyncer?: ProductOrderLinePayProductOrderPaidSyncer
 }
 
 export type ProductOrderLinePayConfirmPaymentContext = {
@@ -110,6 +112,32 @@ export type ProductOrderLinePayPaymentMetadataUpdaterInput = {
 
 export type ProductOrderLinePayPaymentMetadataUpdater = (
   input: ProductOrderLinePayPaymentMetadataUpdaterInput,
+) => Promise<unknown>
+
+export type ProductOrderLinePayPaymentPaidMarkerInput = {
+  paymentId: string
+  provider: 'line_pay'
+  transactionId: string
+  orderId: string
+  amount: number
+  currency: 'TWD'
+  metadata: Record<string, unknown>
+}
+
+export type ProductOrderLinePayPaymentPaidMarker = (
+  input: ProductOrderLinePayPaymentPaidMarkerInput,
+) => Promise<unknown>
+
+export type ProductOrderLinePayProductOrderPaidSyncerInput = {
+  productOrderId: string
+  paymentId: string
+  provider: 'line_pay'
+  transactionId: string
+  orderId: string
+}
+
+export type ProductOrderLinePayProductOrderPaidSyncer = (
+  input: ProductOrderLinePayProductOrderPaidSyncerInput,
 ) => Promise<unknown>
 
 function createErrorResponse(error: string, status: number) {
@@ -295,6 +323,102 @@ function buildLinePayMetadata(input: {
   }
 }
 
+function buildPaidMetadata(input: {
+  metadata: Record<string, unknown>
+  orderId: string
+  transactionId: string
+  markedAt?: string
+}) {
+  const linePay = isRecord(input.metadata.linePay) ? input.metadata.linePay : {}
+  const markedAt = input.markedAt ?? new Date().toISOString()
+
+  return {
+    ...input.metadata,
+    linePay: {
+      ...linePay,
+      paid: {
+        markedAt,
+        provider: 'line_pay',
+        transactionId: input.transactionId,
+        orderId: input.orderId,
+      },
+    },
+  }
+}
+
+function validateSafeToMarkPaid(input: {
+  payment: ProductOrderLinePayConfirmPaymentContext
+  order: ProductOrderLinePayConfirmProductOrderContext
+  linePay: ReturnType<typeof getLinePayRawPayload>
+  orderId: string
+  transactionId: string
+  outcome: LinePayConfirmOutcomeDecision
+}) {
+  if (
+    !input.outcome.shouldMarkPaid ||
+    (input.outcome.outcome !== 'confirmed_paid' && input.outcome.outcome !== 'payment_completed')
+  ) {
+    return {
+      ok: false as const,
+      error: 'line_pay_confirm_not_safe_to_mark_paid',
+    }
+  }
+
+  if (input.payment.provider !== 'line_pay' || input.payment.status !== 'pending') {
+    return {
+      ok: false as const,
+      error: 'line_pay_confirm_paid_provider_mismatch',
+    }
+  }
+
+  if (input.payment.amount !== input.order.total_amount) {
+    return {
+      ok: false as const,
+      error: 'line_pay_confirm_paid_amount_mismatch',
+    }
+  }
+
+  if (input.payment.currency !== 'TWD' || input.order.currency !== 'TWD') {
+    return {
+      ok: false as const,
+      error: 'line_pay_confirm_paid_currency_mismatch',
+    }
+  }
+
+  if (input.order.payment_id !== input.payment.id || input.order.payment_status === 'paid') {
+    return {
+      ok: false as const,
+      error: 'line_pay_confirm_not_safe_to_mark_paid',
+    }
+  }
+
+  if (!input.linePay || input.linePay.transactionId !== input.transactionId) {
+    return {
+      ok: false as const,
+      error: 'line_pay_confirm_paid_transaction_id_mismatch',
+    }
+  }
+
+  if (input.payment.merchant_order_no !== input.orderId || input.linePay.orderId !== input.orderId) {
+    return {
+      ok: false as const,
+      error: 'line_pay_confirm_paid_order_id_mismatch',
+    }
+  }
+
+  return {
+    ok: true as const,
+  }
+}
+
+function isSuccessfulProductOrderPaidSyncResult(value: unknown) {
+  if (!isRecord(value) || typeof value.result !== 'string') {
+    return true
+  }
+
+  return value.result === 'synced' || value.result === 'already_paid'
+}
+
 function validatePaymentPreflight(
   payment: ProductOrderLinePayConfirmPaymentContext | null,
   orderId: string,
@@ -440,6 +564,8 @@ export async function handleProductOrderLinePayConfirmRedirect({
   requestStatusChecker,
   paymentDetailsGetter,
   paymentMetadataUpdater,
+  paymentPaidMarker,
+  productOrderPaidSyncer,
 }: HandleProductOrderLinePayConfirmRedirectInput): Promise<Response> {
   if (request.method !== 'GET') {
     return createErrorResponse('method_not_allowed', 405)
@@ -644,14 +770,85 @@ export async function handleProductOrderLinePayConfirmRedirect({
   }
 
   const verifiedPaid = outcome.shouldMarkPaid
+  const paidSafety = validateSafeToMarkPaid({
+    payment: payablePayment,
+    order: payableOrder,
+    linePay,
+    orderId,
+    transactionId,
+    outcome,
+  })
+
+  if (!paidSafety.ok) {
+    return NextResponse.json(
+      {
+        ok: false,
+        provider: 'line_pay',
+        error: paidSafety.error,
+        confirmed: false,
+        markedPaid: false,
+        paymentId: payablePayment.id,
+        productOrderId,
+        orderId,
+        transactionId,
+        amount: payableOrder.total_amount,
+        currency: 'TWD',
+        outcome: outcome.outcome,
+      },
+      { status: 202 },
+    )
+  }
+
+  if (typeof paymentPaidMarker !== 'function') {
+    return createErrorResponse('line_pay_payment_paid_marker_missing', 500)
+  }
+
+  if (typeof productOrderPaidSyncer !== 'function') {
+    return createErrorResponse('line_pay_product_order_paid_syncer_missing', 500)
+  }
+
+  const paidMetadata = buildPaidMetadata({
+    metadata,
+    orderId,
+    transactionId,
+  })
+
+  try {
+    await paymentPaidMarker({
+      paymentId: payablePayment.id,
+      provider: 'line_pay',
+      transactionId,
+      orderId,
+      amount: payableOrder.total_amount,
+      currency: 'TWD',
+      metadata: paidMetadata,
+    })
+  } catch {
+    return createErrorResponse('line_pay_payment_mark_paid_failed', 500)
+  }
+
+  try {
+    const syncResult = await productOrderPaidSyncer({
+      productOrderId,
+      paymentId: payablePayment.id,
+      provider: 'line_pay',
+      transactionId,
+      orderId,
+    })
+
+    if (!isSuccessfulProductOrderPaidSyncResult(syncResult)) {
+      return createErrorResponse('line_pay_product_order_sync_paid_failed', 500)
+    }
+  } catch {
+    return createErrorResponse('line_pay_product_order_sync_paid_failed', 500)
+  }
 
   return NextResponse.json(
     {
-      ok: verifiedPaid,
+      ok: true,
       provider: 'line_pay',
-      ...(verifiedPaid ? {} : { error: 'line_pay_confirm_requires_manual_or_followup_check' }),
       confirmed: verifiedPaid,
-      markedPaid: false,
+      markedPaid: true,
       paymentId: payablePayment.id,
       productOrderId,
       orderId,
@@ -660,6 +857,6 @@ export async function handleProductOrderLinePayConfirmRedirect({
       currency: 'TWD',
       outcome: outcome.outcome,
     },
-    { status: verifiedPaid ? 200 : 202 },
+    { status: 200 },
   )
 }

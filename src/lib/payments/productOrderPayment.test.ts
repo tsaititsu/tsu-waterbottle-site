@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import {
   buildProductOrderPaymentMapping,
   createProductOrderLinePayPendingPayment,
+  markProductOrderLinePayPaymentPaid,
   PRODUCT_ORDER_PAYMENT_ITEM_KEY,
   PRODUCT_ORDER_PAYMENT_ITEM_TYPE,
   PRODUCT_ORDER_PAYMENT_SOURCE,
@@ -526,6 +527,130 @@ async function runAsyncHelperTests() {
         metadataUpdateMock.supabase,
       ),
     /invalid_product_order_line_pay_metadata/,
+  )
+
+  const paidMock = createMockSupabase({})
+  const paidResult = await markProductOrderLinePayPaymentPaid(
+    {
+      paymentId,
+      provider: 'line_pay',
+      transactionId: '2026070700000000001',
+      orderId: 'LP_product_order_c0bd4cbf-64db-4e2d-a1d7-e2215d96802b_20260707153000',
+      amount: 1500,
+      currency: 'TWD',
+      metadata: {
+        linePay: {
+          orderId: 'LP_product_order_c0bd4cbf-64db-4e2d-a1d7-e2215d96802b_20260707153000',
+          sourceType: 'product_order',
+          sourceId: payableOrder.id,
+          transactionId: '2026070700000000001',
+          confirm: {
+            returnCode: '0000',
+            returnMessage: 'Success.',
+            orderId: 'LP_product_order_c0bd4cbf-64db-4e2d-a1d7-e2215d96802b_20260707153000',
+            transactionId: '2026070700000000001',
+          },
+          outcome: {
+            outcome: 'confirmed_paid',
+            shouldMarkPaid: true,
+          },
+          paid: {
+            markedAt: '2026-07-07T07:30:00.000Z',
+            provider: 'line_pay',
+            transactionId: '2026070700000000001',
+            orderId: 'LP_product_order_c0bd4cbf-64db-4e2d-a1d7-e2215d96802b_20260707153000',
+          },
+        },
+      },
+      paidAt: '2026-07-07T07:31:00.000Z',
+    },
+    paidMock.supabase,
+  )
+
+  assert.deepEqual(paidResult, {
+    paymentId,
+  })
+  assert.deepEqual(paidMock.calls.tables, ['payments'])
+  assert.equal(paidMock.calls.updates.length, 1)
+  assert.equal(paidMock.calls.updates[0].status, 'paid')
+  assert.equal(paidMock.calls.updates[0].provider_trade_no, '2026070700000000001')
+  assert.equal(paidMock.calls.updates[0].paid_at, '2026-07-07T07:31:00.000Z')
+  assert.equal(paidMock.calls.updates[0].updated_at, '2026-07-07T07:31:00.000Z')
+  assert.equal((paidMock.calls.updates[0].raw_payload as Record<string, unknown>) !== undefined, true)
+  assert.deepEqual(paidMock.calls.eqs, [
+    ['id', paymentId],
+    ['provider', 'line_pay'],
+    ['status', 'pending'],
+    ['amount_twd', 1500],
+    ['currency', 'TWD'],
+    ['merchant_order_no', 'LP_product_order_c0bd4cbf-64db-4e2d-a1d7-e2215d96802b_20260707153000'],
+  ])
+  assertNoSecretOrCustomerKeys(paidMock.calls.updates[0])
+
+  await assert.rejects(
+    () =>
+      markProductOrderLinePayPaymentPaid(
+        {
+          paymentId,
+          provider: 'newebpay' as 'line_pay',
+          transactionId: '2026070700000000001',
+          orderId: 'LP_product_order_c0bd4cbf-64db-4e2d-a1d7-e2215d96802b_20260707153000',
+          amount: 1500,
+          currency: 'TWD',
+          metadata: {
+            linePay: {
+              orderId: 'LP_product_order_c0bd4cbf-64db-4e2d-a1d7-e2215d96802b_20260707153000',
+            },
+          },
+        },
+        paidMock.supabase,
+      ),
+    /invalid_product_order_line_pay_input/,
+  )
+
+  await assert.rejects(
+    () =>
+      markProductOrderLinePayPaymentPaid(
+        {
+          paymentId,
+          provider: 'line_pay',
+          transactionId: '2026070700000000001',
+          orderId: 'LP_product_order_c0bd4cbf-64db-4e2d-a1d7-e2215d96802b_20260707153000',
+          amount: 1500,
+          currency: 'TWD',
+          metadata: {
+            linePay: {
+              channelSecret: 'unsafe',
+            },
+          },
+        },
+        paidMock.supabase,
+      ),
+    /invalid_product_order_line_pay_metadata/,
+  )
+
+  const paidFailureMock = createMockSupabase({
+    updateError: { message: 'raw paid update failure' },
+  })
+  await assert.rejects(
+    () =>
+      markProductOrderLinePayPaymentPaid(
+        {
+          paymentId,
+          provider: 'line_pay',
+          transactionId: '2026070700000000001',
+          orderId: 'LP_product_order_c0bd4cbf-64db-4e2d-a1d7-e2215d96802b_20260707153000',
+          amount: 1500,
+          currency: 'TWD',
+          metadata: {
+            linePay: {
+              orderId: 'LP_product_order_c0bd4cbf-64db-4e2d-a1d7-e2215d96802b_20260707153000',
+            },
+          },
+        },
+        paidFailureMock.supabase,
+      ),
+    /product_order_line_pay_payment_mark_paid_failed/,
   )
 }
 

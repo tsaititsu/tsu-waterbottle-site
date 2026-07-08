@@ -1,9 +1,11 @@
 import { handleProductOrderLinePayConfirmRedirect } from './handler'
 import {
   getProductOrderLinePayConfirmPaymentContext,
+  markProductOrderLinePayPaymentPaid,
   updateProductOrderLinePayPaymentMetadata,
 } from '../../../../../lib/payments/productOrderPayment'
 import { getProductOrderLinePayConfirmContext } from '../../../../../lib/supabase/productOrders'
+import { syncProductOrderAfterPaymentPaid } from '../../../../../lib/supabase/productOrderSync'
 import {
   checkLinePayPaymentRequestStatus,
   confirmLinePayPayment,
@@ -39,5 +41,11 @@ export async function GET(request: Request) {
         fetchFn: fetch,
       }),
     paymentMetadataUpdater: updateProductOrderLinePayPaymentMetadata,
+    paymentPaidMarker: markProductOrderLinePayPaymentPaid,
+    productOrderPaidSyncer: (input) =>
+      syncProductOrderAfterPaymentPaid({
+        orderId: input.productOrderId,
+        paymentId: input.paymentId,
+      }),
   })
 }

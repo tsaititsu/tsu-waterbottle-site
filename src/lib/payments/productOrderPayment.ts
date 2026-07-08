@@ -63,6 +63,21 @@ export type UpdateProductOrderLinePayPaymentMetadataResult = {
   paymentId: string
 }
 
+export type MarkProductOrderLinePayPaymentPaidInput = {
+  paymentId: string
+  provider: 'line_pay'
+  transactionId: string
+  orderId: string
+  amount: number
+  currency: 'TWD'
+  metadata: Record<string, unknown>
+  paidAt?: string | null
+}
+
+export type MarkProductOrderLinePayPaymentPaidResult = {
+  paymentId: string
+}
+
 export type ProductOrderLinePayConfirmPaymentContext = {
   id: string
   provider: string | null
@@ -268,6 +283,50 @@ export async function updateProductOrderLinePayPaymentMetadata(
 
   if (error) {
     throw new Error('product_order_payment_metadata_update_failed')
+  }
+
+  return {
+    paymentId,
+  }
+}
+
+export async function markProductOrderLinePayPaymentPaid(
+  input: MarkProductOrderLinePayPaymentPaidInput,
+  supabase = getSupabaseAdmin(),
+): Promise<MarkProductOrderLinePayPaymentPaidResult> {
+  const paymentId = assertUuid(input.paymentId, 'invalid_product_order_line_pay_payment_id')
+  const orderId = normalizeRequiredText(input.orderId, 'invalid_product_order_line_pay_input')
+  const transactionId = normalizeRequiredText(input.transactionId, 'invalid_product_order_line_pay_input')
+
+  if (input.provider !== 'line_pay' || input.currency !== 'TWD') {
+    throw new Error('invalid_product_order_line_pay_input')
+  }
+
+  if (!Number.isInteger(input.amount) || input.amount <= 0) {
+    throw new Error('invalid_product_order_line_pay_input')
+  }
+
+  assertSafeLinePayMetadata(input.metadata)
+
+  const paidAt = input.paidAt ?? new Date().toISOString()
+  const { error } = await supabase
+    .from('payments')
+    .update({
+      status: 'paid',
+      provider_trade_no: transactionId,
+      paid_at: paidAt,
+      raw_payload: input.metadata,
+      updated_at: paidAt,
+    })
+    .eq('id', paymentId)
+    .eq('provider', 'line_pay')
+    .eq('status', 'pending')
+    .eq('amount_twd', input.amount)
+    .eq('currency', 'TWD')
+    .eq('merchant_order_no', orderId)
+
+  if (error) {
+    throw new Error('product_order_line_pay_payment_mark_paid_failed')
   }
 
   return {
