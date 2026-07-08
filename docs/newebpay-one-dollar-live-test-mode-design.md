@@ -40,17 +40,38 @@
 
 - `ENABLE_NEWEBPAY_ONE_DOLLAR_TEST_MODE`
 - `NEXT_PUBLIC_ENABLE_NEWEBPAY_ONE_DOLLAR_TEST_NOTICE`
+- `NEWEBPAY_ONE_DOLLAR_TEST_PRODUCTION_CONFIRMATION`
 
 建議規則：
 
 - 預設 `false`。
 - production 預設不可開。
 - 若要在 production 實刷 1 元，必須人工確認。
+- production 類環境即使 `ENABLE_NEWEBPAY_ONE_DOLLAR_TEST_MODE=true`，仍需二次確認值。
+- 二次確認值使用固定常數 `CONFIRM_NEWEBPAY_ONE_DOLLAR_TEST`，不是 secret。
 - 開啟前需確認只允許內部測試人員操作。
 - 開啟時前端要明顯顯示「目前為 1 元測試模式」。
 - 關閉後前端不可再顯示測試模式提示。
 - 不可只開後端測試模式而不顯示前端提示。
 - 不可只顯示前端提示而後端仍用正式金額。
+
+### 22J-27 helper 初版
+
+已新增 reusable helper：
+
+- `src/lib/newebpay/oneDollarTestMode.ts`
+- `src/lib/newebpay/oneDollarTestMode.test.ts`
+
+目前 helper 只負責：
+
+- 判斷 1 元測試模式是否開啟。
+- 判斷 production 類環境是否有二次確認。
+- 建立 1 元測試付款 context。
+- 保留原始金額 metadata。
+- 標記 `test_payment=true`。
+- 避免敏感 NewebPay / OpenAI / LINE Pay key 類欄位被放進 metadata。
+
+目前 helper 尚未接入商品 / 課程 / 占卜 / AI 命盤正式流程。
 
 ## 四、測試模式行為
 
@@ -200,7 +221,6 @@ Apple Pay 測試可以使用 1 元，但需要另行小包實作與測試。
 
 ## 九、下一步建議
 
-- 22J-27：實作 NewebPay 1 元測試模式 helper。
 - 22J-28：商品 cart 1 元測試模式。
 - 22J-29：紫微占卜 1 元測試模式。
 - 22J-30：Apple Pay 1 元測試入口。
