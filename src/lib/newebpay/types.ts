@@ -28,6 +28,7 @@ export type CoursePaymentPayload = {
   notifyUrl: string
   returnUrl: string
   clientBackUrl: string
+  instFlag?: '0' | '3,6'
 }
 
 export type NewebPayTradeInfoFields = {
@@ -44,4 +45,5 @@ export type NewebPayTradeInfoFields = {
   ReturnURL: string
   ClientBackURL: string
   CREDIT: '1'
+  InstFlag: '0' | '3,6'
 }

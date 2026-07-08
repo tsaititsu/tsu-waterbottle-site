@@ -21,6 +21,7 @@ function encodeTradeInfo(fields: NewebPayTradeInfoFields) {
   params.set('ReturnURL', fields.ReturnURL)
   params.set('ClientBackURL', fields.ClientBackURL)
   params.set('CREDIT', fields.CREDIT)
+  params.set('InstFlag', fields.InstFlag)
   return params.toString()
 }
 
@@ -56,6 +57,7 @@ export function buildCoursePaymentTradeInfoFields(
     ReturnURL: payload.returnUrl,
     ClientBackURL: payload.clientBackUrl,
     CREDIT: '1',
+    InstFlag: payload.instFlag ?? '0',
   }
 }
 

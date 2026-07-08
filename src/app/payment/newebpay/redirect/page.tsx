@@ -130,6 +130,7 @@ export default async function NewebPayRedirectPage({ searchParams }: RedirectPag
         notifyUrl: `${config.siteUrl}/api/payments/newebpay/notify`,
         returnUrl: `${config.siteUrl}/api/payments/newebpay/return`,
         clientBackUrl: payment.item_type === 'course' ? `${config.siteUrl}/account/courses` : `${config.siteUrl}/payment/newebpay/test`,
+        instFlag: payment.item_type === 'course' ? '3,6' : '0',
       },
       config,
     )

@@ -399,6 +399,7 @@ assert.equal(verifyTradeSha(data.fields.TradeInfo, data.fields.TradeSha, hashKey
 assert.equal(decrypted.get('Amt'), '3600')
 assert.equal(decrypted.get('ItemDesc'), '水瓶先生論命')
 assert.equal(decrypted.get('CREDIT'), '1')
+assert.equal(decrypted.get('InstFlag'), '0')
 assert.equal(decrypted.has('LINEPAY'), false)
 assert.equal(
   decrypted.get('NotifyURL'),
@@ -426,6 +427,7 @@ assert.equal(smokeData.amount, 1)
 assert.equal(decryptedSmoke.get('Amt'), '1')
 assert.equal(decryptedSmoke.get('ItemDesc'), '藍新正式環境測試付款')
 assert.equal(decryptedSmoke.get('CREDIT'), '1')
+assert.equal(decryptedSmoke.get('InstFlag'), '0')
 assert.equal(decryptedSmoke.has('LINEPAY'), false)
 
 const divinationData = createNewebPayMpgPaymentData({
@@ -441,6 +443,7 @@ assert.equal(divinationData.amount, 50)
 assert.equal(decryptedDivination.get('Amt'), '50')
 assert.equal(decryptedDivination.get('ItemDesc'), '紫微牌卡占卜單次')
 assert.equal(decryptedDivination.get('CREDIT'), '1')
+assert.equal(decryptedDivination.get('InstFlag'), '0')
 assert.equal(decryptedDivination.get('ClientBackURL'), 'http://localhost:3000/ai-divination')
 assert.equal(decryptedDivination.has('LINEPAY'), false)
 
@@ -457,6 +460,7 @@ assert.equal(aiChartData.amount, 100)
 assert.equal(decryptedAiChart.get('Amt'), '100')
 assert.equal(decryptedAiChart.get('ItemDesc'), 'AI 命盤分析')
 assert.equal(decryptedAiChart.get('CREDIT'), '1')
+assert.equal(decryptedAiChart.get('InstFlag'), '0')
 assert.equal(decryptedAiChart.get('ClientBackURL'), 'http://localhost:3000/ai-chart')
 assert.equal(decryptedAiChart.has('LINEPAY'), false)
 
@@ -488,6 +492,7 @@ assert.equal(productOrderData.amount, 1500)
 assert.equal(decryptedProductOrder.get('Amt'), '1500')
 assert.equal(decryptedProductOrder.get('ItemDesc'), `開運商品訂單 ${productOrderNo}`)
 assert.equal(decryptedProductOrder.get('CREDIT'), '1')
+assert.equal(decryptedProductOrder.get('InstFlag'), '0')
 assert.equal(decryptedProductOrder.get('ClientBackURL'), 'http://localhost:3000/cart')
 assert.equal(decryptedProductOrder.has('LINEPAY'), false)
 
@@ -672,3 +677,4 @@ for (const paymentTool of [
 ]) {
   assert.equal(decryptedMerchantDefault.has(paymentTool), false)
 }
+assert.equal(decryptedMerchantDefault.get('InstFlag'), '0')

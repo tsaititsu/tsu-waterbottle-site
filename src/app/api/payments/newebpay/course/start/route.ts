@@ -92,6 +92,7 @@ export async function POST(request: Request) {
         notifyUrl: buildNewebPayMerchantOrderUrl(config.siteUrl, '/api/payments/newebpay/notify', merchantOrderNo),
         returnUrl: buildNewebPayMerchantOrderUrl(config.siteUrl, '/api/payments/newebpay/return', merchantOrderNo),
         clientBackUrl: `${config.siteUrl}/account/courses`,
+        instFlag: '3,6',
       },
       config,
     )

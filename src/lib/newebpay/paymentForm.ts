@@ -536,6 +536,7 @@ export function createNewebPayMpgPaymentData({
     NotifyURL: buildMerchantOrderUrl(config.siteUrl, '/api/payments/newebpay/notify', merchantOrderNo),
     ClientBackURL: buildClientBackUrl(config.siteUrl, item.itemKey),
     LangType: 'zh-tw',
+    InstFlag: 0,
   }
 
   if (paymentMode === 'credit') {

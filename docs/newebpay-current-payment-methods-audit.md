@@ -59,6 +59,7 @@
 | `ESUNWALLET` | 否 | 未使用 |
 | `TWQR` | 否 | 未使用 |
 | `AFTEE` | 否 | 未使用 |
+| `InstFlag` | 是，課程付款送 `InstFlag=3,6`，非課程 NewebPay payment helper 送 `InstFlag=0` | 課程限定信用卡分期 |
 
 `paymentMode` 目前只允許：
 
@@ -67,8 +68,8 @@
 
 行為：
 
-- `credit`：TradeInfo 會加入 `CREDIT=1`。
-- `merchant_default`：TradeInfo 不加入任何支付工具參數，交由藍新商店後台已啟用的付款方式顯示。
+- `credit`：TradeInfo 會加入 `CREDIT=1`，非課程交易明確帶 `InstFlag=0`。
+- `merchant_default`：TradeInfo 不加入信用卡等支付工具參數，但明確帶 `InstFlag=0`，避免非課程交易套用分期。
 - `linepay`：create handler 會直接回 `linepay_not_enabled`，不會送 NewebPay MPG `LINEPAY=1`。
 
 ### Course / test legacy MPG form helper
@@ -83,8 +84,9 @@
 `createCoursePaymentMpgForm()` / `buildCoursePaymentTradeInfoFields()` 的 TradeInfo 型別固定包含：
 
 - `CREDIT: "1"`
+- `InstFlag`
 
-這條舊 course / test 流程目前也是信用卡一次付清，不會主動送 `LINEPAY=1`、`WEBATM`、`VACC`、`CVS`、`BARCODE`、`TAIWANPAY` 等參數。
+目前課程 start / redirect 流程會送 `InstFlag=3,6`，只讓線上課程可用信用卡 3 期 / 6 期分期。test payment 與非課程 NewebPay payment helper 維持 `InstFlag=0`，不會主動送 `LINEPAY=1`、`WEBATM`、`VACC`、`CVS`、`BARCODE`、`TAIWANPAY` 等參數。
 
 ### Notify / query parsing
 
@@ -138,6 +140,7 @@ Notify / query 會讀藍新回傳的：
 - provider：`newebpay`
 - item_type：`course`
 - TradeInfo 支付工具：`CREDIT=1`
+- TradeInfo 分期：`InstFlag=3,6`
 - Notify sync：`syncNewebPayCourseAfterPayment`
 
 入口：
@@ -359,11 +362,13 @@ production 實際 flag 值仍需部署環境人工確認。
 已在程式主動送出的 NewebPay 支付方式：
 
 - `CREDIT=1`
+- 課程限定 `InstFlag=3,6`
+- 非課程 NewebPay 交易 `InstFlag=0`
 
 已接產品：
 
 - booking：NewebPay credit，前端受 `NEXT_PUBLIC_ENABLE_NEWEBPAY` 控制。
-- course：NewebPay credit，透過 course start / redirect 流程。
+- course：NewebPay credit，透過 course start / redirect 流程，課程限定 `InstFlag=3,6`。
 - divination：NewebPay credit，前端受 `NEXT_PUBLIC_ENABLE_NEWEBPAY` 控制。
 - ai-chart：NewebPay credit，前端受 `NEXT_PUBLIC_ENABLE_AI_CHART_NEWEBPAY` 控制，預設關閉。
 - product order：NewebPay credit 後端骨架與 Notify sync 已完成，cart 前端尚未接 NewebPay checkout。
