@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import {
   buildProductOrderPaymentMapping,
   createProductOrderLinePayPendingPayment,
+  getProductOrderLinePayCancelContext,
   markProductOrderLinePayPaymentPaid,
   PRODUCT_ORDER_PAYMENT_ITEM_KEY,
   PRODUCT_ORDER_PAYMENT_ITEM_TYPE,
@@ -41,7 +42,7 @@ const payableOrder: ProductOrderForPayment = {
 }
 
 function createMockSupabase(input: {
-  selectData?: ProductOrderPaymentContextRow | null
+  selectData?: unknown | null
   selectError?: { message: string } | null
   updateError?: { message: string } | null
 }): {
@@ -455,6 +456,103 @@ async function runAsyncHelperTests() {
         },
       ),
     /invalid_product_order_line_pay_metadata/,
+  )
+
+  const linePayOrderId = 'LP_product_order_c0bd4cbf-64db-4e2d-a1d7-e2215d96802b_20260707153000'
+  const linePayTransactionId = '2026070700000000001'
+  const cancelContextMock = createMockSupabase({
+    selectData: {
+      id: paymentId,
+      provider: 'line_pay',
+      status: 'pending',
+      merchant_order_no: linePayOrderId,
+      raw_payload: {
+        linePay: {
+          orderId: linePayOrderId,
+          sourceType: 'product_order',
+          sourceId: payableOrder.id,
+          transactionId: linePayTransactionId,
+        },
+      },
+    },
+  })
+  const cancelContext = await getProductOrderLinePayCancelContext(
+    {
+      orderId: linePayOrderId,
+      transactionId: linePayTransactionId,
+    },
+    cancelContextMock.supabase,
+  )
+
+  assert.deepEqual(cancelContext, {
+    id: paymentId,
+    provider: 'line_pay',
+    status: 'pending',
+    merchant_order_no: linePayOrderId,
+    raw_payload: {
+      linePay: {
+        orderId: linePayOrderId,
+        sourceType: 'product_order',
+        sourceId: payableOrder.id,
+        transactionId: linePayTransactionId,
+      },
+    },
+  })
+  assert.deepEqual(cancelContextMock.calls.tables, ['payments'])
+  assert.deepEqual(cancelContextMock.calls.selects, ['id,provider,status,merchant_order_no,raw_payload'])
+  assert.deepEqual(cancelContextMock.calls.eqs, [
+    ['provider', 'line_pay'],
+    ['merchant_order_no', linePayOrderId],
+  ])
+  assertNoSecretOrCustomerKeys(cancelContext)
+
+  const cancelTransactionLookupMock = createMockSupabase({
+    selectData: {
+      id: paymentId,
+      provider: 'line_pay',
+      status: 'pending',
+      merchant_order_no: linePayOrderId,
+      raw_payload: {
+        linePay: {
+          orderId: linePayOrderId,
+          sourceType: 'product_order',
+          sourceId: payableOrder.id,
+          transactionId: linePayTransactionId,
+        },
+      },
+    },
+  })
+  await getProductOrderLinePayCancelContext(
+    {
+      orderId: null,
+      transactionId: linePayTransactionId,
+    },
+    cancelTransactionLookupMock.supabase,
+  )
+  assert.deepEqual(cancelTransactionLookupMock.calls.eqs, [
+    ['provider', 'line_pay'],
+    ['raw_payload->linePay->>transactionId', linePayTransactionId],
+  ])
+
+  const cancelMissingMock = createMockSupabase({ selectData: null })
+  const missingCancelContext = await getProductOrderLinePayCancelContext(
+    {
+      orderId: linePayOrderId,
+      transactionId: null,
+    },
+    cancelMissingMock.supabase,
+  )
+  assert.equal(missingCancelContext, null)
+  await assert.rejects(
+    () =>
+      getProductOrderLinePayCancelContext(
+        {
+          orderId: null,
+          transactionId: null,
+        },
+        cancelMissingMock.supabase,
+      ),
+    /invalid_line_pay_cancel_lookup/,
   )
 
   const metadataUpdateMock = createMockSupabase({})

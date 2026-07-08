@@ -88,12 +88,28 @@ export type ProductOrderLinePayConfirmPaymentContext = {
   raw_payload: Record<string, unknown> | null
 }
 
+export type ProductOrderLinePayCancelPaymentContext = {
+  id: string
+  provider: string | null
+  status: string | null
+  merchant_order_no: string | null
+  raw_payload: Record<string, unknown> | null
+}
+
 type ProductOrderLinePayConfirmPaymentRow = {
   id: string
   provider: string | null
   status: string | null
   amount_twd: number | null
   currency: string | null
+  merchant_order_no: string | null
+  raw_payload: Record<string, unknown> | null
+}
+
+type ProductOrderLinePayCancelPaymentRow = {
+  id: string
+  provider: string | null
+  status: string | null
   merchant_order_no: string | null
   raw_payload: Record<string, unknown> | null
 }
@@ -363,6 +379,47 @@ export async function getProductOrderLinePayConfirmPaymentContext(
     status: row.status,
     amount: row.amount_twd,
     currency: row.currency,
+    merchant_order_no: row.merchant_order_no,
+    raw_payload: row.raw_payload,
+  }
+}
+
+export async function getProductOrderLinePayCancelContext(
+  input: { orderId?: string | null; transactionId?: string | null },
+  supabase = getSupabaseAdmin(),
+): Promise<ProductOrderLinePayCancelPaymentContext | null> {
+  const orderId = input.orderId?.trim() || null
+  const transactionId = input.transactionId?.trim() || null
+
+  if (!orderId && !transactionId) {
+    throw new Error('invalid_line_pay_cancel_lookup')
+  }
+
+  let query = supabase
+    .from('payments')
+    .select('id,provider,status,merchant_order_no,raw_payload')
+    .eq('provider', 'line_pay')
+
+  query = orderId
+    ? query.eq('merchant_order_no', orderId)
+    : query.eq('raw_payload->linePay->>transactionId', transactionId)
+
+  const { data, error } = await query.maybeSingle()
+
+  if (error) {
+    throw new Error('line_pay_cancel_payment_lookup_failed')
+  }
+
+  if (!data) {
+    return null
+  }
+
+  const row = data as ProductOrderLinePayCancelPaymentRow
+
+  return {
+    id: row.id,
+    provider: row.provider,
+    status: row.status,
     merchant_order_no: row.merchant_order_no,
     raw_payload: row.raw_payload,
   }
