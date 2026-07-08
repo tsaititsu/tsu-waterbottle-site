@@ -1,5 +1,6 @@
 export const CART_LINE_PAY_BUTTON_LABEL = 'LINE Pay'
-export const CART_LINE_PAY_UNAVAILABLE_MESSAGE = 'LINE Pay 測試中，暫未開放付款。'
+export const CART_LINE_PAY_READY_MESSAGE = '將前往 LINE Pay 完成付款。'
+export const CART_LINE_PAY_LOADING_MESSAGE = '正在建立 LINE Pay 付款資料...'
 
 export type CartLinePayCheckoutItem = {
   id: string
@@ -75,11 +76,13 @@ export type StartLinePayCartCheckoutResult =
         | 'line_pay_redirect_failed'
     }
 
+export type StartLinePayCartCheckoutError = Extract<StartLinePayCartCheckoutResult, { ok: false }>['error']
+
 export type CartLinePayButtonState = {
   visible: boolean
-  disabled: true
+  disabled: boolean
   label: typeof CART_LINE_PAY_BUTTON_LABEL
-  message: typeof CART_LINE_PAY_UNAVAILABLE_MESSAGE
+  message: typeof CART_LINE_PAY_READY_MESSAGE | typeof CART_LINE_PAY_LOADING_MESSAGE
 }
 
 function normalizeRequiredText(value: string | null | undefined) {
@@ -141,12 +144,32 @@ function buildCreateProductOrderInput(
 
 export function getCartLinePayButtonState(
   flagValue: string | undefined = process.env.NEXT_PUBLIC_ENABLE_LINE_PAY,
+  isCheckingOut = false,
 ): CartLinePayButtonState {
   return {
     visible: flagValue === 'true',
-    disabled: true,
+    disabled: isCheckingOut,
     label: CART_LINE_PAY_BUTTON_LABEL,
-    message: CART_LINE_PAY_UNAVAILABLE_MESSAGE,
+    message: isCheckingOut ? CART_LINE_PAY_LOADING_MESSAGE : CART_LINE_PAY_READY_MESSAGE,
+  }
+}
+
+export function getLinePayCartCheckoutErrorMessage(error: StartLinePayCartCheckoutError) {
+  switch (error) {
+    case 'line_pay_cart_empty':
+      return '購物車目前沒有可付款的開運商品。'
+    case 'line_pay_customer_info_missing':
+      return '請完整填寫收件資料並勾選購買須知後，再使用 LINE Pay 付款。'
+    case 'line_pay_create_order_failed':
+      return '商品訂單建立失敗，請稍後再試。'
+    case 'line_pay_product_order_id_missing':
+      return '商品訂單資料不完整，請稍後再試。'
+    case 'line_pay_request_failed':
+      return 'LINE Pay 付款資料建立失敗，請稍後再試。'
+    case 'line_pay_payment_url_missing':
+      return 'LINE Pay 付款連結建立失敗，請稍後再試。'
+    case 'line_pay_redirect_failed':
+      return '無法前往 LINE Pay 付款頁，請稍後再試。'
   }
 }
 

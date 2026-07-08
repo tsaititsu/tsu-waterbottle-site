@@ -3,7 +3,13 @@
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { useCart } from '@/components/CartContext'
-import { getCartLinePayButtonState } from './linePayCheckout'
+import {
+  getCartLinePayButtonState,
+  getLinePayCartCheckoutErrorMessage,
+  startLinePayCartCheckout,
+  type CartLinePayCreateProductOrderInput,
+  type CartLinePayRequestBody,
+} from './linePayCheckout'
 
 const typeLabel: Record<string, string> = {
   divination: '占卜',
@@ -41,10 +47,11 @@ export default function CartPage() {
   const [spiritualProductsAccepted, setSpiritualProductsAccepted] = useState(false)
   const [postOfficeShippingInfo, setPostOfficeShippingInfo] = useState<PostOfficeShippingInfo>(emptyPostOfficeShippingInfo)
   const [checkoutError, setCheckoutError] = useState('')
+  const [isLinePayCheckingOut, setIsLinePayCheckingOut] = useState(false)
 
   const formattedTotal = useMemo(() => `NT$${totalAmount.toLocaleString('zh-TW')}`, [totalAmount])
   const hasSpiritualProduct = items.some((item) => item.type === 'spiritual_product')
-  const linePayButtonState = getCartLinePayButtonState()
+  const linePayButtonState = getCartLinePayButtonState(undefined, isLinePayCheckingOut)
 
   const updatePostOfficeShippingInfo = (key: keyof PostOfficeShippingInfo, value: string) => {
     setPostOfficeShippingInfo((current) => ({
@@ -64,9 +71,7 @@ export default function CartPage() {
     note: postOfficeShippingInfo.note.trim(),
   })
 
-  const handleCheckoutClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (!hasSpiritualProduct) return
-
+  const getValidatedShippingInfo = () => {
     const shippingInfo = getTrimmedShippingInfo()
     const isShippingInfoComplete =
       Boolean(shippingInfo.recipientName) &&
@@ -77,17 +82,19 @@ export default function CartPage() {
       Boolean(shippingInfo.address)
 
     if (!isShippingInfoComplete) {
-      event.preventDefault()
       setCheckoutError('請完整填寫郵局寄送資料。')
-      return
+      return null
     }
 
     if (!spiritualProductsAccepted) {
-      event.preventDefault()
       setCheckoutError('請先勾選同意開運商品購買須知與退換貨政策，再前往結帳。')
-      return
+      return null
     }
 
+    return shippingInfo
+  }
+
+  const savePostOfficeShippingInfo = (shippingInfo: ReturnType<typeof getTrimmedShippingInfo>) => {
     try {
       window.localStorage.setItem(
         postOfficeShippingStorageKey,
@@ -98,6 +105,91 @@ export default function CartPage() {
       )
     } catch {
       // If local storage is unavailable, keep the current checkout path unchanged.
+    }
+  }
+
+  const handleCheckoutClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!hasSpiritualProduct) return
+
+    const shippingInfo = getValidatedShippingInfo()
+    if (!shippingInfo) {
+      event.preventDefault()
+      return
+    }
+
+    savePostOfficeShippingInfo(shippingInfo)
+  }
+
+  const handleLinePayCheckoutClick = async () => {
+    if (isLinePayCheckingOut) return
+
+    const shippingInfo = getValidatedShippingInfo()
+    if (!shippingInfo) return
+
+    const productItems = items.filter((item) => item.type === 'spiritual_product')
+    setIsLinePayCheckingOut(true)
+    setCheckoutError('')
+    savePostOfficeShippingInfo(shippingInfo)
+
+    const result = await startLinePayCartCheckout({
+      cartItems: productItems,
+      customerInfo: {
+        customerName: shippingInfo.recipientName,
+        customerPhone: shippingInfo.recipientPhone,
+        recipientName: shippingInfo.recipientName,
+        recipientPhone: shippingInfo.recipientPhone,
+        postalCode: shippingInfo.postalCode,
+        address: `${shippingInfo.city}${shippingInfo.district}${shippingInfo.address}`,
+        note: shippingInfo.note,
+      },
+      createProductOrder: async (input: CartLinePayCreateProductOrderInput) => {
+        const response = await fetch('/api/product-orders/create', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            ...input,
+            paymentMethod: 'newebpay',
+          }),
+        })
+        const data = await response.json().catch(() => null)
+
+        if (!response.ok || !data || data.ok !== true) {
+          throw new Error('line_pay_create_order_failed')
+        }
+
+        return {
+          ...data,
+          productOrderId: data.productOrderId ?? data.orderId,
+        }
+      },
+      requestLinePayPayment: async (body: CartLinePayRequestBody) => {
+        const response = await fetch('/api/product-orders/line-pay/request', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            productOrderId: body.productOrderId,
+          }),
+        })
+        const data = await response.json().catch(() => null)
+
+        if (!response.ok || !data || data.ok !== true) {
+          throw new Error('line_pay_request_failed')
+        }
+
+        return data
+      },
+      redirectToPaymentUrl: (paymentUrlWeb: string) => {
+        window.location.assign(paymentUrlWeb)
+      },
+    })
+
+    if (!result.ok) {
+      setCheckoutError(getLinePayCartCheckoutErrorMessage(result.error))
+      setIsLinePayCheckingOut(false)
     }
   }
 
@@ -304,12 +396,13 @@ export default function CartPage() {
                   <p className="mt-1 font-serifTC text-2xl font-semibold text-deepPurple">{formattedTotal}</p>
                 </div>
                 <div className="flex gap-3">
-                  {linePayButtonState.visible ? (
+                  {linePayButtonState.visible && hasSpiritualProduct ? (
                     <div className="grid gap-2">
                       <button
-                        aria-disabled="true"
-                        className="rounded-xl border border-borderSoft bg-white px-5 py-3 font-semibold text-textMuted opacity-70"
+                        aria-busy={isLinePayCheckingOut}
+                        className="focus-ring rounded-xl bg-[#06c755] px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
                         disabled={linePayButtonState.disabled}
+                        onClick={handleLinePayCheckoutClick}
                         type="button"
                       >
                         {linePayButtonState.label}

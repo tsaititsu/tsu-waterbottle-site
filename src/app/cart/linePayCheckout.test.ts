@@ -3,7 +3,9 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   CART_LINE_PAY_BUTTON_LABEL,
-  CART_LINE_PAY_UNAVAILABLE_MESSAGE,
+  CART_LINE_PAY_LOADING_MESSAGE,
+  CART_LINE_PAY_READY_MESSAGE,
+  getLinePayCartCheckoutErrorMessage,
   getCartLinePayButtonState,
   startLinePayCartCheckout,
   type CartLinePayCheckoutItem,
@@ -99,37 +101,62 @@ test('button label uses official LINE Pay spacing and casing', () => {
 })
 
 test('LINE Pay button state is disabled', () => {
-  assert.equal(getCartLinePayButtonState('true').disabled, true)
+  assert.equal(getCartLinePayButtonState('true', true).disabled, true)
 })
 
-test('unavailable message is a safe skeleton notice', () => {
-  assert.equal(CART_LINE_PAY_UNAVAILABLE_MESSAGE, 'LINE Pay 測試中，暫未開放付款。')
+test('LINE Pay button state is enabled when flag is on and not loading', () => {
+  assert.equal(getCartLinePayButtonState('true', false).disabled, false)
 })
 
-test('cart page renders disabled LINE Pay button only through skeleton state', () => {
+test('ready and loading messages are safe checkout notices', () => {
+  assert.equal(CART_LINE_PAY_READY_MESSAGE, '將前往 LINE Pay 完成付款。')
+  assert.equal(CART_LINE_PAY_LOADING_MESSAGE, '正在建立 LINE Pay 付款資料...')
+  assert.equal(getCartLinePayButtonState('true', false).message, CART_LINE_PAY_READY_MESSAGE)
+  assert.equal(getCartLinePayButtonState('true', true).message, CART_LINE_PAY_LOADING_MESSAGE)
+})
+
+test('cart page renders LINE Pay button through checkout state', () => {
   const source = readCartPageSource()
 
   assert.equal(source.includes('getCartLinePayButtonState'), true)
   assert.equal(source.includes('disabled={linePayButtonState.disabled}'), true)
   assert.equal(source.includes('{linePayButtonState.label}'), true)
+  assert.equal(source.includes('handleLinePayCheckoutClick'), true)
 })
 
-test('cart page does not call LINE Pay request route', () => {
+test('cart page calls LINE Pay request route through click handler only', () => {
   const source = readCartPageSource()
 
-  assert.equal(source.includes('/api/product-orders/line-pay/request'), false)
+  assert.equal(source.includes('/api/product-orders/line-pay/request'), true)
+  assert.equal(source.includes('/api/payments/newebpay/create'), false)
 })
 
-test('cart page does not call fetch for LINE Pay skeleton', () => {
+test('cart page uses fetch for product order and LINE Pay request APIs', () => {
   const source = readCartPageSource()
 
-  assert.equal(source.includes('fetch('), false)
+  assert.equal(source.includes("fetch('/api/product-orders/create'"), true)
+  assert.equal(source.includes("fetch('/api/product-orders/line-pay/request'"), true)
 })
 
-test('cart page does not redirect to paymentUrl', () => {
+test('cart page redirects with paymentUrlWeb only', () => {
   const source = readCartPageSource()
 
-  assert.equal(source.includes('paymentUrl'), false)
+  assert.equal(source.includes('window.location.assign(paymentUrlWeb)'), true)
+  assert.equal(source.includes('window.location.assign(data'), false)
+})
+
+test('cart page prevents duplicate LINE Pay checkout while loading', () => {
+  const source = readCartPageSource()
+
+  assert.equal(source.includes('if (isLinePayCheckingOut) return'), true)
+  assert.equal(source.includes('setIsLinePayCheckingOut(true)'), true)
+})
+
+test('cart page sends LINE Pay request body with productOrderId only', () => {
+  const source = readCartPageSource()
+
+  assert.equal(source.includes('productOrderId: body.productOrderId'), true)
+  assert.equal(source.includes('...body'), false)
 })
 
 test('LINE Pay skeleton does not expose secrets or payment internals', () => {
@@ -181,6 +208,12 @@ test('missing customer info returns line_pay_customer_info_missing', async () =>
     provider: 'line_pay',
     error: 'line_pay_customer_info_missing',
   })
+})
+
+test('checkout errors map to friendly messages', () => {
+  assert.equal(getLinePayCartCheckoutErrorMessage('line_pay_create_order_failed'), '商品訂單建立失敗，請稍後再試。')
+  assert.equal(getLinePayCartCheckoutErrorMessage('line_pay_request_failed'), 'LINE Pay 付款資料建立失敗，請稍後再試。')
+  assert.equal(getLinePayCartCheckoutErrorMessage('line_pay_payment_url_missing'), 'LINE Pay 付款連結建立失敗，請稍後再試。')
 })
 
 test('createProductOrder is called with product order input', async () => {
