@@ -2,6 +2,15 @@ export const CART_LINE_PAY_BUTTON_LABEL = 'LINE Pay'
 export const CART_LINE_PAY_READY_MESSAGE = '將前往 LINE Pay 完成付款。'
 export const CART_LINE_PAY_LOADING_MESSAGE = '正在建立 LINE Pay 付款資料...'
 
+export type CartLinePayReturnStatus = 'success' | 'canceled' | 'pending' | 'failed' | 'error'
+
+export type CartLinePayReturnMessage = {
+  visible: boolean
+  tone: 'success' | 'warning' | 'info' | 'error'
+  title: string
+  message: string
+}
+
 export type CartLinePayCheckoutItem = {
   id: string
   itemName: string
@@ -85,6 +94,13 @@ export type CartLinePayButtonState = {
   message: typeof CART_LINE_PAY_READY_MESSAGE | typeof CART_LINE_PAY_LOADING_MESSAGE
 }
 
+const hiddenLinePayReturnMessage: CartLinePayReturnMessage = {
+  visible: false,
+  tone: 'info',
+  title: '',
+  message: '',
+}
+
 function normalizeRequiredText(value: string | null | undefined) {
   const trimmed = String(value ?? '').trim()
   return trimmed || null
@@ -151,6 +167,50 @@ export function getCartLinePayButtonState(
     disabled: isCheckingOut,
     label: CART_LINE_PAY_BUTTON_LABEL,
     message: isCheckingOut ? CART_LINE_PAY_LOADING_MESSAGE : CART_LINE_PAY_READY_MESSAGE,
+  }
+}
+
+export function buildLinePayReturnMessage(linePayStatus: unknown): CartLinePayReturnMessage {
+  if (typeof linePayStatus !== 'string') return hiddenLinePayReturnMessage
+
+  switch (linePayStatus.trim()) {
+    case 'success':
+      return {
+        visible: true,
+        tone: 'success',
+        title: 'LINE Pay 付款已完成',
+        message: 'LINE Pay 付款已完成，我們正在整理訂單資訊。',
+      }
+    case 'canceled':
+      return {
+        visible: true,
+        tone: 'warning',
+        title: 'LINE Pay 付款已取消',
+        message: '你已取消 LINE Pay 付款，訂單尚未付款。',
+      }
+    case 'pending':
+      return {
+        visible: true,
+        tone: 'info',
+        title: 'LINE Pay 付款確認中',
+        message: 'LINE Pay 付款狀態確認中，請稍後再查看訂單狀態。',
+      }
+    case 'failed':
+      return {
+        visible: true,
+        tone: 'warning',
+        title: 'LINE Pay 付款未完成',
+        message: 'LINE Pay 付款未完成，請重新付款或改用其他付款方式。',
+      }
+    case 'error':
+      return {
+        visible: true,
+        tone: 'error',
+        title: 'LINE Pay 付款確認發生問題',
+        message: 'LINE Pay 付款確認發生問題，請聯繫客服協助確認。',
+      }
+    default:
+      return hiddenLinePayReturnMessage
   }
 }
 

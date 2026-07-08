@@ -1,12 +1,14 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useCart } from '@/components/CartContext'
 import {
+  buildLinePayReturnMessage,
   getCartLinePayButtonState,
   getLinePayCartCheckoutErrorMessage,
   startLinePayCartCheckout,
+  type CartLinePayReturnMessage,
   type CartLinePayCreateProductOrderInput,
   type CartLinePayRequestBody,
 } from './linePayCheckout'
@@ -42,12 +44,22 @@ const emptyPostOfficeShippingInfo: PostOfficeShippingInfo = {
   note: '',
 }
 
+function getLinePayReturnMessageClassName(tone: CartLinePayReturnMessage['tone']) {
+  if (tone === 'success') return 'border-[#9fd8b5] bg-[#f0fbf4] text-[#1f6f3d]'
+  if (tone === 'warning') return 'border-[#eedec1] bg-[#fff8eb] text-deepPurple'
+  if (tone === 'error') return 'border-[#efc7c7] bg-[#fff1f1] text-[#8a1f1f]'
+  return 'border-borderSoft bg-softPurple text-deepPurple'
+}
+
 export default function CartPage() {
   const { items, isLoaded, removeItem, totalAmount, totalQuantity } = useCart()
   const [spiritualProductsAccepted, setSpiritualProductsAccepted] = useState(false)
   const [postOfficeShippingInfo, setPostOfficeShippingInfo] = useState<PostOfficeShippingInfo>(emptyPostOfficeShippingInfo)
   const [checkoutError, setCheckoutError] = useState('')
   const [isLinePayCheckingOut, setIsLinePayCheckingOut] = useState(false)
+  const [linePayReturnMessage, setLinePayReturnMessage] = useState<CartLinePayReturnMessage>(() =>
+    buildLinePayReturnMessage(null),
+  )
 
   const formattedTotal = useMemo(() => `NT$${totalAmount.toLocaleString('zh-TW')}`, [totalAmount])
   const hasSpiritualProduct = items.some((item) => item.type === 'spiritual_product')
@@ -60,6 +72,11 @@ export default function CartPage() {
     }))
     setCheckoutError('')
   }
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    setLinePayReturnMessage(buildLinePayReturnMessage(params.get('linePay')))
+  }, [])
 
   const getTrimmedShippingInfo = () => ({
     recipientName: postOfficeShippingInfo.recipientName.trim(),
@@ -201,6 +218,13 @@ export default function CartPage() {
           <h1 className="mt-2 font-serifTC text-3xl font-semibold text-deepPurple">購物車內容</h1>
           <p className="mt-2 max-w-2xl text-textMuted">目前購物車為審核展示用途，保留未付款的服務項目。</p>
         </section>
+
+        {linePayReturnMessage.visible ? (
+          <section className={`rounded-2xl border p-5 shadow-soft ${getLinePayReturnMessageClassName(linePayReturnMessage.tone)}`}>
+            <p className="font-serifTC text-xl font-semibold">{linePayReturnMessage.title}</p>
+            <p className="mt-2 text-sm leading-6">{linePayReturnMessage.message}</p>
+          </section>
+        ) : null}
 
         <section className="rounded-2xl border border-borderSoft bg-white p-6 shadow-soft md:p-8">
           {!isLoaded ? <p className="text-textMuted">載入中...</p> : null}

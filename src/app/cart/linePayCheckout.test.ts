@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  buildLinePayReturnMessage,
   CART_LINE_PAY_BUTTON_LABEL,
   CART_LINE_PAY_LOADING_MESSAGE,
   CART_LINE_PAY_READY_MESSAGE,
@@ -159,6 +160,15 @@ test('cart page sends LINE Pay request body with productOrderId only', () => {
   assert.equal(source.includes('...body'), false)
 })
 
+test('cart page reads linePay query for return message only', () => {
+  const source = readCartPageSource()
+
+  assert.equal(source.includes("params.get('linePay')"), true)
+  assert.equal(source.includes('buildLinePayReturnMessage'), true)
+  assert.equal(source.includes('confirmLinePayPayment'), false)
+  assert.equal(source.includes('linePayConfirmer'), false)
+})
+
 test('LINE Pay skeleton does not expose secrets or payment internals', () => {
   const text = `${readLinePayCheckoutSource()}\n${String(getCartLinePayButtonState)}`
 
@@ -214,6 +224,94 @@ test('checkout errors map to friendly messages', () => {
   assert.equal(getLinePayCartCheckoutErrorMessage('line_pay_create_order_failed'), '商品訂單建立失敗，請稍後再試。')
   assert.equal(getLinePayCartCheckoutErrorMessage('line_pay_request_failed'), 'LINE Pay 付款資料建立失敗，請稍後再試。')
   assert.equal(getLinePayCartCheckoutErrorMessage('line_pay_payment_url_missing'), 'LINE Pay 付款連結建立失敗，請稍後再試。')
+})
+
+test('no linePay query hides return message', () => {
+  assert.deepEqual(buildLinePayReturnMessage(null), {
+    visible: false,
+    tone: 'info',
+    title: '',
+    message: '',
+  })
+})
+
+test('linePay=success shows completed message', () => {
+  const result = buildLinePayReturnMessage('success')
+
+  assert.equal(result.visible, true)
+  assert.equal(result.tone, 'success')
+  assert.equal(result.message, 'LINE Pay 付款已完成，我們正在整理訂單資訊。')
+})
+
+test('linePay=canceled shows canceled message', () => {
+  const result = buildLinePayReturnMessage('canceled')
+
+  assert.equal(result.visible, true)
+  assert.equal(result.tone, 'warning')
+  assert.equal(result.message, '你已取消 LINE Pay 付款，訂單尚未付款。')
+})
+
+test('linePay=pending shows pending message', () => {
+  const result = buildLinePayReturnMessage('pending')
+
+  assert.equal(result.visible, true)
+  assert.equal(result.tone, 'info')
+  assert.equal(result.message, 'LINE Pay 付款狀態確認中，請稍後再查看訂單狀態。')
+})
+
+test('linePay=failed shows failed message', () => {
+  const result = buildLinePayReturnMessage('failed')
+
+  assert.equal(result.visible, true)
+  assert.equal(result.tone, 'warning')
+  assert.equal(result.message, 'LINE Pay 付款未完成，請重新付款或改用其他付款方式。')
+})
+
+test('linePay=error shows support message', () => {
+  const result = buildLinePayReturnMessage('error')
+
+  assert.equal(result.visible, true)
+  assert.equal(result.tone, 'error')
+  assert.equal(result.message, 'LINE Pay 付款確認發生問題，請聯繫客服協助確認。')
+})
+
+test('unsupported linePay query hides return message', () => {
+  assert.equal(buildLinePayReturnMessage('unknown').visible, false)
+})
+
+test('return messages do not expose transaction or secret details', () => {
+  const text = JSON.stringify([
+    buildLinePayReturnMessage('success'),
+    buildLinePayReturnMessage('canceled'),
+    buildLinePayReturnMessage('pending'),
+    buildLinePayReturnMessage('failed'),
+    buildLinePayReturnMessage('error'),
+  ])
+
+  for (const forbidden of [
+    'transactionId',
+    'channelSecret',
+    'channelId',
+    'env',
+    'TradeInfo',
+    'TradeSha',
+    'phone',
+    'email',
+    'address',
+  ]) {
+    assert.equal(text.includes(forbidden), false, forbidden)
+  }
+})
+
+test('return message helper does not call payment APIs or mark paid', () => {
+  const source = String(buildLinePayReturnMessage)
+  const lowerSource = source.toLowerCase()
+
+  assert.equal(source.includes('fetch('), false)
+  assert.equal(source.includes('/api/product-orders/line-pay/request'), false)
+  assert.equal(lowerSource.includes('linepaypayment'), false)
+  assert.equal(lowerSource.includes('newebpay'), false)
+  assert.equal(lowerSource.includes('markpaid'), false)
 })
 
 test('createProductOrder is called with product order input', async () => {
