@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { useCart } from '@/components/CartContext'
+import { getCartLinePayButtonState } from './linePayCheckout'
 
 const typeLabel: Record<string, string> = {
   divination: '占卜',
@@ -43,6 +44,7 @@ export default function CartPage() {
 
   const formattedTotal = useMemo(() => `NT$${totalAmount.toLocaleString('zh-TW')}`, [totalAmount])
   const hasSpiritualProduct = items.some((item) => item.type === 'spiritual_product')
+  const linePayButtonState = getCartLinePayButtonState()
 
   const updatePostOfficeShippingInfo = (key: keyof PostOfficeShippingInfo, value: string) => {
     setPostOfficeShippingInfo((current) => ({
@@ -302,6 +304,19 @@ export default function CartPage() {
                   <p className="mt-1 font-serifTC text-2xl font-semibold text-deepPurple">{formattedTotal}</p>
                 </div>
                 <div className="flex gap-3">
+                  {linePayButtonState.visible ? (
+                    <div className="grid gap-2">
+                      <button
+                        aria-disabled="true"
+                        className="rounded-xl border border-borderSoft bg-white px-5 py-3 font-semibold text-textMuted opacity-70"
+                        disabled={linePayButtonState.disabled}
+                        type="button"
+                      >
+                        {linePayButtonState.label}
+                      </button>
+                      <p className="max-w-44 text-xs leading-5 text-textMuted">{linePayButtonState.message}</p>
+                    </div>
+                  ) : null}
                   <Link
                     href="/bank-transfer"
                     onClick={handleCheckoutClick}
