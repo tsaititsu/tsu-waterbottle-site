@@ -83,6 +83,10 @@ test('exports getLinePayPaymentDetails', () => {
   assert.equal(typeof linePay.getLinePayPaymentDetails, 'function')
 })
 
+test('exports resolveLinePayConfirmOutcome', () => {
+  assert.equal(typeof linePay.resolveLinePayConfirmOutcome, 'function')
+})
+
 test('barrel import does not read environment variables', () => {
   const before = process.env.LINE_PAY_CHANNEL_SECRET
 
