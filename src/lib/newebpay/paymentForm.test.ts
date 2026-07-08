@@ -76,6 +76,7 @@ assert.equal(isNewebPayPaymentSource('manual_test'), true)
 assert.equal(isNewebPayPaymentSource('external'), false)
 assert.equal(isNewebPayPaymentMode('credit'), true)
 assert.equal(isNewebPayPaymentMode('merchant_default'), true)
+assert.equal(isNewebPayPaymentMode('apple_pay_test'), true)
 assert.equal(isNewebPayPaymentMode('linepay'), false)
 
 const bookingId = '550e8400-e29b-41d4-a716-446655440000'
@@ -429,6 +430,34 @@ assert.equal(decryptedSmoke.get('ItemDesc'), '藍新正式環境測試付款')
 assert.equal(decryptedSmoke.get('CREDIT'), '1')
 assert.equal(decryptedSmoke.get('InstFlag'), '0')
 assert.equal(decryptedSmoke.has('LINEPAY'), false)
+
+const applePayTestData = createNewebPayMpgPaymentData({
+  itemKey: 'newebpay_live_smoke_test_1',
+  config,
+  paymentMode: 'apple_pay_test',
+  amount: 1,
+  itemDesc: 'Apple Pay 1 元測試付款',
+  now: new Date(2026, 6, 3, 17, 25, 30),
+  merchantOrderNo: 'WB20260703172530APPL',
+})
+const decryptedApplePayTest = new URLSearchParams(
+  decryptTradeInfo(applePayTestData.fields.TradeInfo, hashKey, hashIv),
+)
+
+assert.equal(applePayTestData.itemKey, 'newebpay_live_smoke_test_1')
+assert.equal(applePayTestData.amount, 1)
+assert.equal(decryptedApplePayTest.get('Amt'), '1')
+assert.equal(decryptedApplePayTest.get('ItemDesc'), 'Apple Pay 1 元測試付款')
+assert.equal(decryptedApplePayTest.get('APPLEPAY'), '1')
+assert.equal(decryptedApplePayTest.get('InstFlag'), '0')
+assert.equal(decryptedApplePayTest.has('CREDIT'), false)
+assert.equal(decryptedApplePayTest.has('LINEPAY'), false)
+assert.equal(decryptedApplePayTest.has('VACC'), false)
+assert.equal(decryptedApplePayTest.has('WEBATM'), false)
+assert.equal(decryptedApplePayTest.has('CVS'), false)
+assert.equal(decryptedApplePayTest.has('BARCODE'), false)
+assert.equal(decryptedApplePayTest.has('ANDROIDPAY'), false)
+assert.equal(decryptedApplePayTest.has('SAMSUNGPAY'), false)
 
 const divinationData = createNewebPayMpgPaymentData({
   itemKey: 'ai_divination_single',

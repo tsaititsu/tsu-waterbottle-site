@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { handleCreateNewebPayPaymentRequest } from './handler'
 import { createNewebPayMpgPaymentData } from '../../../../../lib/newebpay/paymentForm'
 import { PRODUCT_ORDER_PAYMENT_ITEM_KEY } from '../../../../../lib/payments/productOrderPayment'
+import { ONE_DOLLAR_TEST_CONFIRMATION_VALUE } from '../../../../../lib/newebpay/oneDollarTestMode'
 import type { CreatePendingPaymentInput } from '../../../../../lib/supabase/payments'
 import type { ProductOrderPaymentContext } from '../../../../../lib/supabase/productOrders'
 import type { NewebPayMpgPaymentData } from '../../../../../lib/newebpay/paymentForm'
@@ -131,6 +132,80 @@ function createProductDeps(input: {
   }
 }
 
+function applePayTestBody(overrides: Record<string, unknown> = {}) {
+  return {
+    itemKey: 'newebpay_live_smoke_test_1',
+    source: 'manual_test',
+    paymentMode: 'apple_pay_test',
+    ...overrides,
+  }
+}
+
+function createApplePayTestDeps(input: {
+  env?: Record<string, string | undefined>
+  createPendingPaymentError?: Error
+} = {}) {
+  const calls: {
+    configs: number
+    paymentDataInputs: Record<string, unknown>[]
+    pendingPayments: CreatePendingPaymentInput[]
+    productOrderLookups: string[]
+    productOrderLinks: Array<{ orderId: string; paymentId: string }>
+    divinationLinks: unknown[]
+    aiChartLinks: unknown[]
+  } = {
+    configs: 0,
+    paymentDataInputs: [],
+    pendingPayments: [],
+    productOrderLookups: [],
+    productOrderLinks: [],
+    divinationLinks: [],
+    aiChartLinks: [],
+  }
+
+  return {
+    calls,
+    deps: {
+      env: input.env ?? {},
+      getNewebPayConfig: () => {
+        calls.configs += 1
+        return fakeConfig
+      },
+      createNewebPayMpgPaymentData: (paymentInput: Parameters<typeof createNewebPayMpgPaymentData>[0]) => {
+        calls.paymentDataInputs.push(paymentInput)
+        return buildPaymentData({
+          itemKey: paymentInput.itemKey,
+          amount: paymentInput.amount,
+        })
+      },
+      getProductOrderForPayment: async (lookupOrderId: string) => {
+        calls.productOrderLookups.push(lookupOrderId)
+        return null
+      },
+      createPendingPayment: async (paymentInput: CreatePendingPaymentInput) => {
+        calls.pendingPayments.push(paymentInput)
+        if (input.createPendingPaymentError) {
+          throw input.createPendingPaymentError
+        }
+
+        return { id: paymentId }
+      },
+      linkProductOrderPayment: async (linkInput: { orderId: string; paymentId: string }) => {
+        calls.productOrderLinks.push(linkInput)
+        return linkInput
+      },
+      linkDivinationReadingPendingPayment: async (linkInput: unknown) => {
+        calls.divinationLinks.push(linkInput)
+        return { result: 'linked' as const, readingId: 'unused' }
+      },
+      linkAiChartReportPendingPayment: async (linkInput: unknown) => {
+        calls.aiChartLinks.push(linkInput)
+        return { result: 'linked' as const, reportId: 'unused' }
+      },
+    },
+  }
+}
+
 function assertNoUnsafeSerializedKeys(value: unknown) {
   const serialized = JSON.stringify(value)
 
@@ -147,6 +222,126 @@ function assertNoUnsafeSerializedKeys(value: unknown) {
   assert.equal(serialized.includes('shipment'), false)
   assert.equal(serialized.includes('logistics'), false)
 }
+
+test('apple_pay_test is disabled when all flags are off', async () => {
+  const { calls, deps } = createApplePayTestDeps()
+  const response = await handleCreateNewebPayPaymentRequest(applePayTestBody(), deps)
+  const json = await readJson(response)
+
+  assert.equal(response.status, 403)
+  assert.deepEqual(json, { ok: false, error: 'apple_pay_test_disabled' })
+  assert.equal(calls.configs, 0)
+  assert.deepEqual(calls.pendingPayments, [])
+})
+
+test('apple_pay_test is disabled when one dollar test mode is off', async () => {
+  const { calls, deps } = createApplePayTestDeps({
+    env: {
+      ENABLE_NEWEBPAY_APPLE_PAY_TEST_MODE: 'true',
+      ENABLE_NEWEBPAY_ONE_DOLLAR_TEST_MODE: 'false',
+      NEWEBPAY_ENV: 'test',
+    },
+  })
+  const response = await handleCreateNewebPayPaymentRequest(applePayTestBody(), deps)
+  const json = await readJson(response)
+
+  assert.equal(response.status, 403)
+  assert.deepEqual(json, { ok: false, error: 'apple_pay_test_disabled' })
+  assert.equal(calls.configs, 0)
+  assert.deepEqual(calls.pendingPayments, [])
+})
+
+test('apple_pay_test production requires one dollar confirmation', async () => {
+  const { calls, deps } = createApplePayTestDeps({
+    env: {
+      ENABLE_NEWEBPAY_APPLE_PAY_TEST_MODE: 'true',
+      ENABLE_NEWEBPAY_ONE_DOLLAR_TEST_MODE: 'true',
+      NEWEBPAY_ENV: 'production',
+    },
+  })
+  const response = await handleCreateNewebPayPaymentRequest(applePayTestBody(), deps)
+  const json = await readJson(response)
+
+  assert.equal(response.status, 403)
+  assert.deepEqual(json, { ok: false, error: 'apple_pay_test_disabled' })
+  assert.equal(calls.configs, 0)
+  assert.deepEqual(calls.pendingPayments, [])
+})
+
+test('apple_pay_test requires the smoke test item and manual source', async () => {
+  const { calls, deps } = createApplePayTestDeps({
+    env: {
+      ENABLE_NEWEBPAY_APPLE_PAY_TEST_MODE: 'true',
+      ENABLE_NEWEBPAY_ONE_DOLLAR_TEST_MODE: 'true',
+      NEWEBPAY_ENV: 'test',
+    },
+  })
+  const response = await handleCreateNewebPayPaymentRequest(
+    applePayTestBody({
+      itemKey: PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+      source: 'product_order',
+      orderId,
+    }),
+    deps,
+  )
+  const json = await readJson(response)
+
+  assert.equal(response.status, 400)
+  assert.deepEqual(json, { ok: false, error: 'invalid_apple_pay_test_request' })
+  assert.deepEqual(calls.productOrderLookups, [])
+  assert.deepEqual(calls.pendingPayments, [])
+})
+
+test('apple_pay_test creates a one dollar Apple Pay pending payment when flags are enabled', async () => {
+  const { calls, deps } = createApplePayTestDeps({
+    env: {
+      ENABLE_NEWEBPAY_APPLE_PAY_TEST_MODE: 'true',
+      ENABLE_NEWEBPAY_ONE_DOLLAR_TEST_MODE: 'true',
+      NEWEBPAY_ENV: 'production',
+      NEWEBPAY_ONE_DOLLAR_TEST_PRODUCTION_CONFIRMATION: ONE_DOLLAR_TEST_CONFIRMATION_VALUE,
+    },
+  })
+  const response = await handleCreateNewebPayPaymentRequest(applePayTestBody(), deps)
+  const json = await readJson(response)
+
+  assert.equal(response.status, 200)
+  assert.equal(json.ok, true)
+  assert.equal(json.amount, 1)
+  assert.equal(json.itemKey, 'newebpay_live_smoke_test_1')
+  assert.equal(calls.configs, 1)
+  assert.deepEqual(calls.productOrderLookups, [])
+  assert.deepEqual(calls.productOrderLinks, [])
+  assert.deepEqual(calls.divinationLinks, [])
+  assert.deepEqual(calls.aiChartLinks, [])
+  assert.equal(calls.paymentDataInputs.length, 1)
+  assert.equal(calls.paymentDataInputs[0].itemKey, 'newebpay_live_smoke_test_1')
+  assert.equal(calls.paymentDataInputs[0].paymentMode, 'apple_pay_test')
+  assert.equal(calls.paymentDataInputs[0].amount, 1)
+  assert.equal(calls.paymentDataInputs[0].itemDesc, 'Apple Pay 1 元測試付款｜1元測試付款')
+  assert.equal(calls.pendingPayments.length, 1)
+
+  const paymentInput = calls.pendingPayments[0]
+
+  assert.equal(paymentInput.provider, 'newebpay')
+  assert.equal(paymentInput.itemType, 'newebpay_smoke_test')
+  assert.equal(paymentInput.itemId, 'newebpay_live_smoke_test_1')
+  assert.equal(paymentInput.bookingId, null)
+  assert.equal(paymentInput.itemName, 'Apple Pay 1 元測試付款｜1元測試付款')
+  assert.equal(paymentInput.amountTwd, 1)
+  assert.equal(paymentInput.rawPayload?.paymentMode, 'apple_pay_test')
+  assert.equal(paymentInput.rawPayload?.amount, 1)
+  assert.equal(paymentInput.rawPayload?.test_payment, true)
+  assert.equal(paymentInput.rawPayload?.one_dollar_test_mode, true)
+  assert.equal(paymentInput.rawPayload?.apple_pay_test, true)
+  assert.equal(paymentInput.rawPayload?.original_amount, 1)
+  assert.equal(paymentInput.rawPayload?.test_source, 'apple_pay_test')
+  assert.equal('productOrderId' in (paymentInput.rawPayload ?? {}), false)
+  assert.equal('courseId' in (paymentInput.rawPayload ?? {}), false)
+  assert.equal('readingId' in (paymentInput.rawPayload ?? {}), false)
+  assert.equal('reportId' in (paymentInput.rawPayload ?? {}), false)
+  assertNoUnsafeSerializedKeys(paymentInput.rawPayload)
+  assertNoUnsafeSerializedKeys(json)
+})
 
 test('product order success creates a pending payment and links the order', async () => {
   const { calls, deps } = createProductDeps()

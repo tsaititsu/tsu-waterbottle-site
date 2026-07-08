@@ -1,5 +1,14 @@
 import { NextResponse } from 'next/server'
 import {
+  buildNewebPayApplePayTestContext,
+  buildNewebPayApplePayTestPendingPaymentMetadata,
+  isNewebPayApplePayTestModeEnabled,
+  NEWEBPAY_APPLE_PAY_TEST_ITEM_KEY,
+  NEWEBPAY_APPLE_PAY_TEST_MODE,
+  NEWEBPAY_APPLE_PAY_TEST_SOURCE,
+  type NewebPayApplePayTestContext,
+} from '../../../../../lib/newebpay/applePayTestPayment'
+import {
   buildNewebPayPendingPaymentMetadata,
   createNewebPayMpgPaymentData,
   isNewebPayPaymentMode,
@@ -64,6 +73,7 @@ type LinkAiChartReportPendingPaymentDependency = (input: {
 type LinkProductOrderPaymentDependency = (input: { orderId: string; paymentId: string }) => Promise<unknown>
 
 type CreateNewebPayPaymentDependencies = {
+  env?: Record<string, string | undefined>
   getNewebPayConfig?: GetNewebPayConfigDependency
   createNewebPayMpgPaymentData?: typeof createNewebPayMpgPaymentData
   buildNewebPayPendingPaymentMetadata?: typeof buildNewebPayPendingPaymentMetadata
@@ -155,6 +165,14 @@ function productOrderValidationErrorResponse(error: unknown) {
   }
 
   return NextResponse.json({ ok: false, error: 'product_order_not_payable' }, { status: 409 })
+}
+
+function applePayTestDisabledResponse() {
+  return NextResponse.json({ ok: false, error: 'apple_pay_test_disabled' }, { status: 403 })
+}
+
+function applePayTestInvalidRequestResponse() {
+  return NextResponse.json({ ok: false, error: 'invalid_apple_pay_test_request' }, { status: 400 })
 }
 
 function divinationPaymentLinkErrorResponse(input: {
@@ -271,6 +289,33 @@ export async function handleCreateNewebPayPaymentRequest(
 
   const paymentMode: NewebPayPaymentMode = body?.paymentMode ?? 'credit'
   const source = body?.source as NewebPayPaymentSource | undefined
+  let applePayTestContext: NewebPayApplePayTestContext | null = null
+
+  if (paymentMode === NEWEBPAY_APPLE_PAY_TEST_MODE) {
+    const env = deps.env ?? process.env
+
+    if (
+      item.itemKey !== NEWEBPAY_APPLE_PAY_TEST_ITEM_KEY ||
+      source !== NEWEBPAY_APPLE_PAY_TEST_SOURCE ||
+      body?.bookingId !== undefined ||
+      body?.readingId !== undefined ||
+      body?.reportId !== undefined ||
+      body?.orderId !== undefined
+    ) {
+      return applePayTestInvalidRequestResponse()
+    }
+
+    if (!isNewebPayApplePayTestModeEnabled(env)) {
+      return applePayTestDisabledResponse()
+    }
+
+    try {
+      applePayTestContext = buildNewebPayApplePayTestContext(env)
+    } catch {
+      return applePayTestDisabledResponse()
+    }
+  }
+
   const bookingIdResolution = resolveNewebPayBookingIdForPayment({
     itemKey: item.itemKey,
     source,
@@ -411,21 +456,26 @@ export async function handleCreateNewebPayPaymentRequest(
       itemKey: item.itemKey,
       config,
       paymentMode,
-      amount: productOrderPayment?.amountTwd,
-      itemDesc: productOrderPayment?.itemDesc,
+      amount: applePayTestContext?.amount ?? productOrderPayment?.amountTwd,
+      itemDesc: applePayTestContext?.itemDesc ?? productOrderPayment?.itemDesc,
     })
-    const pendingPaymentMetadata = (deps.buildNewebPayPendingPaymentMetadata ?? buildNewebPayPendingPaymentMetadata)({
-      itemKey: item.itemKey,
-      source,
-      paymentMode,
-      merchantOrderNo: paymentData.merchantOrderNo,
-      bookingId,
-      readingId,
-      reportId,
-      productOrderPayment,
-    })
-    const itemName = productOrderPayment?.itemDesc ?? item.itemDesc
-    const amountTwd = productOrderPayment?.amountTwd ?? item.amount
+    const pendingPaymentMetadata = applePayTestContext
+      ? buildNewebPayApplePayTestPendingPaymentMetadata({
+          context: applePayTestContext,
+          merchantOrderNo: paymentData.merchantOrderNo,
+        })
+      : (deps.buildNewebPayPendingPaymentMetadata ?? buildNewebPayPendingPaymentMetadata)({
+          itemKey: item.itemKey,
+          source,
+          paymentMode,
+          merchantOrderNo: paymentData.merchantOrderNo,
+          bookingId,
+          readingId,
+          reportId,
+          productOrderPayment,
+        })
+    const itemName = applePayTestContext?.itemDesc ?? productOrderPayment?.itemDesc ?? item.itemDesc
+    const amountTwd = applePayTestContext?.amount ?? productOrderPayment?.amountTwd ?? item.amount
     let pendingPayment: { id: string }
 
     try {

@@ -73,6 +73,24 @@
 
 目前 helper 尚未接入商品 / 課程 / 占卜 / AI 命盤正式流程。
 
+### 22J-28 Apple Pay 內部測試入口
+
+已新增 Apple Pay 1 元內部測試入口：
+
+- `src/lib/newebpay/applePayTestPayment.ts`
+- `src/app/internal/newebpay/apple-pay-test/page.tsx`
+- `docs/newebpay-apple-pay-test-setup.md`
+
+目前狀態：
+
+- 只用於內部 Apple Pay 1 元測試。
+- 需同時開啟 Apple Pay test flag 與 1 元測試模式 flag。
+- production 類環境仍需 `CONFIRM_NEWEBPAY_ONE_DOLLAR_TEST` 二次確認。
+- MPG payload 使用 `APPLEPAY=1`、`InstFlag=0`、`Amt=1`。
+- 不送 `CREDIT=1`、`LINEPAY=1`、`VACC=1`、`ANDROIDPAY=1`、`SAMSUNGPAY=1`。
+- 尚未套進正式商品 / 課程 / 占卜 / AI 命盤流程。
+- 測完需關閉全部測試 flag。
+
 ## 四、測試模式行為
 
 ### 1. 課程付款
@@ -146,6 +164,7 @@ Apple Pay 測試可以使用 1 元，但需要另行小包實作與測試。
 - 不要同時送 `LINEPAY=1`。
 - 不要同時送 `VACC=1`。
 - `InstFlag=0`。
+- 22J-28 已建立內部測試入口，但仍不代表 Apple Pay 已全站上線。
 
 是否同時送 `CREDIT=1` 需評估：
 

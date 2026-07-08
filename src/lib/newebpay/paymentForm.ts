@@ -4,6 +4,7 @@ import { AI_DIVINATION_ITEM_KEY, buildDivinationPaymentPayload } from './divinat
 import { generateNewebPayMerchantOrderNo } from './orderNo'
 import { getNewebPayPaymentItem, type NewebPayPaymentItemKey } from './paymentItems'
 import type { NewebPayConfig } from './types'
+import type { NewebPayApplePayTestPaymentMode } from './applePayTestPayment'
 import {
   PRODUCT_ORDER_PAYMENT_ITEM_KEY,
   type ProductOrderPaymentMapping,
@@ -16,7 +17,8 @@ export type NewebPayPaymentSource =
   | 'ai_chart_report'
   | 'product_order'
   | 'manual_test'
-export type NewebPayPaymentMode = 'credit' | 'merchant_default'
+export type StandardNewebPayPaymentMode = 'credit' | 'merchant_default'
+export type NewebPayPaymentMode = StandardNewebPayPaymentMode | NewebPayApplePayTestPaymentMode
 
 export type NewebPayBookingPaymentContext = {
   id: string
@@ -170,7 +172,7 @@ const allowedSources = new Set<NewebPayPaymentSource>([
   'product_order',
   'manual_test',
 ])
-const allowedPaymentModes = new Set<NewebPayPaymentMode>(['credit', 'merchant_default'])
+const allowedPaymentModes = new Set<NewebPayPaymentMode>(['credit', 'merchant_default', 'apple_pay_test'])
 
 export function isNewebPayPaymentSource(source: unknown): source is NewebPayPaymentSource {
   return typeof source === 'string' && allowedSources.has(source as NewebPayPaymentSource)
@@ -178,6 +180,14 @@ export function isNewebPayPaymentSource(source: unknown): source is NewebPayPaym
 
 export function isNewebPayPaymentMode(mode: unknown): mode is NewebPayPaymentMode {
   return typeof mode === 'string' && allowedPaymentModes.has(mode as NewebPayPaymentMode)
+}
+
+function assertStandardNewebPayPaymentMode(paymentMode: NewebPayPaymentMode): StandardNewebPayPaymentMode {
+  if (paymentMode === 'apple_pay_test') {
+    throw new Error('invalid_newebpay_payment_mode_for_item')
+  }
+
+  return paymentMode
 }
 
 export function isValidNewebPayUuid(value: unknown): value is string {
@@ -437,7 +447,7 @@ export function buildNewebPayPendingPaymentMetadata({
     const divinationPayload = buildDivinationPaymentPayload({
       readingId: readingId ?? '',
       merchantOrderNo,
-      paymentMode,
+      paymentMode: assertStandardNewebPayPaymentMode(paymentMode),
     })
 
     return {
@@ -455,7 +465,7 @@ export function buildNewebPayPendingPaymentMetadata({
     const aiChartPayload = buildAiChartReportPaymentPayload({
       reportId: reportId ?? '',
       merchantOrderNo,
-      paymentMode,
+      paymentMode: assertStandardNewebPayPaymentMode(paymentMode),
     })
 
     return {
@@ -541,6 +551,10 @@ export function createNewebPayMpgPaymentData({
 
   if (paymentMode === 'credit') {
     tradeInfoParams.CREDIT = 1
+  }
+
+  if (paymentMode === 'apple_pay_test') {
+    tradeInfoParams.APPLEPAY = 1
   }
 
   const tradeInfo = encryptTradeInfo(tradeInfoParams, config.hashKey, config.hashIv)
