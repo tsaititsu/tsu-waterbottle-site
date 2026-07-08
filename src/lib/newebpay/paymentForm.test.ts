@@ -495,6 +495,11 @@ assert.equal(decryptedProductOrder.get('CREDIT'), '1')
 assert.equal(decryptedProductOrder.get('InstFlag'), '0')
 assert.equal(decryptedProductOrder.get('ClientBackURL'), 'http://localhost:3000/cart')
 assert.equal(decryptedProductOrder.has('LINEPAY'), false)
+assert.equal(decryptedProductOrder.has('VACC'), false)
+assert.equal(decryptedProductOrder.has('WEBATM'), false)
+assert.equal(decryptedProductOrder.has('APPLEPAY'), false)
+assert.equal(decryptedProductOrder.has('ANDROIDPAY'), false)
+assert.equal(decryptedProductOrder.has('SAMSUNGPAY'), false)
 
 const smokePendingPaymentMetadata = buildNewebPayPendingPaymentMetadata({
   itemKey: 'newebpay_live_smoke_test_1',

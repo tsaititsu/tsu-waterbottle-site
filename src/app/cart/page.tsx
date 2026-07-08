@@ -12,6 +12,14 @@ import {
   type CartLinePayCreateProductOrderInput,
   type CartLinePayRequestBody,
 } from './linePayCheckout'
+import {
+  getCartNewebPayButtonState,
+  getNewebPayCartCheckoutErrorMessage,
+  startNewebPayCartCheckout,
+  type CartNewebPayCreateProductOrderInput,
+  type CartNewebPayFormInput,
+  type CartNewebPayPaymentRequestBody,
+} from './newebpayCheckout'
 
 const typeLabel: Record<string, string> = {
   divination: '占卜',
@@ -51,11 +59,30 @@ function getLinePayReturnMessageClassName(tone: CartLinePayReturnMessage['tone']
   return 'border-borderSoft bg-softPurple text-deepPurple'
 }
 
+function submitCartNewebPayForm(input: CartNewebPayFormInput) {
+  const form = document.createElement('form')
+  form.method = input.method
+  form.action = input.action
+  form.style.display = 'none'
+
+  for (const field of input.fields) {
+    const element = document.createElement('input')
+    element.type = 'hidden'
+    element.name = field.name
+    element.value = field.value
+    form.appendChild(element)
+  }
+
+  document.body.appendChild(form)
+  form.submit()
+}
+
 export default function CartPage() {
   const { items, isLoaded, removeItem, totalAmount, totalQuantity } = useCart()
   const [spiritualProductsAccepted, setSpiritualProductsAccepted] = useState(false)
   const [postOfficeShippingInfo, setPostOfficeShippingInfo] = useState<PostOfficeShippingInfo>(emptyPostOfficeShippingInfo)
   const [checkoutError, setCheckoutError] = useState('')
+  const [isNewebPayCheckingOut, setIsNewebPayCheckingOut] = useState(false)
   const [isLinePayCheckingOut, setIsLinePayCheckingOut] = useState(false)
   const [linePayReturnMessage, setLinePayReturnMessage] = useState<CartLinePayReturnMessage>(() =>
     buildLinePayReturnMessage(null),
@@ -63,6 +90,7 @@ export default function CartPage() {
 
   const formattedTotal = useMemo(() => `NT$${totalAmount.toLocaleString('zh-TW')}`, [totalAmount])
   const hasSpiritualProduct = items.some((item) => item.type === 'spiritual_product')
+  const newebPayButtonState = getCartNewebPayButtonState(isNewebPayCheckingOut)
   const linePayButtonState = getCartLinePayButtonState(undefined, isLinePayCheckingOut)
 
   const updatePostOfficeShippingInfo = (key: keyof PostOfficeShippingInfo, value: string) => {
@@ -207,6 +235,80 @@ export default function CartPage() {
     if (!result.ok) {
       setCheckoutError(getLinePayCartCheckoutErrorMessage(result.error))
       setIsLinePayCheckingOut(false)
+    }
+  }
+
+  const handleNewebPayCheckoutClick = async () => {
+    if (isNewebPayCheckingOut) return
+
+    const shippingInfo = getValidatedShippingInfo()
+    if (!shippingInfo) return
+
+    const productItems = items.filter((item) => item.type === 'spiritual_product')
+    setIsNewebPayCheckingOut(true)
+    setCheckoutError('')
+    savePostOfficeShippingInfo(shippingInfo)
+
+    const result = await startNewebPayCartCheckout({
+      cartItems: productItems,
+      customerInfo: {
+        customerName: shippingInfo.recipientName,
+        customerPhone: shippingInfo.recipientPhone,
+        recipientName: shippingInfo.recipientName,
+        recipientPhone: shippingInfo.recipientPhone,
+        postalCode: shippingInfo.postalCode,
+        address: `${shippingInfo.city}${shippingInfo.district}${shippingInfo.address}`,
+        note: shippingInfo.note,
+      },
+      createProductOrder: async (input: CartNewebPayCreateProductOrderInput) => {
+        const response = await fetch('/api/product-orders/create', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            ...input,
+            paymentMethod: 'newebpay',
+          }),
+        })
+        const data = await response.json().catch(() => null)
+
+        if (!response.ok || !data || data.ok !== true) {
+          throw new Error('newebpay_create_order_failed')
+        }
+
+        return {
+          ...data,
+          productOrderId: data.productOrderId ?? data.orderId,
+        }
+      },
+      createNewebPayPayment: async (body: CartNewebPayPaymentRequestBody) => {
+        const response = await fetch('/api/payments/newebpay/create', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            itemKey: 'spiritual_product_order',
+            source: 'product_order',
+            paymentMode: body.paymentMode,
+            orderId: body.productOrderId,
+          }),
+        })
+        const data = await response.json().catch(() => null)
+
+        if (!response.ok || !data || data.ok !== true) {
+          throw new Error('newebpay_payment_create_failed')
+        }
+
+        return data
+      },
+      submitNewebPayForm: submitCartNewebPayForm,
+    })
+
+    if (!result.ok) {
+      setCheckoutError(getNewebPayCartCheckoutErrorMessage(result.error))
+      setIsNewebPayCheckingOut(false)
     }
   }
 
@@ -420,6 +522,20 @@ export default function CartPage() {
                   <p className="mt-1 font-serifTC text-2xl font-semibold text-deepPurple">{formattedTotal}</p>
                 </div>
                 <div className="flex gap-3">
+                  {newebPayButtonState.visible && hasSpiritualProduct ? (
+                    <div className="grid gap-2">
+                      <button
+                        aria-busy={isNewebPayCheckingOut}
+                        className="focus-ring rounded-xl bg-deepPurple px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
+                        disabled={newebPayButtonState.disabled}
+                        onClick={handleNewebPayCheckoutClick}
+                        type="button"
+                      >
+                        {newebPayButtonState.label}
+                      </button>
+                      <p className="max-w-44 text-xs leading-5 text-textMuted">{newebPayButtonState.message}</p>
+                    </div>
+                  ) : null}
                   {linePayButtonState.visible && hasSpiritualProduct ? (
                     <div className="grid gap-2">
                       <button

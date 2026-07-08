@@ -129,7 +129,7 @@ test('cart page calls LINE Pay request route through click handler only', () => 
   const source = readCartPageSource()
 
   assert.equal(source.includes('/api/product-orders/line-pay/request'), true)
-  assert.equal(source.includes('/api/payments/newebpay/create'), false)
+  assert.equal(readLinePayCheckoutSource().includes('/api/payments/newebpay/create'), false)
 })
 
 test('cart page uses fetch for product order and LINE Pay request APIs', () => {
