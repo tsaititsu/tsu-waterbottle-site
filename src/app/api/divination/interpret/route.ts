@@ -23,6 +23,7 @@ import {
   markDivinationReadingFailed,
   markDivinationReadingInterpreting,
 } from "@/lib/supabase/divinationReadings"
+import { getDivinationOpenAIModel } from "@/lib/openai/divinationModel"
 import type {
   DivinationCardSummary,
   DivinationDrawMode,
@@ -39,7 +40,6 @@ const drawModes = new Set<DivinationDrawMode>(["manual", "auto"])
 const positions = new Set<DivinationPosition>(["upright", "reversed"])
 
 const openAiResponsesUrl = "https://api.openai.com/v1/responses"
-const fallbackOpenAiModel = "gpt-4.1-mini"
 
 function jsonError(error: string, status = 400) {
   return NextResponse.json({ ok: false, error }, { status })
@@ -224,7 +224,7 @@ async function createOpenAiInterpretation(input: {
     }
   }
 
-  const model = process.env.OPENAI_MODEL || fallbackOpenAiModel
+  const model = getDivinationOpenAIModel(process.env)
   const legacyContext = buildLegacyReadingContext(input)
   const draftResult = await requestOpenAiText({
     apiKey,
