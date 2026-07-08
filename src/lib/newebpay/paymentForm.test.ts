@@ -6,6 +6,7 @@ import {
   createNewebPayMpgPaymentData,
   isNewebPayPaymentMode,
   isNewebPayPaymentSource,
+  PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE,
   resolveNewebPayAiChartReportPendingPaymentLink,
   resolveNewebPayAiChartReportIdForPayment,
   resolveNewebPayDivinationPendingPaymentLink,
@@ -77,6 +78,7 @@ assert.equal(isNewebPayPaymentSource('external'), false)
 assert.equal(isNewebPayPaymentMode('credit'), true)
 assert.equal(isNewebPayPaymentMode('merchant_default'), true)
 assert.equal(isNewebPayPaymentMode('apple_pay_test'), true)
+assert.equal(isNewebPayPaymentMode(PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE), true)
 assert.equal(isNewebPayPaymentMode('linepay'), false)
 
 const bookingId = '550e8400-e29b-41d4-a716-446655440000'
@@ -530,6 +532,36 @@ assert.equal(decryptedProductOrder.has('APPLEPAY'), false)
 assert.equal(decryptedProductOrder.has('ANDROIDPAY'), false)
 assert.equal(decryptedProductOrder.has('SAMSUNGPAY'), false)
 
+const productOrderApplePayData = createNewebPayMpgPaymentData({
+  itemKey: PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+  config,
+  paymentMode: PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE,
+  amount: 1500,
+  itemDesc: `開運商品訂單 ${productOrderNo}`,
+  now: new Date(2026, 6, 3, 17, 25, 30),
+  merchantOrderNo: 'WB20260703172530APRD',
+})
+const decryptedProductOrderApplePay = new URLSearchParams(
+  decryptTradeInfo(productOrderApplePayData.fields.TradeInfo, hashKey, hashIv),
+)
+
+assert.equal(productOrderApplePayData.itemKey, PRODUCT_ORDER_PAYMENT_ITEM_KEY)
+assert.equal(productOrderApplePayData.amount, 1500)
+assert.equal(decryptedProductOrderApplePay.get('Amt'), '1500')
+assert.equal(decryptedProductOrderApplePay.get('ItemDesc'), `開運商品訂單 ${productOrderNo}`)
+assert.equal(decryptedProductOrderApplePay.get('APPLEPAY'), '1')
+assert.equal(decryptedProductOrderApplePay.get('InstFlag'), '0')
+assert.equal(decryptedProductOrderApplePay.get('ClientBackURL'), 'http://localhost:3000/cart')
+assert.equal(decryptedProductOrderApplePay.has('CREDIT'), false)
+assert.equal(decryptedProductOrderApplePay.has('LINEPAY'), false)
+assert.equal(decryptedProductOrderApplePay.has('VACC'), false)
+assert.equal(decryptedProductOrderApplePay.has('WEBATM'), false)
+assert.equal(decryptedProductOrderApplePay.has('CVS'), false)
+assert.equal(decryptedProductOrderApplePay.has('BARCODE'), false)
+assert.equal(decryptedProductOrderApplePay.has('ANDROIDPAY'), false)
+assert.equal(decryptedProductOrderApplePay.has('SAMSUNGPAY'), false)
+assert.equal(decryptedProductOrderApplePay.has('TAIWANPAY'), false)
+
 const smokePendingPaymentMetadata = buildNewebPayPendingPaymentMetadata({
   itemKey: 'newebpay_live_smoke_test_1',
   source: 'manual_test',
@@ -652,6 +684,7 @@ assert.deepEqual(productOrderPendingPaymentMetadata.rawPayload, {
   orderNo: productOrderNo,
   amount: 1500,
   paymentMode: 'credit',
+  paymentMethod: 'credit',
   itemDesc: `開運商品訂單 ${productOrderNo}`,
   merchantOrderNo: productOrderData.merchantOrderNo,
 })
@@ -663,6 +696,52 @@ assert.equal('customerPhone' in productOrderPendingPaymentMetadata.rawPayload, f
 assert.equal('customerEmail' in productOrderPendingPaymentMetadata.rawPayload, false)
 assert.equal('address' in productOrderPendingPaymentMetadata.rawPayload, false)
 assert.equal('shipment' in productOrderPendingPaymentMetadata.rawPayload, false)
+
+const productOrderApplePayPendingPaymentMetadata = buildNewebPayPendingPaymentMetadata({
+  itemKey: PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+  source: PRODUCT_ORDER_PAYMENT_SOURCE,
+  paymentMode: PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE,
+  merchantOrderNo: productOrderApplePayData.merchantOrderNo,
+  productOrderPayment: {
+    itemKey: PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+    itemType: PRODUCT_ORDER_PAYMENT_ITEM_TYPE,
+    itemId: orderId,
+    amountTwd: 1500,
+    itemDesc: `開運商品訂單 ${productOrderNo}`,
+    rawPayload: {
+      itemKey: PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+      itemType: PRODUCT_ORDER_PAYMENT_ITEM_TYPE,
+      source: PRODUCT_ORDER_PAYMENT_SOURCE,
+      orderId,
+      orderNo: productOrderNo,
+      amount: 1500,
+    },
+  },
+})
+
+assert.equal(productOrderApplePayPendingPaymentMetadata.itemType, PRODUCT_ORDER_PAYMENT_ITEM_TYPE)
+assert.equal(productOrderApplePayPendingPaymentMetadata.itemId, orderId)
+assert.equal(productOrderApplePayPendingPaymentMetadata.bookingId, null)
+assert.deepEqual(productOrderApplePayPendingPaymentMetadata.rawPayload, {
+  itemKey: PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+  itemType: PRODUCT_ORDER_PAYMENT_ITEM_TYPE,
+  source: PRODUCT_ORDER_PAYMENT_SOURCE,
+  orderId,
+  orderNo: productOrderNo,
+  amount: 1500,
+  paymentMode: PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE,
+  paymentMethod: 'apple_pay',
+  itemDesc: `開運商品訂單 ${productOrderNo}`,
+  merchantOrderNo: productOrderApplePayData.merchantOrderNo,
+})
+assert.equal('TradeInfo' in productOrderApplePayPendingPaymentMetadata.rawPayload, false)
+assert.equal('TradeSha' in productOrderApplePayPendingPaymentMetadata.rawPayload, false)
+assert.equal('HashKey' in productOrderApplePayPendingPaymentMetadata.rawPayload, false)
+assert.equal('HashIV' in productOrderApplePayPendingPaymentMetadata.rawPayload, false)
+assert.equal('customerPhone' in productOrderApplePayPendingPaymentMetadata.rawPayload, false)
+assert.equal('customerEmail' in productOrderApplePayPendingPaymentMetadata.rawPayload, false)
+assert.equal('address' in productOrderApplePayPendingPaymentMetadata.rawPayload, false)
+assert.equal('shipment' in productOrderApplePayPendingPaymentMetadata.rawPayload, false)
 
 const bookingPendingPaymentMetadata = buildNewebPayPendingPaymentMetadata({
   itemKey: 'booking_consultation_60',

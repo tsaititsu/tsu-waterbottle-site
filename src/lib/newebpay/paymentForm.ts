@@ -18,7 +18,12 @@ export type NewebPayPaymentSource =
   | 'product_order'
   | 'manual_test'
 export type StandardNewebPayPaymentMode = 'credit' | 'merchant_default'
-export type NewebPayPaymentMode = StandardNewebPayPaymentMode | NewebPayApplePayTestPaymentMode
+export const PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE = 'product_order_apple_pay'
+export type ProductOrderApplePayPaymentMode = typeof PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE
+export type NewebPayPaymentMode =
+  | StandardNewebPayPaymentMode
+  | NewebPayApplePayTestPaymentMode
+  | ProductOrderApplePayPaymentMode
 
 export type NewebPayBookingPaymentContext = {
   id: string
@@ -140,6 +145,7 @@ export type NewebPayPendingPaymentMetadata = {
     orderId?: string
     orderNo?: string
     itemType?: string
+    paymentMethod?: 'credit' | 'apple_pay'
   }
 }
 
@@ -172,7 +178,12 @@ const allowedSources = new Set<NewebPayPaymentSource>([
   'product_order',
   'manual_test',
 ])
-const allowedPaymentModes = new Set<NewebPayPaymentMode>(['credit', 'merchant_default', 'apple_pay_test'])
+const allowedPaymentModes = new Set<NewebPayPaymentMode>([
+  'credit',
+  'merchant_default',
+  'apple_pay_test',
+  PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE,
+])
 
 export function isNewebPayPaymentSource(source: unknown): source is NewebPayPaymentSource {
   return typeof source === 'string' && allowedSources.has(source as NewebPayPaymentSource)
@@ -183,7 +194,7 @@ export function isNewebPayPaymentMode(mode: unknown): mode is NewebPayPaymentMod
 }
 
 function assertStandardNewebPayPaymentMode(paymentMode: NewebPayPaymentMode): StandardNewebPayPaymentMode {
-  if (paymentMode === 'apple_pay_test') {
+  if (paymentMode === 'apple_pay_test' || paymentMode === PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE) {
     throw new Error('invalid_newebpay_payment_mode_for_item')
   }
 
@@ -483,6 +494,8 @@ export function buildNewebPayPendingPaymentMetadata({
     if (!productOrderPayment) {
       throw new Error('invalid_product_order_payment_input')
     }
+    const productOrderPaymentMethod =
+      paymentMode === PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE ? 'apple_pay' : paymentMode === 'credit' ? 'credit' : null
 
     return {
       itemType: productOrderPayment.itemType,
@@ -491,6 +504,7 @@ export function buildNewebPayPendingPaymentMetadata({
       rawPayload: {
         ...productOrderPayment.rawPayload,
         paymentMode,
+        ...(productOrderPaymentMethod ? { paymentMethod: productOrderPaymentMethod } : {}),
         itemDesc: productOrderPayment.itemDesc,
         merchantOrderNo,
       },
@@ -530,6 +544,10 @@ export function createNewebPayMpgPaymentData({
   const paymentAmount = amount ?? item.amount
   const paymentItemDesc = itemDesc ?? item.itemDesc
 
+  if (paymentMode === PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE && item.itemKey !== PRODUCT_ORDER_PAYMENT_ITEM_KEY) {
+    throw new Error('invalid_newebpay_payment_mode_for_item')
+  }
+
   if (!Number.isInteger(paymentAmount) || paymentAmount <= 0 || !paymentItemDesc.trim()) {
     throw new Error('Invalid NewebPay payment item amount or description')
   }
@@ -554,6 +572,10 @@ export function createNewebPayMpgPaymentData({
   }
 
   if (paymentMode === 'apple_pay_test') {
+    tradeInfoParams.APPLEPAY = 1
+  }
+
+  if (paymentMode === PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE) {
     tradeInfoParams.APPLEPAY = 1
   }
 

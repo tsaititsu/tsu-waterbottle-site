@@ -2,6 +2,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  CART_NEWEBPAY_APPLE_PAY_BUTTON_LABEL,
+  CART_NEWEBPAY_APPLE_PAY_LOADING_MESSAGE,
+  CART_NEWEBPAY_APPLE_PAY_READY_MESSAGE,
   CART_NEWEBPAY_BUTTON_LABEL,
   CART_NEWEBPAY_LOADING_MESSAGE,
   CART_NEWEBPAY_READY_MESSAGE,
@@ -103,8 +106,11 @@ function submitFormOk(calls: CartNewebPayFormInput[] = []) {
 
 test('button label is credit card payment and not LINE Pay', () => {
   assert.equal(CART_NEWEBPAY_BUTTON_LABEL, '信用卡付款')
+  assert.equal(CART_NEWEBPAY_APPLE_PAY_BUTTON_LABEL, 'Apple Pay 付款（iPhone / Safari）')
   assert.equal(CART_NEWEBPAY_BUTTON_LABEL.includes('LINE Pay'), false)
   assert.equal(CART_NEWEBPAY_BUTTON_LABEL.includes('分期'), false)
+  assert.equal(CART_NEWEBPAY_APPLE_PAY_BUTTON_LABEL.includes('測試'), false)
+  assert.equal(CART_NEWEBPAY_APPLE_PAY_BUTTON_LABEL.includes('NT$1'), false)
 })
 
 test('button state is visible and loading state is disabled', () => {
@@ -120,12 +126,24 @@ test('button state is visible and loading state is disabled', () => {
     label: CART_NEWEBPAY_BUTTON_LABEL,
     message: CART_NEWEBPAY_LOADING_MESSAGE,
   })
+  assert.deepEqual(getCartNewebPayButtonState(false, 'product_order_apple_pay'), {
+    visible: true,
+    disabled: false,
+    label: CART_NEWEBPAY_APPLE_PAY_BUTTON_LABEL,
+    message: CART_NEWEBPAY_APPLE_PAY_READY_MESSAGE,
+  })
+  assert.deepEqual(getCartNewebPayButtonState(true, 'product_order_apple_pay'), {
+    visible: true,
+    disabled: true,
+    label: CART_NEWEBPAY_APPLE_PAY_BUTTON_LABEL,
+    message: CART_NEWEBPAY_APPLE_PAY_LOADING_MESSAGE,
+  })
 })
 
 test('checkout errors map to friendly messages', () => {
   assert.equal(getNewebPayCartCheckoutErrorMessage('newebpay_cart_empty'), '購物車目前沒有可付款的開運商品。')
   assert.equal(getNewebPayCartCheckoutErrorMessage('newebpay_create_order_failed'), '商品訂單建立失敗，請稍後再試。')
-  assert.equal(getNewebPayCartCheckoutErrorMessage('newebpay_payment_create_failed'), '信用卡付款資料建立失敗，請稍後再試。')
+  assert.equal(getNewebPayCartCheckoutErrorMessage('newebpay_payment_create_failed'), '付款資料建立失敗，請稍後再試。')
 })
 
 test('empty cart returns newebpay_cart_empty', async () => {
@@ -271,6 +289,35 @@ test('createNewebPayPayment body only includes productOrderId and credit mode', 
   assert.equal(JSON.stringify(paymentCalls).includes('wallet'), false)
 })
 
+test('Apple Pay checkout requests product order Apple Pay mode with formal amount', async () => {
+  const paymentCalls: CartNewebPayPaymentRequestBody[] = []
+  const submitCalls: CartNewebPayFormInput[] = []
+
+  const result = await startNewebPayCartCheckout({
+    cartItems,
+    customerInfo,
+    paymentMode: 'product_order_apple_pay',
+    createProductOrder: createOrderOk(),
+    createNewebPayPayment: createNewebPayPaymentOk(paymentCalls),
+    submitNewebPayForm: submitFormOk(submitCalls),
+  })
+
+  assert.equal(result.ok, true)
+  if (!result.ok) throw new Error(result.error)
+  assert.equal(result.amount, 1500)
+  assert.deepEqual(paymentCalls, [
+    {
+      productOrderId: 'product-order-1',
+      paymentMode: 'product_order_apple_pay',
+    },
+  ])
+  assert.deepEqual(Object.keys(paymentCalls[0]).sort(), ['paymentMode', 'productOrderId'])
+  assert.equal(JSON.stringify(paymentCalls).includes('linepay'), false)
+  assert.equal(JSON.stringify(paymentCalls).includes('atm'), false)
+  assert.equal(JSON.stringify(paymentCalls).includes('wallet'), false)
+  assert.equal(submitCalls.length, 1)
+})
+
 test('createNewebPayPayment failure does not submit form', async () => {
   const submitCalls: CartNewebPayFormInput[] = []
   const result = await startNewebPayCartCheckout({
@@ -398,7 +445,6 @@ test('helper source does not enable linepay, atm, or wallet payments', () => {
     'linepay',
     'VACC',
     'WEBATM',
-    'APPLEPAY',
     'ANDROIDPAY',
     'SAMSUNGPAY',
     "provider: 'line_pay'",
@@ -470,7 +516,8 @@ test('cart page wires credit card button to product order and NewebPay create AP
   const source = readCartPageSource()
 
   assert.equal(source.includes('handleNewebPayCheckoutClick'), true)
-  assert.equal(source.includes('{newebPayButtonState.label}'), true)
+  assert.equal(source.includes('{neWebPayCreditButtonState.label}'), true)
+  assert.equal(source.includes('{neWebPayApplePayButtonState.label}'), true)
   assert.equal(source.includes("fetch('/api/product-orders/create'"), true)
   assert.equal(source.includes("fetch('/api/payments/newebpay/create'"), true)
   assert.equal(source.includes("itemKey: 'spiritual_product_order'"), true)
@@ -486,7 +533,8 @@ test('cart page posts only NewebPay credit parameters and submits payment form',
   assert.equal(source.includes('window.location.assign(data'), false)
   assert.equal(source.includes("paymentMethod: 'newebpay'"), true)
   assert.equal(source.includes("paymentMode: body.paymentMode"), true)
-  assert.equal(source.includes("paymentMode: 'credit'"), false)
+  assert.equal(source.includes("handleNewebPayCheckoutClick('credit')"), true)
+  assert.equal(source.includes("handleNewebPayCheckoutClick('product_order_apple_pay')"), true)
   assert.equal(source.includes("paymentMethod: 'line_pay'"), false)
   assert.equal(source.includes("paymentMode: 'linepay'"), false)
   assert.equal(source.includes("paymentMode: 'atm'"), false)
@@ -495,6 +543,9 @@ test('cart page posts only NewebPay credit parameters and submits payment form',
   assert.equal(source.includes('SAMSUNGPAY'), false)
   assert.equal(source.includes('VACC'), false)
   assert.equal(source.includes('LINEPAY'), false)
+  assert.equal(source.includes('測試 NT$1'), false)
+  assert.equal(source.includes('1 元測試'), false)
+  assert.equal(source.includes('/apple-pay-test'), false)
 })
 
 test('cart page prevents duplicate NewebPay checkout while loading', () => {
@@ -502,7 +553,8 @@ test('cart page prevents duplicate NewebPay checkout while loading', () => {
 
   assert.equal(source.includes('if (isNewebPayCheckingOut) return'), true)
   assert.equal(source.includes('setIsNewebPayCheckingOut(true)'), true)
-  assert.equal(source.includes('disabled={newebPayButtonState.disabled}'), true)
+  assert.equal(source.includes('disabled={neWebPayCreditButtonState.disabled}'), true)
+  assert.equal(source.includes('disabled={neWebPayApplePayButtonState.disabled}'), true)
 })
 
 runTests().catch((error) => {

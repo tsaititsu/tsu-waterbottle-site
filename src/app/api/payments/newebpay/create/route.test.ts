@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { handleCreateNewebPayPaymentRequest } from './handler'
-import { createNewebPayMpgPaymentData } from '../../../../../lib/newebpay/paymentForm'
+import {
+  createNewebPayMpgPaymentData,
+  PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE,
+} from '../../../../../lib/newebpay/paymentForm'
 import { PRODUCT_ORDER_PAYMENT_ITEM_KEY } from '../../../../../lib/payments/productOrderPayment'
 import { ONE_DOLLAR_TEST_CONFIRMATION_VALUE } from '../../../../../lib/newebpay/oneDollarTestMode'
 import type { CreatePendingPaymentInput } from '../../../../../lib/supabase/payments'
@@ -358,6 +361,7 @@ test('product order success creates a pending payment and links the order', asyn
   assert.deepEqual(calls.productOrderLinks, [{ orderId, paymentId }])
   assert.deepEqual(calls.divinationLinks, [])
   assert.deepEqual(calls.aiChartLinks, [])
+  assert.equal(calls.paymentDataInputs[0].paymentMode, 'credit')
 
   const paymentInput = calls.pendingPayments[0]
 
@@ -374,10 +378,76 @@ test('product order success creates a pending payment and links the order', asyn
   assert.equal(paymentInput.rawPayload?.orderId, orderId)
   assert.equal(paymentInput.rawPayload?.orderNo, orderNo)
   assert.equal(paymentInput.rawPayload?.amount, payableOrder.totalAmountTwd)
+  assert.equal(paymentInput.rawPayload?.paymentMode, 'credit')
+  assert.equal(paymentInput.rawPayload?.paymentMethod, 'credit')
   assert.equal(calls.paymentDataInputs[0].amount, payableOrder.totalAmountTwd)
   assert.equal(calls.paymentDataInputs[0].itemDesc, `開運商品訂單 ${orderNo}`)
   assertNoUnsafeSerializedKeys(paymentInput.rawPayload)
   assertNoUnsafeSerializedKeys(json)
+})
+
+test('product order Apple Pay success creates a formal pending payment and links the order', async () => {
+  const { calls, deps } = createProductDeps()
+  const response = await handleCreateNewebPayPaymentRequest(
+    validBody({ paymentMode: PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE }),
+    deps,
+  )
+  const json = await readJson(response)
+
+  assert.equal(response.status, 200)
+  assert.equal(json.ok, true)
+  assert.equal(json.merchantOrderNo, merchantOrderNo)
+  assert.equal(json.amount, payableOrder.totalAmountTwd)
+  assert.equal(json.itemKey, PRODUCT_ORDER_PAYMENT_ITEM_KEY)
+  assert.deepEqual(calls.productOrderLookups, [orderId])
+  assert.equal(calls.pendingPayments.length, 1)
+  assert.deepEqual(calls.productOrderLinks, [{ orderId, paymentId }])
+  assert.deepEqual(calls.divinationLinks, [])
+  assert.deepEqual(calls.aiChartLinks, [])
+  assert.equal(calls.paymentDataInputs.length, 1)
+  assert.equal(calls.paymentDataInputs[0].paymentMode, PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE)
+  assert.equal(calls.paymentDataInputs[0].amount, payableOrder.totalAmountTwd)
+  assert.equal(calls.paymentDataInputs[0].itemDesc, `開運商品訂單 ${orderNo}`)
+
+  const paymentInput = calls.pendingPayments[0]
+
+  assert.equal(paymentInput.provider, 'newebpay')
+  assert.equal(paymentInput.itemType, 'spiritual_product_order')
+  assert.equal(paymentInput.itemId, orderId)
+  assert.equal(paymentInput.bookingId, null)
+  assert.equal(paymentInput.amountTwd, payableOrder.totalAmountTwd)
+  assert.equal(paymentInput.itemName, `開運商品訂單 ${orderNo}`)
+  assert.equal(paymentInput.merchantOrderNo, merchantOrderNo)
+  assert.equal(paymentInput.rawPayload?.itemKey, PRODUCT_ORDER_PAYMENT_ITEM_KEY)
+  assert.equal(paymentInput.rawPayload?.itemType, 'spiritual_product_order')
+  assert.equal(paymentInput.rawPayload?.source, 'product_order')
+  assert.equal(paymentInput.rawPayload?.orderId, orderId)
+  assert.equal(paymentInput.rawPayload?.orderNo, orderNo)
+  assert.equal(paymentInput.rawPayload?.amount, payableOrder.totalAmountTwd)
+  assert.equal(paymentInput.rawPayload?.paymentMode, PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE)
+  assert.equal(paymentInput.rawPayload?.paymentMethod, 'apple_pay')
+  assertNoUnsafeSerializedKeys(paymentInput.rawPayload)
+  assertNoUnsafeSerializedKeys(json)
+})
+
+test('product order Apple Pay mode is rejected for non product order requests', async () => {
+  const { calls, deps } = createProductDeps()
+  const response = await handleCreateNewebPayPaymentRequest(
+    {
+      itemKey: 'ai_divination_single',
+      source: 'ai_divination',
+      paymentMode: PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE,
+      readingId: '2df1a8da-3893-4b81-8d00-774a9cc0e472',
+    },
+    deps,
+  )
+  const json = await readJson(response)
+
+  assert.equal(response.status, 400)
+  assert.deepEqual(json, { ok: false, error: 'invalid_product_order_apple_pay_request' })
+  assert.deepEqual(calls.productOrderLookups, [])
+  assert.deepEqual(calls.pendingPayments, [])
+  assert.deepEqual(calls.productOrderLinks, [])
 })
 
 test('missing orderId is rejected before payment creation', async () => {

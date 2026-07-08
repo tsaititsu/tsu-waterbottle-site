@@ -4,8 +4,13 @@ import {
 } from '../../lib/newebpay/clientForm'
 
 export const CART_NEWEBPAY_BUTTON_LABEL = '信用卡付款'
+export const CART_NEWEBPAY_APPLE_PAY_BUTTON_LABEL = 'Apple Pay 付款（iPhone / Safari）'
 export const CART_NEWEBPAY_READY_MESSAGE = '將前往藍新金流信用卡一次付清頁。'
+export const CART_NEWEBPAY_APPLE_PAY_READY_MESSAGE = '將前往藍新金流 Apple Pay 付款頁。'
 export const CART_NEWEBPAY_LOADING_MESSAGE = '正在建立信用卡付款資料...'
+export const CART_NEWEBPAY_APPLE_PAY_LOADING_MESSAGE = '正在建立 Apple Pay 付款資料...'
+
+export type CartNewebPayPaymentMode = 'credit' | 'product_order_apple_pay'
 
 export type CartNewebPayCheckoutItem = {
   id: string
@@ -48,7 +53,7 @@ export type CartNewebPayCreateProductOrderInput = {
 
 export type CartNewebPayPaymentRequestBody = {
   productOrderId: string
-  paymentMode: 'credit'
+  paymentMode: CartNewebPayPaymentMode
 }
 
 export type CartNewebPayFormInput = {
@@ -60,6 +65,7 @@ export type CartNewebPayFormInput = {
 export type StartNewebPayCartCheckoutInput = {
   cartItems: CartNewebPayCheckoutItem[]
   customerInfo: CartNewebPayCustomerInfo
+  paymentMode?: CartNewebPayPaymentMode
   createProductOrder: (input: CartNewebPayCreateProductOrderInput) => Promise<unknown>
   createNewebPayPayment: (body: CartNewebPayPaymentRequestBody) => Promise<unknown>
   submitNewebPayForm: (input: CartNewebPayFormInput) => Promise<void> | void
@@ -94,8 +100,12 @@ export type StartNewebPayCartCheckoutError = Extract<StartNewebPayCartCheckoutRe
 export type CartNewebPayButtonState = {
   visible: boolean
   disabled: boolean
-  label: typeof CART_NEWEBPAY_BUTTON_LABEL
-  message: typeof CART_NEWEBPAY_READY_MESSAGE | typeof CART_NEWEBPAY_LOADING_MESSAGE
+  label: typeof CART_NEWEBPAY_BUTTON_LABEL | typeof CART_NEWEBPAY_APPLE_PAY_BUTTON_LABEL
+  message:
+    | typeof CART_NEWEBPAY_READY_MESSAGE
+    | typeof CART_NEWEBPAY_LOADING_MESSAGE
+    | typeof CART_NEWEBPAY_APPLE_PAY_READY_MESSAGE
+    | typeof CART_NEWEBPAY_APPLE_PAY_LOADING_MESSAGE
 }
 
 function normalizeRequiredText(value: string | null | undefined) {
@@ -161,12 +171,23 @@ function buildCreateProductOrderInput(
   }
 }
 
-export function getCartNewebPayButtonState(isCheckingOut = false): CartNewebPayButtonState {
+export function getCartNewebPayButtonState(
+  isCheckingOut = false,
+  paymentMode: CartNewebPayPaymentMode = 'credit',
+): CartNewebPayButtonState {
+  const isApplePay = paymentMode === 'product_order_apple_pay'
+
   return {
     visible: true,
     disabled: isCheckingOut,
-    label: CART_NEWEBPAY_BUTTON_LABEL,
-    message: isCheckingOut ? CART_NEWEBPAY_LOADING_MESSAGE : CART_NEWEBPAY_READY_MESSAGE,
+    label: isApplePay ? CART_NEWEBPAY_APPLE_PAY_BUTTON_LABEL : CART_NEWEBPAY_BUTTON_LABEL,
+    message: isCheckingOut
+      ? isApplePay
+        ? CART_NEWEBPAY_APPLE_PAY_LOADING_MESSAGE
+        : CART_NEWEBPAY_LOADING_MESSAGE
+      : isApplePay
+        ? CART_NEWEBPAY_APPLE_PAY_READY_MESSAGE
+        : CART_NEWEBPAY_READY_MESSAGE,
   }
 }
 
@@ -181,9 +202,9 @@ export function getNewebPayCartCheckoutErrorMessage(error: StartNewebPayCartChec
     case 'newebpay_product_order_id_missing':
       return '商品訂單資料不完整，請稍後再試。'
     case 'newebpay_payment_create_failed':
-      return '信用卡付款資料建立失敗，請稍後再試。'
+      return '付款資料建立失敗，請稍後再試。'
     case 'newebpay_form_fields_missing':
-      return '信用卡付款表單資料不完整，請稍後再試。'
+      return '付款表單資料不完整，請稍後再試。'
     case 'newebpay_form_submit_failed':
       return '無法前往藍新金流付款頁，請稍後再試。'
   }
@@ -192,6 +213,7 @@ export function getNewebPayCartCheckoutErrorMessage(error: StartNewebPayCartChec
 export async function startNewebPayCartCheckout({
   cartItems,
   customerInfo,
+  paymentMode = 'credit',
   createProductOrder,
   createNewebPayPayment,
   submitNewebPayForm,
@@ -245,7 +267,7 @@ export async function startNewebPayCartCheckout({
   try {
     paymentResponse = await createNewebPayPayment({
       productOrderId,
-      paymentMode: 'credit',
+      paymentMode,
     })
   } catch {
     return {

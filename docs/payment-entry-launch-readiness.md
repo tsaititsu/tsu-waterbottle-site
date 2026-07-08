@@ -1,7 +1,7 @@
 # Payment Entry Launch Readiness Checklist
 
 本文件整理付款入口上線前總檢查。  
-本輪只新增文件，不改程式邏輯、不新增 API route、不新增前端按鈕、不呼叫藍新 API、不呼叫 LINE Pay API、不刷卡、不讀 `.env.local`、不讀 production env、不輸出任何 key、不執行 SQL、不 push、不 deploy。
+文件不得放 MerchantID / HashKey / HashIV / LINE Pay Channel Secret / production env 真值 / TradeInfo / TradeSha。
 
 ## 一、目前可開放入口
 
@@ -48,6 +48,24 @@
 - product order create API 支援 `paymentMethod=bank_transfer`
 - 既有匯款提交流程是否已和 product_order 穩定綁定，仍需另包確認
 
+### 4. 商品 cart NewebPay checkout
+
+商品 cart 目前正式提供：
+
+- NewebPay 信用卡付款：`CREDIT=1`、`InstFlag=0`
+- NewebPay Apple Pay：`APPLEPAY=1`、`InstFlag=0`
+- provider: `newebpay`
+- 使用正式商品金額
+- Notify paid 後 sync `product_orders`
+
+注意：
+
+- 商品 Apple Pay 只限 product order / cart。
+- 商品不送 `LINEPAY=1`。
+- 商品不送 `VACC=1`。
+- 商品不送 Google Pay / Samsung Pay。
+- 商品出貨仍需人工確認。
+
 ## 二、目前不可開放入口
 
 ### 1. 官方 LINE Pay
@@ -86,22 +104,7 @@ AI 命盤付款狀態：
 - reportContent / OpenAI / 正式交付流程仍需完成與測試
 - 不應開正式入口
 
-### 4. Product order / cart 的 NewebPay 正式 checkout
-
-商品 NewebPay 狀態：
-
-- product order create API 已建立
-- product order NewebPay pending payment 後端骨架已建立
-- Notify paid sync product_orders 已建立
-- cart 尚未接正式 NewebPay checkout 按鈕
-- 不應視為已可對一般使用者開放
-
-補充：
-
-- cart 官方 LINE Pay flow 已完成，但屬 `provider=line_pay`，目前保存暫停
-- 不能把官方 LINE Pay cart flow 視為 NewebPay 正式 checkout
-
-### 5. ATM / WebATM / 超商代碼 / 條碼
+### 4. ATM / WebATM / 超商代碼 / 條碼
 
 目前狀態：
 
@@ -191,15 +194,17 @@ AI 命盤付款狀態：
 - NewebPay pending payment 後端骨架已建立
 - Notify paid sync product_orders 已建立
 - 商品 NewebPay 不分期，`InstFlag=0`
-- cart 尚未接正式 NewebPay checkout
+- cart 已接正式 NewebPay 信用卡 checkout
+- cart 已接正式 NewebPay Apple Pay checkout
 - cart 目前保留匯款入口
 - 官方 LINE Pay 已完成但保存暫停
 - 藍新 LINE Pay 未啟用
 
 上線建議：
 
-- 商品上線第一版可先走匯款 / 人工確認
-- NewebPay checkout 需另包接 cart 前端並測 Notify paid sync
+- 商品可走信用卡 / Apple Pay / 匯款並行
+- 正式開放後需測 Notify paid sync product_orders
+- 出貨仍需人工確認
 - LINE Pay 不作為本階段商品正式付款入口
 
 ### 6. Bank transfer 匯款
@@ -306,6 +311,8 @@ AI 命盤付款狀態：
 
 - 課程信用卡一次付清
 - 課程信用卡 3 / 6 期分期
+- 商品 cart 信用卡付款
+- 商品 cart Apple Pay
 - 已穩定的匯款入口
 
 條件：
@@ -313,18 +320,18 @@ AI 命盤付款狀態：
 - 完成 NewebPay 正式低金額刷卡測試
 - 完成 Notify / Return / course_purchases sync 確認
 - 確認課程分期只出現在課程交易
+- 商品交易確認 `InstFlag=0`
+- 商品 Apple Pay 確認只送 `APPLEPAY=1`
 
 ### 第二層：需測試後上線
 
 - Booking 信用卡
 - Divination NT$50
-- Product order NewebPay checkout
 
 條件：
 
 - 各產品都需完成低金額刷卡
 - 各產品都需確認 paid sync
-- 商品 cart 需先補正式 NewebPay checkout 前端
 
 ### 第三層：暫不開放
 
@@ -357,9 +364,8 @@ AI 命盤付款狀態：
 - 測 NewebPay 課程 3 / 6 期
 - 確認 paid 後 `course_purchases` sync
 
-### B. 再處理商品 cart NewebPay checkout
+### B. 再處理商品 cart 上線驗證
 
-- 接商品正式 NewebPay checkout
 - 測 Notify paid sync product_orders
 - 補匯款人工出貨流程
 - 暫不接物流 API

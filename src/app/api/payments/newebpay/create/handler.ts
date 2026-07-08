@@ -13,6 +13,7 @@ import {
   createNewebPayMpgPaymentData,
   isNewebPayPaymentMode,
   isNewebPayPaymentSource,
+  PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE,
   resolveNewebPayAiChartReportPendingPaymentLink,
   resolveNewebPayAiChartReportIdForPayment,
   resolveNewebPayDivinationPendingPaymentLink,
@@ -29,6 +30,8 @@ import {
 import { getNewebPayPaymentItem } from '../../../../../lib/newebpay/paymentItems'
 import {
   buildProductOrderPaymentMapping,
+  PRODUCT_ORDER_PAYMENT_ITEM_KEY,
+  PRODUCT_ORDER_PAYMENT_SOURCE,
   validateProductOrderPayableForNewebpay,
   type ProductOrderForPayment,
   type ProductOrderPaymentMapping,
@@ -175,6 +178,10 @@ function applePayTestInvalidRequestResponse() {
   return NextResponse.json({ ok: false, error: 'invalid_apple_pay_test_request' }, { status: 400 })
 }
 
+function productOrderApplePayInvalidRequestResponse() {
+  return NextResponse.json({ ok: false, error: 'invalid_product_order_apple_pay_request' }, { status: 400 })
+}
+
 function divinationPaymentLinkErrorResponse(input: {
   readingId: string
   paymentId: string
@@ -290,6 +297,18 @@ export async function handleCreateNewebPayPaymentRequest(
   const paymentMode: NewebPayPaymentMode = body?.paymentMode ?? 'credit'
   const source = body?.source as NewebPayPaymentSource | undefined
   let applePayTestContext: NewebPayApplePayTestContext | null = null
+
+  if (
+    paymentMode === PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE &&
+    (item.itemKey !== PRODUCT_ORDER_PAYMENT_ITEM_KEY ||
+      source !== PRODUCT_ORDER_PAYMENT_SOURCE ||
+      body?.orderId === undefined ||
+      body?.bookingId !== undefined ||
+      body?.readingId !== undefined ||
+      body?.reportId !== undefined)
+  ) {
+    return productOrderApplePayInvalidRequestResponse()
+  }
 
   if (paymentMode === NEWEBPAY_APPLE_PAY_TEST_MODE) {
     const env = deps.env ?? process.env

@@ -1,12 +1,13 @@
 # Payment Current Status Summary
 
 本文件整理目前網站金流總狀態。  
-本輪只新增文件，不改程式邏輯、不呼叫藍新 API、不呼叫 LINE Pay API、不刷卡、不讀 `.env.local`、不讀 production env、不輸出任何 key、不執行 SQL、不 push、不 deploy。
+文件不得放 MerchantID / HashKey / HashIV / LINE Pay Channel Secret / production env 真值 / TradeInfo / TradeSha。
 
 ## 一、目前金流總結
 
 - NewebPay 信用卡一次付清：目前是網站正式金流主線。
 - NewebPay 課程信用卡分期：只限線上課程付款，TradeInfo 送 `CREDIT=1` 與 `InstFlag=3,6`。
+- NewebPay 商品 Apple Pay：只限商品 cart，TradeInfo 送 `APPLEPAY=1` 與 `InstFlag=0`。
 - 非課程 NewebPay：明確不開分期，TradeInfo 維持 `InstFlag=0` 或不開分期。
 - 官方 LINE Pay：使用 `provider=line_pay`，程式與文件已完成到可保存狀態，但目前暫停，不建議開放。
 - 藍新 LINE Pay：尚未啟用，程式目前沒有送 NewebPay MPG `LINEPAY=1`。
@@ -25,10 +26,12 @@
 - 不混官方 `provider=line_pay`
 - Notify route 依既有 `payments` 與各產品 sync helper 更新業務狀態
 
-共用 create route 目前只允許：
+共用 create route 目前允許：
 
 - `paymentMode=credit`
 - `paymentMode=merchant_default`
+- `paymentMode=product_order_apple_pay`，只限商品 cart / product order
+- `paymentMode=apple_pay_test`，只限內部測試入口與測試 flag
 
 `paymentMode=linepay` 會被擋下，不會送出 NewebPay MPG `LINEPAY=1`。
 
@@ -173,11 +176,13 @@
 - NewebPay pending payment 後端骨架已完成
 - Notify paid 後可 sync `product_orders`
 - NewebPay 商品付款使用 `CREDIT=1`
+- NewebPay 商品 Apple Pay 使用 `APPLEPAY=1`
 - 商品 NewebPay 不分期，維持 `InstFlag=0`
 
 目前 cart 狀態：
 
-- cart 正式 NewebPay checkout 尚未接到前端按鈕
+- cart 正式 NewebPay 信用卡 checkout 已接到前端按鈕
+- cart 正式 NewebPay Apple Pay checkout 已接到前端按鈕
 - cart 保留郵局匯款入口
 - cart 官方 LINE Pay 前端流程已完成，但目前保存暫停
 - 官方 LINE Pay 使用 `provider=line_pay`，不是 NewebPay MPG `LINEPAY=1`
@@ -214,8 +219,9 @@
 
 - 信用卡一次付清全站主線
 - 課程 3 / 6 期分期
+- 商品 cart 信用卡與 Apple Pay
 - LINE Pay 先暫停
-- product order cart 若要上線，優先接 NewebPay credit 或匯款，不碰 LINE Pay
+- product order cart 若要擴充，先測 Notify paid sync 與人工出貨 SOP，不碰 LINE Pay
 
 ### B. 等藍新 LINE Pay 申請通過後評估
 

@@ -16,6 +16,7 @@ import {
   getCartNewebPayButtonState,
   getNewebPayCartCheckoutErrorMessage,
   startNewebPayCartCheckout,
+  type CartNewebPayPaymentMode,
   type CartNewebPayCreateProductOrderInput,
   type CartNewebPayFormInput,
   type CartNewebPayPaymentRequestBody,
@@ -90,7 +91,8 @@ export default function CartPage() {
 
   const formattedTotal = useMemo(() => `NT$${totalAmount.toLocaleString('zh-TW')}`, [totalAmount])
   const hasSpiritualProduct = items.some((item) => item.type === 'spiritual_product')
-  const newebPayButtonState = getCartNewebPayButtonState(isNewebPayCheckingOut)
+  const neWebPayCreditButtonState = getCartNewebPayButtonState(isNewebPayCheckingOut, 'credit')
+  const neWebPayApplePayButtonState = getCartNewebPayButtonState(isNewebPayCheckingOut, 'product_order_apple_pay')
   const linePayButtonState = getCartLinePayButtonState(undefined, isLinePayCheckingOut)
 
   const updatePostOfficeShippingInfo = (key: keyof PostOfficeShippingInfo, value: string) => {
@@ -238,7 +240,7 @@ export default function CartPage() {
     }
   }
 
-  const handleNewebPayCheckoutClick = async () => {
+  const handleNewebPayCheckoutClick = async (paymentMode: CartNewebPayPaymentMode = 'credit') => {
     if (isNewebPayCheckingOut) return
 
     const shippingInfo = getValidatedShippingInfo()
@@ -251,6 +253,7 @@ export default function CartPage() {
 
     const result = await startNewebPayCartCheckout({
       cartItems: productItems,
+      paymentMode,
       customerInfo: {
         customerName: shippingInfo.recipientName,
         customerPhone: shippingInfo.recipientPhone,
@@ -522,18 +525,36 @@ export default function CartPage() {
                   <p className="mt-1 font-serifTC text-2xl font-semibold text-deepPurple">{formattedTotal}</p>
                 </div>
                 <div className="flex gap-3">
-                  {newebPayButtonState.visible && hasSpiritualProduct ? (
+                  {neWebPayCreditButtonState.visible && hasSpiritualProduct ? (
                     <div className="grid gap-2">
                       <button
                         aria-busy={isNewebPayCheckingOut}
                         className="focus-ring rounded-xl bg-deepPurple px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
-                        disabled={newebPayButtonState.disabled}
-                        onClick={handleNewebPayCheckoutClick}
+                        disabled={neWebPayCreditButtonState.disabled}
+                        onClick={() => {
+                          void handleNewebPayCheckoutClick('credit')
+                        }}
                         type="button"
                       >
-                        {newebPayButtonState.label}
+                        {neWebPayCreditButtonState.label}
                       </button>
-                      <p className="max-w-44 text-xs leading-5 text-textMuted">{newebPayButtonState.message}</p>
+                      <p className="max-w-44 text-xs leading-5 text-textMuted">{neWebPayCreditButtonState.message}</p>
+                    </div>
+                  ) : null}
+                  {neWebPayApplePayButtonState.visible && hasSpiritualProduct ? (
+                    <div className="grid gap-2">
+                      <button
+                        aria-busy={isNewebPayCheckingOut}
+                        className="focus-ring rounded-xl bg-black px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
+                        disabled={neWebPayApplePayButtonState.disabled}
+                        onClick={() => {
+                          void handleNewebPayCheckoutClick('product_order_apple_pay')
+                        }}
+                        type="button"
+                      >
+                        {neWebPayApplePayButtonState.label}
+                      </button>
+                      <p className="max-w-44 text-xs leading-5 text-textMuted">{neWebPayApplePayButtonState.message}</p>
                     </div>
                   ) : null}
                   {linePayButtonState.visible && hasSpiritualProduct ? (
