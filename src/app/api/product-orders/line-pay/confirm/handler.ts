@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server'
 import {
+  createLinePayNonce,
   getLinePayServerConfig,
   normalizeLinePayOrderId,
+  resolveLinePayConfirmOutcome,
   validateLinePayTransactionId,
+  type LinePayConfirmErrorInput,
+  type LinePayConfirmOutcomeDecision,
+  type LinePayPaymentDetailsResult,
+  type LinePayPaymentRequestStatusResult,
   type LinePayServerEnv,
 } from '../../../../../lib/linePay'
 
@@ -11,6 +17,10 @@ export type HandleProductOrderLinePayConfirmRedirectInput = {
   env: LinePayServerEnv
   paymentReader?: ProductOrderLinePayConfirmPaymentReader
   productOrderReader?: ProductOrderLinePayConfirmProductOrderReader
+  linePayConfirmer?: ProductOrderLinePayConfirmer
+  requestStatusChecker?: ProductOrderLinePayRequestStatusChecker
+  paymentDetailsGetter?: ProductOrderLinePayPaymentDetailsGetter
+  paymentMetadataUpdater?: ProductOrderLinePayPaymentMetadataUpdater
 }
 
 export type ProductOrderLinePayConfirmPaymentContext = {
@@ -39,6 +49,68 @@ export type ProductOrderLinePayConfirmProductOrderContext = {
 export type ProductOrderLinePayConfirmProductOrderReader = (input: {
   productOrderId: string
 }) => Promise<ProductOrderLinePayConfirmProductOrderContext | null>
+
+export type ProductOrderLinePayConfirmerInput = {
+  environment: string
+  channelId: string
+  channelSecret: string
+  nonce: string
+  transactionId: string
+  payloadInput: {
+    amount: number
+    currency: 'TWD'
+  }
+}
+
+export type ProductOrderLinePayConfirmResult = {
+  returnCode?: string | null
+  returnMessage?: string | null
+  transactionId?: string | null
+  orderId?: string | null
+  amount?: number | null
+  currency?: string | null
+  payInfo?: unknown
+  packages?: unknown
+  info?: unknown
+}
+
+export type ProductOrderLinePayConfirmer = (
+  input: ProductOrderLinePayConfirmerInput,
+) => Promise<ProductOrderLinePayConfirmResult>
+
+export type ProductOrderLinePayRequestStatusCheckerInput = {
+  environment: string
+  channelId: string
+  channelSecret: string
+  nonce: string
+  transactionId: string
+}
+
+export type ProductOrderLinePayRequestStatusChecker = (
+  input: ProductOrderLinePayRequestStatusCheckerInput,
+) => Promise<LinePayPaymentRequestStatusResult>
+
+export type ProductOrderLinePayPaymentDetailsGetterInput = {
+  environment: string
+  channelId: string
+  channelSecret: string
+  nonce: string
+  transactionId: string
+  orderId: string
+}
+
+export type ProductOrderLinePayPaymentDetailsGetter = (
+  input: ProductOrderLinePayPaymentDetailsGetterInput,
+) => Promise<LinePayPaymentDetailsResult>
+
+export type ProductOrderLinePayPaymentMetadataUpdaterInput = {
+  paymentId: string
+  metadata: Record<string, unknown>
+}
+
+export type ProductOrderLinePayPaymentMetadataUpdater = (
+  input: ProductOrderLinePayPaymentMetadataUpdaterInput,
+) => Promise<unknown>
 
 function createErrorResponse(error: string, status: number) {
   return NextResponse.json(
@@ -82,6 +154,144 @@ function getLinePayRawPayload(payment: ProductOrderLinePayConfirmPaymentContext)
     transactionId: typeof linePay.transactionId === 'string' ? linePay.transactionId.trim() : '',
     sourceType: typeof linePay.sourceType === 'string' ? linePay.sourceType.trim() : '',
     sourceId: typeof linePay.sourceId === 'string' ? linePay.sourceId.trim() : '',
+  }
+}
+
+function getString(value: unknown) {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'bigint') return String(value)
+  return null
+}
+
+function getConfirmErrorCode(error: unknown) {
+  if (!error) return null
+  if (typeof error === 'string') return error.trim()
+  if (error instanceof Error) return error.message.toLowerCase().includes('timeout') ? 'timeout' : null
+  if (isRecord(error)) return getString(error.code)?.trim() ?? null
+  return null
+}
+
+function getConfirmErrorMessage(error: unknown) {
+  if (!error) return null
+  if (typeof error === 'string') return error
+  if (error instanceof Error) return error.message
+  if (isRecord(error)) return getString(error.message)
+  return null
+}
+
+function normalizeConfirmErrorForOutcome(error: unknown): LinePayConfirmErrorInput | Error | string {
+  if (error instanceof Error || typeof error === 'string') {
+    return error
+  }
+
+  if (isRecord(error)) {
+    return {
+      ...(getString(error.code) ? { code: getString(error.code) } : {}),
+      ...(getString(error.message) ? { message: getString(error.message) } : {}),
+    }
+  }
+
+  return String(error)
+}
+
+function isRecoverableConfirmError(error: unknown) {
+  const code = getConfirmErrorCode(error)
+  const message = getConfirmErrorMessage(error)?.toLowerCase() ?? ''
+
+  return code === '1172' || code === '1198' || code === 'timeout' || message.includes('timeout')
+}
+
+function sanitizeMetadataValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeMetadataValue)
+  }
+
+  if (!isRecord(value)) {
+    return value
+  }
+
+  return Object.entries(value).reduce<Record<string, unknown>>((result, [key, entry]) => {
+    if (/channelSecret|channelId|TradeInfo|TradeSha|HashKey|HashIV|signature|headers|phone|email|address/i.test(key)) {
+      return result
+    }
+
+    result[key] = sanitizeMetadataValue(entry)
+    return result
+  }, {})
+}
+
+function buildConfirmMetadata(confirmResult: ProductOrderLinePayConfirmResult | null, confirmError: unknown) {
+  if (confirmResult) {
+    return {
+      ...(confirmResult.returnCode ? { returnCode: confirmResult.returnCode } : {}),
+      ...(confirmResult.returnMessage ? { returnMessage: confirmResult.returnMessage } : {}),
+      ...(confirmResult.orderId ? { orderId: confirmResult.orderId } : {}),
+      ...(confirmResult.transactionId ? { transactionId: confirmResult.transactionId } : {}),
+      ...(confirmResult.payInfo !== undefined ? { payInfo: sanitizeMetadataValue(confirmResult.payInfo) } : {}),
+    }
+  }
+
+  const returnCode = getConfirmErrorCode(confirmError)
+  const returnMessage = getConfirmErrorMessage(confirmError)
+
+  if (!returnCode && !returnMessage) {
+    return null
+  }
+
+  return {
+    ...(returnCode ? { returnCode } : {}),
+    ...(returnMessage ? { returnMessage } : {}),
+  }
+}
+
+function buildLinePayMetadata(input: {
+  existingMetadata: Record<string, unknown> | null
+  orderId: string
+  productOrderId: string
+  transactionId: string
+  confirmResult: ProductOrderLinePayConfirmResult | null
+  confirmError: unknown
+  requestStatusResult: LinePayPaymentRequestStatusResult | null
+  paymentDetailsResult: LinePayPaymentDetailsResult | null
+  outcome: LinePayConfirmOutcomeDecision
+}) {
+  const existing = isRecord(input.existingMetadata) ? input.existingMetadata : {}
+  const existingLinePay = isRecord(existing.linePay) ? existing.linePay : {}
+  const confirm = buildConfirmMetadata(input.confirmResult, input.confirmError)
+
+  return {
+    ...existing,
+    linePay: {
+      ...existingLinePay,
+      orderId: input.orderId,
+      sourceType: 'product_order',
+      sourceId: input.productOrderId,
+      transactionId: input.transactionId,
+      ...(confirm ? { confirm } : {}),
+      ...(input.requestStatusResult
+        ? {
+            statusCheck: {
+              returnCode: input.requestStatusResult.returnCode,
+              ...(input.requestStatusResult.returnMessage
+                ? { returnMessage: input.requestStatusResult.returnMessage }
+                : {}),
+              status: input.requestStatusResult.status,
+            },
+          }
+        : {}),
+      ...(input.paymentDetailsResult
+        ? {
+            paymentDetails: {
+              returnCode: input.paymentDetailsResult.returnCode,
+              ...(input.paymentDetailsResult.returnMessage
+                ? { returnMessage: input.paymentDetailsResult.returnMessage }
+                : {}),
+              matched: input.outcome.outcome === 'payment_completed',
+            },
+          }
+        : {}),
+      outcome: input.outcome,
+    },
   }
 }
 
@@ -226,6 +436,10 @@ export async function handleProductOrderLinePayConfirmRedirect({
   env,
   paymentReader,
   productOrderReader,
+  linePayConfirmer,
+  requestStatusChecker,
+  paymentDetailsGetter,
+  paymentMetadataUpdater,
 }: HandleProductOrderLinePayConfirmRedirectInput): Promise<Response> {
   if (request.method !== 'GET') {
     return createErrorResponse('method_not_allowed', 405)
@@ -314,19 +528,138 @@ export async function handleProductOrderLinePayConfirmRedirect({
     return createErrorResponse(productOrderError.error, productOrderError.status)
   }
 
+  if (typeof linePayConfirmer !== 'function') {
+    return createErrorResponse('line_pay_confirmer_missing', 500)
+  }
+
+  if (typeof paymentMetadataUpdater !== 'function') {
+    return createErrorResponse('line_pay_confirm_metadata_update_missing', 500)
+  }
+
+  const payableOrder = productOrder as ProductOrderLinePayConfirmProductOrderContext & {
+    total_amount: number
+    currency: 'TWD'
+  }
+  let confirmResult: ProductOrderLinePayConfirmResult | null = null
+  let confirmError: LinePayConfirmErrorInput | Error | string | null = null
+  let requestStatusResult: LinePayPaymentRequestStatusResult | null = null
+  let paymentDetailsResult: LinePayPaymentDetailsResult | null = null
+  const expected = {
+    transactionId,
+    orderId,
+    amount: payableOrder.total_amount,
+    currency: 'TWD',
+  }
+
+  try {
+    confirmResult = await linePayConfirmer({
+      environment: config.environment,
+      channelId: config.channelId,
+      channelSecret: config.channelSecret,
+      nonce: createLinePayNonce(),
+      transactionId,
+      payloadInput: {
+        amount: payableOrder.total_amount,
+        currency: 'TWD',
+      },
+    })
+  } catch (error) {
+    confirmError = normalizeConfirmErrorForOutcome(error)
+
+    if (!isRecoverableConfirmError(error)) {
+      return createErrorResponse('line_pay_confirm_failed', 500)
+    }
+  }
+
+  let outcome = resolveLinePayConfirmOutcome({
+    confirmResult,
+    confirmError,
+    expected,
+  })
+
+  if (outcome.shouldQueryStatus) {
+    if (typeof requestStatusChecker !== 'function') {
+      return createErrorResponse('line_pay_request_status_check_failed', 500)
+    }
+
+    try {
+      requestStatusResult = await requestStatusChecker({
+        environment: config.environment,
+        channelId: config.channelId,
+        channelSecret: config.channelSecret,
+        nonce: createLinePayNonce(),
+        transactionId,
+      })
+    } catch {
+      return createErrorResponse('line_pay_request_status_check_failed', 500)
+    }
+  }
+
+  if (outcome.shouldQueryPaymentDetails) {
+    if (typeof paymentDetailsGetter !== 'function') {
+      return createErrorResponse('line_pay_payment_details_check_failed', 500)
+    }
+
+    try {
+      paymentDetailsResult = await paymentDetailsGetter({
+        environment: config.environment,
+        channelId: config.channelId,
+        channelSecret: config.channelSecret,
+        nonce: createLinePayNonce(),
+        transactionId,
+        orderId,
+      })
+    } catch {
+      return createErrorResponse('line_pay_payment_details_check_failed', 500)
+    }
+  }
+
+  if (requestStatusResult || paymentDetailsResult) {
+    outcome = resolveLinePayConfirmOutcome({
+      requestStatusResult,
+      paymentDetailsResult,
+      expected,
+    })
+  }
+
+  const metadata = buildLinePayMetadata({
+    existingMetadata: payablePayment.raw_payload,
+    orderId,
+    productOrderId,
+    transactionId,
+    confirmResult,
+    confirmError,
+    requestStatusResult,
+    paymentDetailsResult,
+    outcome,
+  })
+
+  try {
+    await paymentMetadataUpdater({
+      paymentId: payablePayment.id,
+      metadata,
+    })
+  } catch {
+    return createErrorResponse('line_pay_confirm_metadata_update_failed', 500)
+  }
+
+  const verifiedPaid = outcome.shouldMarkPaid
+
   return NextResponse.json(
     {
-      ok: false,
-      error: 'line_pay_product_order_confirm_not_implemented',
-      received: true,
-      preflight: true,
+      ok: verifiedPaid,
+      provider: 'line_pay',
+      ...(verifiedPaid ? {} : { error: 'line_pay_confirm_requires_manual_or_followup_check' }),
+      confirmed: verifiedPaid,
+      markedPaid: false,
       paymentId: payablePayment.id,
       productOrderId,
       orderId,
       transactionId,
-      amount: payablePayment.amount,
-      currency: payablePayment.currency,
+      amount: payableOrder.total_amount,
+      currency: 'TWD',
+      outcome: outcome.outcome,
     },
-    { status: 501 },
+    { status: verifiedPaid ? 200 : 202 },
   )
 }

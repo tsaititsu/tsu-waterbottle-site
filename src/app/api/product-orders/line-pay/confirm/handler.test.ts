@@ -93,6 +93,101 @@ function createProductOrderReader(
   }
 }
 
+function createConfirmResult(override: Record<string, unknown> = {}) {
+  return {
+    returnCode: '0000',
+    returnMessage: 'Success.',
+    transactionId,
+    orderId,
+    amount: 1500,
+    currency: 'TWD',
+    payInfo: [
+      {
+        amount: 1500,
+      },
+    ],
+    ...override,
+  }
+}
+
+function createLinePayConfirmer(
+  result: Record<string, unknown> = createConfirmResult(),
+  calls: Array<Record<string, unknown>> = [],
+  error?: unknown,
+) {
+  return async (input: Record<string, unknown>) => {
+    calls.push(input)
+
+    if (error) {
+      throw error
+    }
+
+    return result
+  }
+}
+
+function createRequestStatusChecker(
+  result: Record<string, unknown> = {
+    returnCode: '0123',
+    returnMessage: 'payment completed',
+    transactionId,
+    status: 'payment_completed',
+  },
+  calls: Array<Record<string, unknown>> = [],
+  error?: unknown,
+) {
+  return async (input: Record<string, unknown>) => {
+    calls.push(input)
+
+    if (error) {
+      throw error
+    }
+
+    return result
+  }
+}
+
+function createPaymentDetailsGetter(
+  result: Record<string, unknown> = {
+    returnCode: '0000',
+    returnMessage: 'Success.',
+    info: [
+      {
+        transactionId,
+        orderId,
+        amount: 1500,
+        currency: 'TWD',
+      },
+    ],
+  },
+  calls: Array<Record<string, unknown>> = [],
+  error?: unknown,
+) {
+  return async (input: Record<string, unknown>) => {
+    calls.push(input)
+
+    if (error) {
+      throw error
+    }
+
+    return result
+  }
+}
+
+function createMetadataUpdater(calls: Array<Record<string, unknown>> = [], error?: unknown) {
+  return async (input: Record<string, unknown>) => {
+    calls.push(input)
+
+    if (error) {
+      throw error
+    }
+
+    return {
+      paymentId: input.paymentId,
+    }
+  }
+}
+
 async function callHandler({
   request = createRequest(),
   env = fullEnv,
@@ -102,12 +197,21 @@ async function callHandler({
   env?: LinePayServerEnv
   paymentReader?: Parameters<typeof handleProductOrderLinePayConfirmRedirect>[0]['paymentReader']
   productOrderReader?: Parameters<typeof handleProductOrderLinePayConfirmRedirect>[0]['productOrderReader']
+  linePayConfirmer?: Parameters<typeof handleProductOrderLinePayConfirmRedirect>[0]['linePayConfirmer']
+  requestStatusChecker?: Parameters<typeof handleProductOrderLinePayConfirmRedirect>[0]['requestStatusChecker']
+  paymentDetailsGetter?: Parameters<typeof handleProductOrderLinePayConfirmRedirect>[0]['paymentDetailsGetter']
+  paymentMetadataUpdater?: Parameters<typeof handleProductOrderLinePayConfirmRedirect>[0]['paymentMetadataUpdater']
 } = {}) {
   return handleProductOrderLinePayConfirmRedirect({
     request,
     env,
     paymentReader: 'paymentReader' in input ? input.paymentReader : createPaymentReader(),
     productOrderReader: 'productOrderReader' in input ? input.productOrderReader : createProductOrderReader(),
+    linePayConfirmer: 'linePayConfirmer' in input ? input.linePayConfirmer : createLinePayConfirmer(),
+    requestStatusChecker: 'requestStatusChecker' in input ? input.requestStatusChecker : createRequestStatusChecker(),
+    paymentDetailsGetter: 'paymentDetailsGetter' in input ? input.paymentDetailsGetter : createPaymentDetailsGetter(),
+    paymentMetadataUpdater:
+      'paymentMetadataUpdater' in input ? input.paymentMetadataUpdater : createMetadataUpdater(),
   })
 }
 
@@ -129,6 +233,16 @@ function assertSafeResponse(payload: Record<string, unknown>) {
   assert.equal(text.includes('phone'), false)
   assert.equal(text.includes('email'), false)
   assert.equal(text.includes('address'), false)
+}
+
+function assertNoPaidMutation(value: unknown) {
+  const text = JSON.stringify(value)
+
+  assert.equal(text.includes('"status":"paid"'), false)
+  assert.equal(text.includes('"payment_status":"paid"'), false)
+  assert.equal(text.includes('"order_status":"paid"'), false)
+  assert.equal(text.includes('paid_at'), false)
+  assert.equal(text.includes('markPaid'), false)
 }
 
 async function assertErrorResponse(
@@ -463,33 +577,273 @@ test('payment amount mismatch returns line_pay_payment_amount_mismatch', async (
   )
 })
 
-test('successful preflight returns not implemented with payment and order context', async () => {
+test('missing linePayConfirmer returns line_pay_confirmer_missing', async () => {
+  await assertErrorResponse(
+    {
+      linePayConfirmer: undefined,
+    },
+    500,
+    'line_pay_confirmer_missing',
+  )
+})
+
+test('missing paymentMetadataUpdater returns line_pay_confirm_metadata_update_missing', async () => {
+  await assertErrorResponse(
+    {
+      paymentMetadataUpdater: undefined,
+    },
+    500,
+    'line_pay_confirm_metadata_update_missing',
+  )
+})
+
+test('general confirm error returns line_pay_confirm_failed', async () => {
+  await assertErrorResponse(
+    {
+      linePayConfirmer: createLinePayConfirmer(createConfirmResult(), [], new Error('general failure')),
+    },
+    500,
+    'line_pay_confirm_failed',
+  )
+})
+
+test('confirm error 1172 queries status and payment details without marking paid', async () => {
+  const confirmCalls: Array<Record<string, unknown>> = []
+  const statusCalls: Array<Record<string, unknown>> = []
+  const detailCalls: Array<Record<string, unknown>> = []
+  const metadataCalls: Array<Record<string, unknown>> = []
+  const response = await callHandler({
+    linePayConfirmer: createLinePayConfirmer(createConfirmResult(), confirmCalls, {
+      code: '1172',
+      message: 'Confirm processing unknown.',
+    }),
+    requestStatusChecker: createRequestStatusChecker(undefined, statusCalls),
+    paymentDetailsGetter: createPaymentDetailsGetter(undefined, detailCalls),
+    paymentMetadataUpdater: createMetadataUpdater(metadataCalls),
+  })
+  const json = await readJson(response)
+
+  assert.equal(response.status, 200)
+  assert.equal(json.outcome, 'payment_completed')
+  assert.equal(json.markedPaid, false)
+  assert.equal(confirmCalls.length, 1)
+  assert.equal(statusCalls.length, 1)
+  assert.equal(detailCalls.length, 1)
+  assert.equal(statusCalls[0].transactionId, transactionId)
+  assert.equal(detailCalls[0].transactionId, transactionId)
+  assert.equal(detailCalls[0].orderId, orderId)
+  assert.equal((metadataCalls[0].metadata as Record<string, unknown>).linePay !== undefined, true)
+  assertNoPaidMutation(json)
+})
+
+test('confirm error 1198 queries status and payment details without marking paid', async () => {
+  const statusCalls: Array<Record<string, unknown>> = []
+  const detailCalls: Array<Record<string, unknown>> = []
+  const response = await callHandler({
+    linePayConfirmer: createLinePayConfirmer(createConfirmResult(), [], {
+      code: '1198',
+      message: 'Confirm status unknown.',
+    }),
+    requestStatusChecker: createRequestStatusChecker(undefined, statusCalls),
+    paymentDetailsGetter: createPaymentDetailsGetter(undefined, detailCalls),
+  })
+  const json = await readJson(response)
+
+  assert.equal(response.status, 200)
+  assert.equal(json.outcome, 'payment_completed')
+  assert.equal(json.markedPaid, false)
+  assert.equal(statusCalls.length, 1)
+  assert.equal(detailCalls.length, 1)
+})
+
+test('confirm timeout queries status and payment details without marking paid', async () => {
+  const statusCalls: Array<Record<string, unknown>> = []
+  const detailCalls: Array<Record<string, unknown>> = []
+  const response = await callHandler({
+    linePayConfirmer: createLinePayConfirmer(createConfirmResult(), [], {
+      code: 'timeout',
+      message: 'read timeout',
+    }),
+    requestStatusChecker: createRequestStatusChecker(undefined, statusCalls),
+    paymentDetailsGetter: createPaymentDetailsGetter(undefined, detailCalls),
+  })
+  const json = await readJson(response)
+
+  assert.equal(response.status, 200)
+  assert.equal(json.outcome, 'payment_completed')
+  assert.equal(json.markedPaid, false)
+  assert.equal(statusCalls.length, 1)
+  assert.equal(detailCalls.length, 1)
+})
+
+test('status and details mismatch returns followup response and does not mark paid', async () => {
+  const response = await callHandler({
+    linePayConfirmer: createLinePayConfirmer(createConfirmResult(), [], {
+      code: '1172',
+      message: 'Confirm processing unknown.',
+    }),
+    requestStatusChecker: createRequestStatusChecker(),
+    paymentDetailsGetter: createPaymentDetailsGetter({
+      returnCode: '0000',
+      returnMessage: 'Success.',
+      info: [
+        {
+          transactionId,
+          orderId,
+          amount: 1499,
+          currency: 'TWD',
+        },
+      ],
+    }),
+  })
+  const json = await readJson(response)
+
+  assert.equal(response.status, 202)
+  assert.equal(json.ok, false)
+  assert.equal(json.error, 'line_pay_confirm_requires_manual_or_followup_check')
+  assert.equal(json.outcome, 'mismatch')
+  assert.equal(json.markedPaid, false)
+  assertNoPaidMutation(json)
+})
+
+test('requestStatusChecker throw returns line_pay_request_status_check_failed', async () => {
+  await assertErrorResponse(
+    {
+      linePayConfirmer: createLinePayConfirmer(createConfirmResult(), [], {
+        code: '1172',
+        message: 'Confirm processing unknown.',
+      }),
+      requestStatusChecker: createRequestStatusChecker(undefined, [], new Error('status failed')),
+    },
+    500,
+    'line_pay_request_status_check_failed',
+  )
+})
+
+test('paymentDetailsGetter throw returns line_pay_payment_details_check_failed', async () => {
+  await assertErrorResponse(
+    {
+      linePayConfirmer: createLinePayConfirmer(createConfirmResult(), [], {
+        code: '1172',
+        message: 'Confirm processing unknown.',
+      }),
+      requestStatusChecker: createRequestStatusChecker(),
+      paymentDetailsGetter: createPaymentDetailsGetter(undefined, [], new Error('details failed')),
+    },
+    500,
+    'line_pay_payment_details_check_failed',
+  )
+})
+
+test('paymentMetadataUpdater throw returns line_pay_confirm_metadata_update_failed', async () => {
+  await assertErrorResponse(
+    {
+      paymentMetadataUpdater: createMetadataUpdater([], new Error('metadata failed')),
+    },
+    500,
+    'line_pay_confirm_metadata_update_failed',
+  )
+})
+
+test('preflight errors do not call linePayConfirmer', async () => {
+  const confirmCalls: Array<Record<string, unknown>> = []
+  const response = await callHandler({
+    paymentReader: createPaymentReader(createPayment({ status: 'paid' })),
+    linePayConfirmer: createLinePayConfirmer(createConfirmResult(), confirmCalls),
+  })
+
+  assert.equal(response.status, 409)
+  assert.deepEqual(confirmCalls, [])
+})
+
+test('LINE Pay disabled does not call linePayConfirmer', async () => {
+  const confirmCalls: Array<Record<string, unknown>> = []
+  const response = await callHandler({
+    env: {
+      NEXT_PUBLIC_ENABLE_LINE_PAY: 'false',
+    },
+    linePayConfirmer: createLinePayConfirmer(createConfirmResult(), confirmCalls),
+  })
+
+  assert.equal(response.status, 404)
+  assert.deepEqual(confirmCalls, [])
+})
+
+test('product order already paid does not call linePayConfirmer', async () => {
+  const confirmCalls: Array<Record<string, unknown>> = []
+  const response = await callHandler({
+    productOrderReader: createProductOrderReader(createProductOrder({ payment_status: 'paid' })),
+    linePayConfirmer: createLinePayConfirmer(createConfirmResult(), confirmCalls),
+  })
+
+  assert.equal(response.status, 409)
+  assert.deepEqual(confirmCalls, [])
+})
+
+test('successful preflight calls linePayConfirmer with transactionId amount and currency', async () => {
   const paymentReaderCalls: Array<{ orderId: string }> = []
   const productOrderReaderCalls: Array<{ productOrderId: string }> = []
+  const confirmCalls: Array<Record<string, unknown>> = []
+  const metadataCalls: Array<Record<string, unknown>> = []
   const response = await callHandler({
     request: createRequest(`orderId=%20${orderId}%20&transactionId=${transactionId}`),
     paymentReader: createPaymentReader(createPayment(), paymentReaderCalls),
     productOrderReader: createProductOrderReader(createProductOrder(), productOrderReaderCalls),
+    linePayConfirmer: createLinePayConfirmer(createConfirmResult(), confirmCalls),
+    paymentMetadataUpdater: createMetadataUpdater(metadataCalls),
   })
   const json = await readJson(response)
 
-  assert.equal(response.status, 501)
+  assert.equal(response.status, 200)
   assert.deepEqual(json, {
-    ok: false,
-    error: 'line_pay_product_order_confirm_not_implemented',
-    received: true,
-    preflight: true,
+    ok: true,
+    provider: 'line_pay',
+    confirmed: true,
+    markedPaid: false,
     paymentId,
     productOrderId,
     orderId,
     transactionId,
     amount: 1500,
     currency: 'TWD',
+    outcome: 'confirmed_paid',
   })
   assert.deepEqual(paymentReaderCalls, [{ orderId }])
   assert.deepEqual(productOrderReaderCalls, [{ productOrderId }])
+  assert.equal(confirmCalls.length, 1)
+  assert.equal(confirmCalls[0].transactionId, transactionId)
+  assert.deepEqual(confirmCalls[0].payloadInput, {
+    amount: 1500,
+    currency: 'TWD',
+  })
   assert.equal(typeof json.transactionId, 'string')
   assertSafeResponse(json)
+  assertNoPaidMutation(json)
+  assert.equal(metadataCalls.length, 1)
+})
+
+test('confirm success writes confirm and outcome metadata', async () => {
+  const metadataCalls: Array<Record<string, unknown>> = []
+  const response = await callHandler({
+    paymentMetadataUpdater: createMetadataUpdater(metadataCalls),
+  })
+  const json = await readJson(response)
+  const metadata = metadataCalls[0].metadata as Record<string, unknown>
+  const linePay = metadata.linePay as Record<string, unknown>
+  const confirm = linePay.confirm as Record<string, unknown>
+  const outcome = linePay.outcome as Record<string, unknown>
+
+  assert.equal(response.status, 200)
+  assert.equal(json.confirmed, true)
+  assert.equal(json.markedPaid, false)
+  assert.equal(confirm.returnCode, '0000')
+  assert.equal(confirm.returnMessage, 'Success.')
+  assert.equal(confirm.orderId, orderId)
+  assert.equal(confirm.transactionId, transactionId)
+  assert.deepEqual(confirm.payInfo, [{ amount: 1500 }])
+  assert.equal(outcome.outcome, 'confirmed_paid')
+  assert.equal(outcome.shouldMarkPaid, true)
+  assertNoPaidMutation(metadata)
 })
 
 test('19 digit transactionId stays string', async () => {
@@ -538,15 +892,15 @@ test('handler does not call LINE Pay API or global fetch', async () => {
     const response = await callHandler()
     const json = await readJson(response)
 
-    assert.equal(response.status, 501)
-    assert.equal(json.preflight, true)
+    assert.equal(response.status, 200)
+    assert.equal(json.confirmed, true)
     assert.equal(called, false)
   } finally {
     globalThis.fetch = originalFetch
   }
 })
 
-test('handler source does not include DB update, confirm API, or mark paid behavior', () => {
+test('handler source does not include direct DB update or mark paid behavior', () => {
   const source = String(handleProductOrderLinePayConfirmRedirect)
 
   assert.equal(source.includes('confirmLinePayPayment'), false)
