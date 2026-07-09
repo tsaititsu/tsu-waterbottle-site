@@ -10,27 +10,19 @@ import { getUserBookingRecords, subscribeBookingChange, updateBookingRecord, typ
 const cancellationLimitHours = 24
 const lineSupportUrl = 'https://lin.ee/6Tpje1P'
 
-function formatDateTimeText(value: string) {
-  return new Date(value).toLocaleString('zh-TW', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  })
-}
-
 function canCancelBooking(booking: BookingRecord) {
   if (booking.status !== 'confirmed') return false
   const start = new Date(booking.startTime).getTime()
   return start - Date.now() > cancellationLimitHours * 60 * 60 * 1000
 }
 
-async function postJson(path: string, body: unknown) {
+async function postJson(path: string, body: unknown, accessToken?: string | null) {
   const response = await fetch(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
+    },
     body: JSON.stringify(body)
   })
   const data = await response.json().catch(() => ({}))
@@ -125,17 +117,13 @@ export default function AccountBookingsPage() {
 
     if (!emailsSent) {
       try {
-        await postJson('/api/email/send-booking-cancellation', {
-          bookingId: booking.id,
-          customerName: booking.customerName,
-          customerEmail: booking.customerEmail,
-          customerPhone: booking.customerPhone,
-          planName: booking.planName,
-          amount: booking.amount,
-          startTimeText: formatDateTimeText(booking.startTime),
-          endTimeText: formatDateTimeText(booking.endTime),
-          cancellationReason: reason
-        })
+        // 安全設計：只傳 bookingId 與純文字取消原因，收件人與內容由後端從 booking record 推導。
+        const accessToken = await getAuthAccessToken()
+        await postJson(
+          '/api/email/send-booking-cancellation',
+          { bookingId: booking.id, cancellationReason: reason },
+          accessToken
+        )
         emailsSent = true
       } catch (error) {
         errors.push(error instanceof Error ? error.message : '取消通知信寄送失敗')

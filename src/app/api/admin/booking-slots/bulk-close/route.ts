@@ -1,24 +1,6 @@
 import { NextResponse } from 'next/server'
+import { requireAdminUser } from '@/lib/auth/admin'
 import { listDefaultBookingSlots } from '@/lib/defaultBookingSlots'
-import { getSupabaseAdmin } from '@/lib/supabase/admin'
-
-async function requireAuthenticatedUser(request: Request) {
-  const authHeader = request.headers.get('authorization')
-  const token = authHeader?.replace(/^Bearer\s+/i, '').trim()
-
-  if (!token) {
-    return { error: NextResponse.json({ ok: false, error: '請先登入後再使用後台。' }, { status: 401 }) }
-  }
-
-  const supabase = getSupabaseAdmin()
-  const { data, error } = await supabase.auth.getUser(token)
-
-  if (error || !data.user) {
-    return { error: NextResponse.json({ ok: false, error: '登入狀態已失效，請重新登入。' }, { status: 401 }) }
-  }
-
-  return { supabase }
-}
 
 function parseDateParts(value: unknown) {
   if (typeof value !== 'string') return null
@@ -93,7 +75,7 @@ function isWithinCloseWindow(slot: { start_at: string; end_at: string }, allDay:
 
 export async function PATCH(request: Request) {
   try {
-    const auth = await requireAuthenticatedUser(request)
+    const auth = await requireAdminUser(request)
     if ('error' in auth) return auth.error
 
     const body = (await request.json().catch(() => null)) as {
