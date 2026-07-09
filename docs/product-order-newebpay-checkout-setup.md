@@ -58,20 +58,33 @@
 
 ## 四、前端流程
 
-cart 頁顯示兩個 NewebPay 按鈕：
+cart 頁使用「付款方式」選單，主要選項為：
 
 - 信用卡付款
 - Apple Pay 付款（iPhone / Safari）
+- 郵局匯款
+
+主要 CTA 會依選項變化：
+
+- 信用卡付款：`前往信用卡付款`
+- Apple Pay：`前往 Apple Pay 付款`
+- 郵局匯款：`郵局匯款`
 
 流程：
 
 1. 使用者填寫郵局寄送資料。
 2. 使用者勾選開運商品購買須知與退換貨政策。
-3. 點擊「信用卡付款」或「Apple Pay 付款」。
-4. 前端呼叫 `POST /api/product-orders/create` 建立正式商品訂單。
+3. 選擇付款方式。
+4. 若選信用卡或 Apple Pay，前端呼叫 `POST /api/product-orders/create` 建立正式商品訂單。
 5. 前端呼叫 `POST /api/payments/newebpay/create` 建立 NewebPay pending payment。
 6. 前端收到 NewebPay Form 欄位後送出 Form Post。
 7. 使用者被導向 NewebPay MPG 付款頁。
+
+郵局匯款不走 NewebPay：
+
+- 不呼叫 NewebPay create API。
+- 不送任何 NewebPay MPG 參數。
+- 沿用既有郵局匯款與人工確認流程。
 
 前端不直接解密或解析 `TradeInfo`，也不接收 HashKey / HashIV。
 

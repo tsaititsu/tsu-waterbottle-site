@@ -91,7 +91,7 @@ export function DivinationQuestionForm({ onQuestionSubmit }: DivinationQuestionF
               onClick={() => {
                 setSelectedMode('auto')
                 setMessageType('info')
-                setMessage('已選擇自動抽牌。請按下方按鈕完成本機測試付款後開始解讀。')
+                setMessage('已選擇自動抽牌。請按下方按鈕完成付款後開始解讀。')
               }}
               className={`focus-ring min-h-12 rounded-xl px-6 py-3 text-sm font-semibold transition ${
                 selectedMode === 'auto'
@@ -118,7 +118,7 @@ export function DivinationQuestionForm({ onQuestionSubmit }: DivinationQuestionF
               onClick={() => handlePreviewDraw('auto', { mockPaid: true })}
               className="mt-3 rounded-full bg-deepPurple px-5 py-3 text-sm font-semibold text-white transition hover:bg-purpleMain"
             >
-              支付 NT$50 開始解讀（本機測試）
+              支付 NT$50 開始解讀
             </button>
           </div>
         ) : null}

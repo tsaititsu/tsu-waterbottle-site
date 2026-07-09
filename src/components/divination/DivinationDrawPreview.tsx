@@ -281,8 +281,8 @@ function DivinationConsentNotice({
             <p className="font-semibold text-deepPurple">付費解讀規則</p>
             <ul className="mt-2 grid gap-2">
               <li>抽牌本身不收費；當你按下「開始解讀」並產生 AI 解讀時，本次服務費用為 NT$50。</li>
-              <li>本機測試階段會使用 mock paid 流程，不會連接正式金流。</li>
-              <li>正式上線後，將以正式付款流程完成付款後再產生 AI 解讀。</li>
+              <li>完整 AI 解讀需完成付款確認後才會產生。</li>
+              <li>若付款或解讀服務暫時無法使用，請稍後再試或聯繫客服協助。</li>
             </ul>
           </div>
 
@@ -697,7 +697,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     }
 
     if (!isPersistedReading) {
-      setErrorMessage("這筆占卜目前仍是本機測試流程。")
+      setErrorMessage("這筆占卜目前無法使用線上付款，請重新建立占卜紀錄。")
       return
     }
 
@@ -1146,10 +1146,10 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                     {isInterpreting || isMockPaying
                       ? "支付與解讀中..."
                       : paymentRequired
-                        ? `支付 NT$${paymentRequired.amountTwd} 開始解讀（本機測試）`
+                        ? `支付 NT$${paymentRequired.amountTwd} 開始解讀`
                         : isPersistedReading
                           ? "開始 AI 解讀"
-                          : "支付 NT$50 開始解讀（本機測試）"}
+                          : "支付 NT$50 開始解讀"}
                   </button>
                 )}
                 <button
@@ -1193,7 +1193,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                 >
                   {isInterpreting || isMockPaying
                     ? "支付與解讀中..."
-                    : `支付 NT$${paymentRequired.amountTwd} 開始解讀（本機測試）`}
+                    : `支付 NT$${paymentRequired.amountTwd} 開始解讀`}
                 </button>
               )}
             </div>

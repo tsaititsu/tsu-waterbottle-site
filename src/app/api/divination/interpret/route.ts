@@ -40,6 +40,8 @@ const drawModes = new Set<DivinationDrawMode>(["manual", "auto"])
 const positions = new Set<DivinationPosition>(["upright", "reversed"])
 
 const openAiResponsesUrl = "https://api.openai.com/v1/responses"
+const openAiServiceUnavailableMessage = "AI 解讀服務暫時維護中，請稍後再試。"
+const paidOpenAiServiceUnavailableMessage = "付款已完成，但 AI 解讀暫時無法產生，請聯繫客服。"
 
 function jsonError(error: string, status = 400) {
   return NextResponse.json({ ok: false, error }, { status })
@@ -220,7 +222,7 @@ async function createOpenAiInterpretation(input: {
       ok: false as const,
       status: 500,
       error: "OPENAI_API_KEY_MISSING",
-      message: "尚未設定 OpenAI API Key。",
+      message: openAiServiceUnavailableMessage,
     }
   }
 
@@ -425,7 +427,7 @@ async function interpretPersistedDivinationReading(input: {
       {
         ok: false,
         error: openAiResult.error,
-        message: openAiResult.message,
+        message: paidOpenAiServiceUnavailableMessage,
       },
       { status: openAiResult.status }
     )

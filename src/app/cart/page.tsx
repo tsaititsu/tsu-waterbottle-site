@@ -5,15 +5,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { useCart } from '@/components/CartContext'
 import {
   buildLinePayReturnMessage,
-  getCartLinePayButtonState,
-  getLinePayCartCheckoutErrorMessage,
-  startLinePayCartCheckout,
   type CartLinePayReturnMessage,
-  type CartLinePayCreateProductOrderInput,
-  type CartLinePayRequestBody,
 } from './linePayCheckout'
 import {
-  getCartNewebPayButtonState,
   getNewebPayCartCheckoutErrorMessage,
   startNewebPayCartCheckout,
   type CartNewebPayPaymentMode,
@@ -32,6 +26,34 @@ const typeLabel: Record<string, string> = {
 }
 
 const postOfficeShippingStorageKey = 'waterbottle-post-office-shipping-info'
+
+type CartPaymentMethod = CartNewebPayPaymentMode | 'post_office'
+
+const cartPaymentMethodOptions: Array<{
+  value: CartPaymentMethod
+  label: string
+  description: string
+  ctaLabel: string
+}> = [
+  {
+    value: 'credit',
+    label: '信用卡付款',
+    description: '前往藍新金流信用卡一次付清頁',
+    ctaLabel: '前往信用卡付款',
+  },
+  {
+    value: 'product_order_apple_pay',
+    label: 'Apple Pay 付款（iPhone / Safari）',
+    description: '前往藍新金流 Apple Pay 付款頁',
+    ctaLabel: '前往 Apple Pay 付款',
+  },
+  {
+    value: 'post_office',
+    label: '郵局匯款',
+    description: '查看郵局匯款資訊，完成匯款後由人工確認',
+    ctaLabel: '郵局匯款',
+  },
+]
 
 type PostOfficeShippingInfo = {
   recipientName: string
@@ -84,16 +106,15 @@ export default function CartPage() {
   const [postOfficeShippingInfo, setPostOfficeShippingInfo] = useState<PostOfficeShippingInfo>(emptyPostOfficeShippingInfo)
   const [checkoutError, setCheckoutError] = useState('')
   const [isNewebPayCheckingOut, setIsNewebPayCheckingOut] = useState(false)
-  const [isLinePayCheckingOut, setIsLinePayCheckingOut] = useState(false)
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<CartPaymentMethod>('credit')
   const [linePayReturnMessage, setLinePayReturnMessage] = useState<CartLinePayReturnMessage>(() =>
     buildLinePayReturnMessage(null),
   )
 
   const formattedTotal = useMemo(() => `NT$${totalAmount.toLocaleString('zh-TW')}`, [totalAmount])
   const hasSpiritualProduct = items.some((item) => item.type === 'spiritual_product')
-  const neWebPayCreditButtonState = getCartNewebPayButtonState(isNewebPayCheckingOut, 'credit')
-  const neWebPayApplePayButtonState = getCartNewebPayButtonState(isNewebPayCheckingOut, 'product_order_apple_pay')
-  const linePayButtonState = getCartLinePayButtonState(undefined, isLinePayCheckingOut)
+  const selectedPaymentMethodOption =
+    cartPaymentMethodOptions.find((option) => option.value === selectedPaymentMethod) ?? cartPaymentMethodOptions[0]
 
   const updatePostOfficeShippingInfo = (key: keyof PostOfficeShippingInfo, value: string) => {
     setPostOfficeShippingInfo((current) => ({
@@ -134,7 +155,7 @@ export default function CartPage() {
     }
 
     if (!spiritualProductsAccepted) {
-      setCheckoutError('請先勾選同意開運商品購買須知與退換貨政策，再前往結帳。')
+      setCheckoutError('請先勾選同意開運商品購買須知與退換貨政策，再選擇付款方式。')
       return null
     }
 
@@ -165,79 +186,6 @@ export default function CartPage() {
     }
 
     savePostOfficeShippingInfo(shippingInfo)
-  }
-
-  const handleLinePayCheckoutClick = async () => {
-    if (isLinePayCheckingOut) return
-
-    const shippingInfo = getValidatedShippingInfo()
-    if (!shippingInfo) return
-
-    const productItems = items.filter((item) => item.type === 'spiritual_product')
-    setIsLinePayCheckingOut(true)
-    setCheckoutError('')
-    savePostOfficeShippingInfo(shippingInfo)
-
-    const result = await startLinePayCartCheckout({
-      cartItems: productItems,
-      customerInfo: {
-        customerName: shippingInfo.recipientName,
-        customerPhone: shippingInfo.recipientPhone,
-        recipientName: shippingInfo.recipientName,
-        recipientPhone: shippingInfo.recipientPhone,
-        postalCode: shippingInfo.postalCode,
-        address: `${shippingInfo.city}${shippingInfo.district}${shippingInfo.address}`,
-        note: shippingInfo.note,
-      },
-      createProductOrder: async (input: CartLinePayCreateProductOrderInput) => {
-        const response = await fetch('/api/product-orders/create', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            ...input,
-            paymentMethod: 'newebpay',
-          }),
-        })
-        const data = await response.json().catch(() => null)
-
-        if (!response.ok || !data || data.ok !== true) {
-          throw new Error('line_pay_create_order_failed')
-        }
-
-        return {
-          ...data,
-          productOrderId: data.productOrderId ?? data.orderId,
-        }
-      },
-      requestLinePayPayment: async (body: CartLinePayRequestBody) => {
-        const response = await fetch('/api/product-orders/line-pay/request', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            productOrderId: body.productOrderId,
-          }),
-        })
-        const data = await response.json().catch(() => null)
-
-        if (!response.ok || !data || data.ok !== true) {
-          throw new Error('line_pay_request_failed')
-        }
-
-        return data
-      },
-      redirectToPaymentUrl: (paymentUrlWeb: string) => {
-        window.location.assign(paymentUrlWeb)
-      },
-    })
-
-    if (!result.ok) {
-      setCheckoutError(getLinePayCartCheckoutErrorMessage(result.error))
-      setIsLinePayCheckingOut(false)
-    }
   }
 
   const handleNewebPayCheckoutClick = async (paymentMode: CartNewebPayPaymentMode = 'credit') => {
@@ -524,63 +472,58 @@ export default function CartPage() {
                   <p className="text-sm text-textMuted">小計（{totalQuantity} 件）</p>
                   <p className="mt-1 font-serifTC text-2xl font-semibold text-deepPurple">{formattedTotal}</p>
                 </div>
-                <div className="flex gap-3">
-                  {neWebPayCreditButtonState.visible && hasSpiritualProduct ? (
+                <div className="grid w-full gap-3 sm:w-auto sm:min-w-80">
+                  {hasSpiritualProduct ? (
                     <div className="grid gap-2">
+                      <label className="grid gap-2 text-sm font-semibold text-textDark">
+                        <span>付款方式</span>
+                        <select
+                          className="focus-ring rounded-xl border border-borderSoft bg-white px-4 py-3 text-textDark"
+                          onChange={(event) => {
+                            setSelectedPaymentMethod(event.target.value as CartPaymentMethod)
+                            setCheckoutError('')
+                          }}
+                          value={selectedPaymentMethod}
+                        >
+                          {cartPaymentMethodOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <p className="text-xs leading-5 text-textMuted">{selectedPaymentMethodOption.description}</p>
+                    </div>
+                  ) : null}
+                  <div className="flex flex-wrap gap-3 sm:justify-end">
+                    {hasSpiritualProduct && selectedPaymentMethod === 'post_office' ? (
+                      <Link
+                        href="/bank-transfer"
+                        onClick={handleCheckoutClick}
+                        className="focus-ring rounded-xl bg-[#3d0d74] px-5 py-3 font-semibold text-white"
+                      >
+                        {selectedPaymentMethodOption.ctaLabel}
+                      </Link>
+                    ) : null}
+                    {hasSpiritualProduct && selectedPaymentMethod !== 'post_office' ? (
                       <button
                         aria-busy={isNewebPayCheckingOut}
-                        className="focus-ring rounded-xl bg-deepPurple px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
-                        disabled={neWebPayCreditButtonState.disabled}
+                        className={`focus-ring rounded-xl px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70 ${
+                          selectedPaymentMethod === 'product_order_apple_pay' ? 'bg-black' : 'bg-deepPurple'
+                        }`}
+                        disabled={isNewebPayCheckingOut}
                         onClick={() => {
-                          void handleNewebPayCheckoutClick('credit')
+                          void handleNewebPayCheckoutClick(selectedPaymentMethod)
                         }}
                         type="button"
                       >
-                        {neWebPayCreditButtonState.label}
+                        {isNewebPayCheckingOut ? '正在建立付款資料...' : selectedPaymentMethodOption.ctaLabel}
                       </button>
-                      <p className="max-w-44 text-xs leading-5 text-textMuted">{neWebPayCreditButtonState.message}</p>
-                    </div>
-                  ) : null}
-                  {neWebPayApplePayButtonState.visible && hasSpiritualProduct ? (
-                    <div className="grid gap-2">
-                      <button
-                        aria-busy={isNewebPayCheckingOut}
-                        className="focus-ring rounded-xl bg-black px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
-                        disabled={neWebPayApplePayButtonState.disabled}
-                        onClick={() => {
-                          void handleNewebPayCheckoutClick('product_order_apple_pay')
-                        }}
-                        type="button"
-                      >
-                        {neWebPayApplePayButtonState.label}
-                      </button>
-                      <p className="max-w-44 text-xs leading-5 text-textMuted">{neWebPayApplePayButtonState.message}</p>
-                    </div>
-                  ) : null}
-                  {linePayButtonState.visible && hasSpiritualProduct ? (
-                    <div className="grid gap-2">
-                      <button
-                        aria-busy={isLinePayCheckingOut}
-                        className="focus-ring rounded-xl bg-[#06c755] px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
-                        disabled={linePayButtonState.disabled}
-                        onClick={handleLinePayCheckoutClick}
-                        type="button"
-                      >
-                        {linePayButtonState.label}
-                      </button>
-                      <p className="max-w-44 text-xs leading-5 text-textMuted">{linePayButtonState.message}</p>
-                    </div>
-                  ) : null}
-                  <Link
-                    href="/bank-transfer"
-                    onClick={handleCheckoutClick}
-                    className="focus-ring rounded-xl bg-[#3d0d74] px-5 py-3 font-semibold text-white"
-                  >
-                    前往結帳
-                  </Link>
+                    ) : null}
                   <Link href="/" className="focus-ring rounded-xl border border-borderSoft px-5 py-3 font-semibold text-textDark">
                     繼續逛逛
                   </Link>
+                  </div>
                 </div>
               </div>
             </>

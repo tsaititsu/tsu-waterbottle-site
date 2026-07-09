@@ -98,6 +98,9 @@
 - 開始解讀前會先將 reading 狀態更新為 `interpreting`。
 - OpenAI 解讀成功後會寫入 `interpretation`、`result_summary`，並將狀態更新為 `completed`。
 - OpenAI API key 缺失、請求失敗或回應格式異常時，會回安全錯誤並標記 reading `failed`。
+- 正式站不得向使用者顯示 OpenAI API key、env、server config 或 internal config 類錯誤細節。
+- 缺少 server env 或 AI 解讀服務不可用時，使用者只應看到泛用維護或客服協助訊息。
+- production 需在 Vercel 設定 `OPENAI_API_KEY`；模型設定維持 `OPENAI_DIVINATION_MODEL=gpt-5.5`，不要把 key 寫進文件。
 - 已在 `interpreting` 的 reading 會回 `DIVINATION_READING_INTERPRETING`，避免重複啟動。
 - 已 `completed` 的 reading 會回 `DIVINATION_READING_ALREADY_COMPLETED`，避免重複解讀覆蓋。
 - 狀態有 `pending_payment`、`paid`、`interpreting`、`completed`、`failed`、`canceled` 分流。

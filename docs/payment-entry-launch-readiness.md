@@ -52,8 +52,10 @@
 
 商品 cart 目前正式提供：
 
+- 付款方式選單
 - NewebPay 信用卡付款：`CREDIT=1`、`InstFlag=0`
 - NewebPay Apple Pay：`APPLEPAY=1`、`InstFlag=0`
+- 郵局匯款：人工確認，不走 NewebPay
 - provider: `newebpay`
 - 使用正式商品金額
 - Notify paid 後 sync `product_orders`
@@ -163,6 +165,7 @@ AI 命盤付款狀態：
 - paid gate 依 DB paid 狀態判斷
 - Notify paid 後有 divination reading sync
 - 非課程交易不分期，`InstFlag=0`
+- 正式站不可顯示 OpenAI API key / env / server config 等內部錯誤細節
 - repo 無法確認是否已實刷過
 
 上線建議：
@@ -196,7 +199,7 @@ AI 命盤付款狀態：
 - 商品 NewebPay 不分期，`InstFlag=0`
 - cart 已接正式 NewebPay 信用卡 checkout
 - cart 已接正式 NewebPay Apple Pay checkout
-- cart 目前保留匯款入口
+- cart 目前以付款方式選單保留郵局匯款入口
 - 官方 LINE Pay 已完成但保存暫停
 - 藍新 LINE Pay 未啟用
 

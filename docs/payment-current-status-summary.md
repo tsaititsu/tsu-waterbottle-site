@@ -152,6 +152,8 @@
 - Notify paid 後有 divination reading sync
 - 本文件沒有做實刷，本輪沒有刷卡
 - 不送 `LINEPAY=1`
+- 正式站不顯示 OpenAI API key / env / server config 類內部錯誤
+- 若 AI 解讀服務設定或服務暫時不可用，使用者只會看到泛用維護或客服協助訊息
 
 ### 4. AI Chart
 
@@ -181,8 +183,9 @@
 
 目前 cart 狀態：
 
-- cart 正式 NewebPay 信用卡 checkout 已接到前端按鈕
-- cart 正式 NewebPay Apple Pay checkout 已接到前端按鈕
+- cart 付款區已改為「付款方式」選單
+- cart 正式 NewebPay 信用卡 checkout 已接到選單 CTA
+- cart 正式 NewebPay Apple Pay checkout 已接到選單 CTA
 - cart 保留郵局匯款入口
 - cart 官方 LINE Pay 前端流程已完成，但目前保存暫停
 - 官方 LINE Pay 使用 `provider=line_pay`，不是 NewebPay MPG `LINEPAY=1`

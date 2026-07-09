@@ -512,12 +512,28 @@ test('success result does not expose contact fields, secrets, or raw TradeInfo',
   }
 })
 
-test('cart page wires credit card button to product order and NewebPay create APIs', () => {
+test('cart page renders payment method selector with credit card, Apple Pay, and post office options', () => {
+  const source = readCartPageSource()
+
+  assert.equal(source.includes('cartPaymentMethodOptions'), true)
+  assert.equal(source.includes('<select'), true)
+  assert.equal(source.includes('付款方式'), true)
+  assert.equal(source.includes("label: '信用卡付款'"), true)
+  assert.equal(source.includes("label: 'Apple Pay 付款（iPhone / Safari）'"), true)
+  assert.equal(source.includes("label: '郵局匯款'"), true)
+  assert.equal(source.includes("ctaLabel: '前往信用卡付款'"), true)
+  assert.equal(source.includes("ctaLabel: '前往 Apple Pay 付款'"), true)
+  assert.equal(source.includes("ctaLabel: '郵局匯款'"), true)
+  assert.equal(source.includes('前往結帳'), false)
+  assert.equal(source.includes('前往付款'), false)
+})
+
+test('cart page selector wires NewebPay choices to product order and NewebPay create APIs', () => {
   const source = readCartPageSource()
 
   assert.equal(source.includes('handleNewebPayCheckoutClick'), true)
-  assert.equal(source.includes('{neWebPayCreditButtonState.label}'), true)
-  assert.equal(source.includes('{neWebPayApplePayButtonState.label}'), true)
+  assert.equal(source.includes("selectedPaymentMethod !== 'post_office'"), true)
+  assert.equal(source.includes('selectedPaymentMethodOption.ctaLabel'), true)
   assert.equal(source.includes("fetch('/api/product-orders/create'"), true)
   assert.equal(source.includes("fetch('/api/payments/newebpay/create'"), true)
   assert.equal(source.includes("itemKey: 'spiritual_product_order'"), true)
@@ -533,8 +549,9 @@ test('cart page posts only NewebPay credit parameters and submits payment form',
   assert.equal(source.includes('window.location.assign(data'), false)
   assert.equal(source.includes("paymentMethod: 'newebpay'"), true)
   assert.equal(source.includes("paymentMode: body.paymentMode"), true)
-  assert.equal(source.includes("handleNewebPayCheckoutClick('credit')"), true)
-  assert.equal(source.includes("handleNewebPayCheckoutClick('product_order_apple_pay')"), true)
+  assert.equal(source.includes("value: 'credit'"), true)
+  assert.equal(source.includes('handleNewebPayCheckoutClick(selectedPaymentMethod)'), true)
+  assert.equal(source.includes("value: 'product_order_apple_pay'"), true)
   assert.equal(source.includes("paymentMethod: 'line_pay'"), false)
   assert.equal(source.includes("paymentMode: 'linepay'"), false)
   assert.equal(source.includes("paymentMode: 'atm'"), false)
@@ -553,8 +570,21 @@ test('cart page prevents duplicate NewebPay checkout while loading', () => {
 
   assert.equal(source.includes('if (isNewebPayCheckingOut) return'), true)
   assert.equal(source.includes('setIsNewebPayCheckingOut(true)'), true)
-  assert.equal(source.includes('disabled={neWebPayCreditButtonState.disabled}'), true)
-  assert.equal(source.includes('disabled={neWebPayApplePayButtonState.disabled}'), true)
+  assert.equal(source.includes('disabled={isNewebPayCheckingOut}'), true)
+})
+
+test('post office transfer option does not call NewebPay create API directly', () => {
+  const source = readCartPageSource()
+  const postOfficeStart = source.indexOf("selectedPaymentMethod === 'post_office'")
+  const postOfficeEnd = source.indexOf("selectedPaymentMethod !== 'post_office'")
+  const postOfficeBlock = source.slice(postOfficeStart, postOfficeEnd)
+
+  assert.ok(postOfficeStart >= 0)
+  assert.ok(postOfficeEnd > postOfficeStart)
+  assert.equal(postOfficeBlock.includes('/api/payments/newebpay/create'), false)
+  assert.equal(postOfficeBlock.includes("href=\"/bank-transfer\""), true)
+  assert.equal(postOfficeBlock.includes('LINEPAY=1'), false)
+  assert.equal(postOfficeBlock.includes('VACC=1'), false)
 })
 
 runTests().catch((error) => {
