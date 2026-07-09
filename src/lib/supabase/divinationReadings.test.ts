@@ -635,6 +635,55 @@ assert.throws(
   /errorMessage/,
 )
 
+// --- 會員歸戶保留（22J-39）：任何 update payload 都不可觸碰 user_id ---
+// paid sync / pending link / interpreting / completed / failed 皆為 partial update，
+// 不包含 user_id 欄位，因此付款與解讀流程不會清掉 create 時寫入的會員歸戶。
+
+{
+  const ownershipNow = '2026-07-09T12:00:00.000Z'
+  const updatePayloadsThatMustNotTouchUserId: Array<Record<string, unknown>> = [
+    buildDivinationPaidUpdatePayload(
+      { paymentId: 'payment-1', merchantOrderNo: 'WB20260709120000TEST' },
+      ownershipNow,
+    ),
+    buildDivinationPendingPaymentLinkPayload(
+      { paymentId: 'payment-1', merchantOrderNo: 'WB20260709120000TEST' },
+      ownershipNow,
+    ),
+    buildDivinationInterpretingUpdatePayload(ownershipNow),
+    buildDivinationCompletedUpdatePayload(
+      { interpretation: { summary: '完成' }, resultSummary: '完成' },
+      ownershipNow,
+    ),
+    buildDivinationFailedUpdatePayload({ errorMessage: 'OpenAI 失敗' }, ownershipNow),
+  ]
+
+  for (const payload of updatePayloadsThatMustNotTouchUserId) {
+    assert.equal('user_id' in payload, false)
+    assert.equal('userId' in payload, false)
+  }
+
+  // 未登入（匿名）仍可建立 reading：user_id 為 null，localUserId 流程不受影響。
+  const anonymousPayload = buildPendingDivinationReadingPayload(
+    { question: '匿名使用者的問題', drawMode: 'manual' },
+    ownershipNow,
+  )
+  assert.equal(anonymousPayload.user_id, null)
+
+  // 已登入：user_id 寫入 Supabase auth user id；空白字串視為未登入。
+  const ownedPayload = buildPendingDivinationReadingPayload(
+    { userId: '5f0b8f2e-1234-4c56-9abc-def012345678', question: '登入使用者的問題', drawMode: 'auto' },
+    ownershipNow,
+  )
+  assert.equal(ownedPayload.user_id, '5f0b8f2e-1234-4c56-9abc-def012345678')
+
+  const blankUserPayload = buildPendingDivinationReadingPayload(
+    { userId: '   ', question: '空白 userId 的問題', drawMode: 'manual' },
+    ownershipNow,
+  )
+  assert.equal(blankUserPayload.user_id, null)
+}
+
 async function main() {
   const readingId = 'ec34c86a-d6e2-424e-9a37-48cef981b3bc'
   const existingInterpretation = {

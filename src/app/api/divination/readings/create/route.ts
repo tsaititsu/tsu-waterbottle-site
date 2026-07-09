@@ -8,6 +8,7 @@ import type {
   DivinationPosition,
   DivinationReadingPreview,
 } from "@/lib/divination/types"
+import { getUserIdFromRequest } from "@/lib/supabase/auth"
 import { createPendingDivinationReading } from "@/lib/supabase/divinationReadings"
 
 type RequestBody = Partial<Record<keyof CreateDivinationReadingRequest, unknown>>
@@ -83,7 +84,11 @@ export async function POST(request: Request) {
 
   if (shouldPersistDivinationReading()) {
     try {
+      // 會員歸戶：已登入時寫入 Supabase auth user id；未登入維持匿名（user_id = null），
+      // 不影響既有匿名 localUserId 流程。
+      const authenticatedUserId = await getUserIdFromRequest(request)
       const persistedReading = await createPendingDivinationReading({
+        userId: authenticatedUserId,
         externalReadingId: localReadingId,
         question,
         drawMode: drawMode as DivinationDrawMode,

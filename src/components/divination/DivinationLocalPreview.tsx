@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { DivinationQuestionForm } from "./DivinationQuestionForm"
+import { getAuthAccessToken } from "@/lib/mockAuth"
 import {
   clearDivinationFollowUpDraft,
   clearDivinationFollowUpDisplayThread,
@@ -92,9 +93,14 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
     drawMode: DrawMode
   }) {
     const localUserId = getLocalUserId()
+    // 已登入時帶上 token，讓後端把占卜紀錄歸戶到會員；未登入維持匿名流程。
+    const accessToken = await getAuthAccessToken()
     const response = await fetch("/api/divination/readings/create", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
       body: JSON.stringify({
         question: input.question,
         drawMode: input.drawMode,
