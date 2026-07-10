@@ -51,6 +51,22 @@ function cardText(reading: AccountDivinationReading) {
   return position ? `${reading.cardName}（${position}）` : reading.cardName
 }
 
+function getReadingAction(reading: AccountDivinationReading) {
+  if (reading.status === 'completed') {
+    return { label: '查看解讀', href: `/ai-divination/result/${reading.id}` }
+  }
+
+  if (reading.status === 'paid') {
+    return { label: '繼續產生解讀', href: `/ai-divination/result/${reading.id}?payment=success` }
+  }
+
+  if (reading.status === 'interpreting') {
+    return { label: '查看解讀進度', href: `/ai-divination/result/${reading.id}` }
+  }
+
+  return null
+}
+
 export default function AccountDivinationsPage() {
   const [user, setUser] = useState<UserProfile | null>(null)
   const [loginOpen, setLoginOpen] = useState(false)
@@ -153,40 +169,44 @@ export default function AccountDivinationsPage() {
               </Link>
             </div>
           ) : (
-            readings.map((reading) => (
-              <article
-                key={reading.id}
-                className="grid gap-3 rounded-2xl border border-borderSoft bg-white p-5 shadow-soft"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <p className="max-w-2xl font-semibold leading-7 text-textDark">{reading.question}</p>
-                  <span
-                    className={`rounded-full px-3 py-1 text-xs font-semibold ${statusBadgeClass(reading.status)}`}
-                  >
-                    {reading.status ? statusLabels[reading.status] ?? reading.status : '狀態未知'}
-                  </span>
-                </div>
-                <div className="grid gap-1 text-sm text-textMuted">
-                  <p>抽到的牌：{cardText(reading)}</p>
-                  {reading.drawMode ? (
-                    <p>抽牌方式：{drawModeLabels[reading.drawMode] ?? reading.drawMode}</p>
+            readings.map((reading) => {
+              const action = getReadingAction(reading)
+
+              return (
+                <article
+                  key={reading.id}
+                  className="grid gap-3 rounded-2xl border border-borderSoft bg-white p-5 shadow-soft"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <p className="max-w-2xl font-semibold leading-7 text-textDark">{reading.question}</p>
+                    <span
+                      className={`rounded-full px-3 py-1 text-xs font-semibold ${statusBadgeClass(reading.status)}`}
+                    >
+                      {reading.status ? statusLabels[reading.status] ?? reading.status : '狀態未知'}
+                    </span>
+                  </div>
+                  <div className="grid gap-1 text-sm text-textMuted">
+                    <p>抽到的牌：{cardText(reading)}</p>
+                    {reading.drawMode ? (
+                      <p>抽牌方式：{drawModeLabels[reading.drawMode] ?? reading.drawMode}</p>
+                    ) : null}
+                    <p>建立時間：{formatTaipeiDateTime(reading.createdAt)}</p>
+                  </div>
+                  {action ? (
+                    <Link
+                      className="focus-ring w-fit rounded-lg bg-deepPurple px-4 py-2 text-sm font-semibold text-white"
+                      href={action.href}
+                    >
+                      {action.label}
+                    </Link>
+                  ) : reading.status === 'pending_payment' ? (
+                    <p className="text-sm text-textMuted">尚未完成付款。</p>
+                  ) : reading.status === 'failed' ? (
+                    <p className="text-sm text-textMuted">解讀暫時未完成，請聯繫客服協助。</p>
                   ) : null}
-                  <p>建立時間：{formatTaipeiDateTime(reading.createdAt)}</p>
-                </div>
-                {reading.status === 'completed' ? (
-                  <Link
-                    className="focus-ring w-fit rounded-lg bg-deepPurple px-4 py-2 text-sm font-semibold text-white"
-                    href={`/account/divinations/${reading.id}`}
-                  >
-                    查看解讀
-                  </Link>
-                ) : reading.status === 'pending_payment' ? (
-                  <p className="text-sm text-textMuted">尚未完成付款。</p>
-                ) : reading.status === 'failed' ? (
-                  <p className="text-sm text-textMuted">解讀暫時未完成，請聯繫客服協助。</p>
-                ) : null}
-              </article>
-            ))
+                </article>
+              )
+            })
           )}
         </div>
       </section>

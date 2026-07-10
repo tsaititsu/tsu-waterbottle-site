@@ -3,6 +3,7 @@ import {
   buildNewebPayReturnRedirectForPayment,
   handleNewebPayReturnGet,
   handleNewebPayReturnPost,
+  isValidDivinationReturnReadingId,
 } from './handler'
 import type { PaymentRecord } from '../../../../../lib/supabase/payments'
 
@@ -75,9 +76,38 @@ test('ReturnURL 可用 MerchantOrderNo 找出 divination reading 並導向本次
   })
   const location = redirectLocation(response)
 
-  assert.equal(response.status, 307)
+  assert.equal(response.status, 303)
   assert.deepEqual(calls, [merchantOrderNo])
   assert.equal(location, `http://localhost/ai-divination/result/${readingId}?payment=success`)
+})
+
+test('ReturnURL 可直接從 form body 的 MerchantOrderNo 查本地 payment', async () => {
+  const form = new FormData()
+  form.set('MerchantOrderNo', merchantOrderNo)
+  form.set('readingId', 'attacker-controlled-reading-id')
+  const calls: string[] = []
+
+  const response = await handleNewebPayReturnPost(
+    new Request('http://localhost/api/payments/newebpay/return?readingId=evil-id', {
+      method: 'POST',
+      body: form,
+    }),
+    {
+      getPaymentByMerchantOrderNo: async (orderNo) => {
+        calls.push(orderNo)
+        return makePayment()
+      },
+    },
+  )
+
+  assert.equal(response.status, 303)
+  assert.deepEqual(calls, [merchantOrderNo])
+  assert.equal(
+    redirectLocation(response),
+    `http://localhost/ai-divination/result/${readingId}?payment=success`,
+  )
+  assert.equal(redirectLocation(response).includes('evil-id'), false)
+  assert.equal(redirectLocation(response).includes('attacker-controlled-reading-id'), false)
 })
 
 test('ReturnURL 不信任任意 query readingId', async () => {
@@ -118,6 +148,17 @@ test('非 divination payment 維持通用 return 頁', () => {
   assert.equal(response, null)
 })
 
+test('divination payment 的 item_id 必須是合法 UUID', () => {
+  assert.equal(isValidDivinationReturnReadingId(readingId), true)
+  assert.equal(isValidDivinationReturnReadingId('../reading'), false)
+
+  const response = buildNewebPayReturnRedirectForPayment(
+    new Request('http://localhost/api/payments/newebpay/return'),
+    makePayment({ itemId: '../reading' }),
+  )
+  assert.equal(response, null)
+})
+
 test('TradeSha 失敗或缺資料回通用確認頁', async () => {
   const response = await handleNewebPayReturnPost(makePostRequest(), {
     getNewebPayConfig: () => fakeConfig,
@@ -126,13 +167,15 @@ test('TradeSha 失敗或缺資料回通用確認頁', async () => {
     getPaymentByMerchantOrderNo: async () => makePayment(),
   })
 
-  assert.equal(redirectLocation(response), 'http://localhost/payment/newebpay/return?status=unknown')
+  assert.equal(response.status, 303)
+  assert.equal(redirectLocation(response), 'http://localhost/payment/newebpay/result')
 })
 
 test('GET ReturnURL 不做 paid 或 reading redirect', () => {
   const response = handleNewebPayReturnGet(new Request('http://localhost/api/payments/newebpay/return'))
 
-  assert.equal(redirectLocation(response), 'http://localhost/payment/newebpay/return?status=unknown')
+  assert.equal(response.status, 303)
+  assert.equal(redirectLocation(response), 'http://localhost/payment/newebpay/result')
 })
 
 async function runTests() {

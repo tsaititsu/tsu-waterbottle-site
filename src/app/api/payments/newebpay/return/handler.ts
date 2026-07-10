@@ -5,6 +5,9 @@ import type { NewebPayConfig } from '../../../../../lib/newebpay/types'
 
 type JsonRecord = Record<string, unknown>
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const SEE_OTHER_STATUS = 303
+
 export type NewebPayReturnHandlerDeps = {
   getNewebPayConfig?: () => NewebPayConfig
   verifyTradeSha?: (encryptedTradeInfo: string, tradeSha: string, hashKey: string, hashIv: string) => boolean
@@ -27,6 +30,13 @@ function getFormString(formData: FormData, key: string) {
   return typeof value === 'string' ? value : ''
 }
 
+function getDirectMerchantOrderNo(formData: FormData) {
+  return (
+    getFormString(formData, 'MerchantOrderNo') ||
+    getFormString(formData, 'merchantOrderNo')
+  ).trim()
+}
+
 function getMerchantOrderNo(decryptedTradeInfo: unknown) {
   if (typeof decryptedTradeInfo === 'string') {
     const trimmed = decryptedTradeInfo.trim()
@@ -46,24 +56,26 @@ function getMerchantOrderNo(decryptedTradeInfo: unknown) {
   return getString(result.MerchantOrderNo).trim()
 }
 
-function redirectToGenericReturn(request: Request, params: Record<string, string>) {
-  const url = new URL('/payment/newebpay/return', request.url)
-  Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value))
-  return NextResponse.redirect(url)
+function redirectToGenericReturn(request: Request) {
+  const url = new URL('/payment/newebpay/result', request.url)
+  return NextResponse.redirect(url, { status: SEE_OTHER_STATUS })
 }
 
 function redirectToDivinationResult(request: Request, readingId: string) {
   const url = new URL(`/ai-divination/result/${encodeURIComponent(readingId)}`, request.url)
   url.searchParams.set('payment', 'success')
-  return NextResponse.redirect(url)
+  return NextResponse.redirect(url, { status: SEE_OTHER_STATUS })
+}
+
+export function isValidDivinationReturnReadingId(value: unknown): value is string {
+  return typeof value === 'string' && UUID_PATTERN.test(value.trim())
 }
 
 export function buildNewebPayReturnRedirectForPayment(request: Request, payment: PaymentRecord | null) {
   if (
     payment?.provider === 'newebpay' &&
     payment.itemType === 'ai_divination' &&
-    typeof payment.itemId === 'string' &&
-    payment.itemId.trim()
+    isValidDivinationReturnReadingId(payment.itemId)
   ) {
     return redirectToDivinationResult(request, payment.itemId.trim())
   }
@@ -77,37 +89,42 @@ export async function handleNewebPayReturnPost(
 ): Promise<NextResponse> {
   try {
     const formData = await request.formData()
+    const directMerchantOrderNo = getDirectMerchantOrderNo(formData)
     const encryptedTradeInfo = getFormString(formData, 'TradeInfo')
     const tradeSha = getFormString(formData, 'TradeSha')
+    let merchantOrderNo = directMerchantOrderNo
 
-    if (!encryptedTradeInfo || !tradeSha) {
-      return redirectToGenericReturn(request, { status: 'unknown' })
-    }
-
-    const config = deps.getNewebPayConfig
-      ? deps.getNewebPayConfig()
-      : (await import('../../../../../lib/newebpay/config')).getNewebPayConfig()
-    const verify = deps.verifyTradeSha ?? verifyTradeSha
-    if (!verify(encryptedTradeInfo, tradeSha, config.hashKey, config.hashIv)) {
-      return redirectToGenericReturn(request, { status: 'unknown' })
-    }
-
-    const decrypt = deps.decryptTradeInfo ?? decryptTradeInfo
-    const merchantOrderNo = getMerchantOrderNo(decrypt(encryptedTradeInfo, config.hashKey, config.hashIv))
     if (!merchantOrderNo) {
-      return redirectToGenericReturn(request, { status: 'unknown' })
+      if (!encryptedTradeInfo || !tradeSha) {
+        return redirectToGenericReturn(request)
+      }
+
+      const config = deps.getNewebPayConfig
+        ? deps.getNewebPayConfig()
+        : (await import('../../../../../lib/newebpay/config')).getNewebPayConfig()
+      const verify = deps.verifyTradeSha ?? verifyTradeSha
+      if (!verify(encryptedTradeInfo, tradeSha, config.hashKey, config.hashIv)) {
+        return redirectToGenericReturn(request)
+      }
+
+      const decrypt = deps.decryptTradeInfo ?? decryptTradeInfo
+      merchantOrderNo = getMerchantOrderNo(decrypt(encryptedTradeInfo, config.hashKey, config.hashIv))
+    }
+
+    if (!merchantOrderNo) {
+      return redirectToGenericReturn(request)
     }
 
     const payment = await deps.getPaymentByMerchantOrderNo(merchantOrderNo)
     const divinationRedirect = buildNewebPayReturnRedirectForPayment(request, payment)
     if (divinationRedirect) return divinationRedirect
 
-    return redirectToGenericReturn(request, { merchantOrderNo })
+    return redirectToGenericReturn(request)
   } catch {
-    return redirectToGenericReturn(request, { status: 'unknown' })
+    return redirectToGenericReturn(request)
   }
 }
 
 export function handleNewebPayReturnGet(request: Request) {
-  return redirectToGenericReturn(request, { status: 'unknown' })
+  return redirectToGenericReturn(request)
 }

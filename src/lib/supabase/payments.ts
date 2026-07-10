@@ -311,6 +311,23 @@ export async function getPaymentByMerchantOrderNo(merchantOrderNo: string) {
   return data ? mapPaymentRow(data as PaymentRow) : null
 }
 
+export async function getPaymentById(paymentId: string) {
+  assertRequiredText(paymentId, 'paymentId')
+
+  const supabase = getSupabaseAdmin()
+  const { data, error } = await supabase
+    .from('payments')
+    .select('*')
+    .eq('id', paymentId.trim())
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return data ? mapPaymentRow(data as PaymentRow) : null
+}
+
 export async function markPaymentPaidByMerchantOrderNo(input: MarkPaymentPaidInput): Promise<MarkPaymentPaidResult> {
   const existingPayment = await getPaymentByMerchantOrderNo(input.merchantOrderNo)
   const decision = getMarkPaymentPaidDecision(existingPayment)

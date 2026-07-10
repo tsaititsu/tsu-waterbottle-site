@@ -20,6 +20,10 @@ const interpretRouteSource = readFileSync(
   join(projectRoot, 'src/app/api/divination/interpret/route.ts'),
   'utf8',
 )
+const interpretResumeSource = readFileSync(
+  join(projectRoot, 'src/app/api/divination/interpret/resume.ts'),
+  'utf8',
+)
 const localPreviewSource = readFileSync(
   join(projectRoot, 'src/components/divination/DivinationLocalPreview.tsx'),
   'utf8',
@@ -63,10 +67,11 @@ test('interpret route paid gate is untouched by this hotfix', () => {
 })
 
 test('interpret route does not write user_id (ownership is set at create time only)', () => {
-  assert.equal(interpretRouteSource.includes('getUserIdFromRequest'), true)
-  assert.equal(interpretRouteSource.includes('userId:'), false)
-  assert.equal(interpretRouteSource.includes('user_id:'), false)
-  assert.equal(interpretRouteSource.includes("user_id':"), false)
+  const interpretSources = `${interpretRouteSource}\n${interpretResumeSource}`
+  assert.equal(interpretSources.includes('getUserIdFromRequest'), true)
+  assert.equal(interpretSources.includes('userId:'), false)
+  assert.equal(interpretSources.includes('user_id:'), false)
+  assert.equal(interpretSources.includes("user_id':"), false)
 })
 
 test('divination client sends the auth token when logged in and stays anonymous otherwise', () => {
