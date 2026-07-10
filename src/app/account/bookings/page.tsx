@@ -1,9 +1,10 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { LoginModal } from '@/components/LoginModal'
 import { PageHero } from '@/components/PageHero'
+import { CancelBookingModal, type CancelBookingSummary } from '@/components/bookings/CancelBookingModal'
 import { getAuthAccessToken, getMockUser, subscribeAuthChange, type UserProfile } from '@/lib/mockAuth'
 import { getUserBookingRecords, subscribeBookingChange, updateBookingRecord, type BookingRecord } from '@/lib/mockBooking'
 
@@ -37,6 +38,8 @@ export default function AccountBookingsPage() {
   const [bookings, setBookings] = useState<BookingRecord[]>([])
   const [loginOpen, setLoginOpen] = useState(false)
   const [cancelingId, setCancelingId] = useState('')
+  const [bookingToCancel, setBookingToCancel] = useState<BookingRecord | null>(null)
+  const [cancellationError, setCancellationError] = useState('')
   const [statusMessage, setStatusMessage] = useState<ReactNode>('')
 
   useEffect(() => {
@@ -77,7 +80,12 @@ export default function AccountBookingsPage() {
     }
   }, [])
 
-  async function cancelBooking(booking: BookingRecord) {
+  const closeCancellationModal = useCallback(() => {
+    setBookingToCancel(null)
+    setCancellationError('')
+  }, [])
+
+  function openCancellationModal(booking: BookingRecord) {
     if (!canCancelBooking(booking)) {
       setStatusMessage(
         <>
@@ -91,11 +99,13 @@ export default function AccountBookingsPage() {
       return
     }
 
-    const reason = window.prompt('請輸入取消原因（可留空）', '') ?? ''
-    const ok = window.confirm('確定要取消這筆預約嗎？系統會同步刪除 Google Calendar 事件，並寄出取消通知信。')
-    if (!ok) return
+    setCancellationError('')
+    setBookingToCancel(booking)
+  }
 
+  async function cancelBooking(booking: BookingRecord, reason: string) {
     setCancelingId(booking.id)
+    setCancellationError('')
     setStatusMessage('正在取消預約...')
 
     const errors: string[] = []
@@ -139,8 +149,6 @@ export default function AccountBookingsPage() {
       cancelledAt,
       cancellationReason: reason
     }
-    const updated = updateBookingRecord(booking.id, cancellationUpdates)
-
     try {
       await postJson('/api/bookings/update', {
         bookingId: booking.id,
@@ -153,14 +161,19 @@ export default function AccountBookingsPage() {
           cancellationReason: reason
         }
       })
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : '資料庫取消狀態更新失敗')
+    } catch {
+      setCancelingId('')
+      setStatusMessage('')
+      setCancellationError('取消預約失敗，請稍後再試；已輸入的取消原因會保留。')
+      return
     }
 
+    const updated = updateBookingRecord(booking.id, cancellationUpdates)
     const nextBooking = updated ?? { ...booking, ...cancellationUpdates, updatedAt: new Date().toISOString() }
     setBookings((current) => current.map((item) => (item.id === nextBooking.id ? nextBooking : item)))
 
     setCancelingId('')
+    closeCancellationModal()
     if (errors.length > 0) {
       setStatusMessage(`預約已標記取消，但部分同步失敗：${errors.join('；')}`)
     } else {
@@ -223,9 +236,10 @@ export default function AccountBookingsPage() {
                     </span>
                   ) : canCancelBooking(booking) ? (
                     <button
-                      className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-deepPurple ring-1 ring-deepPurple disabled:opacity-60"
+                      className="min-h-11 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-deepPurple ring-1 ring-deepPurple disabled:opacity-60"
+                      data-testid="open-cancel-booking"
                       disabled={cancelingId === booking.id}
-                      onClick={() => void cancelBooking(booking)}
+                      onClick={() => openCancellationModal(booking)}
                       type="button"
                     >
                       {cancelingId === booking.id ? '取消中...' : '取消預約'}
@@ -244,6 +258,28 @@ export default function AccountBookingsPage() {
           )}
         </div>
       </section>
+      {bookingToCancel ? (
+        <CancelBookingModal
+          bookingId={bookingToCancel.id}
+          error={cancellationError}
+          loading={cancelingId === bookingToCancel.id}
+          onClose={closeCancellationModal}
+          onConfirm={(reason) => cancelBooking(bookingToCancel, reason)}
+          open
+          summary={
+            {
+              date: new Date(bookingToCancel.startTime).toLocaleDateString('zh-TW', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                weekday: 'short',
+              }),
+              time: `${new Date(bookingToCancel.startTime).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })} - ${new Date(bookingToCancel.endTime).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}`,
+              service: bookingToCancel.planName,
+            } satisfies CancelBookingSummary
+          }
+        />
+      ) : null}
       <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} onSuccess={() => setLoginOpen(false)} />
     </>
   )
