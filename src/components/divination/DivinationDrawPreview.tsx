@@ -208,8 +208,41 @@ function updateStoredReadingSessionMerchantOrderNo(input: {
 }
 
 function getNewebPayCheckoutErrorMessage(error?: string) {
-  if (error === "divination_reading_not_payable" || error === "divination_reading_already_linked") {
+  if (
+    error === "payment_already_exists" ||
+    error === "divination_reading_not_payable" ||
+    error === "divination_reading_already_linked"
+  ) {
     return "這筆占卜已建立付款資料，請回到付款頁完成付款，或重新開始一筆占卜。"
+  }
+
+  if (error === "unauthorized") {
+    return "請先登入管理員帳號後再使用測試付款。"
+  }
+
+  if (error === "admin_required") {
+    return "此測試付款功能僅限管理員使用。"
+  }
+
+  if (error === "test_mode_disabled" || error === "divination_one_dollar_test_disabled") {
+    return "測試付款功能目前未啟用。"
+  }
+
+  if (
+    error === "divination_reading_id_required" ||
+    error === "invalid_divination_reading_id" ||
+    error === "divination_reading_not_found" ||
+    error === "reading_not_owned"
+  ) {
+    return "找不到本次占卜紀錄，請重新抽牌。"
+  }
+
+  if (error === "reading_card_data_missing" || error === "invalid_divination_draw_selection") {
+    return "本次抽牌資料不完整，尚未建立付款。請重新確認牌卡後再付款。"
+  }
+
+  if (error === "payment_create_failed" || error === "payment_form_create_failed") {
+    return "付款資料建立失敗，請稍後再試。"
   }
 
   return "線上付款資料建立失敗，請稍後再試。"

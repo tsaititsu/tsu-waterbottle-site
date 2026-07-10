@@ -72,6 +72,14 @@ function createDivinationDeps(
     env?: Record<string, string | undefined>
     requester?: { id: string; email: string | null } | null
     useRealPaymentData?: boolean
+    reading?: {
+      status?: 'pending_payment' | 'paid' | 'interpreting' | 'completed' | 'failed' | 'canceled' | null
+      userId?: string | null
+      paymentId?: string | null
+      merchantOrderNo?: string | null
+    } | null
+    drawSelectionResult?: 'updated' | 'not_found' | 'not_payable'
+    paymentDataThrows?: boolean
   } = {},
 ) {
   const calls: {
@@ -94,6 +102,9 @@ function createDivinationDeps(
       getNewebPayConfig: () => fakeConfig,
       createNewebPayMpgPaymentData: (paymentInput: Parameters<typeof createNewebPayMpgPaymentData>[0]) => {
         calls.paymentDataInputs.push(paymentInput as unknown as Record<string, unknown>)
+        if (input.paymentDataThrows) {
+          throw new Error('payment_form_create_failed')
+        }
         if (input.useRealPaymentData) {
           return createNewebPayMpgPaymentData(paymentInput)
         }
@@ -101,9 +112,10 @@ function createDivinationDeps(
       },
       getDivinationReadingPaymentContext: async (lookupReadingId: string) => ({
         id: lookupReadingId,
-        status: 'pending_payment' as const,
-        paymentId: null,
-        merchantOrderNo: null,
+        userId: input.reading?.userId ?? adminUser.id,
+        status: input.reading?.status === undefined ? ('pending_payment' as const) : input.reading.status,
+        paymentId: input.reading?.paymentId ?? null,
+        merchantOrderNo: input.reading?.merchantOrderNo ?? null,
       }),
       validateDivinationReadingPayment,
       createPendingPayment: async (paymentInput: CreatePendingPaymentInput) => {
@@ -117,7 +129,7 @@ function createDivinationDeps(
         position: string
       }) => {
         calls.drawSelectionUpdates.push(updateInput)
-        return { result: 'updated' as const, readingId: updateInput.readingId }
+        return { result: input.drawSelectionResult ?? 'updated', readingId: updateInput.readingId }
       },
       linkDivinationReadingPendingPayment: async (linkInput: {
         readingId: string
@@ -192,6 +204,7 @@ test('未登入請求測試模式 → 401 且不建立 payment', async () => {
   )
 
   assert.equal(response.status, 401)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'unauthorized' })
   assert.equal(calls.pendingPayments.length, 0)
 })
 
@@ -203,6 +216,7 @@ test('非 admin 即使傳 testMode 也拿不到 NT$1（403、不建立 payment�
   )
 
   assert.equal(response.status, 403)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'admin_required' })
   assert.equal(calls.pendingPayments.length, 0)
 })
 
@@ -216,6 +230,7 @@ test('flags 全關 → admin 也拿不到測試模式', async () => {
   )
 
   assert.equal(response.status, 403)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'test_mode_disabled' })
   assert.equal(calls.pendingPayments.length, 0)
 })
 
@@ -241,6 +256,7 @@ test('production 缺 confirmation → 403；補上正確 confirmation → 可用
     missing.deps,
   )
   assert.equal(missingResponse.status, 403)
+  assert.deepEqual(await readJson(missingResponse), { ok: false, error: 'test_mode_disabled' })
   assert.equal(missing.calls.pendingPayments.length, 0)
 
   const confirmed = createDivinationDeps({
@@ -291,7 +307,7 @@ test('占卜付款建立前必須帶完整牌卡資料，避免付款後紀錄�
   const json = await readJson(response)
 
   assert.equal(response.status, 400)
-  assert.deepEqual(json, { ok: false, error: 'invalid_divination_draw_selection' })
+  assert.deepEqual(json, { ok: false, error: 'reading_card_data_missing' })
   assert.equal(calls.drawSelectionUpdates.length, 0)
   assert.equal(calls.pendingPayments.length, 0)
 })
@@ -307,6 +323,59 @@ test('占卜付款不接受不合法牌卡或正反位資料', async () => {
   assert.equal(response.status, 400)
   assert.deepEqual(json, { ok: false, error: 'invalid_divination_draw_selection' })
   assert.equal(calls.drawSelectionUpdates.length, 0)
+  assert.equal(calls.pendingPayments.length, 0)
+})
+
+test('非本人 reading 不能建立管理員 NT$1 測試付款', async () => {
+  const { deps, calls } = createDivinationDeps({ reading: { userId: 'other-user' } })
+  const response = await handleCreateNewebPayPaymentRequest(
+    divinationBody({ divinationOneDollarTest: true }),
+    deps,
+  )
+
+  assert.equal(response.status, 404)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'reading_not_owned' })
+  assert.equal(calls.drawSelectionUpdates.length, 0)
+  assert.equal(calls.pendingPayments.length, 0)
+})
+
+test('已有 pending payment 時不重複建立付款資料', async () => {
+  const { deps, calls } = createDivinationDeps({
+    reading: { paymentId, merchantOrderNo },
+  })
+  const response = await handleCreateNewebPayPaymentRequest(
+    divinationBody({ divinationOneDollarTest: true }),
+    deps,
+  )
+
+  assert.equal(response.status, 400)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'payment_already_exists' })
+  assert.equal(calls.drawSelectionUpdates.length, 0)
+  assert.equal(calls.pendingPayments.length, 0)
+})
+
+test('牌卡資料更新被擋時回 payment_already_exists，避免泛用失敗', async () => {
+  const { deps, calls } = createDivinationDeps({ drawSelectionResult: 'not_payable' })
+  const response = await handleCreateNewebPayPaymentRequest(
+    divinationBody({ divinationOneDollarTest: true }),
+    deps,
+  )
+
+  assert.equal(response.status, 409)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'payment_already_exists' })
+  assert.equal(calls.drawSelectionUpdates.length, 1)
+  assert.equal(calls.pendingPayments.length, 0)
+})
+
+test('NewebPay form 建立失敗時回安全 payment_form_create_failed', async () => {
+  const { deps, calls } = createDivinationDeps({ paymentDataThrows: true })
+  const response = await handleCreateNewebPayPaymentRequest(
+    divinationBody({ divinationOneDollarTest: true }),
+    deps,
+  )
+
+  assert.equal(response.status, 500)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'payment_form_create_failed' })
   assert.equal(calls.pendingPayments.length, 0)
 })
 
@@ -450,6 +519,10 @@ test('前端保留正式按鈕、測試按鈕受 admin 狀態 gate，Apple Pay �
   assert.equal(source.includes('apple_pay_test'), false)
   // 測試欄位只在 admin 測試分支加入
   assert.equal(source.includes('divinationOneDollarTest: true'), true)
+  assert.equal(source.includes('reading_card_data_missing'), true)
+  assert.equal(source.includes('payment_already_exists'), true)
+  assert.equal(source.includes('test_mode_disabled'), true)
+  assert.equal(source.includes('admin_required'), true)
 })
 
 async function runTests() {

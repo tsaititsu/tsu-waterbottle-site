@@ -131,6 +131,10 @@ function pendingPaymentErrorResponse(input: { merchantOrderNo: string; itemKey: 
     error: input.error instanceof Error ? input.error.message : 'unknown_error',
   })
 
+  if (input.itemKey === AI_DIVINATION_ITEM_KEY) {
+    return NextResponse.json({ ok: false, error: 'payment_create_failed' }, { status: 500 })
+  }
+
   return NextResponse.json({ ok: false, error: '建立付款紀錄失敗，請稍後再試。' }, { status: 500 })
 }
 
@@ -210,6 +214,10 @@ function productOrderApplePayInvalidRequestResponse() {
 
 function invalidDivinationDrawSelectionResponse() {
   return NextResponse.json({ ok: false, error: 'invalid_divination_draw_selection' }, { status: 400 })
+}
+
+function missingDivinationDrawSelectionResponse() {
+  return NextResponse.json({ ok: false, error: 'reading_card_data_missing' }, { status: 400 })
 }
 
 function divinationDrawSelectionUpdateErrorResponse(input: { readingId: string; error: unknown }) {
@@ -378,6 +386,7 @@ export async function handleCreateNewebPayPaymentRequest(
   // server 端重新驗證：登入 + ADMIN_EMAILS + 雙 flag（含 production confirmation）。
   // 任一不符即拒絕，不會退回 NT$50 靜默執行，避免管理員誤以為在測試。
   let divinationOneDollarTestContext: NewebPayOneDollarTestContext | null = null
+  let divinationOneDollarTestRequester: DivinationOneDollarTestUser | null = null
 
   if (body?.divinationOneDollarTest !== undefined) {
     if (
@@ -408,8 +417,14 @@ export async function handleCreateNewebPayPaymentRequest(
     const access = resolveDivinationOneDollarTestAccess({ env, user: requester })
 
     if (!access.allowed) {
+      const errorByReason = {
+        unauthenticated: 'unauthorized',
+        not_admin: 'admin_required',
+        test_mode_disabled: 'test_mode_disabled',
+      } as const
+
       return NextResponse.json(
-        { ok: false, error: 'divination_one_dollar_test_forbidden' },
+        { ok: false, error: errorByReason[access.reason] },
         { status: access.status },
       )
     }
@@ -424,6 +439,7 @@ export async function handleCreateNewebPayPaymentRequest(
     }
 
     divinationOneDollarTestContext = testContext
+    divinationOneDollarTestRequester = requester
   }
 
   const bookingIdResolution = resolveNewebPayBookingIdForPayment({
@@ -509,12 +525,26 @@ export async function handleCreateNewebPayPaymentRequest(
     const readingValidation = validateReadingPayment(reading)
 
     if (!readingValidation.ok) {
-      return NextResponse.json({ ok: false, error: readingValidation.error }, { status: 400 })
+      const status = readingValidation.error === 'divination_reading_not_found' ? 404 : 400
+      return NextResponse.json({ ok: false, error: readingValidation.error }, { status })
+    }
+
+    if (
+      divinationOneDollarTestContext &&
+      (!divinationOneDollarTestRequester ||
+        !reading?.userId ||
+        reading.userId !== divinationOneDollarTestRequester.id)
+    ) {
+      return NextResponse.json({ ok: false, error: 'reading_not_owned' }, { status: 404 })
     }
 
     const cardId = typeof body?.cardId === 'string' ? body.cardId.trim() : ''
     const position = typeof body?.position === 'string' ? body.position.trim() : ''
     const selectedCard = cardId ? ziweiCards.find((card) => card.id === cardId) : null
+
+    if (!cardId || !position) {
+      return missingDivinationDrawSelectionResponse()
+    }
 
     if (!selectedCard || !divinationPositions.has(position)) {
       return invalidDivinationDrawSelectionResponse()
@@ -532,7 +562,7 @@ export async function handleCreateNewebPayPaymentRequest(
       })
 
       if (updateResult.result !== 'updated') {
-        return NextResponse.json({ ok: false, error: 'divination_reading_not_payable' }, { status: 400 })
+        return NextResponse.json({ ok: false, error: 'payment_already_exists' }, { status: 409 })
       }
     } catch (error) {
       return divinationDrawSelectionUpdateErrorResponse({ readingId, error })
@@ -592,13 +622,18 @@ export async function handleCreateNewebPayPaymentRequest(
     const effectivePaymentMode = divinationOneDollarTestContext
       ? NEWEBPAY_APPLE_PAY_TEST_MODE
       : paymentMode
-    const paymentData = (deps.createNewebPayMpgPaymentData ?? createNewebPayMpgPaymentData)({
-      itemKey: item.itemKey,
-      config,
-      paymentMode: effectivePaymentMode,
-      amount: applePayTestContext?.amount ?? divinationOneDollarTestContext?.amount ?? productOrderPayment?.amountTwd,
-      itemDesc: applePayTestContext?.itemDesc ?? divinationOneDollarTestContext?.itemDesc ?? productOrderPayment?.itemDesc,
-    })
+    let paymentData
+    try {
+      paymentData = (deps.createNewebPayMpgPaymentData ?? createNewebPayMpgPaymentData)({
+        itemKey: item.itemKey,
+        config,
+        paymentMode: effectivePaymentMode,
+        amount: applePayTestContext?.amount ?? divinationOneDollarTestContext?.amount ?? productOrderPayment?.amountTwd,
+        itemDesc: applePayTestContext?.itemDesc ?? divinationOneDollarTestContext?.itemDesc ?? productOrderPayment?.itemDesc,
+      })
+    } catch {
+      return NextResponse.json({ ok: false, error: 'payment_form_create_failed' }, { status: 500 })
+    }
     const pendingPaymentMetadata = applePayTestContext
       ? buildNewebPayApplePayTestPendingPaymentMetadata({
           context: applePayTestContext,

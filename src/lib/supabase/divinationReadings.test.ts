@@ -539,6 +539,7 @@ for (const status of notPayableLinkStatuses) {
 
 const paymentContext = mapDivinationReadingPaymentContext({
   id: '2df1a8da-3893-4b81-8d00-774a9cc0e472',
+  user_id: 'user-1',
   status: 'pending_payment',
   payment_id: null,
   merchant_order_no: null,
@@ -546,6 +547,7 @@ const paymentContext = mapDivinationReadingPaymentContext({
 
 assert.deepEqual(paymentContext, {
   id: '2df1a8da-3893-4b81-8d00-774a9cc0e472',
+  userId: 'user-1',
   status: 'pending_payment',
   paymentId: null,
   merchantOrderNo: null,
@@ -581,14 +583,14 @@ assert.deepEqual(
     ...paymentContext,
     paymentId: '4db88892-e602-40e3-9bcd-4595a0dcfb95',
   }),
-  { ok: false, error: 'divination_reading_not_payable' },
+  { ok: false, error: 'payment_already_exists' },
 )
 assert.deepEqual(
   validateDivinationReadingPayment({
     ...paymentContext,
     merchantOrderNo: 'WB20260705143000ABCD',
   }),
-  { ok: false, error: 'divination_reading_not_payable' },
+  { ok: false, error: 'payment_already_exists' },
 )
 
 assert.equal('TradeInfo' in pendingPayload, false)

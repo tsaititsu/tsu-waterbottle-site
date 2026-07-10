@@ -102,6 +102,7 @@ export type DivinationReadingPaidSyncRow = {
 
 export type DivinationReadingPaymentContext = {
   id: string
+  userId: string | null
   status: DivinationReadingStatus | null
   paymentId: string | null
   merchantOrderNo: string | null
@@ -109,6 +110,7 @@ export type DivinationReadingPaymentContext = {
 
 export type DivinationReadingPaymentContextRow = {
   id: string
+  user_id: string | null
   status: DivinationReadingStatus | null
   payment_id: string | null
   merchant_order_no: string | null
@@ -199,7 +201,7 @@ export type DivinationDrawSelectionUpdateResult =
 
 export type DivinationReadingPaymentValidationResult =
   | { ok: true }
-  | { ok: false; error: 'divination_reading_not_found' | 'divination_reading_not_payable' }
+  | { ok: false; error: 'divination_reading_not_found' | 'divination_reading_not_payable' | 'payment_already_exists' }
 
 export type MarkDivinationReadingPaidInput = {
   readingId: string
@@ -450,6 +452,7 @@ export function mapDivinationReadingPaymentContext(
 ): DivinationReadingPaymentContext {
   return {
     id: row.id,
+    userId: row.user_id,
     status: row.status,
     paymentId: row.payment_id,
     merchantOrderNo: row.merchant_order_no,
@@ -493,9 +496,12 @@ export function validateDivinationReadingPayment(
 
   if (
     reading.paymentId !== null ||
-    reading.merchantOrderNo !== null ||
-    (reading.status !== 'pending_payment' && reading.status !== null)
+    reading.merchantOrderNo !== null
   ) {
+    return { ok: false, error: 'payment_already_exists' }
+  }
+
+  if (reading.status !== 'pending_payment' && reading.status !== null) {
     return { ok: false, error: 'divination_reading_not_payable' }
   }
 
@@ -551,7 +557,7 @@ export async function getDivinationReadingPaymentContext(
   const supabase = getSupabaseAdmin()
   const { data, error } = await supabase
     .from('divination_readings')
-    .select('id,status,payment_id,merchant_order_no')
+    .select('id,user_id,status,payment_id,merchant_order_no')
     .eq('id', readingId)
     .maybeSingle()
 
