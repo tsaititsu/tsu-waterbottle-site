@@ -104,6 +104,21 @@ export default function AccountPage() {
 
           <div className="rounded-2xl border border-borderSoft bg-white p-6 shadow-soft">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="font-serifTC text-2xl font-semibold text-deepPurple">我的占卜紀錄</h2>
+                <p className="mt-2 text-sm text-textMuted">查看已完成的紫微牌卡解讀。</p>
+              </div>
+              <Link
+                className="focus-ring w-fit rounded-lg bg-deepPurple px-4 py-2 text-sm font-semibold text-white"
+                href="/account/divinations"
+              >
+                查看我的占卜紀錄
+              </Link>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-borderSoft bg-white p-6 shadow-soft">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h2 className="font-serifTC text-2xl font-semibold text-deepPurple">付款紀錄</h2>
               {!hideConsultationServices ? (
                 <Link className="focus-ring w-fit rounded-lg border border-deepPurple bg-white px-4 py-2 text-sm font-semibold text-deepPurple" href="/account/bookings">

@@ -593,6 +593,136 @@ export async function linkDivinationReadingPendingPayment(
   }
 }
 
+// --- 會員本人 read-only 查詢（22J-42：我的占卜紀錄）---
+// 安全原則：
+// - 一律以 Supabase auth user id 過濾，user_id 為 null 的匿名紀錄不可能被列出。
+// - 列表不查 interpretation / raw_payload / payment 欄位。
+// - 單筆只在 status = completed 時輸出 interpretation。
+
+export const ACCOUNT_DIVINATION_LIST_DEFAULT_LIMIT = 20
+export const ACCOUNT_DIVINATION_LIST_MAX_LIMIT = 50
+
+const ACCOUNT_DIVINATION_LIST_COLUMNS =
+  'id,question,card_name,position,draw_mode,status,created_at,interpreted_at,result_summary'
+const ACCOUNT_DIVINATION_DETAIL_COLUMNS = `${ACCOUNT_DIVINATION_LIST_COLUMNS},interpretation`
+
+export type AccountDivinationReadingListRow = {
+  id: string
+  question: string
+  card_name: string | null
+  position: string | null
+  draw_mode: string | null
+  status: DivinationReadingStatus | null
+  created_at: string | null
+  interpreted_at: string | null
+  result_summary: string | null
+}
+
+export type AccountDivinationReadingDetailRow = AccountDivinationReadingListRow & {
+  interpretation: unknown | null
+}
+
+export type AccountDivinationReadingListItem = {
+  id: string
+  question: string
+  cardName: string | null
+  position: string | null
+  drawMode: string | null
+  status: DivinationReadingStatus | null
+  createdAt: string | null
+  interpretedAt: string | null
+  hasInterpretation: boolean
+  resultSummary: string | null
+}
+
+export type AccountDivinationReadingDetail = AccountDivinationReadingListItem & {
+  interpretation: unknown | null
+}
+
+export function normalizeAccountDivinationListLimit(value: unknown): number {
+  const parsed =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim()
+        ? Number(value)
+        : Number.NaN
+
+  if (!Number.isFinite(parsed) || parsed <= 0) return ACCOUNT_DIVINATION_LIST_DEFAULT_LIMIT
+
+  return Math.min(Math.floor(parsed), ACCOUNT_DIVINATION_LIST_MAX_LIMIT)
+}
+
+export function mapAccountDivinationReadingListItem(
+  row: AccountDivinationReadingListRow,
+): AccountDivinationReadingListItem {
+  return {
+    id: row.id,
+    question: row.question,
+    cardName: row.card_name ?? null,
+    position: row.position ?? null,
+    drawMode: row.draw_mode ?? null,
+    status: row.status ?? null,
+    createdAt: row.created_at ?? null,
+    interpretedAt: row.interpreted_at ?? null,
+    hasInterpretation: row.status === 'completed',
+    resultSummary: row.result_summary ?? null,
+  }
+}
+
+export function mapAccountDivinationReadingDetail(
+  row: AccountDivinationReadingDetailRow,
+): AccountDivinationReadingDetail {
+  return {
+    ...mapAccountDivinationReadingListItem(row),
+    // completed 才輸出 interpretation；其他狀態一律 null。
+    interpretation: row.status === 'completed' ? (row.interpretation ?? null) : null,
+  }
+}
+
+export async function listDivinationReadingsForUser(
+  userId: string,
+  options: { limit?: unknown } = {},
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<AccountDivinationReadingListItem[]> {
+  assertRequiredText(userId, 'userId')
+
+  const limit = normalizeAccountDivinationListLimit(options.limit)
+  const { data, error } = await supabase
+    .from('divination_readings')
+    .select(ACCOUNT_DIVINATION_LIST_COLUMNS)
+    .eq('user_id', userId.trim())
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return ((data ?? []) as AccountDivinationReadingListRow[]).map(mapAccountDivinationReadingListItem)
+}
+
+export async function getDivinationReadingForUser(
+  readingId: string,
+  userId: string,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<AccountDivinationReadingDetail | null> {
+  assertRequiredText(readingId, 'readingId')
+  assertRequiredText(userId, 'userId')
+
+  const { data, error } = await supabase
+    .from('divination_readings')
+    .select(ACCOUNT_DIVINATION_DETAIL_COLUMNS)
+    .eq('id', readingId.trim())
+    .eq('user_id', userId.trim())
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return data ? mapAccountDivinationReadingDetail(data as AccountDivinationReadingDetailRow) : null
+}
+
 export async function markDivinationReadingPaidByPayment(
   input: MarkDivinationReadingPaidInput,
 ): Promise<MarkDivinationReadingPaidResult> {

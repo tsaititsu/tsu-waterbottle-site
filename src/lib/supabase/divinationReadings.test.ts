@@ -10,8 +10,13 @@ import {
   decideDivinationPendingPaymentLink,
   decideDivinationPaidUpdate,
   getDivinationReadingForInterpretation,
+  getDivinationReadingForUser,
+  listDivinationReadingsForUser,
+  mapAccountDivinationReadingDetail,
+  mapAccountDivinationReadingListItem,
   mapDivinationReadingPaymentContext,
   markDivinationReadingCompleted,
+  normalizeAccountDivinationListLimit,
   markDivinationReadingFailed,
   markDivinationReadingInterpreting,
   validateDivinationReadingPayment,
@@ -684,6 +689,175 @@ assert.throws(
   assert.equal(blankUserPayload.user_id, null)
 }
 
+// --- 會員本人查詢（22J-42：我的占卜紀錄）---
+
+{
+  // limit 正規化：預設 20、上限 50、不合法值回預設
+  assert.equal(normalizeAccountDivinationListLimit(undefined), 20)
+  assert.equal(normalizeAccountDivinationListLimit(null), 20)
+  assert.equal(normalizeAccountDivinationListLimit(''), 20)
+  assert.equal(normalizeAccountDivinationListLimit('abc'), 20)
+  assert.equal(normalizeAccountDivinationListLimit(0), 20)
+  assert.equal(normalizeAccountDivinationListLimit(-5), 20)
+  assert.equal(normalizeAccountDivinationListLimit('10'), 10)
+  assert.equal(normalizeAccountDivinationListLimit(10.9), 10)
+  assert.equal(normalizeAccountDivinationListLimit(50), 50)
+  assert.equal(normalizeAccountDivinationListLimit('999'), 50)
+  assert.equal(normalizeAccountDivinationListLimit(Number.POSITIVE_INFINITY), 20)
+
+  const completedRow = {
+    id: 'reading-1',
+    question: '工作方向？',
+    card_name: '紫微星',
+    position: 'upright',
+    draw_mode: 'manual',
+    status: 'completed' as const,
+    created_at: '2026-07-09T16:08:00.000Z',
+    interpreted_at: '2026-07-09T16:10:00.000Z',
+    result_summary: '整體穩定',
+  }
+
+  const listItem = mapAccountDivinationReadingListItem(completedRow)
+  assert.equal(listItem.id, 'reading-1')
+  assert.equal(listItem.cardName, '紫微星')
+  assert.equal(listItem.hasInterpretation, true)
+  assert.equal(listItem.resultSummary, '整體穩定')
+  // 列表項不得含 interpretation / user_id / raw_payload / payment 欄位
+  const listItemKeys = JSON.stringify(listItem)
+  assert.equal(listItemKeys.includes('interpretation'), false)
+  assert.equal(listItemKeys.includes('user_id'), false)
+  assert.equal(listItemKeys.includes('raw_payload'), false)
+  assert.equal(listItemKeys.includes('payment'), false)
+
+  const pendingItem = mapAccountDivinationReadingListItem({
+    ...completedRow,
+    status: 'pending_payment' as const,
+    interpreted_at: null,
+    result_summary: null,
+  })
+  assert.equal(pendingItem.hasInterpretation, false)
+
+  // detail：completed 才輸出 interpretation
+  const interpretation = { summary: '解讀內容' }
+  const completedDetail = mapAccountDivinationReadingDetail({ ...completedRow, interpretation })
+  assert.deepEqual(completedDetail.interpretation, interpretation)
+
+  const pendingDetail = mapAccountDivinationReadingDetail({
+    ...completedRow,
+    status: 'pending_payment' as const,
+    interpretation,
+  })
+  assert.equal(pendingDetail.interpretation, null)
+
+  const failedDetail = mapAccountDivinationReadingDetail({
+    ...completedRow,
+    status: 'failed' as const,
+    interpretation,
+  })
+  assert.equal(failedDetail.interpretation, null)
+}
+
+type AccountQueryCalls = {
+  tables: string[]
+  selects: string[]
+  eqs: Array<[string, unknown]>
+  orders: Array<[string, unknown]>
+  limits: number[]
+}
+
+function createAccountReadingsMockSupabase(response: { data: unknown; error: { message: string } | null }) {
+  const calls: AccountQueryCalls = { tables: [], selects: [], eqs: [], orders: [], limits: [] }
+  const chain = {
+    select(columns: string) {
+      calls.selects.push(columns)
+      return chain
+    },
+    eq(column: string, value: unknown) {
+      calls.eqs.push([column, value])
+      return chain
+    },
+    order(column: string, options: unknown) {
+      calls.orders.push([column, options])
+      return chain
+    },
+    limit(count: number) {
+      calls.limits.push(count)
+      return Promise.resolve(response)
+    },
+    maybeSingle() {
+      return Promise.resolve(response)
+    },
+  }
+  const supabase = {
+    from(table: string) {
+      calls.tables.push(table)
+      return chain
+    },
+  }
+
+  return { supabase: supabase as unknown as MockSupabaseClient, calls }
+}
+
+async function accountQueriesMain() {
+  const completedRow = {
+    id: 'reading-1',
+    question: '工作方向？',
+    card_name: '紫微星',
+    position: 'upright',
+    draw_mode: 'manual',
+    status: 'completed',
+    created_at: '2026-07-09T16:08:00.000Z',
+    interpreted_at: '2026-07-09T16:10:00.000Z',
+    result_summary: null,
+  }
+
+  // list：以 user_id 過濾＋新到舊＋預設 20 筆，select 不含敏感欄位
+  const listMock = createAccountReadingsMockSupabase({ data: [completedRow], error: null })
+  const items = await listDivinationReadingsForUser('user-a', {}, listMock.supabase)
+
+  assert.equal(items.length, 1)
+  assert.equal(items[0].id, 'reading-1')
+  assert.deepEqual(listMock.calls.tables, ['divination_readings'])
+  assert.deepEqual(listMock.calls.eqs, [['user_id', 'user-a']])
+  assert.deepEqual(listMock.calls.orders, [['created_at', { ascending: false }]])
+  assert.deepEqual(listMock.calls.limits, [20])
+
+  const listColumns = listMock.calls.selects[0]
+  assert.equal(listColumns.includes('interpretation'), false)
+  assert.equal(listColumns.includes('raw_payload'), false)
+  assert.equal(listColumns.includes('payment_id'), false)
+  assert.equal(listColumns.includes('merchant_order_no'), false)
+  assert.equal(listColumns.includes('user_id'), false)
+
+  // limit 上限 50
+  const cappedMock = createAccountReadingsMockSupabase({ data: [], error: null })
+  await listDivinationReadingsForUser('user-a', { limit: '999' }, cappedMock.supabase)
+  assert.deepEqual(cappedMock.calls.limits, [50])
+
+  // 空 userId 直接拒絕（不可能列出匿名 user_id=null 紀錄）
+  await assert.rejects(() => listDivinationReadingsForUser('   ', {}, listMock.supabase), /userId/)
+
+  // detail：同時以 id 與 user_id 過濾；查無 → null
+  const detailMock = createAccountReadingsMockSupabase({
+    data: { ...completedRow, interpretation: { summary: '內容' } },
+    error: null,
+  })
+  const detail = await getDivinationReadingForUser('reading-1', 'user-a', detailMock.supabase)
+
+  assert.equal(detail?.id, 'reading-1')
+  assert.deepEqual(detail?.interpretation, { summary: '內容' })
+  assert.deepEqual(detailMock.calls.eqs, [
+    ['id', 'reading-1'],
+    ['user_id', 'user-a'],
+  ])
+  assert.equal(detailMock.calls.selects[0].includes('interpretation'), true)
+  assert.equal(detailMock.calls.selects[0].includes('raw_payload'), false)
+
+  const missingMock = createAccountReadingsMockSupabase({ data: null, error: null })
+  const missing = await getDivinationReadingForUser('reading-x', 'user-a', missingMock.supabase)
+  assert.equal(missing, null)
+}
+
 async function main() {
   const readingId = 'ec34c86a-d6e2-424e-9a37-48cef981b3bc'
   const existingInterpretation = {
@@ -809,7 +983,9 @@ async function main() {
   await assert.rejects(() => getDivinationReadingForInterpretation(readingId, errorMock.supabase), /select failed/)
 }
 
-main().catch((error) => {
-  console.error(error)
-  process.exit(1)
-})
+main()
+  .then(() => accountQueriesMain())
+  .catch((error) => {
+    console.error(error)
+    process.exit(1)
+  })
