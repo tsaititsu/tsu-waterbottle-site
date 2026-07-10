@@ -235,6 +235,76 @@ async function runPaymentPersistenceAssertions() {
   assert.deepEqual(updatedInput, paidInput)
   assert.equal('rawPayload' in updatedResult.payment, false)
 
+  let oneDollarMarkCalled = false
+  const oneDollarDivinationResult = await persistNewebPayNotifyPaymentResult(
+    {
+      ...parsedQuery,
+      amount: 1,
+      paymentType: 'CREDIT',
+      paymentMethod: 'CREDIT',
+    },
+    async () =>
+      createPaymentRecord({
+        itemType: 'ai_divination',
+        itemId: '2df1a8da-3893-4b81-8d00-774a9cc0e472',
+        itemName: '紫微占卜管理員測試｜1元測試付款',
+        amountTwd: 1,
+        rawPayload: {
+          amount: 1,
+          test_payment: true,
+          one_dollar_test_mode: true,
+          divination_one_dollar_test: true,
+          original_amount: 50,
+          test_source: 'divination',
+          merchantOrderNo: 'WB20260703172530A1B2',
+        },
+      }),
+    async () => {
+      oneDollarMarkCalled = true
+      return {
+        result: 'updated',
+        payment: createPaymentPaidContext({
+          itemType: 'ai_divination',
+          itemId: '2df1a8da-3893-4b81-8d00-774a9cc0e472',
+        }),
+      }
+    },
+  )
+
+  assert.equal(oneDollarDivinationResult.ok, true)
+  assert.equal(oneDollarMarkCalled, true)
+
+  let oneDollarMismatchMarkedPaid = false
+  const oneDollarDivinationMismatch = await persistNewebPayNotifyPaymentResult(
+    {
+      ...parsedQuery,
+      amount: 50,
+    },
+    async () =>
+      createPaymentRecord({
+        itemType: 'ai_divination',
+        itemId: '2df1a8da-3893-4b81-8d00-774a9cc0e472',
+        amountTwd: 1,
+        rawPayload: {
+          amount: 1,
+          test_payment: true,
+          divination_one_dollar_test: true,
+          merchantOrderNo: 'WB20260703172530A1B2',
+        },
+      }),
+    async () => {
+      oneDollarMismatchMarkedPaid = true
+      return { result: 'updated', payment: paidContext }
+    },
+  )
+
+  assert.equal(oneDollarDivinationMismatch.ok, false)
+  assert.equal(
+    'error' in oneDollarDivinationMismatch && oneDollarDivinationMismatch.error,
+    'payment_amount_mismatch',
+  )
+  assert.equal(oneDollarMismatchMarkedPaid, false)
+
   const alreadyPaidResult = await persistNewebPayNotifyPaymentResult(
     parsedQuery,
     async () => createPaymentRecord({

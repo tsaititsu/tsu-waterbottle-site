@@ -24,6 +24,7 @@ import {
   buildNewebPayClientFormFields,
   type NewebPayClientFormField,
 } from "@/lib/newebpay/clientForm"
+import { getAuthAccessToken, subscribeAuthChange } from "@/lib/mockAuth"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
@@ -333,6 +334,8 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
   const [isInterpreting, setIsInterpreting] = useState(false)
   const [isMockPaying, setIsMockPaying] = useState(false)
   const [isNewebPayCheckingOut, setIsNewebPayCheckingOut] = useState(false)
+  // 管理員限定 NT$1 測試模式：由 admin-only API 確認可用性，非 admin 永遠 false。
+  const [isAdminOneDollarTestAvailable, setIsAdminOneDollarTestAvailable] = useState(false)
   const [paymentRequired, setPaymentRequired] = useState<PaymentRequiredState | null>(null)
   const [hasAcceptedTerms, setHasAcceptedTerms] = useState(false)
   const [hoveredCardIndex, setHoveredCardIndex] = useState<number | null>(null)
@@ -387,6 +390,52 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
       if (shuffleTimerRef.current) {
         clearTimeout(shuffleTimerRef.current)
       }
+    }
+  }, [])
+
+  useEffect(() => {
+    // 詢問 admin-only API 是否開放 NT$1 測試模式；未登入或非 admin 會拿到 401/403，
+    // 一律維持 false。任何錯誤都靜默處理，不影響正式付款流程。
+    let cancelled = false
+    let requestVersion = 0
+
+    const checkAdminOneDollarTest = async () => {
+      const currentRequestVersion = ++requestVersion
+      if (!cancelled) setIsAdminOneDollarTestAvailable(false)
+
+      try {
+        const accessToken = await getAuthAccessToken()
+        if (!accessToken) return
+
+        const response = await fetch("/api/admin/divination-one-dollar-test", {
+          cache: "no-store",
+          headers: { authorization: `Bearer ${accessToken}` },
+        })
+        if (!response.ok) return
+
+        const data = (await response.json().catch(() => null)) as { ok?: boolean; enabled?: boolean } | null
+        if (
+          !cancelled &&
+          currentRequestVersion === requestVersion &&
+          data?.ok === true &&
+          data.enabled === true
+        ) {
+          setIsAdminOneDollarTestAvailable(true)
+        }
+      } catch {
+        // 靜默：非 admin 或未登入不顯示測試入口。
+      }
+    }
+
+    void checkAdminOneDollarTest()
+    const unsubscribe = subscribeAuthChange(() => {
+      void checkAdminOneDollarTest()
+    })
+
+    return () => {
+      cancelled = true
+      requestVersion += 1
+      unsubscribe()
     }
   }, [])
 
@@ -685,7 +734,9 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     }
   }
 
-  async function handleNewebPayDivinationCheckout() {
+  async function handleNewebPayDivinationCheckout(options: { adminOneDollarTest?: boolean } = {}) {
+    const isAdminOneDollarTest = options.adminOneDollarTest === true && isAdminOneDollarTestAvailable
+
     if (!pendingCard || !pendingPosition) {
       setErrorMessage("請先選一張牌。")
       return
@@ -711,14 +762,23 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
     let shouldSubmitForm = false
 
     try {
+      // 管理員測試模式需帶登入 token，讓 server 重新驗證 admin 與 flags；
+      // 正式付款請求維持原樣（不帶測試欄位）。
+      const adminAccessToken = isAdminOneDollarTest ? await getAuthAccessToken() : null
       const response = await fetch("/api/payments/newebpay/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(isAdminOneDollarTest && adminAccessToken
+            ? { Authorization: `Bearer ${adminAccessToken}` }
+            : {}),
+        },
         body: JSON.stringify({
           itemKey: "ai_divination_single",
           source: "ai_divination",
           paymentMode: "credit",
           readingId,
+          ...(isAdminOneDollarTest ? { divinationOneDollarTest: true } : {}),
         }),
       })
       const data = (await response.json().catch(() => null)) as NewebPayCreateResponse | null
@@ -1124,18 +1184,30 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
               ) : null}
               <div className="grid gap-3 sm:grid-cols-2">
                 {paymentRequired && isPersistedReading ? (
-                  <button
-                    type="button"
-                    onClick={handleNewebPayDivinationCheckout}
-                    disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled}
-                    className="rounded-full bg-deepPurple px-5 py-3 font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isNewebPayCheckingOut
-                      ? "建立線上付款資料中..."
-                      : isNewebPayEnabled
-                        ? `信用卡線上付款 NT$${paymentRequired.amountTwd}`
-                        : "線上付款尚未啟用"}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleNewebPayDivinationCheckout()}
+                      disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled}
+                      className="rounded-full bg-deepPurple px-5 py-3 font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isNewebPayCheckingOut
+                        ? "建立線上付款資料中..."
+                        : isNewebPayEnabled
+                          ? `信用卡線上付款 NT$${paymentRequired.amountTwd}`
+                          : "線上付款尚未啟用"}
+                    </button>
+                    {isAdminOneDollarTestAvailable ? (
+                      <button
+                        type="button"
+                        onClick={() => handleNewebPayDivinationCheckout({ adminOneDollarTest: true })}
+                        disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled}
+                        className="rounded-full border border-deepPurple bg-white px-5 py-3 font-semibold text-deepPurple transition hover:bg-softPurple disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        管理員測試付款 NT$1
+                      </button>
+                    ) : null}
+                  </>
                 ) : (
                   <button
                     type="button"
@@ -1172,18 +1244,30 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                   : "本次 AI 占卜解讀需 NT$50。"}
               </p>
               {isPersistedReading ? (
-                <button
-                  type="button"
-                  onClick={handleNewebPayDivinationCheckout}
-                  disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled}
-                  className="justify-self-start rounded-full bg-deepPurple px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isNewebPayCheckingOut
-                    ? "建立線上付款資料中..."
-                    : isNewebPayEnabled
-                      ? `信用卡線上付款 NT$${paymentRequired.amountTwd}`
-                      : "線上付款尚未啟用"}
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleNewebPayDivinationCheckout()}
+                    disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled}
+                    className="rounded-full bg-deepPurple px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isNewebPayCheckingOut
+                      ? "建立線上付款資料中..."
+                      : isNewebPayEnabled
+                        ? `信用卡線上付款 NT$${paymentRequired.amountTwd}`
+                        : "線上付款尚未啟用"}
+                  </button>
+                  {isAdminOneDollarTestAvailable ? (
+                    <button
+                      type="button"
+                      onClick={() => handleNewebPayDivinationCheckout({ adminOneDollarTest: true })}
+                      disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled}
+                      className="rounded-full border border-deepPurple bg-white px-5 py-3 text-sm font-semibold text-deepPurple transition hover:bg-softPurple disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      管理員測試付款 NT$1
+                    </button>
+                  ) : null}
+                </div>
               ) : (
                 <button
                   type="button"

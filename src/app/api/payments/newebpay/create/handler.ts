@@ -39,6 +39,16 @@ import {
 import type { CreatePendingPaymentInput } from '../../../../../lib/supabase/payments'
 import type { NewebPayConfig } from '../../../../../lib/newebpay/types'
 import type { DivinationReadingPaymentContext } from '../../../../../lib/supabase/divinationReadings'
+import {
+  AI_DIVINATION_ITEM_KEY,
+  AI_DIVINATION_ITEM_TYPE,
+} from '../../../../../lib/newebpay/divinationPayment'
+import {
+  buildDivinationOneDollarTestContext,
+  resolveDivinationOneDollarTestAccess,
+  type DivinationOneDollarTestUser,
+} from '../../../../../lib/newebpay/divinationOneDollarTest'
+import type { NewebPayOneDollarTestContext } from '../../../../../lib/newebpay/oneDollarTestMode'
 
 export type CreateNewebPayPaymentRequest = {
   itemKey?: unknown
@@ -48,6 +58,7 @@ export type CreateNewebPayPaymentRequest = {
   readingId?: unknown
   reportId?: unknown
   orderId?: unknown
+  divinationOneDollarTest?: unknown
 }
 
 type CreatePendingPaymentDependency = (input: CreatePendingPaymentInput) => Promise<{ id: string }>
@@ -75,8 +86,11 @@ type LinkAiChartReportPendingPaymentDependency = (input: {
 }) => Promise<{ result: 'linked' | 'already_linked' | 'not_found' | 'not_payable' }>
 type LinkProductOrderPaymentDependency = (input: { orderId: string; paymentId: string }) => Promise<unknown>
 
+type GetRequesterWithEmailDependency = () => Promise<DivinationOneDollarTestUser | null>
+
 type CreateNewebPayPaymentDependencies = {
   env?: Record<string, string | undefined>
+  getRequesterWithEmail?: GetRequesterWithEmailDependency
   getNewebPayConfig?: GetNewebPayConfigDependency
   createNewebPayMpgPaymentData?: typeof createNewebPayMpgPaymentData
   buildNewebPayPendingPaymentMetadata?: typeof buildNewebPayPendingPaymentMetadata
@@ -335,6 +349,58 @@ export async function handleCreateNewebPayPaymentRequest(
     }
   }
 
+  // --- 紫微占卜管理員限定 NT$1 實刷測試模式（22J-45）---
+  // server 端重新驗證：登入 + ADMIN_EMAILS + 雙 flag（含 production confirmation）。
+  // 任一不符即拒絕，不會退回 NT$50 靜默執行，避免管理員誤以為在測試。
+  let divinationOneDollarTestContext: NewebPayOneDollarTestContext | null = null
+
+  if (body?.divinationOneDollarTest !== undefined) {
+    if (
+      body.divinationOneDollarTest !== true ||
+      item.itemKey !== AI_DIVINATION_ITEM_KEY ||
+      source !== AI_DIVINATION_ITEM_TYPE ||
+      paymentMode !== 'credit' ||
+      body?.readingId === undefined ||
+      body?.bookingId !== undefined ||
+      body?.reportId !== undefined ||
+      body?.orderId !== undefined
+    ) {
+      return NextResponse.json(
+        { ok: false, error: 'divination_one_dollar_test_invalid_request' },
+        { status: 400 },
+      )
+    }
+
+    const env = deps.env ?? process.env
+
+    let requester: DivinationOneDollarTestUser | null = null
+    try {
+      requester = deps.getRequesterWithEmail ? await deps.getRequesterWithEmail() : null
+    } catch {
+      requester = null
+    }
+
+    const access = resolveDivinationOneDollarTestAccess({ env, user: requester })
+
+    if (!access.allowed) {
+      return NextResponse.json(
+        { ok: false, error: 'divination_one_dollar_test_forbidden' },
+        { status: access.status },
+      )
+    }
+
+    const testContext = buildDivinationOneDollarTestContext(env)
+
+    if (!testContext.enabled) {
+      return NextResponse.json(
+        { ok: false, error: 'divination_one_dollar_test_disabled' },
+        { status: 403 },
+      )
+    }
+
+    divinationOneDollarTestContext = testContext
+  }
+
   const bookingIdResolution = resolveNewebPayBookingIdForPayment({
     itemKey: item.itemKey,
     source,
@@ -475,8 +541,8 @@ export async function handleCreateNewebPayPaymentRequest(
       itemKey: item.itemKey,
       config,
       paymentMode,
-      amount: applePayTestContext?.amount ?? productOrderPayment?.amountTwd,
-      itemDesc: applePayTestContext?.itemDesc ?? productOrderPayment?.itemDesc,
+      amount: applePayTestContext?.amount ?? divinationOneDollarTestContext?.amount ?? productOrderPayment?.amountTwd,
+      itemDesc: applePayTestContext?.itemDesc ?? divinationOneDollarTestContext?.itemDesc ?? productOrderPayment?.itemDesc,
     })
     const pendingPaymentMetadata = applePayTestContext
       ? buildNewebPayApplePayTestPendingPaymentMetadata({
@@ -493,8 +559,26 @@ export async function handleCreateNewebPayPaymentRequest(
           reportId,
           productOrderPayment,
         })
-    const itemName = applePayTestContext?.itemDesc ?? productOrderPayment?.itemDesc ?? item.itemDesc
-    const amountTwd = applePayTestContext?.amount ?? productOrderPayment?.amountTwd ?? item.amount
+    // NT$1 測試：payment 紀錄金額與 NewebPay Amt 一律同源（context.amount），
+    // rawPayload 併入測試標記（test_payment / original_amount 等）。
+    const pendingPaymentRawPayload = divinationOneDollarTestContext
+      ? {
+          ...pendingPaymentMetadata.rawPayload,
+          amount: divinationOneDollarTestContext.amount,
+          itemDesc: divinationOneDollarTestContext.itemDesc,
+          ...divinationOneDollarTestContext.metadata,
+        }
+      : pendingPaymentMetadata.rawPayload
+    const itemName =
+      applePayTestContext?.itemDesc ??
+      divinationOneDollarTestContext?.itemDesc ??
+      productOrderPayment?.itemDesc ??
+      item.itemDesc
+    const amountTwd =
+      applePayTestContext?.amount ??
+      divinationOneDollarTestContext?.amount ??
+      productOrderPayment?.amountTwd ??
+      item.amount
     let pendingPayment: { id: string }
 
     try {
@@ -508,7 +592,7 @@ export async function handleCreateNewebPayPaymentRequest(
         bookingId: pendingPaymentMetadata.bookingId,
         merchantOrderNo: paymentData.merchantOrderNo,
         amountTwd,
-        rawPayload: pendingPaymentMetadata.rawPayload,
+        rawPayload: pendingPaymentRawPayload,
       })
     } catch (error) {
       if (orderId) {
