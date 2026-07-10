@@ -91,30 +91,25 @@ const shufflePreviewCards = [
   { rotate: "rotate-[18deg]", translate: "translate-x-16 translate-y-6", scale: "scale-95" },
 ]
 
-function getMobileFanTransform(index: number) {
+function getEllipticalFanTransform(
+  index: number,
+  radius: number,
+  yRadius: number,
+  isPicked: boolean
+) {
   const angle = -55 + index * (110 / (ziweiCards.length - 1))
-  const radius = 150
-  const yRadius = 78
   const x = Math.sin((angle * Math.PI) / 180) * radius
-  const y = -Math.cos((angle * Math.PI) / 180) * yRadius + 65
+  const y = -Math.cos((angle * Math.PI) / 180) * yRadius + 65 - (isPicked ? 72 : 0)
 
   return `translate(${x}px, ${y}px) rotate(${angle / 3}deg)`
 }
 
-function getFanTransform(index: number) {
-  const centerIndex = (ziweiCards.length - 1) / 2
-  const offset = index - centerIndex
-  const x = offset * 58
-  const y = Math.pow(Math.abs(offset), 1.28) * 8 + 10
-  const angle = offset * 2.9
-
-  return `translate(calc(-50% + ${x}px), ${y}px) rotate(${angle}deg)`
+function getMobileFanTransform(index: number, isPicked: boolean) {
+  return getEllipticalFanTransform(index, 150, 78, isPicked)
 }
 
-function getFanZIndex(index: number) {
-  const centerIndex = (ziweiCards.length - 1) / 2
-
-  return 100 - Math.round(Math.abs(index - centerIndex) * 4)
+function getDesktopFanTransform(index: number, isPicked: boolean) {
+  return getEllipticalFanTransform(index, 340, 130, isPicked)
 }
 
 function getRandomPosition(): DivinationPosition {
@@ -1073,7 +1068,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                 洗牌中，請先把注意力放在你的問題上……
               </p>
             </div>
-          ) : pendingIndex === null ? (
+          ) : (
             <div className="w-full min-w-0 max-w-full">
               <div className="mobile-card-fan-stage relative -mx-5 flex h-[260px] w-[calc(100%+2.5rem)] min-w-0 items-center justify-center lg:hidden">
                 {ziweiCards.map((card, index) => (
@@ -1081,15 +1076,25 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                     key={card.id}
                     type="button"
                     onClick={() => pickCard(index)}
-                    disabled={shuffling || isInterpreting || hasResultPreview}
-                    className={`group absolute h-[100px] w-[72px] rounded-xl bg-transparent p-0 transition-all duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-darkGold/40 ${
-                      shuffling || isInterpreting || hasResultPreview ? "cursor-default opacity-80" : ""
+                    disabled={pendingIndex !== null || shuffling || isInterpreting || hasResultPreview}
+                    className={`group absolute h-[100px] w-[72px] rounded-xl bg-transparent p-0 transition-all duration-500 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-darkGold/40 ${
+                      pendingIndex !== null || shuffling || isInterpreting || hasResultPreview ? "cursor-default" : ""
                     }`}
                     data-mobile-fan-index={index}
-                    style={{ transform: getMobileFanTransform(index), zIndex: index + 1 }}
+                    data-selected={pendingIndex === index ? "true" : "false"}
+                    style={{
+                      transform: getMobileFanTransform(index, pendingIndex === index),
+                      zIndex: pendingIndex === index ? 100 : index + 1,
+                    }}
                     aria-label={`選擇第 ${index + 1} 張牌`}
                   >
-                    <span className="mobile-card-fan-visual pointer-events-none relative block h-full w-full overflow-hidden rounded-xl shadow-sm transition duration-200 group-hover:-translate-y-3 group-hover:scale-110 group-focus-visible:-translate-y-3 group-focus-visible:scale-110">
+                    <span
+                      className={`mobile-card-fan-visual pointer-events-none relative block h-full w-full overflow-hidden rounded-xl transition duration-200 group-hover:-translate-y-3 group-hover:scale-110 group-focus-visible:-translate-y-3 group-focus-visible:scale-110 ${
+                        pendingIndex === index
+                          ? "shadow-[0_18px_42px_rgba(180,142,56,0.42)] ring-2 ring-darkGold/50"
+                          : "shadow-sm"
+                      }`}
+                    >
                       <Image
                         src="/cards/back.png"
                         alt=""
@@ -1103,36 +1108,41 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                 ))}
               </div>
 
-              <div className="relative hidden h-[340px] w-full max-w-5xl scroll-mt-32 lg:block">
+              <div className="desktop-card-fan-stage relative hidden h-[380px] w-full max-w-5xl scroll-mt-32 items-center justify-center lg:flex">
                 {ziweiCards.map((card, index) => {
                   return (
                     <button
                       key={card.id}
                       type="button"
                       onClick={() => pickCard(index)}
-                      disabled={shuffling || isInterpreting || hasResultPreview}
+                      disabled={pendingIndex !== null || shuffling || isInterpreting || hasResultPreview}
                       onBlur={() => setHoveredCardIndex(null)}
                       onFocus={() => setHoveredCardIndex(index)}
                       onMouseEnter={() => setHoveredCardIndex(index)}
                       onMouseLeave={() => setHoveredCardIndex(null)}
-                      className={`group absolute left-1/2 top-12 h-32 w-20 scroll-mt-32 rounded-xl bg-transparent p-0 transition-all duration-200 ease-out hover:-translate-y-3 hover:shadow-[0_18px_42px_rgba(180,142,56,0.28)] focus-visible:-translate-y-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-darkGold/40 ${
-                        shuffling || isInterpreting || hasResultPreview ? "cursor-default opacity-80" : ""
+                      className={`group absolute h-[173px] w-[125px] scroll-mt-32 rounded-xl bg-transparent p-0 transition-all duration-500 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-darkGold/40 ${
+                        pendingIndex !== null || shuffling || isInterpreting || hasResultPreview ? "cursor-default" : ""
                       }`}
+                      data-desktop-fan-index={index}
+                      data-selected={pendingIndex === index ? "true" : "false"}
                       style={{
-                        transform:
-                          hoveredCardIndex === index
-                            ? `${getFanTransform(index)} translateY(-14px)`
-                            : getFanTransform(index),
-                        zIndex: pendingIndex === index ? 260 : hoveredCardIndex === index ? 220 : getFanZIndex(index),
+                        transform: getDesktopFanTransform(index, pendingIndex === index),
+                        zIndex: pendingIndex === index ? 300 : hoveredCardIndex === index ? 220 : index + 1,
                       }}
                       aria-label={`選擇第 ${index + 1} 張牌`}
                     >
-                      <span className="pointer-events-none relative block h-full overflow-hidden rounded-xl transition duration-300 ease-out group-hover:-translate-y-4 group-hover:scale-105 group-focus-visible:-translate-y-4 group-focus-visible:scale-105">
+                      <span
+                        className={`pointer-events-none relative block h-full overflow-hidden rounded-xl transition duration-300 ease-out group-hover:-translate-y-4 group-hover:scale-105 group-focus-visible:-translate-y-4 group-focus-visible:scale-105 ${
+                          pendingIndex === index
+                            ? "shadow-[0_20px_55px_rgba(180,142,56,0.46)] ring-2 ring-darkGold/60"
+                            : "shadow-sm"
+                        }`}
+                      >
                         <Image
                           src="/cards/back.png"
                           alt=""
                           fill
-                          sizes="80px"
+                          sizes="125px"
                           className="object-cover"
                         />
                         <span className="sr-only">紫微牌卡牌背</span>
@@ -1141,10 +1151,6 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                   )
                 })}
               </div>
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-purple-100 bg-purple-50/60 px-4 py-3 text-sm text-textMuted">
-              已選出一張牌，請在下方確認。
             </div>
           )}
 
@@ -1171,7 +1177,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
               <p className="text-lg font-semibold text-deepPurple">是不是這張牌？</p>
               {isManualMode ? (
                 <div className="rounded-2xl border border-borderSoft bg-white p-5 text-center leading-7 text-textMuted">
-                  你選到一張牌。請確認是不是這張。
+                  你選中的牌已停在上方。請確認是不是這張，再繼續解讀。
                 </div>
               ) : (
                 <div className="grid gap-4 rounded-2xl border border-borderSoft bg-white p-4 leading-7 sm:grid-cols-[160px_1fr] sm:items-center">
@@ -1257,7 +1263,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                       : paymentRequired
                         ? `支付 NT$${paymentRequired.amountTwd} 開始解讀`
                         : isPersistedReading
-                          ? "開始 AI 解讀"
+                          ? "就是這張，開始解讀"
                           : "支付 NT$50 開始解讀"}
                   </button>
                 )}
