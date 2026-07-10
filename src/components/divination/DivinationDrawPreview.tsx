@@ -91,27 +91,14 @@ const shufflePreviewCards = [
   { rotate: "rotate-[18deg]", translate: "translate-x-16 translate-y-6", scale: "scale-95" },
 ]
 
-const mobileFanTransforms = [
-  "translateY(18px) rotate(-13deg)",
-  "translateY(6px) rotate(-7deg)",
-  "translateY(0) rotate(0deg)",
-  "translateY(6px) rotate(7deg)",
-  "translateY(18px) rotate(13deg)",
-]
+function getMobileFanTransform(index: number) {
+  const angle = -55 + index * (110 / (ziweiCards.length - 1))
+  const radius = 150
+  const yRadius = 78
+  const x = Math.sin((angle * Math.PI) / 180) * radius
+  const y = -Math.cos((angle * Math.PI) / 180) * yRadius + 65
 
-const mobileFanLeftOffsets = [14, 63, 112, 161, 210]
-const mobileFanZIndexes = [1, 2, 3, 2, 1]
-const mobileFanPageSize = 5
-
-function getMobileFanSlot(localIndex: number, pageSize: number) {
-  if (pageSize === 4) return [0, 1, 3, 4][localIndex]
-  return localIndex
-}
-
-function getMobileFanPages() {
-  return Array.from({ length: Math.ceil(ziweiCards.length / mobileFanPageSize) }, (_, pageIndex) =>
-    ziweiCards.slice(pageIndex * mobileFanPageSize, (pageIndex + 1) * mobileFanPageSize)
-  )
+  return `translate(${x}px, ${y}px) rotate(${angle / 3}deg)`
 }
 
 function getFanTransform(index: number) {
@@ -1088,51 +1075,31 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
             </div>
           ) : pendingIndex === null ? (
             <div className="w-full min-w-0 max-w-full">
-              <div className="divination-card-scroller grid w-full min-w-0 max-w-full auto-cols-[100%] grid-flow-col snap-x snap-mandatory touch-pan-x overflow-x-auto overscroll-x-contain pb-8 pt-5 lg:hidden">
-                {getMobileFanPages().map((pageCards, pageIndex) => (
-                  <div
-                    key={`mobile-fan-page-${pageIndex}`}
-                    className="mobile-card-fan-page h-40 w-full min-w-0 snap-center"
-                    data-mobile-fan-page={pageIndex}
+              <div className="mobile-card-fan-stage relative -mx-5 flex h-[260px] w-[calc(100%+2.5rem)] min-w-0 items-center justify-center lg:hidden">
+                {ziweiCards.map((card, index) => (
+                  <button
+                    key={card.id}
+                    type="button"
+                    onClick={() => pickCard(index)}
+                    disabled={shuffling || isInterpreting || hasResultPreview}
+                    className={`group absolute h-[100px] w-[72px] rounded-xl bg-transparent p-0 transition-all duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-darkGold/40 ${
+                      shuffling || isInterpreting || hasResultPreview ? "cursor-default opacity-80" : ""
+                    }`}
+                    data-mobile-fan-index={index}
+                    style={{ transform: getMobileFanTransform(index), zIndex: index + 1 }}
+                    aria-label={`選擇第 ${index + 1} 張牌`}
                   >
-                    <div className="relative mx-auto h-40 w-[288px] max-w-full">
-                      {pageCards.map((card, localIndex) => {
-                        const index = pageIndex * mobileFanPageSize + localIndex
-                        const fanSlot = getMobileFanSlot(localIndex, pageCards.length)
-
-                        return (
-                          <button
-                            key={card.id}
-                            type="button"
-                            onClick={() => pickCard(index)}
-                            disabled={shuffling || isInterpreting || hasResultPreview}
-                            className={`group absolute top-0 flex h-36 w-16 min-w-0 items-start justify-center rounded-xl bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-darkGold/40 ${
-                              shuffling || isInterpreting || hasResultPreview ? "cursor-default opacity-80" : ""
-                            }`}
-                            data-mobile-fan-index={fanSlot}
-                            style={{ left: `${mobileFanLeftOffsets[fanSlot]}px`, zIndex: mobileFanZIndexes[fanSlot] }}
-                            aria-label={`選擇第 ${index + 1} 張牌`}
-                          >
-                            <span
-                              className="mobile-card-fan-visual block h-24 w-16 origin-bottom transition-transform duration-200"
-                              style={{ transform: mobileFanTransforms[fanSlot] }}
-                            >
-                              <span className="relative block h-full overflow-hidden rounded-xl shadow-sm transition duration-200 group-hover:-translate-y-1 group-hover:scale-[1.03] group-focus-visible:-translate-y-1 group-focus-visible:scale-[1.03]">
-                                <Image
-                                  src="/cards/back.png"
-                                  alt=""
-                                  fill
-                                  sizes="64px"
-                                  className="object-cover"
-                                />
-                                <span className="sr-only">紫微牌卡牌背</span>
-                              </span>
-                            </span>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
+                    <span className="mobile-card-fan-visual pointer-events-none relative block h-full w-full overflow-hidden rounded-xl shadow-sm transition duration-200 group-hover:-translate-y-3 group-hover:scale-110 group-focus-visible:-translate-y-3 group-focus-visible:scale-110">
+                      <Image
+                        src="/cards/back.png"
+                        alt=""
+                        fill
+                        sizes="72px"
+                        className="object-cover"
+                      />
+                      <span className="sr-only">紫微牌卡牌背</span>
+                    </span>
+                  </button>
                 ))}
               </div>
 
