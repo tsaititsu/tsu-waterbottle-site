@@ -58,11 +58,11 @@ async function readJson(response: Response) {
   return (await response.json()) as Record<string, unknown>
 }
 
-function buildPaymentData(input: { itemKey: string; amount?: number }): NewebPayMpgPaymentData {
+function buildPaymentData(input: { itemKey: string; amount?: number; merchantOrderNo?: string }): NewebPayMpgPaymentData {
   return {
     action: 'https://example.test/mpg',
     method: 'POST',
-    merchantOrderNo,
+    merchantOrderNo: input.merchantOrderNo ?? merchantOrderNo,
     itemKey: input.itemKey as NewebPayMpgPaymentData['itemKey'],
     amount: input.amount ?? 0,
     fields: {
@@ -98,6 +98,7 @@ function createProductDeps(input: {
   return {
     calls,
     deps: {
+      generateMerchantOrderNo: () => merchantOrderNo,
       getNewebPayConfig: () => fakeConfig,
       createNewebPayMpgPaymentData: (paymentInput: Parameters<typeof createNewebPayMpgPaymentData>[0]) => {
         calls.paymentDataInputs.push(paymentInput)
@@ -170,6 +171,7 @@ function createApplePayTestDeps(input: {
     calls,
     deps: {
       env: input.env ?? {},
+      generateMerchantOrderNo: () => merchantOrderNo,
       getNewebPayConfig: () => {
         calls.configs += 1
         return fakeConfig
@@ -179,6 +181,7 @@ function createApplePayTestDeps(input: {
         return buildPaymentData({
           itemKey: paymentInput.itemKey,
           amount: paymentInput.amount,
+          merchantOrderNo: paymentInput.merchantOrderNo,
         })
       },
       getProductOrderForPayment: async (lookupOrderId: string) => {

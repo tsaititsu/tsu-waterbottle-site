@@ -2,11 +2,19 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { handleCreateNewebPayPaymentRequest } from './handler'
-import { createNewebPayMpgPaymentData, type NewebPayMpgPaymentData } from '../../../../../lib/newebpay/paymentForm'
+import {
+  buildNewebPayPendingPaymentMetadata,
+  createNewebPayMpgPaymentData,
+  type NewebPayMpgPaymentData,
+} from '../../../../../lib/newebpay/paymentForm'
 import { validateDivinationReadingPayment } from '../../../../../lib/supabase/divinationReadings'
 import { ONE_DOLLAR_TEST_CONFIRMATION_VALUE } from '../../../../../lib/newebpay/oneDollarTestMode'
 import { decryptTradeInfo } from '../../../../../lib/newebpay/crypto'
-import type { CreatePendingPaymentInput } from '../../../../../lib/supabase/payments'
+import {
+  PaymentRepositoryError,
+  type CreatePendingPaymentInput,
+  type ExistingPaymentTarget,
+} from '../../../../../lib/supabase/payments'
 import type { NewebPayConfig } from '../../../../../lib/newebpay/types'
 
 const tests: Array<{ name: string; fn: () => Promise<void> }> = []
@@ -39,11 +47,11 @@ const fakeConfig: NewebPayConfig = {
   mpgEndpoint: 'https://example.test/mpg',
 }
 
-function buildPaymentData(input: { itemKey: string; amount?: number }): NewebPayMpgPaymentData {
+function buildPaymentData(input: { itemKey: string; amount?: number; merchantOrderNo?: string }): NewebPayMpgPaymentData {
   return {
     action: 'https://example.test/mpg',
     method: 'POST',
-    merchantOrderNo,
+    merchantOrderNo: input.merchantOrderNo ?? merchantOrderNo,
     itemKey: input.itemKey as NewebPayMpgPaymentData['itemKey'],
     amount: input.amount ?? 0,
     fields: {
@@ -77,9 +85,18 @@ function createDivinationDeps(
       userId?: string | null
       paymentId?: string | null
       merchantOrderNo?: string | null
+      cardId?: string | null
+      cardName?: string | null
+      position?: string | null
     } | null
     drawSelectionResult?: 'updated' | 'not_found' | 'not_payable'
     paymentDataThrows?: boolean
+    paymentInsertError?: unknown
+    existingPayment?: ExistingPaymentTarget | null
+    existingLookupError?: unknown
+    linkResult?: 'linked' | 'already_linked' | 'not_found' | 'not_payable'
+    linkError?: unknown
+    metadataThrows?: boolean
   } = {},
 ) {
   const calls: {
@@ -98,8 +115,13 @@ function createDivinationDeps(
     calls,
     deps: {
       env: input.env ?? allFlagsEnv,
+      generateMerchantOrderNo: () => merchantOrderNo,
       getRequesterWithEmail: async () => (input.requester === undefined ? adminUser : input.requester),
       getNewebPayConfig: () => fakeConfig,
+      buildNewebPayPendingPaymentMetadata: (metadataInput: Parameters<typeof buildNewebPayPendingPaymentMetadata>[0]) => {
+        if (input.metadataThrows) throw new Error('invalid metadata')
+        return buildNewebPayPendingPaymentMetadata(metadataInput)
+      },
       createNewebPayMpgPaymentData: (paymentInput: Parameters<typeof createNewebPayMpgPaymentData>[0]) => {
         calls.paymentDataInputs.push(paymentInput as unknown as Record<string, unknown>)
         if (input.paymentDataThrows) {
@@ -108,18 +130,26 @@ function createDivinationDeps(
         if (input.useRealPaymentData) {
           return createNewebPayMpgPaymentData(paymentInput)
         }
-        return buildPaymentData(paymentInput as unknown as { itemKey: string; amount?: number })
+        return buildPaymentData(paymentInput as unknown as { itemKey: string; amount?: number; merchantOrderNo?: string })
       },
       getDivinationReadingPaymentContext: async (lookupReadingId: string) => ({
         id: lookupReadingId,
         userId: input.reading?.userId ?? adminUser.id,
+        cardId: input.reading?.cardId ?? null,
+        cardName: input.reading?.cardName ?? null,
+        position: input.reading?.position ?? null,
         status: input.reading?.status === undefined ? ('pending_payment' as const) : input.reading.status,
         paymentId: input.reading?.paymentId ?? null,
         merchantOrderNo: input.reading?.merchantOrderNo ?? null,
       }),
       validateDivinationReadingPayment,
+      getExistingPaymentByItemTarget: async () => {
+        if (input.existingLookupError) throw input.existingLookupError
+        return input.existingPayment ?? null
+      },
       createPendingPayment: async (paymentInput: CreatePendingPaymentInput) => {
         calls.pendingPayments.push(paymentInput)
+        if (input.paymentInsertError) throw input.paymentInsertError
         return { id: paymentId }
       },
       updateDivinationReadingDrawSelection: async (updateInput: {
@@ -137,7 +167,8 @@ function createDivinationDeps(
         merchantOrderNo: string
       }) => {
         calls.divinationLinks.push(linkInput)
-        return { result: 'linked' as const }
+        if (input.linkError) throw input.linkError
+        return { result: input.linkResult ?? ('linked' as const) }
       },
     },
   }
@@ -295,7 +326,10 @@ test('admin 測試模式：payment=1、NewebPay Amt=1、金額同源一致', asy
   // 付款工具由 server 授權後派生，client 無法直接指定 Apple Pay。
   assert.equal(calls.paymentDataInputs[0].paymentMode, 'apple_pay_test')
   assert.equal(String(calls.paymentDataInputs[0].itemDesc).includes('管理員 Apple Pay 測試'), true)
-  assert.equal(String(calls.pendingPayments[0].itemName).includes('管理員 Apple Pay 測試'), true)
+  assert.equal(calls.pendingPayments[0].itemName, '紫微牌卡占卜單次')
+  assert.equal(calls.pendingPayments[0].itemType, 'ai_divination')
+  assert.equal(calls.pendingPayments[0].itemId, readingId)
+  assert.equal(calls.pendingPayments[0].userId, adminUser.id)
 })
 
 test('占卜付款建立前必須帶完整牌卡資料，避免付款後紀錄尚未抽牌', async () => {
@@ -310,6 +344,29 @@ test('占卜付款建立前必須帶完整牌卡資料，避免付款後紀錄�
   assert.deepEqual(json, { ok: false, error: 'reading_card_data_missing' })
   assert.equal(calls.drawSelectionUpdates.length, 0)
   assert.equal(calls.pendingPayments.length, 0)
+})
+
+test('舊前端未送 cardId / position 時，從 reading DB 安全恢復牌卡資料', async () => {
+  const { deps, calls } = createDivinationDeps({
+    reading: {
+      cardId: 'ziwei',
+      cardName: '紫微星',
+      position: 'upright',
+    },
+  })
+  const response = await handleCreateNewebPayPaymentRequest(
+    divinationBody({ cardId: undefined, position: undefined, divinationOneDollarTest: true }),
+    deps,
+  )
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(calls.drawSelectionUpdates[0], {
+    readingId,
+    cardId: 'ziwei',
+    cardName: '紫微星',
+    position: 'upright',
+  })
+  assert.equal(calls.pendingPayments.length, 1)
 })
 
 test('占卜付款不接受不合法牌卡或正反位資料', async () => {
@@ -348,13 +405,13 @@ test('已有 pending payment 時不重複建立付款資料', async () => {
     deps,
   )
 
-  assert.equal(response.status, 400)
-  assert.deepEqual(await readJson(response), { ok: false, error: 'payment_already_exists' })
+  assert.equal(response.status, 409)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'payment_duplicate_conflict' })
   assert.equal(calls.drawSelectionUpdates.length, 0)
   assert.equal(calls.pendingPayments.length, 0)
 })
 
-test('牌卡資料更新被擋時回 payment_already_exists，避免泛用失敗', async () => {
+test('牌卡資料更新被擋時回 payment_duplicate_conflict，避免泛用失敗', async () => {
   const { deps, calls } = createDivinationDeps({ drawSelectionResult: 'not_payable' })
   const response = await handleCreateNewebPayPaymentRequest(
     divinationBody({ divinationOneDollarTest: true }),
@@ -362,7 +419,7 @@ test('牌卡資料更新被擋時回 payment_already_exists，避免泛用失敗
   )
 
   assert.equal(response.status, 409)
-  assert.deepEqual(await readJson(response), { ok: false, error: 'payment_already_exists' })
+  assert.deepEqual(await readJson(response), { ok: false, error: 'payment_duplicate_conflict' })
   assert.equal(calls.drawSelectionUpdates.length, 1)
   assert.equal(calls.pendingPayments.length, 0)
 })
@@ -376,7 +433,96 @@ test('NewebPay form 建立失敗時回安全 payment_form_create_failed', async 
 
   assert.equal(response.status, 500)
   assert.deepEqual(await readJson(response), { ok: false, error: 'payment_form_create_failed' })
+  assert.equal(calls.pendingPayments.length, 1)
+  assert.equal(calls.divinationLinks.length, 1)
+})
+
+test('payment metadata 無效時不 insert、不 link、不建立 form', async () => {
+  const { deps, calls } = createDivinationDeps({ metadataThrows: true })
+  const response = await handleCreateNewebPayPaymentRequest(
+    divinationBody({ divinationOneDollarTest: true }),
+    deps,
+  )
+
+  assert.equal(response.status, 400)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'payment_metadata_invalid' })
   assert.equal(calls.pendingPayments.length, 0)
+  assert.equal(calls.divinationLinks.length, 0)
+  assert.equal(calls.paymentDataInputs.length, 0)
+})
+
+test('payment insert 失敗時回 payment_insert_failed，且不 link、不建立 form', async () => {
+  const { deps, calls } = createDivinationDeps({
+    paymentInsertError: new PaymentRepositoryError('missing_required_field'),
+  })
+  const response = await handleCreateNewebPayPaymentRequest(
+    divinationBody({ divinationOneDollarTest: true }),
+    deps,
+  )
+
+  assert.equal(response.status, 500)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'payment_insert_failed' })
+  assert.equal(calls.pendingPayments.length, 1)
+  assert.equal(calls.divinationLinks.length, 0)
+  assert.equal(calls.paymentDataInputs.length, 0)
+})
+
+test('merchant order duplicate 回 payment_duplicate_conflict，不 link、不建立 form', async () => {
+  const { deps, calls } = createDivinationDeps({
+    paymentInsertError: new PaymentRepositoryError('duplicate'),
+  })
+  const response = await handleCreateNewebPayPaymentRequest(
+    divinationBody({ divinationOneDollarTest: true }),
+    deps,
+  )
+
+  assert.equal(response.status, 409)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'payment_duplicate_conflict' })
+  assert.equal(calls.divinationLinks.length, 0)
+  assert.equal(calls.paymentDataInputs.length, 0)
+})
+
+test('同 reading 已有孤立 pending payment 時不再 insert', async () => {
+  const { deps, calls } = createDivinationDeps({
+    existingPayment: { id: paymentId, status: 'pending', merchantOrderNo },
+  })
+  const response = await handleCreateNewebPayPaymentRequest(
+    divinationBody({ divinationOneDollarTest: true }),
+    deps,
+  )
+
+  assert.equal(response.status, 409)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'payment_duplicate_conflict' })
+  assert.equal(calls.pendingPayments.length, 0)
+  assert.equal(calls.divinationLinks.length, 0)
+  assert.equal(calls.paymentDataInputs.length, 0)
+})
+
+test('reading link 失敗時回 payment_reading_link_failed，且不建立 form', async () => {
+  const { deps, calls } = createDivinationDeps({ linkError: new Error('raw link failure') })
+  const response = await handleCreateNewebPayPaymentRequest(
+    divinationBody({ divinationOneDollarTest: true }),
+    deps,
+  )
+
+  assert.equal(response.status, 500)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'payment_reading_link_failed' })
+  assert.equal(calls.pendingPayments.length, 1)
+  assert.equal(calls.divinationLinks.length, 1)
+  assert.equal(calls.paymentDataInputs.length, 0)
+})
+
+test('reading 已連結時回 duplicate conflict，且不建立第二份 form', async () => {
+  const { deps, calls } = createDivinationDeps({ linkResult: 'already_linked' })
+  const response = await handleCreateNewebPayPaymentRequest(
+    divinationBody({ divinationOneDollarTest: true }),
+    deps,
+  )
+
+  assert.equal(response.status, 409)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'payment_duplicate_conflict' })
+  assert.equal(calls.pendingPayments.length, 1)
+  assert.equal(calls.paymentDataInputs.length, 0)
 })
 
 test('測試 payment metadata 完整標記', async () => {
@@ -393,6 +539,8 @@ test('測試 payment metadata 完整標記', async () => {
   assert.equal(rawPayload.test_source, 'divination')
   assert.equal(rawPayload.payment_method, 'apple_pay')
   assert.equal(rawPayload.paymentMode, 'apple_pay_test')
+  assert.equal('paymentMethod' in calls.pendingPayments[0], false)
+  assert.equal('sourceType' in calls.pendingPayments[0], false)
   // reading 連結照常建立（paid gate 流程不變）
   assert.equal(calls.divinationLinks.length, 1)
   assert.equal((calls.divinationLinks[0] as { readingId?: string }).readingId, readingId)
@@ -521,6 +669,10 @@ test('前端保留正式按鈕、測試按鈕受 admin 狀態 gate，Apple Pay �
   assert.equal(source.includes('divinationOneDollarTest: true'), true)
   assert.equal(source.includes('reading_card_data_missing'), true)
   assert.equal(source.includes('payment_already_exists'), true)
+  assert.equal(source.includes('payment_duplicate_conflict'), true)
+  assert.equal(source.includes('payment_insert_failed'), true)
+  assert.equal(source.includes('payment_reading_link_failed'), true)
+  assert.equal(source.includes('payment_metadata_invalid'), true)
   assert.equal(source.includes('test_mode_disabled'), true)
   assert.equal(source.includes('admin_required'), true)
 })

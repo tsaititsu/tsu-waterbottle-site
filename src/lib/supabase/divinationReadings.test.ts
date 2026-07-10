@@ -540,6 +540,9 @@ for (const status of notPayableLinkStatuses) {
 const paymentContext = mapDivinationReadingPaymentContext({
   id: '2df1a8da-3893-4b81-8d00-774a9cc0e472',
   user_id: 'user-1',
+  card_id: 'ziwei',
+  card_name: '紫微星',
+  position: 'upright',
   status: 'pending_payment',
   payment_id: null,
   merchant_order_no: null,
@@ -548,6 +551,9 @@ const paymentContext = mapDivinationReadingPaymentContext({
 assert.deepEqual(paymentContext, {
   id: '2df1a8da-3893-4b81-8d00-774a9cc0e472',
   userId: 'user-1',
+  cardId: 'ziwei',
+  cardName: '紫微星',
+  position: 'upright',
   status: 'pending_payment',
   paymentId: null,
   merchantOrderNo: null,

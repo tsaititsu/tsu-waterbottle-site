@@ -50,6 +50,11 @@ import {
   type DivinationOneDollarTestUser,
 } from '../../../../../lib/newebpay/divinationOneDollarTest'
 import type { NewebPayOneDollarTestContext } from '../../../../../lib/newebpay/oneDollarTestMode'
+import { generateNewebPayMerchantOrderNo } from '../../../../../lib/newebpay/orderNo'
+import {
+  classifyPaymentRepositoryError,
+  type ExistingPaymentTarget,
+} from '../../../../../lib/supabase/payments'
 
 export type CreateNewebPayPaymentRequest = {
   itemKey?: unknown
@@ -65,6 +70,11 @@ export type CreateNewebPayPaymentRequest = {
 }
 
 type CreatePendingPaymentDependency = (input: CreatePendingPaymentInput) => Promise<{ id: string }>
+type GetExistingPaymentByItemTargetDependency = (input: {
+  provider: 'newebpay'
+  itemType: string
+  itemId: string
+}) => Promise<ExistingPaymentTarget | null>
 type GetNewebPayConfigDependency = () => NewebPayConfig
 type GetBookingPaymentContextDependency = (bookingId: string) => Promise<NewebPayBookingPaymentContext | null>
 type GetDivinationReadingPaymentContextDependency = (
@@ -111,10 +121,35 @@ type CreateNewebPayPaymentDependencies = {
   getAiChartReportPaymentContext?: GetAiChartReportPaymentContextDependency
   getProductOrderForPayment?: GetProductOrderForPaymentDependency
   createPendingPayment?: CreatePendingPaymentDependency
+  getExistingPaymentByItemTarget?: GetExistingPaymentByItemTargetDependency
+  generateMerchantOrderNo?: typeof generateNewebPayMerchantOrderNo
   linkDivinationReadingPendingPayment?: LinkDivinationReadingPendingPaymentDependency
   updateDivinationReadingDrawSelection?: UpdateDivinationReadingDrawSelectionDependency
   linkAiChartReportPendingPayment?: LinkAiChartReportPendingPaymentDependency
   linkProductOrderPayment?: LinkProductOrderPaymentDependency
+}
+
+type PaymentFailureStage = 'payment_metadata' | 'payment_insert' | 'reading_link' | 'form_build'
+
+function logSafePaymentFailure(input: {
+  stage: PaymentFailureStage
+  errorCode: string
+  sourceType: string
+  testMode: boolean
+  amount: number
+  status: number
+  databaseErrorCategory?: string
+}) {
+  console.error('NewebPay payment stage failed', {
+    stage: input.stage,
+    errorCode: input.errorCode,
+    provider: 'newebpay',
+    sourceType: input.sourceType,
+    testMode: input.testMode,
+    amount: input.amount,
+    status: input.status,
+    ...(input.databaseErrorCategory ? { databaseErrorCategory: input.databaseErrorCategory } : {}),
+  })
 }
 
 function paymentConfigErrorResponse() {
@@ -124,18 +159,78 @@ function paymentConfigErrorResponse() {
   )
 }
 
-function pendingPaymentErrorResponse(input: { merchantOrderNo: string; itemKey: string; error: unknown }) {
-  console.error('建立藍新 pending payment 失敗', {
-    merchantOrderNo: input.merchantOrderNo,
-    itemKey: input.itemKey,
-    error: input.error instanceof Error ? input.error.message : 'unknown_error',
-  })
-
+function pendingPaymentErrorResponse(input: {
+  merchantOrderNo: string
+  itemKey: string
+  itemType: string
+  testMode: boolean
+  amount: number
+  error: unknown
+}) {
   if (input.itemKey === AI_DIVINATION_ITEM_KEY) {
-    return NextResponse.json({ ok: false, error: 'payment_create_failed' }, { status: 500 })
+    const category = classifyPaymentRepositoryError(input.error)
+    const isDuplicate = category === 'duplicate'
+    const errorCode = isDuplicate ? 'payment_duplicate_conflict' : 'payment_insert_failed'
+    const status = isDuplicate ? 409 : 500
+
+    logSafePaymentFailure({
+      stage: 'payment_insert',
+      errorCode,
+      sourceType: input.itemType,
+      testMode: input.testMode,
+      amount: input.amount,
+      status,
+      databaseErrorCategory: category,
+    })
+
+    return NextResponse.json({ ok: false, error: errorCode }, { status })
   }
 
+  console.error('建立藍新 pending payment 失敗', {
+    itemKey: input.itemKey,
+    error: 'payment_insert_failed',
+  })
+
   return NextResponse.json({ ok: false, error: '建立付款紀錄失敗，請稍後再試。' }, { status: 500 })
+}
+
+function divinationPaymentMetadataErrorResponse(input: { testMode: boolean; amount: number }) {
+  logSafePaymentFailure({
+    stage: 'payment_metadata',
+    errorCode: 'payment_metadata_invalid',
+    sourceType: AI_DIVINATION_ITEM_TYPE,
+    testMode: input.testMode,
+    amount: input.amount,
+    status: 400,
+  })
+
+  return NextResponse.json({ ok: false, error: 'payment_metadata_invalid' }, { status: 400 })
+}
+
+function divinationPaymentDuplicateResponse(input: { testMode: boolean; amount: number }) {
+  logSafePaymentFailure({
+    stage: 'payment_insert',
+    errorCode: 'payment_duplicate_conflict',
+    sourceType: AI_DIVINATION_ITEM_TYPE,
+    testMode: input.testMode,
+    amount: input.amount,
+    status: 409,
+  })
+
+  return NextResponse.json({ ok: false, error: 'payment_duplicate_conflict' }, { status: 409 })
+}
+
+function divinationPaymentFormErrorResponse(input: { testMode: boolean; amount: number }) {
+  logSafePaymentFailure({
+    stage: 'form_build',
+    errorCode: 'payment_form_create_failed',
+    sourceType: AI_DIVINATION_ITEM_TYPE,
+    testMode: input.testMode,
+    amount: input.amount,
+    status: 500,
+  })
+
+  return NextResponse.json({ ok: false, error: 'payment_form_create_failed' }, { status: 500 })
 }
 
 function productOrderPendingPaymentErrorResponse(input: { orderId: string; merchantOrderNo: string; error: unknown }) {
@@ -158,9 +253,13 @@ function bookingLookupErrorResponse(input: { bookingId: string; error: unknown }
 }
 
 function divinationReadingLookupErrorResponse(input: { readingId: string; error: unknown }) {
-  console.error('藍新付款占卜 reading 查詢失敗', {
-    readingId: input.readingId,
-    error: input.error instanceof Error ? input.error.message : 'unknown_error',
+  logSafePaymentFailure({
+    stage: 'payment_metadata',
+    errorCode: 'divination_reading_lookup_failed',
+    sourceType: AI_DIVINATION_ITEM_TYPE,
+    testMode: false,
+    amount: 0,
+    status: 500,
   })
 
   return NextResponse.json({ ok: false, error: 'divination_reading_lookup_failed' }, { status: 500 })
@@ -221,9 +320,13 @@ function missingDivinationDrawSelectionResponse() {
 }
 
 function divinationDrawSelectionUpdateErrorResponse(input: { readingId: string; error: unknown }) {
-  console.error('藍新占卜付款前牌卡資料更新失敗', {
-    readingId: input.readingId,
-    error: input.error instanceof Error ? input.error.message : 'unknown_error',
+  logSafePaymentFailure({
+    stage: 'payment_metadata',
+    errorCode: 'divination_draw_selection_update_failed',
+    sourceType: AI_DIVINATION_ITEM_TYPE,
+    testMode: false,
+    amount: 0,
+    status: 500,
   })
 
   return NextResponse.json({ ok: false, error: 'divination_draw_selection_update_failed' }, { status: 500 })
@@ -234,15 +337,19 @@ function divinationPaymentLinkErrorResponse(input: {
   paymentId: string
   merchantOrderNo: string
   error: unknown
+  testMode: boolean
+  amount: number
 }) {
-  console.error('藍新占卜 payment link 失敗', {
-    readingId: input.readingId,
-    paymentId: input.paymentId,
-    merchantOrderNo: input.merchantOrderNo,
-    error: input.error instanceof Error ? input.error.message : 'unknown_error',
+  logSafePaymentFailure({
+    stage: 'reading_link',
+    errorCode: 'payment_reading_link_failed',
+    sourceType: AI_DIVINATION_ITEM_TYPE,
+    testMode: input.testMode,
+    amount: input.amount,
+    status: 500,
   })
 
-  return NextResponse.json({ ok: false, error: 'divination_payment_link_failed' }, { status: 500 })
+  return NextResponse.json({ ok: false, error: 'payment_reading_link_failed' }, { status: 500 })
 }
 
 function aiChartPaymentLinkErrorResponse(input: {
@@ -282,20 +389,24 @@ function divinationPaymentLinkResultResponse(input: {
   paymentId: string
   merchantOrderNo: string
   result: 'already_linked' | 'not_found' | 'not_payable'
+  testMode: boolean
+  amount: number
 }) {
   const resolution = resolveNewebPayDivinationPendingPaymentLink(input.result)
+  const duplicate = !resolution.ok && resolution.error === 'divination_reading_already_linked'
+  const error = duplicate ? 'payment_duplicate_conflict' : 'payment_reading_link_failed'
+  const status = duplicate ? 409 : 500
 
-  console.warn('藍新占卜 payment link 未完成', {
-    readingId: input.readingId,
-    paymentId: input.paymentId,
-    merchantOrderNo: input.merchantOrderNo,
-    result: input.result,
+  logSafePaymentFailure({
+    stage: 'reading_link',
+    errorCode: error,
+    sourceType: AI_DIVINATION_ITEM_TYPE,
+    testMode: input.testMode,
+    amount: input.amount,
+    status,
   })
 
-  return NextResponse.json(
-    { ok: false, error: resolution.ok ? 'divination_payment_link_failed' : resolution.error },
-    { status: 400 },
-  )
+  return NextResponse.json({ ok: false, error }, { status })
 }
 
 function aiChartPaymentLinkResultResponse(input: {
@@ -484,6 +595,7 @@ export async function handleCreateNewebPayPaymentRequest(
 
   const orderId = orderIdResolution.orderId
   let productOrderPayment: ProductOrderPaymentMapping | null = null
+  let divinationPaymentUserId: string | null = null
 
   if (bookingId) {
     let booking
@@ -525,6 +637,13 @@ export async function handleCreateNewebPayPaymentRequest(
     const readingValidation = validateReadingPayment(reading)
 
     if (!readingValidation.ok) {
+      if (readingValidation.error === 'payment_already_exists') {
+        return divinationPaymentDuplicateResponse({
+          testMode: Boolean(divinationOneDollarTestContext),
+          amount: divinationOneDollarTestContext?.amount ?? item.amount,
+        })
+      }
+
       const status = readingValidation.error === 'divination_reading_not_found' ? 404 : 400
       return NextResponse.json({ ok: false, error: readingValidation.error }, { status })
     }
@@ -538,8 +657,12 @@ export async function handleCreateNewebPayPaymentRequest(
       return NextResponse.json({ ok: false, error: 'reading_not_owned' }, { status: 404 })
     }
 
-    const cardId = typeof body?.cardId === 'string' ? body.cardId.trim() : ''
-    const position = typeof body?.position === 'string' ? body.position.trim() : ''
+    divinationPaymentUserId = reading?.userId ?? null
+
+    const requestCardId = typeof body?.cardId === 'string' ? body.cardId.trim() : ''
+    const requestPosition = typeof body?.position === 'string' ? body.position.trim() : ''
+    const cardId = requestCardId || reading?.cardId?.trim() || ''
+    const position = requestPosition || reading?.position?.trim() || ''
     const selectedCard = cardId ? ziweiCards.find((card) => card.id === cardId) : null
 
     if (!cardId || !position) {
@@ -562,7 +685,10 @@ export async function handleCreateNewebPayPaymentRequest(
       })
 
       if (updateResult.result !== 'updated') {
-        return NextResponse.json({ ok: false, error: 'payment_already_exists' }, { status: 409 })
+        return divinationPaymentDuplicateResponse({
+          testMode: Boolean(divinationOneDollarTestContext),
+          amount: divinationOneDollarTestContext?.amount ?? item.amount,
+        })
       }
     } catch (error) {
       return divinationDrawSelectionUpdateErrorResponse({ readingId, error })
@@ -622,33 +748,57 @@ export async function handleCreateNewebPayPaymentRequest(
     const effectivePaymentMode = divinationOneDollarTestContext
       ? NEWEBPAY_APPLE_PAY_TEST_MODE
       : paymentMode
-    let paymentData
-    try {
-      paymentData = (deps.createNewebPayMpgPaymentData ?? createNewebPayMpgPaymentData)({
-        itemKey: item.itemKey,
-        config,
-        paymentMode: effectivePaymentMode,
-        amount: applePayTestContext?.amount ?? divinationOneDollarTestContext?.amount ?? productOrderPayment?.amountTwd,
-        itemDesc: applePayTestContext?.itemDesc ?? divinationOneDollarTestContext?.itemDesc ?? productOrderPayment?.itemDesc,
-      })
-    } catch {
-      return NextResponse.json({ ok: false, error: 'payment_form_create_failed' }, { status: 500 })
-    }
-    const pendingPaymentMetadata = applePayTestContext
-      ? buildNewebPayApplePayTestPendingPaymentMetadata({
-          context: applePayTestContext,
-          merchantOrderNo: paymentData.merchantOrderNo,
-        })
-      : (deps.buildNewebPayPendingPaymentMetadata ?? buildNewebPayPendingPaymentMetadata)({
+    const amountTwd =
+      applePayTestContext?.amount ??
+      divinationOneDollarTestContext?.amount ??
+      productOrderPayment?.amountTwd ??
+      item.amount
+    const testMode = Boolean(divinationOneDollarTestContext)
+    let paymentData: ReturnType<typeof createNewebPayMpgPaymentData> | null = null
+    let merchantOrderNo: string
+
+    if (readingId) {
+      merchantOrderNo = (deps.generateMerchantOrderNo ?? generateNewebPayMerchantOrderNo)()
+    } else {
+      try {
+        paymentData = (deps.createNewebPayMpgPaymentData ?? createNewebPayMpgPaymentData)({
           itemKey: item.itemKey,
-          source,
-          paymentMode,
-          merchantOrderNo: paymentData.merchantOrderNo,
-          bookingId,
-          readingId,
-          reportId,
-          productOrderPayment,
+          config,
+          paymentMode: effectivePaymentMode,
+          amount: applePayTestContext?.amount ?? productOrderPayment?.amountTwd,
+          itemDesc: applePayTestContext?.itemDesc ?? productOrderPayment?.itemDesc,
         })
+        merchantOrderNo = paymentData.merchantOrderNo
+      } catch {
+        return NextResponse.json({ ok: false, error: 'payment_form_create_failed' }, { status: 500 })
+      }
+    }
+
+    let pendingPaymentMetadata
+
+    try {
+      pendingPaymentMetadata = applePayTestContext
+        ? buildNewebPayApplePayTestPendingPaymentMetadata({
+            context: applePayTestContext,
+            merchantOrderNo,
+          })
+        : (deps.buildNewebPayPendingPaymentMetadata ?? buildNewebPayPendingPaymentMetadata)({
+            itemKey: item.itemKey,
+            source,
+            paymentMode,
+            merchantOrderNo,
+            bookingId,
+            readingId,
+            reportId,
+            productOrderPayment,
+          })
+    } catch {
+      if (readingId) {
+        return divinationPaymentMetadataErrorResponse({ testMode, amount: amountTwd })
+      }
+      return paymentConfigErrorResponse()
+    }
+
     // NT$1 測試：payment 紀錄金額與 NewebPay Amt 一律同源（context.amount），
     // rawPayload 併入測試標記（test_payment / original_amount 等）。
     const pendingPaymentRawPayload = divinationOneDollarTestContext
@@ -660,16 +810,38 @@ export async function handleCreateNewebPayPaymentRequest(
           ...divinationOneDollarTestContext.metadata,
         }
       : pendingPaymentMetadata.rawPayload
+    // DB-facing item_name 沿用正式占卜名稱；測試標記只放 raw_payload，避免新增資料庫識別值。
     const itemName =
       applePayTestContext?.itemDesc ??
-      divinationOneDollarTestContext?.itemDesc ??
       productOrderPayment?.itemDesc ??
       item.itemDesc
-    const amountTwd =
-      applePayTestContext?.amount ??
-      divinationOneDollarTestContext?.amount ??
-      productOrderPayment?.amountTwd ??
-      item.amount
+
+    if (readingId && pendingPaymentMetadata.itemId) {
+      try {
+        const findExistingPayment =
+          deps.getExistingPaymentByItemTarget ??
+          (await import('../../../../../lib/supabase/payments')).getExistingPaymentByItemTarget
+        const existingPayment = await findExistingPayment({
+          provider: 'newebpay',
+          itemType: pendingPaymentMetadata.itemType,
+          itemId: pendingPaymentMetadata.itemId,
+        })
+
+        if (existingPayment) {
+          return divinationPaymentDuplicateResponse({ testMode, amount: amountTwd })
+        }
+      } catch (error) {
+        return pendingPaymentErrorResponse({
+          merchantOrderNo,
+          itemKey: item.itemKey,
+          itemType: pendingPaymentMetadata.itemType,
+          testMode,
+          amount: amountTwd,
+          error,
+        })
+      }
+    }
+
     let pendingPayment: { id: string }
 
     try {
@@ -677,11 +849,12 @@ export async function handleCreateNewebPayPaymentRequest(
         deps.createPendingPayment ?? (await import('../../../../../lib/supabase/payments')).createPendingPayment
       pendingPayment = await createPayment({
         provider: 'newebpay',
+        userId: divinationPaymentUserId,
         itemType: pendingPaymentMetadata.itemType,
         itemId: pendingPaymentMetadata.itemId,
         itemName,
         bookingId: pendingPaymentMetadata.bookingId,
-        merchantOrderNo: paymentData.merchantOrderNo,
+        merchantOrderNo,
         amountTwd,
         rawPayload: pendingPaymentRawPayload,
       })
@@ -689,14 +862,17 @@ export async function handleCreateNewebPayPaymentRequest(
       if (orderId) {
         return productOrderPendingPaymentErrorResponse({
           orderId,
-          merchantOrderNo: paymentData.merchantOrderNo,
+          merchantOrderNo,
           error,
         })
       }
 
       return pendingPaymentErrorResponse({
-        merchantOrderNo: paymentData.merchantOrderNo,
+        merchantOrderNo,
         itemKey: item.itemKey,
+        itemType: pendingPaymentMetadata.itemType,
+        testMode,
+        amount: amountTwd,
         error,
       })
     }
@@ -709,23 +885,27 @@ export async function handleCreateNewebPayPaymentRequest(
         const linkResult = await linkDivinationPayment({
           readingId,
           paymentId: pendingPayment.id,
-          merchantOrderNo: paymentData.merchantOrderNo,
+          merchantOrderNo,
         })
 
         if (linkResult.result !== 'linked') {
           return divinationPaymentLinkResultResponse({
             readingId,
             paymentId: pendingPayment.id,
-            merchantOrderNo: paymentData.merchantOrderNo,
+            merchantOrderNo,
             result: linkResult.result,
+            testMode,
+            amount: amountTwd,
           })
         }
       } catch (error) {
         return divinationPaymentLinkErrorResponse({
           readingId,
           paymentId: pendingPayment.id,
-          merchantOrderNo: paymentData.merchantOrderNo,
+          merchantOrderNo,
           error,
+          testMode,
+          amount: amountTwd,
         })
       }
     }
@@ -738,14 +918,14 @@ export async function handleCreateNewebPayPaymentRequest(
         const linkResult = await linkAiChartPayment({
           reportId,
           paymentId: pendingPayment.id,
-          merchantOrderNo: paymentData.merchantOrderNo,
+          merchantOrderNo,
         })
 
         if (linkResult.result !== 'linked') {
           return aiChartPaymentLinkResultResponse({
             reportId,
             paymentId: pendingPayment.id,
-            merchantOrderNo: paymentData.merchantOrderNo,
+            merchantOrderNo,
             result: linkResult.result,
           })
         }
@@ -753,7 +933,7 @@ export async function handleCreateNewebPayPaymentRequest(
         return aiChartPaymentLinkErrorResponse({
           reportId,
           paymentId: pendingPayment.id,
-          merchantOrderNo: paymentData.merchantOrderNo,
+          merchantOrderNo,
           error,
         })
       }
@@ -772,9 +952,24 @@ export async function handleCreateNewebPayPaymentRequest(
         return productOrderPaymentLinkErrorResponse({
           orderId,
           paymentId: pendingPayment.id,
-          merchantOrderNo: paymentData.merchantOrderNo,
+          merchantOrderNo,
           error,
         })
+      }
+    }
+
+    if (!paymentData) {
+      try {
+        paymentData = (deps.createNewebPayMpgPaymentData ?? createNewebPayMpgPaymentData)({
+          itemKey: item.itemKey,
+          config,
+          paymentMode: effectivePaymentMode,
+          amount: divinationOneDollarTestContext?.amount,
+          itemDesc: divinationOneDollarTestContext?.itemDesc,
+          merchantOrderNo,
+        })
+      } catch {
+        return divinationPaymentFormErrorResponse({ testMode, amount: amountTwd })
       }
     }
 

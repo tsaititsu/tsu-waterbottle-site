@@ -112,10 +112,51 @@ export type MarkPaymentPaidResult =
   | { result: 'already_paid'; payment: PaymentPaidContext }
   | { result: 'updated'; payment: PaymentPaidContext }
 
+export type PaymentRepositoryErrorCategory =
+  | 'duplicate'
+  | 'invalid_enum_or_constraint'
+  | 'missing_required_field'
+  | 'unknown_database_error'
+
+export class PaymentRepositoryError extends Error {
+  readonly category: PaymentRepositoryErrorCategory
+
+  constructor(category: PaymentRepositoryErrorCategory) {
+    super('payment_repository_error')
+    this.name = 'PaymentRepositoryError'
+    this.category = category
+  }
+}
+
+export type ExistingPaymentTarget = {
+  id: string
+  status: PaymentStatus | string
+  merchantOrderNo: string | null
+}
+
 function assertRequiredText(value: string, fieldName: string) {
   if (!value.trim()) {
     throw new Error(`${fieldName} 不可空白`)
   }
+}
+
+function readPostgrestErrorCode(error: unknown) {
+  if (!error || typeof error !== 'object' || !('code' in error)) return ''
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'string' ? code.trim() : ''
+}
+
+export function classifyPaymentRepositoryError(error: unknown): PaymentRepositoryErrorCategory {
+  if (error instanceof PaymentRepositoryError) return error.category
+
+  const code = readPostgrestErrorCode(error)
+  if (code === '23505') return 'duplicate'
+  if (code === '23502') return 'missing_required_field'
+  if (code === '23503' || code === '23514' || code === '22P02') {
+    return 'invalid_enum_or_constraint'
+  }
+
+  return 'unknown_database_error'
 }
 
 export function mapPaymentRow(row: PaymentRow): PaymentRecord {
@@ -210,13 +251,47 @@ export async function createPendingPayment(input: CreatePendingPaymentInput) {
   const supabase = getSupabaseAdmin()
   const insertPayload = buildPendingPaymentInsert(input)
 
-  const { data, error } = await supabase.from('payments').insert(insertPayload).select('*').single()
+  const { data, error } = await supabase.from('payments').insert(insertPayload).select('id').single()
 
   if (error) {
-    throw new Error(error.message)
+    throw new PaymentRepositoryError(classifyPaymentRepositoryError(error))
   }
 
-  return mapPaymentRow(data as PaymentRow)
+  return { id: (data as { id: string }).id }
+}
+
+export async function getExistingPaymentByItemTarget(input: {
+  provider: PaymentProvider
+  itemType: string
+  itemId: string
+}): Promise<ExistingPaymentTarget | null> {
+  assertRequiredText(input.itemType, 'itemType')
+  assertRequiredText(input.itemId, 'itemId')
+
+  const supabase = getSupabaseAdmin()
+  const { data, error } = await supabase
+    .from('payments')
+    .select('id,status,merchant_order_no')
+    .eq('provider', input.provider)
+    .eq('item_type', input.itemType.trim())
+    .eq('item_id', input.itemId.trim())
+    .in('status', ['pending', 'paid'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    throw new PaymentRepositoryError(classifyPaymentRepositoryError(error))
+  }
+
+  if (!data) return null
+
+  const row = data as { id: string; status: PaymentStatus | string; merchant_order_no: string | null }
+  return {
+    id: row.id,
+    status: row.status,
+    merchantOrderNo: row.merchant_order_no,
+  }
 }
 
 export async function getPaymentByMerchantOrderNo(merchantOrderNo: string) {

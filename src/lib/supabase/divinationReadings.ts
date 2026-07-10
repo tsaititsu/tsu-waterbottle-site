@@ -103,6 +103,9 @@ export type DivinationReadingPaidSyncRow = {
 export type DivinationReadingPaymentContext = {
   id: string
   userId: string | null
+  cardId: string | null
+  cardName: string | null
+  position: string | null
   status: DivinationReadingStatus | null
   paymentId: string | null
   merchantOrderNo: string | null
@@ -111,6 +114,9 @@ export type DivinationReadingPaymentContext = {
 export type DivinationReadingPaymentContextRow = {
   id: string
   user_id: string | null
+  card_id: string | null
+  card_name: string | null
+  position: string | null
   status: DivinationReadingStatus | null
   payment_id: string | null
   merchant_order_no: string | null
@@ -453,6 +459,9 @@ export function mapDivinationReadingPaymentContext(
   return {
     id: row.id,
     userId: row.user_id,
+    cardId: row.card_id,
+    cardName: row.card_name,
+    position: row.position,
     status: row.status,
     paymentId: row.payment_id,
     merchantOrderNo: row.merchant_order_no,
@@ -557,7 +566,7 @@ export async function getDivinationReadingPaymentContext(
   const supabase = getSupabaseAdmin()
   const { data, error } = await supabase
     .from('divination_readings')
-    .select('id,user_id,status,payment_id,merchant_order_no')
+    .select('id,user_id,card_id,card_name,position,status,payment_id,merchant_order_no')
     .eq('id', readingId)
     .maybeSingle()
 

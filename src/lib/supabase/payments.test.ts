@@ -2,12 +2,19 @@ import assert from 'node:assert/strict'
 import {
   buildPaidPaymentUpdate,
   buildPendingPaymentInsert,
+  classifyPaymentRepositoryError,
   getMarkPaymentPaidDecision,
   mapPaymentPaidContext,
   mapPaymentRow,
   type PaymentRecord,
   type PaymentRow,
 } from './payments'
+
+assert.equal(classifyPaymentRepositoryError({ code: '23505' }), 'duplicate')
+assert.equal(classifyPaymentRepositoryError({ code: '23502' }), 'missing_required_field')
+assert.equal(classifyPaymentRepositoryError({ code: '23514' }), 'invalid_enum_or_constraint')
+assert.equal(classifyPaymentRepositoryError({ code: '22P02' }), 'invalid_enum_or_constraint')
+assert.equal(classifyPaymentRepositoryError(new Error('opaque database failure')), 'unknown_database_error')
 
 const pendingPayload = buildPendingPaymentInsert({
   userId: 'user-1',

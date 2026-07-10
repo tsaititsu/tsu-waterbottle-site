@@ -210,6 +210,7 @@ function updateStoredReadingSessionMerchantOrderNo(input: {
 function getNewebPayCheckoutErrorMessage(error?: string) {
   if (
     error === "payment_already_exists" ||
+    error === "payment_duplicate_conflict" ||
     error === "divination_reading_not_payable" ||
     error === "divination_reading_already_linked"
   ) {
@@ -241,7 +242,19 @@ function getNewebPayCheckoutErrorMessage(error?: string) {
     return "本次抽牌資料不完整，尚未建立付款。請重新確認牌卡後再付款。"
   }
 
-  if (error === "payment_create_failed" || error === "payment_form_create_failed") {
+  if (error === "payment_metadata_invalid") {
+    return "本次付款資料格式不完整，尚未建立付款。請稍後再試。"
+  }
+
+  if (error === "payment_reading_link_failed") {
+    return "付款資料已建立，但未能連結本次占卜。請勿重複付款並聯繫客服。"
+  }
+
+  if (
+    error === "payment_create_failed" ||
+    error === "payment_insert_failed" ||
+    error === "payment_form_create_failed"
+  ) {
     return "付款資料建立失敗，請稍後再試。"
   }
 

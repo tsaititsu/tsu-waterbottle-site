@@ -24,6 +24,7 @@ import {
   markDivinationReadingFailed,
   markDivinationReadingInterpreting,
   startDivinationReadingInterpretationIfPaid,
+  updateDivinationReadingDrawSelection,
 } from "@/lib/supabase/divinationReadings"
 import { getUserIdFromRequest } from "@/lib/supabase/auth"
 import { getDivinationOpenAIModel } from "@/lib/openai/divinationModel"
@@ -298,6 +299,31 @@ async function interpretPersistedDivinationReading(input: {
   position: DivinationPosition
   followUpContext?: unknown
 }) {
+  try {
+    const drawUpdate = await updateDivinationReadingDrawSelection({
+      readingId: input.readingId,
+      cardId: input.card.id,
+      cardName: input.card.name,
+      position: input.position,
+    })
+
+    if (drawUpdate.result === "not_found") {
+      return NextResponse.json(
+        { ok: false, error: "DIVINATION_READING_NOT_FOUND", message: "找不到占卜紀錄。" },
+        { status: 404 }
+      )
+    }
+  } catch {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "DIVINATION_DRAW_SELECTION_UPDATE_FAILED",
+        message: "抽牌資料保存失敗，請稍後再試。",
+      },
+      { status: 500 }
+    )
+  }
+
   let reading
 
   try {
