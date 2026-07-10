@@ -40,7 +40,7 @@ export function FloatingLineButton() {
   const [position, setPosition] = useState<Position>({ x: 0, y: 0 })
   const [isDesktop, setIsDesktop] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
-  const hideOnMobileInteractionPage = pathname.startsWith('/ai-chart') || pathname.startsWith('/ai-divination')
+  const hideOnMobileInteractionPage = pathname === '/' || pathname.startsWith('/ai-chart') || pathname.startsWith('/ai-divination')
 
   const updatePosition = useCallback((next: Position) => {
     positionRef.current = next
