@@ -63,8 +63,10 @@ test('interpret route paid gate is untouched by this hotfix', () => {
 })
 
 test('interpret route does not write user_id (ownership is set at create time only)', () => {
-  assert.equal(interpretRouteSource.includes('user_id'), false)
-  assert.equal(interpretRouteSource.includes('getUserIdFromRequest'), false)
+  assert.equal(interpretRouteSource.includes('getUserIdFromRequest'), true)
+  assert.equal(interpretRouteSource.includes('userId:'), false)
+  assert.equal(interpretRouteSource.includes('user_id:'), false)
+  assert.equal(interpretRouteSource.includes("user_id':"), false)
 })
 
 test('divination client sends the auth token when logged in and stays anonymous otherwise', () => {

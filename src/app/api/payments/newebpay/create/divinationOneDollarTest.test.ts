@@ -61,6 +61,8 @@ function divinationBody(overrides: Record<string, unknown> = {}) {
     source: 'ai_divination',
     paymentMode: 'credit',
     readingId,
+    cardId: 'ziwei',
+    position: 'upright',
     ...overrides,
   }
 }
@@ -76,10 +78,12 @@ function createDivinationDeps(
     paymentDataInputs: Array<Record<string, unknown>>
     pendingPayments: CreatePendingPaymentInput[]
     divinationLinks: Array<Record<string, unknown>>
+    drawSelectionUpdates: Array<Record<string, unknown>>
   } = {
     paymentDataInputs: [],
     pendingPayments: [],
     divinationLinks: [],
+    drawSelectionUpdates: [],
   }
 
   return {
@@ -106,6 +110,15 @@ function createDivinationDeps(
         calls.pendingPayments.push(paymentInput)
         return { id: paymentId }
       },
+      updateDivinationReadingDrawSelection: async (updateInput: {
+        readingId: string
+        cardId: string
+        cardName: string
+        position: string
+      }) => {
+        calls.drawSelectionUpdates.push(updateInput)
+        return { result: 'updated' as const, readingId: updateInput.readingId }
+      },
       linkDivinationReadingPendingPayment: async (linkInput: {
         readingId: string
         paymentId: string
@@ -130,6 +143,12 @@ test('一般使用者（未登入、無測試欄位）維持正式 NT$50', async
 
   assert.equal(response.status, 200)
   assert.equal(calls.pendingPayments[0].amountTwd, 50)
+  assert.deepEqual(calls.drawSelectionUpdates[0], {
+    readingId,
+    cardId: 'ziwei',
+    cardName: '紫微星',
+    position: 'upright',
+  })
   assert.equal(calls.paymentDataInputs[0].amount, undefined) // 由 item 預設 50 決定
   const serialized = JSON.stringify(calls.pendingPayments[0].rawPayload)
   assert.equal(serialized.includes('test_payment'), false)
@@ -256,10 +275,39 @@ test('admin 測試模式：payment=1、NewebPay Amt=1、金額同源一致', asy
   assert.equal(calls.paymentDataInputs[0].amount, 1)
   // 兩者同源一致（Notify 端以 payments row 金額為對帳基準，同為 1）
   assert.equal(calls.pendingPayments[0].amountTwd, calls.paymentDataInputs[0].amount)
+  assert.equal(calls.drawSelectionUpdates.length, 1)
   // 付款工具由 server 授權後派生，client 無法直接指定 Apple Pay。
   assert.equal(calls.paymentDataInputs[0].paymentMode, 'apple_pay_test')
   assert.equal(String(calls.paymentDataInputs[0].itemDesc).includes('管理員 Apple Pay 測試'), true)
   assert.equal(String(calls.pendingPayments[0].itemName).includes('管理員 Apple Pay 測試'), true)
+})
+
+test('占卜付款建立前必須帶完整牌卡資料，避免付款後紀錄尚未抽牌', async () => {
+  const { deps, calls } = createDivinationDeps()
+  const response = await handleCreateNewebPayPaymentRequest(
+    divinationBody({ cardId: undefined, position: undefined }),
+    deps,
+  )
+  const json = await readJson(response)
+
+  assert.equal(response.status, 400)
+  assert.deepEqual(json, { ok: false, error: 'invalid_divination_draw_selection' })
+  assert.equal(calls.drawSelectionUpdates.length, 0)
+  assert.equal(calls.pendingPayments.length, 0)
+})
+
+test('占卜付款不接受不合法牌卡或正反位資料', async () => {
+  const { deps, calls } = createDivinationDeps()
+  const response = await handleCreateNewebPayPaymentRequest(
+    divinationBody({ cardId: 'not-a-card', position: 'sideways' }),
+    deps,
+  )
+  const json = await readJson(response)
+
+  assert.equal(response.status, 400)
+  assert.deepEqual(json, { ok: false, error: 'invalid_divination_draw_selection' })
+  assert.equal(calls.drawSelectionUpdates.length, 0)
+  assert.equal(calls.pendingPayments.length, 0)
 })
 
 test('測試 payment metadata 完整標記', async () => {

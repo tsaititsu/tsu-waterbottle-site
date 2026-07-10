@@ -5,11 +5,13 @@ import {
   buildDivinationInterpretingUpdatePayload,
   buildDivinationPaidUpdatePayload,
   buildDivinationPendingPaymentLinkPayload,
+  buildDivinationDrawSelectionUpdatePayload,
   buildPendingDivinationReadingPayload,
   decideDivinationInterpretationStart,
   decideDivinationPendingPaymentLink,
   decideDivinationPaidUpdate,
   getDivinationReadingForInterpretation,
+  getDivinationReadingResumeContextForUser,
   getDivinationReadingForUser,
   listDivinationReadingsForUser,
   mapAccountDivinationReadingDetail,
@@ -19,6 +21,8 @@ import {
   normalizeAccountDivinationListLimit,
   markDivinationReadingFailed,
   markDivinationReadingInterpreting,
+  startDivinationReadingInterpretationIfPaid,
+  updateDivinationReadingDrawSelection,
   validateDivinationReadingPayment,
   type DivinationReadingPaidSyncRow,
   type DivinationReadingStatus,
@@ -34,6 +38,7 @@ type MockSupabaseCalls = {
   selects: string[]
   updates: Record<string, unknown>[]
   eqs: Array<[string, unknown]>
+  isCalls: Array<[string, unknown]>
 }
 
 function createMockSupabase(response: MockSupabaseResponse): {
@@ -45,6 +50,7 @@ function createMockSupabase(response: MockSupabaseResponse): {
     selects: [],
     updates: [],
     eqs: [],
+    isCalls: [],
   }
   const chain = {
     select(columns: string) {
@@ -57,6 +63,10 @@ function createMockSupabase(response: MockSupabaseResponse): {
     },
     eq(column: string, value: unknown) {
       calls.eqs.push([column, value])
+      return chain
+    },
+    is(column: string, value: unknown) {
+      calls.isCalls.push([column, value])
       return chain
     },
     async maybeSingle() {
@@ -189,6 +199,23 @@ assert.equal('TradeSha' in pendingPayloadForDbCreate.raw_payload, false)
 assert.equal('HashKey' in pendingPayloadForDbCreate.raw_payload, false)
 assert.equal('HashIV' in pendingPayloadForDbCreate.raw_payload, false)
 assert.equal('interpretation' in pendingPayloadForDbCreate.raw_payload, false)
+
+const drawSelectionPayload = buildDivinationDrawSelectionUpdatePayload(
+  {
+    cardId: 'ziwei',
+    cardName: '紫微星',
+    position: 'upright',
+  },
+  '2026-07-05T12:21:00.000Z',
+)
+
+assert.deepEqual(drawSelectionPayload, {
+  card_id: 'ziwei',
+  card_name: '紫微星',
+  position: 'upright',
+  updated_at: '2026-07-05T12:21:00.000Z',
+})
+assertNoUnsafeUpdatePayload(drawSelectionPayload)
 
 const paidPayload = buildDivinationPaidUpdatePayload(
   {
@@ -891,6 +918,45 @@ async function main() {
 
   assert.equal(await getDivinationReadingForInterpretation(readingId, missingGetMock.supabase), null)
 
+  const resumeMock = createMockSupabase({
+    data: {
+      id: readingId,
+      user_id: 'user-a',
+      question: '工作方向？',
+      draw_mode: 'manual',
+      card_id: 'ziwei',
+      card_name: '紫微星',
+      position: 'upright',
+      status: 'paid',
+      interpretation: null,
+      payment_id: 'payment-1',
+      merchant_order_no: 'WB20260710181818DIV',
+    },
+    error: null,
+  })
+  const resumeContext = await getDivinationReadingResumeContextForUser(readingId, 'user-a', resumeMock.supabase)
+
+  assert.deepEqual(resumeContext, {
+    id: readingId,
+    userId: 'user-a',
+    question: '工作方向？',
+    drawMode: 'manual',
+    cardId: 'ziwei',
+    cardName: '紫微星',
+    position: 'upright',
+    status: 'paid',
+    interpretation: null,
+    paymentId: 'payment-1',
+    merchantOrderNo: 'WB20260710181818DIV',
+  })
+  assert.deepEqual(resumeMock.calls.eqs, [
+    ['id', readingId],
+    ['user_id', 'user-a'],
+  ])
+  assert.equal(resumeMock.calls.selects[0].includes('raw_payload'), false)
+  assert.equal(resumeMock.calls.selects[0].includes('TradeInfo'), false)
+  assert.equal(resumeMock.calls.selects[0].includes('HashKey'), false)
+
   const interpretingMock = createMockSupabase({
     data: { id: readingId },
     error: null,
@@ -906,6 +972,45 @@ async function main() {
   assert.equal(typeof interpretingMock.calls.updates[0].updated_at, 'string')
   assertNoUnsafeSelect(interpretingMock.calls)
   assertNoUnsafeUpdatePayload(interpretingMock.calls.updates[0])
+
+  const paidStartMock = createMockSupabase({
+    data: { id: readingId },
+    error: null,
+  })
+  const paidStartResult = await startDivinationReadingInterpretationIfPaid(readingId, paidStartMock.supabase)
+
+  assert.deepEqual(paidStartResult, { result: 'updated', readingId })
+  assert.deepEqual(paidStartMock.calls.eqs, [
+    ['id', readingId],
+    ['status', 'paid'],
+  ])
+  assert.equal(paidStartMock.calls.updates[0].status, 'interpreting')
+  assertNoUnsafeUpdatePayload(paidStartMock.calls.updates[0])
+
+  const drawUpdateMock = createMockSupabase({
+    data: { id: readingId },
+    error: null,
+  })
+  const drawUpdateResult = await updateDivinationReadingDrawSelection(
+    {
+      readingId,
+      cardId: 'ziwei',
+      cardName: '紫微星',
+      position: 'upright',
+    },
+    drawUpdateMock.supabase,
+  )
+
+  assert.deepEqual(drawUpdateResult, { result: 'updated', readingId })
+  assert.deepEqual(drawUpdateMock.calls.eqs, [
+    ['id', readingId],
+    ['status', 'pending_payment'],
+  ])
+  assert.deepEqual(drawUpdateMock.calls.isCalls, [['payment_id', null]])
+  assert.equal(drawUpdateMock.calls.updates[0].card_id, 'ziwei')
+  assert.equal(drawUpdateMock.calls.updates[0].card_name, '紫微星')
+  assert.equal(drawUpdateMock.calls.updates[0].position, 'upright')
+  assertNoUnsafeUpdatePayload(drawUpdateMock.calls.updates[0])
 
   const completedMock = createMockSupabase({
     data: { id: readingId },

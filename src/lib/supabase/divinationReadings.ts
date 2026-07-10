@@ -126,6 +126,47 @@ export type DivinationReadingInterpretationContextRow = {
   interpretation: unknown | null
 }
 
+export type DivinationReadingResumeContext = {
+  id: string
+  userId: string | null
+  question: string
+  drawMode: string | null
+  cardId: string | null
+  cardName: string | null
+  position: string | null
+  status: DivinationReadingStatus | null
+  interpretation: unknown | null
+  paymentId: string | null
+  merchantOrderNo: string | null
+}
+
+export type DivinationReadingResumeContextRow = {
+  id: string
+  user_id: string | null
+  question: string
+  draw_mode: string | null
+  card_id: string | null
+  card_name: string | null
+  position: string | null
+  status: DivinationReadingStatus | null
+  interpretation: unknown | null
+  payment_id: string | null
+  merchant_order_no: string | null
+}
+
+export type BuildDivinationDrawSelectionUpdatePayloadInput = {
+  cardId: string
+  cardName: string
+  position: string
+}
+
+export type DivinationDrawSelectionUpdatePayload = {
+  card_id: string
+  card_name: string
+  position: string
+  updated_at: string
+}
+
 export type DivinationPaidDecision =
   | { result: 'not_found' }
   | { result: 'should_update' }
@@ -145,6 +186,16 @@ export type DivinationInterpretationStartDecision =
   | { result: 'already_interpreting' }
   | { result: 'already_completed'; interpretation: unknown | null }
   | { result: 'invalid_state'; status: DivinationReadingStatus | null }
+
+export type DivinationInterpretingStartResult =
+  | { result: 'updated'; readingId: string }
+  | { result: 'not_found'; readingId: string }
+  | { result: 'not_payable'; readingId: string }
+
+export type DivinationDrawSelectionUpdateResult =
+  | { result: 'updated'; readingId: string }
+  | { result: 'not_found'; readingId: string }
+  | { result: 'not_payable'; readingId: string }
 
 export type DivinationReadingPaymentValidationResult =
   | { ok: true }
@@ -279,6 +330,18 @@ export function buildDivinationPendingPaymentLinkPayload(
   }
 }
 
+export function buildDivinationDrawSelectionUpdatePayload(
+  input: BuildDivinationDrawSelectionUpdatePayloadInput,
+  now = new Date().toISOString(),
+): DivinationDrawSelectionUpdatePayload {
+  return {
+    card_id: normalizeRequiredText(input.cardId, 'cardId'),
+    card_name: normalizeRequiredText(input.cardName, 'cardName'),
+    position: normalizeRequiredText(input.position, 'position'),
+    updated_at: now,
+  }
+}
+
 export function buildDivinationInterpretingUpdatePayload(
   now = new Date().toISOString(),
 ): DivinationInterpretingUpdatePayload {
@@ -403,6 +466,24 @@ export function mapDivinationReadingInterpretationContext(
   }
 }
 
+export function mapDivinationReadingResumeContext(
+  row: DivinationReadingResumeContextRow,
+): DivinationReadingResumeContext {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    question: row.question,
+    drawMode: row.draw_mode,
+    cardId: row.card_id,
+    cardName: row.card_name,
+    position: row.position,
+    status: row.status,
+    interpretation: row.interpretation ?? null,
+    paymentId: row.payment_id,
+    merchantOrderNo: row.merchant_order_no,
+  }
+}
+
 export function validateDivinationReadingPayment(
   reading: DivinationReadingPaymentContext | null,
 ): DivinationReadingPaymentValidationResult {
@@ -438,6 +519,28 @@ export async function getDivinationReadingForInterpretation(
   }
 
   return data ? mapDivinationReadingInterpretationContext(data as DivinationReadingInterpretationContextRow) : null
+}
+
+export async function getDivinationReadingResumeContextForUser(
+  readingId: string,
+  userId: string,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<DivinationReadingResumeContext | null> {
+  assertRequiredText(readingId, 'readingId')
+  assertRequiredText(userId, 'userId')
+
+  const { data, error } = await supabase
+    .from('divination_readings')
+    .select('id,user_id,question,draw_mode,card_id,card_name,position,status,interpretation,payment_id,merchant_order_no')
+    .eq('id', readingId.trim())
+    .eq('user_id', userId.trim())
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return data ? mapDivinationReadingResumeContext(data as DivinationReadingResumeContextRow) : null
 }
 
 export async function getDivinationReadingPaymentContext(
@@ -493,6 +596,60 @@ export async function markDivinationReadingInterpreting(
     },
     supabase,
   )
+}
+
+export async function startDivinationReadingInterpretationIfPaid(
+  readingId: string,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<DivinationInterpretingStartResult> {
+  assertRequiredText(readingId, 'readingId')
+
+  const { data, error } = await supabase
+    .from('divination_readings')
+    .update(buildDivinationInterpretingUpdatePayload())
+    .eq('id', readingId)
+    .eq('status', 'paid')
+    .select('id')
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return data ? { result: 'updated', readingId } : { result: 'not_payable', readingId }
+}
+
+export async function updateDivinationReadingDrawSelection(
+  input: {
+    readingId: string
+    cardId: string
+    cardName: string
+    position: string
+  },
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<DivinationDrawSelectionUpdateResult> {
+  assertRequiredText(input.readingId, 'readingId')
+
+  const { data, error } = await supabase
+    .from('divination_readings')
+    .update(
+      buildDivinationDrawSelectionUpdatePayload({
+        cardId: input.cardId,
+        cardName: input.cardName,
+        position: input.position,
+      }),
+    )
+    .eq('id', input.readingId.trim())
+    .eq('status', 'pending_payment')
+    .is('payment_id', null)
+    .select('id')
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return data ? { result: 'updated', readingId: input.readingId.trim() } : { result: 'not_payable', readingId: input.readingId.trim() }
 }
 
 export async function markDivinationReadingCompleted(

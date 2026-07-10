@@ -19,10 +19,13 @@ import {
 import {
   decideDivinationInterpretationStart,
   getDivinationReadingForInterpretation,
+  getDivinationReadingResumeContextForUser,
   markDivinationReadingCompleted,
   markDivinationReadingFailed,
   markDivinationReadingInterpreting,
+  startDivinationReadingInterpretationIfPaid,
 } from "@/lib/supabase/divinationReadings"
+import { getUserIdFromRequest } from "@/lib/supabase/auth"
 import { getDivinationOpenAIModel } from "@/lib/openai/divinationModel"
 import type {
   DivinationCardSummary,
@@ -480,6 +483,272 @@ async function interpretPersistedDivinationReading(input: {
   })
 }
 
+function buildCardSummary(card: (typeof ziweiCards)[number]): DivinationCardSummary {
+  return {
+    id: card.id,
+    name: card.name,
+    image: card.image,
+    reversedImage: card.reversedImage,
+    huaqi: card.huaqi,
+    element: card.element,
+    core: card.core,
+  }
+}
+
+async function resumePersistedDivinationReadingFromDb(input: {
+  request: Request
+  readingId: string
+  followUpContext?: unknown
+}) {
+  const userId = await getUserIdFromRequest(input.request).catch(() => null)
+
+  if (!userId) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "UNAUTHORIZED",
+        message: "請先登入後再查看占卜結果。",
+      },
+      { status: 401 }
+    )
+  }
+
+  let reading
+
+  try {
+    reading = await getDivinationReadingResumeContextForUser(input.readingId, userId)
+  } catch (error) {
+    console.warn("Divination reading resume lookup failed:", {
+      readingId: input.readingId,
+      error: error instanceof Error ? error.message : "unknown_error",
+    })
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "DIVINATION_READING_LOOKUP_FAILED",
+        message: "占卜紀錄讀取失敗，請稍後再試。",
+      },
+      { status: 500 }
+    )
+  }
+
+  if (!reading) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "DIVINATION_READING_NOT_FOUND",
+        message: "找不到占卜紀錄。",
+      },
+      { status: 404 }
+    )
+  }
+
+  const selectedCard = reading.cardId ? ziweiCards.find((card) => card.id === reading.cardId) : null
+  const safeDrawMode = drawModes.has(reading.drawMode as DivinationDrawMode)
+    ? (reading.drawMode as DivinationDrawMode)
+    : null
+  const safePosition = positions.has(reading.position as DivinationPosition)
+    ? (reading.position as DivinationPosition)
+    : null
+
+  if (!selectedCard || !safeDrawMode || !safePosition) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "DIVINATION_READING_DRAW_DATA_MISSING",
+        message: "這筆占卜缺少抽牌資料，請聯繫客服協助。",
+      },
+      { status: 409 }
+    )
+  }
+
+  const card = buildCardSummary(selectedCard)
+  const decision = decideDivinationInterpretationStart(reading)
+
+  if (decision.result === "payment_required") {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "PAYMENT_PENDING",
+        message: "正在確認付款結果，請稍後重新整理。",
+        requiresPayment: true,
+        amountTwd: READING_COST_TWD,
+      },
+      { status: 402 }
+    )
+  }
+
+  if (decision.result === "already_interpreting") {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "DIVINATION_READING_INTERPRETING",
+        message: "這筆占卜正在產生解讀，請稍後再試。",
+      },
+      { status: 409 }
+    )
+  }
+
+  if (decision.result === "already_completed") {
+    if (!isValidInterpretation(decision.interpretation)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "DIVINATION_READING_INTERPRETATION_INVALID",
+          message: "解讀內容格式無法顯示，請聯繫客服協助。",
+        },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json({
+      ok: true,
+      interpretation: normalizeInterpretation(decision.interpretation),
+      card,
+      position: safePosition,
+      drawMode: safeDrawMode,
+      paymentGate: {
+        mode: "mock",
+        paymentId: `paid_${reading.id}`,
+        provider: "mock",
+        status: "mock_paid",
+        itemType: "ai_divination",
+        itemName: "紫微牌卡 AI 深度解讀",
+        amountTwd: READING_COST_TWD,
+        currency: "TWD",
+      },
+    } satisfies DivinationInterpretResponse)
+  }
+
+  if (decision.result !== "should_interpret" || !reading.paymentId) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "DIVINATION_READING_INVALID_STATE",
+        message: "這筆占卜目前不能產生解讀。",
+      },
+      { status: 409 }
+    )
+  }
+
+  const safetyCheckText = buildFollowUpSafetyCheckText(reading.question, input.followUpContext)
+  const safetyResult = runPreOpenAISafetyCheck(safetyCheckText)
+
+  if (safetyResult.blocked) {
+    return NextResponse.json({
+      ok: true,
+      interpretation: safetyResult.interpretation,
+      card,
+      position: safePosition,
+      drawMode: safeDrawMode,
+      safetyBlocked: true,
+      safetyReason: safetyResult.reason,
+    })
+  }
+
+  try {
+    const interpretingResult = await startDivinationReadingInterpretationIfPaid(reading.id)
+
+    if (interpretingResult.result !== "updated") {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "DIVINATION_READING_INTERPRETING",
+          message: "這筆占卜正在產生解讀，請稍後再試。",
+        },
+        { status: 409 }
+      )
+    }
+  } catch (error) {
+    console.warn("Divination reading resume interpreting update failed:", {
+      readingId: reading.id,
+      error: error instanceof Error ? error.message : "unknown_error",
+    })
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "DIVINATION_READING_UPDATE_FAILED",
+        message: "占卜紀錄更新失敗，請稍後再試。",
+      },
+      { status: 500 }
+    )
+  }
+
+  const openAiResult = await createOpenAiInterpretation({
+    question: reading.question,
+    drawMode: safeDrawMode,
+    card: selectedCard,
+    position: safePosition,
+    followUpContext: input.followUpContext,
+  })
+
+  if (!openAiResult.ok) {
+    try {
+      await markDivinationReadingFailed({
+        readingId: reading.id,
+        errorMessage: openAiResult.error,
+      })
+    } catch (error) {
+      console.warn("Divination reading failed update failed:", {
+        readingId: reading.id,
+        errorCode: openAiResult.error,
+        error: error instanceof Error ? error.message : "unknown_error",
+      })
+    }
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: openAiResult.error,
+        message: paidOpenAiServiceUnavailableMessage,
+      },
+      { status: openAiResult.status }
+    )
+  }
+
+  try {
+    await markDivinationReadingCompleted({
+      readingId: reading.id,
+      interpretation: openAiResult.interpretation,
+      resultSummary: openAiResult.interpretation.finalAnswer ?? openAiResult.interpretation.summary,
+    })
+  } catch (error) {
+    console.warn("Divination reading completed update failed:", {
+      readingId: reading.id,
+      error: error instanceof Error ? error.message : "unknown_error",
+    })
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "DIVINATION_READING_COMPLETE_FAILED",
+        message: "占卜解讀保存失敗，請稍後再試。",
+      },
+      { status: 500 }
+    )
+  }
+
+  return NextResponse.json({
+    ok: true,
+    interpretation: openAiResult.interpretation,
+    card,
+    position: safePosition,
+    drawMode: safeDrawMode,
+    paymentGate: {
+      mode: "mock",
+      paymentId: `paid_${reading.id}`,
+      provider: "mock",
+      status: "mock_paid",
+      itemType: "ai_divination",
+      itemName: "紫微牌卡 AI 深度解讀",
+      amountTwd: READING_COST_TWD,
+      currency: "TWD",
+    },
+  } satisfies DivinationInterpretResponse)
+}
+
 export async function POST(request: Request) {
   let body: RequestBody
 
@@ -496,7 +765,20 @@ export async function POST(request: Request) {
   const readingId = getTrimmedString(body.readingId)
   const localUserId = getTrimmedString(body.localUserId)
   const mockPaid = body.mockPaid === true
+  const resumeFromDb = body.resumeFromDb === true
   const followUpContext = body.followUpContext
+
+  if (isPersistedDivinationReadingsEnabled() && resumeFromDb) {
+    if (!readingId) {
+      return jsonError("缺少占卜紀錄。")
+    }
+
+    return resumePersistedDivinationReadingFromDb({
+      request,
+      readingId,
+      followUpContext,
+    })
+  }
 
   if (!question) {
     return jsonError("請先填寫占卜問題。")

@@ -158,6 +158,7 @@ export type DivinationInterpretRequest = {
   position: DivinationPosition
   localUserId?: string
   mockPaid?: boolean
+  resumeFromDb?: boolean
   mockPaymentGate?: DivinationMockPaymentGate
   followUpContext?: DivinationFollowUpContext
 }

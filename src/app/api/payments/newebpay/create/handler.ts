@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { ziweiCards } from '../../../../../lib/divination/cards'
 import {
   buildNewebPayApplePayTestContext,
   buildNewebPayApplePayTestPendingPaymentMetadata,
@@ -59,6 +60,8 @@ export type CreateNewebPayPaymentRequest = {
   reportId?: unknown
   orderId?: unknown
   divinationOneDollarTest?: unknown
+  cardId?: unknown
+  position?: unknown
 }
 
 type CreatePendingPaymentDependency = (input: CreatePendingPaymentInput) => Promise<{ id: string }>
@@ -79,6 +82,12 @@ type LinkDivinationReadingPendingPaymentDependency = (input: {
   paymentId: string
   merchantOrderNo: string
 }) => Promise<{ result: 'linked' | 'already_linked' | 'not_found' | 'not_payable' }>
+type UpdateDivinationReadingDrawSelectionDependency = (input: {
+  readingId: string
+  cardId: string
+  cardName: string
+  position: string
+}) => Promise<{ result: 'updated' | 'not_found' | 'not_payable'; readingId: string }>
 type LinkAiChartReportPendingPaymentDependency = (input: {
   reportId: string
   paymentId: string
@@ -87,6 +96,8 @@ type LinkAiChartReportPendingPaymentDependency = (input: {
 type LinkProductOrderPaymentDependency = (input: { orderId: string; paymentId: string }) => Promise<unknown>
 
 type GetRequesterWithEmailDependency = () => Promise<DivinationOneDollarTestUser | null>
+
+const divinationPositions = new Set(['upright', 'reversed'])
 
 type CreateNewebPayPaymentDependencies = {
   env?: Record<string, string | undefined>
@@ -101,6 +112,7 @@ type CreateNewebPayPaymentDependencies = {
   getProductOrderForPayment?: GetProductOrderForPaymentDependency
   createPendingPayment?: CreatePendingPaymentDependency
   linkDivinationReadingPendingPayment?: LinkDivinationReadingPendingPaymentDependency
+  updateDivinationReadingDrawSelection?: UpdateDivinationReadingDrawSelectionDependency
   linkAiChartReportPendingPayment?: LinkAiChartReportPendingPaymentDependency
   linkProductOrderPayment?: LinkProductOrderPaymentDependency
 }
@@ -194,6 +206,19 @@ function applePayTestInvalidRequestResponse() {
 
 function productOrderApplePayInvalidRequestResponse() {
   return NextResponse.json({ ok: false, error: 'invalid_product_order_apple_pay_request' }, { status: 400 })
+}
+
+function invalidDivinationDrawSelectionResponse() {
+  return NextResponse.json({ ok: false, error: 'invalid_divination_draw_selection' }, { status: 400 })
+}
+
+function divinationDrawSelectionUpdateErrorResponse(input: { readingId: string; error: unknown }) {
+  console.error('藍新占卜付款前牌卡資料更新失敗', {
+    readingId: input.readingId,
+    error: input.error instanceof Error ? input.error.message : 'unknown_error',
+  })
+
+  return NextResponse.json({ ok: false, error: 'divination_draw_selection_update_failed' }, { status: 500 })
 }
 
 function divinationPaymentLinkErrorResponse(input: {
@@ -485,6 +510,32 @@ export async function handleCreateNewebPayPaymentRequest(
 
     if (!readingValidation.ok) {
       return NextResponse.json({ ok: false, error: readingValidation.error }, { status: 400 })
+    }
+
+    const cardId = typeof body?.cardId === 'string' ? body.cardId.trim() : ''
+    const position = typeof body?.position === 'string' ? body.position.trim() : ''
+    const selectedCard = cardId ? ziweiCards.find((card) => card.id === cardId) : null
+
+    if (!selectedCard || !divinationPositions.has(position)) {
+      return invalidDivinationDrawSelectionResponse()
+    }
+
+    try {
+      const updateDrawSelection =
+        deps.updateDivinationReadingDrawSelection ??
+        (await import('../../../../../lib/supabase/divinationReadings')).updateDivinationReadingDrawSelection
+      const updateResult = await updateDrawSelection({
+        readingId,
+        cardId: selectedCard.id,
+        cardName: selectedCard.name,
+        position,
+      })
+
+      if (updateResult.result !== 'updated') {
+        return NextResponse.json({ ok: false, error: 'divination_reading_not_payable' }, { status: 400 })
+      }
+    } catch (error) {
+      return divinationDrawSelectionUpdateErrorResponse({ readingId, error })
     }
   }
 

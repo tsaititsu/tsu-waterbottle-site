@@ -778,6 +778,8 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
           source: "ai_divination",
           paymentMode: "credit",
           readingId,
+          cardId: pendingCard.id,
+          position: pendingPosition,
           ...(isAdminOneDollarTest ? { divinationOneDollarTest: true } : {}),
         }),
       })
