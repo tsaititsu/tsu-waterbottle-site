@@ -91,23 +91,6 @@ const shufflePreviewCards = [
   { rotate: "rotate-[18deg]", translate: "translate-x-16 translate-y-6", scale: "scale-95" },
 ]
 
-const spreadCardTransforms = [
-  "rotate-[-8deg] translate-y-3",
-  "rotate-[-6deg] translate-y-2",
-  "rotate-[-4deg] translate-y-1",
-  "rotate-[-2deg] translate-y-0.5",
-  "rotate-[-1deg]",
-  "rotate-0 -translate-y-0.5",
-  "rotate-[1deg] -translate-y-1",
-  "rotate-[1deg] -translate-y-1",
-  "rotate-0 -translate-y-0.5",
-  "rotate-[-1deg]",
-  "rotate-[2deg] translate-y-0.5",
-  "rotate-[4deg] translate-y-1",
-  "rotate-[6deg] translate-y-2",
-  "rotate-[8deg] translate-y-3",
-]
-
 function getFanTransform(index: number) {
   const centerIndex = (ziweiCards.length - 1) / 2
   const offset = index - centerIndex
@@ -965,8 +948,8 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
   ])
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-borderSoft/80 bg-white p-5 shadow-[0_12px_32px_rgba(31,27,46,0.05)] md:p-6">
-      <div className="rounded-2xl bg-white">
+    <section className="min-w-0 max-w-full rounded-2xl border border-borderSoft/80 bg-white p-5 shadow-[0_12px_32px_rgba(31,27,46,0.05)] md:p-6">
+      <div className="min-w-0 max-w-full rounded-2xl bg-white">
         <div className="grid gap-3">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-darkGold">
             Draw
@@ -992,7 +975,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
           </p>
         </div>
 
-        <div className="mt-6 grid justify-items-center gap-5">
+        <div className="mt-6 grid w-full min-w-0 max-w-full justify-items-center gap-5">
           {!canDraw ? (
             <div className="grid justify-items-center gap-4 rounded-2xl border border-borderSoft bg-white px-5 py-5">
               <div className="relative h-32 w-20 overflow-hidden rounded-xl shadow-sm">
@@ -1081,19 +1064,17 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
               </p>
             </div>
           ) : pendingIndex === null ? (
-            <div className="w-full">
-              <div className="overflow-x-auto pb-4 pt-2 lg:hidden">
-                <div className="flex min-w-max items-end justify-start gap-1 px-1">
+            <div className="w-full min-w-0 max-w-full">
+              <div className="divination-card-scroller w-full min-w-0 max-w-full touch-pan-x overflow-x-auto overscroll-x-contain px-3 pb-4 pt-2 lg:hidden">
+                <div className="flex w-max min-w-full items-end justify-start gap-2 px-1">
                   {ziweiCards.map((card, index) => {
-                    const spreadTransform = spreadCardTransforms[index] ?? ""
-
                     return (
                       <button
                         key={card.id}
                         type="button"
                         onClick={() => pickCard(index)}
                         disabled={shuffling || isInterpreting || hasResultPreview}
-                        className={`group h-24 w-16 shrink-0 rounded-xl bg-transparent p-0 transition duration-200 hover:-translate-y-1 hover:shadow-sm focus-visible:-translate-y-1 ${spreadTransform} ${
+                        className={`group h-24 w-16 shrink-0 rounded-xl bg-transparent p-0 transition duration-200 hover:-translate-y-1 hover:shadow-sm focus-visible:-translate-y-1 ${
                           shuffling || isInterpreting || hasResultPreview ? "cursor-default opacity-80" : ""
                         }`}
                         aria-label={`選擇第 ${index + 1} 張牌`}
@@ -1178,7 +1159,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
           ) : null}
 
           {pendingIndex !== null && !hasResultPreview && !isAutoMode ? (
-            <div className="grid w-full max-w-2xl gap-4 rounded-2xl border border-purple-100 bg-purple-50/70 p-4 text-textDark">
+            <div className="grid w-full min-w-0 max-w-2xl gap-4 rounded-2xl border border-purple-100 bg-purple-50/70 p-4 text-textDark">
               <p className="text-lg font-semibold text-deepPurple">是不是這張牌？</p>
               {isManualMode ? (
                 <div className="rounded-2xl border border-borderSoft bg-white p-5 text-center leading-7 text-textMuted">
@@ -1237,7 +1218,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                       type="button"
                       onClick={() => handleNewebPayDivinationCheckout()}
                       disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled}
-                      className="rounded-full bg-deepPurple px-5 py-3 font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
+                      className="min-h-11 w-full rounded-full bg-deepPurple px-5 py-3 font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {isNewebPayCheckingOut
                         ? "建立線上付款資料中..."
@@ -1250,7 +1231,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                         type="button"
                         onClick={() => handleNewebPayDivinationCheckout({ adminOneDollarTest: true })}
                         disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled}
-                        className="rounded-full border border-deepPurple bg-white px-5 py-3 font-semibold text-deepPurple transition hover:bg-softPurple disabled:cursor-not-allowed disabled:opacity-60"
+                        className="min-h-11 w-full rounded-full border border-deepPurple bg-white px-5 py-3 font-semibold text-deepPurple transition hover:bg-softPurple disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         管理員 Apple Pay 測試付款 NT$1
                       </button>
@@ -1261,7 +1242,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                     type="button"
                     onClick={confirmCard}
                     disabled={isInterpreting || (isManualMode && !hasAcceptedTerms)}
-                    className="rounded-full bg-deepPurple px-5 py-3 font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
+                    className="min-h-11 w-full rounded-full bg-deepPurple px-5 py-3 font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isInterpreting || isMockPaying
                       ? "支付與解讀中..."
@@ -1276,7 +1257,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                   type="button"
                   onClick={isAutoMode ? startAutoDraw : changeCard}
                   disabled={isInterpreting}
-                  className="rounded-full border border-borderSoft bg-white px-5 py-3 font-semibold text-deepPurple transition hover:border-darkGold hover:text-darkGold disabled:cursor-not-allowed disabled:opacity-60"
+                  className="min-h-11 w-full rounded-full border border-borderSoft bg-white px-5 py-3 font-semibold text-deepPurple transition hover:border-darkGold hover:text-darkGold disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isAutoMode ? "重新自動抽牌" : "換一張"}
                 </button>
@@ -1370,7 +1351,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
               type="button"
               onClick={startShuffle}
               disabled={shuffling || isInterpreting}
-              className="w-full max-w-sm rounded-full bg-deepPurple px-8 py-3.5 text-base font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
+              className="min-h-11 w-full max-w-sm rounded-full bg-deepPurple px-8 py-3.5 text-base font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {shuffling ? "洗牌中..." : started ? "重新洗牌" : "開始洗牌"}
             </button>

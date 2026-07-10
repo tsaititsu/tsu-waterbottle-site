@@ -1827,12 +1827,12 @@ body { font-family: var(--font); background: #f5f5f0; color: var(--black); }
   [data-show-pinyin="true"] .badge-body-stem { display: inline-block; margin-bottom: 1px; }
 
   /* Mobile zh 無拼音：宮位名 / 博士 / 運線宮名固定小尺寸（桌面用 clamp() 自動縮放）*/
-  [data-show-pinyin="false"][data-locale^="zh"] .doctor-label .star-zh { font-size: 10px; }
-  [data-show-pinyin="false"][data-locale^="zh"] .native-id .id-zh       { font-size: 10px; }
+  [data-show-pinyin="false"][data-locale^="zh"] .doctor-label .star-zh { font-size: 11px; }
+  [data-show-pinyin="false"][data-locale^="zh"] .native-id .id-zh       { font-size: 12px; }
   [data-show-pinyin="false"][data-locale^="zh"] .id-row.decadal-id .id-zh,
   [data-show-pinyin="false"][data-locale^="zh"] .id-row.yearly-id  .id-zh,
   [data-show-pinyin="false"][data-locale^="zh"] .id-row.monthly-id .id-zh,
-  [data-show-pinyin="false"][data-locale^="zh"] .id-row.daily-id   .id-zh { font-size: 9px; }
+  [data-show-pinyin="false"][data-locale^="zh"] .id-row.daily-id   .id-zh { font-size: 11px; }
 
 }
 
@@ -2115,4 +2115,3 @@ body { font-family: var(--font); background: #f5f5f0; color: var(--black); }
 .adv-opt-mark-end { color: #9a8a6a; }
 .adv-opt-active .adv-opt-mark { color: #ffd9cf; }
 .adv-opt-active .adv-opt-mark-end { color: #f0e6d8; }
-

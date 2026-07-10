@@ -138,17 +138,28 @@ textarea {
 }
 
 .original-ziwei-view {
+  max-width: 100%;
+  min-width: 0;
   width: 100%;
 }
 
 .original-ziwei-view .chart-wrapper {
-  max-width: none;
+  max-width: 100%;
+  min-width: 0;
   width: 100%;
 }
 
 .original-ziwei-view .chart-grid {
   grid-template-rows: repeat(4, minmax(clamp(110px, 17vh, 240px), 1fr));
+  max-width: 100%;
+  min-width: 0;
   min-height: min(78vh, 900px);
+  width: 100%;
+}
+
+.original-ziwei-view .palace-cell,
+.original-ziwei-view .center-cell {
+  min-width: 0;
 }
 
 .original-ziwei-view .decadal-timeline,
@@ -270,6 +281,21 @@ textarea {
 
   .chart-workspace {
     min-height: auto;
+  }
+
+  .chart-birth-form input:not([type='checkbox']):not([type='radio']),
+  .chart-birth-form select,
+  .chart-birth-form textarea {
+    font-size: 16px;
+  }
+
+  .original-ziwei-view {
+    --fs-pinyin: 11px;
+    --fs-small: 12px;
+    --fs-star: 13px;
+    --fs-zh-small: 12px;
+    --fs-zh-star: 13px;
+    --fs-zh-tiny: 11px;
   }
 
   .waterbottle-chart-embed .zce-grid {

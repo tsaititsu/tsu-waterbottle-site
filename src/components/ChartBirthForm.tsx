@@ -377,7 +377,7 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
   const currentSavedCharts = chartsByCategory[selectedCategory] ?? []
 
   return (
-    <form className="grid min-w-0 max-w-full gap-6 rounded-2xl border border-borderSoft bg-white p-6 shadow-soft md:p-8">
+    <form className="chart-birth-form grid min-w-0 max-w-full gap-6 rounded-2xl border border-borderSoft bg-white p-6 shadow-soft md:p-8">
       <div className="flex min-w-0 items-center justify-between gap-4">
         <h2 className="font-serifTC text-2xl font-semibold text-deepPurple">新增命盤</h2>
         <button
