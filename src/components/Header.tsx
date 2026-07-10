@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { BookOpen, CalendarCheck, FileText, LogOut, Menu, ScrollText, ShoppingCart, Sparkles, UserRound, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   getMockUser,
   loginWithProvider,
@@ -231,105 +232,20 @@ export function Header() {
   )
 
   return (
-    <header className="site-header sticky top-0 z-50 border-b border-borderSoft/70 bg-white/94 shadow-[0_8px_30px_rgba(31,27,46,0.04)] backdrop-blur">
-      <div className="mx-auto flex h-[var(--mobile-header-height)] w-[min(1480px,calc(100%-28px))] items-center justify-between gap-4 lg:h-[var(--desktop-header-height)] lg:w-[min(1480px,calc(100%-40px))] lg:gap-8">
-        <Link href="/" aria-label="回到首頁">
-          <LogoMark />
-        </Link>
-
-        <nav className="hidden flex-1 items-center justify-center gap-12 text-lg font-semibold text-textDark lg:flex">
-          {visibleNavItems.map((item) => (
-            <Link
-              key={item.href}
-              className={`relative py-2 ${pathname === item.href ? 'text-deepPurple' : 'hover:text-purpleMain'}`}
-              href={item.href}
-              onClick={(event) => {
-                if (item.href !== '/ai-chart' && item.href !== '/booking' && item.href !== '/ai-divination') return
-                event.preventDefault()
-                router.push(`${item.href}?reset=${Date.now()}`)
-              }}
-            >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-
-        <div ref={accountMenuRef} className="relative hidden items-center gap-3 lg:flex">
-          <Link
-            href="/cart"
-            aria-label="購物車"
-            className="relative grid h-12 w-12 place-items-center rounded-full bg-[#0d0d11] text-white transition hover:scale-105"
-          >
-            <ShoppingCart size={22} strokeWidth={2.4} />
-            {totalQuantity > 0 ? (
-              <span className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[#ff3d3d] px-1.5 text-xs font-semibold text-white">
-                {totalQuantity}
-              </span>
-            ) : null}
+    <>
+      <header className="site-header sticky top-0 z-50 border-b border-borderSoft/70 bg-white/94 shadow-[0_8px_30px_rgba(31,27,46,0.04)] backdrop-blur">
+        <div className="mx-auto flex h-[var(--mobile-header-height)] w-[min(1480px,calc(100%-28px))] items-center justify-between gap-4 lg:h-[var(--desktop-header-height)] lg:w-[min(1480px,calc(100%-40px))] lg:gap-8">
+          <Link href="/" aria-label="回到首頁">
+            <LogoMark />
           </Link>
 
-          <button
-            type="button"
-            onClick={() => setAccountMenuOpen((open) => !open)}
-            className="grid h-12 w-12 place-items-center rounded-full bg-[#08080a] text-white shadow-[0_10px_24px_rgba(0,0,0,0.18)] transition hover:scale-105"
-            aria-label="會員選單"
-            aria-expanded={accountMenuOpen}
-          >
-            <UserRound size={24} strokeWidth={2.6} />
-          </button>
-          {accountMenuOpen ? accountMenu : null}
-        </div>
-
-        <div className="flex items-center gap-2 lg:hidden">
-          <Link
-            href="/cart"
-            aria-label={totalQuantity > 0 ? `購物車，共 ${totalQuantity} 件商品` : '購物車'}
-            className="focus-ring relative grid h-11 w-11 place-items-center rounded-lg border border-borderSoft bg-white text-textDark"
-            onClick={() => setMenuOpen(false)}
-          >
-            <ShoppingCart size={21} strokeWidth={2.4} />
-            {totalQuantity > 0 ? (
-              <span className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[#ff3d3d] px-1.5 text-xs font-semibold text-white">
-                {totalQuantity}
-              </span>
-            ) : null}
-          </Link>
-
-          <button
-            type="button"
-            className="focus-ring grid h-11 w-11 place-items-center rounded-lg border border-borderSoft bg-white"
-            aria-label={menuOpen ? '關閉選單' : '開啟選單'}
-            aria-expanded={menuOpen}
-            aria-controls="mobile-navigation"
-            onClick={() => setMenuOpen((value) => !value)}
-          >
-            {menuOpen ? <X size={21} /> : <Menu size={21} />}
-          </button>
-        </div>
-      </div>
-
-      {menuOpen && (
-        <div className="mobile-menu-overlay fixed inset-x-0 bottom-0 z-[45] lg:hidden">
-          <button
-            type="button"
-            aria-label="關閉選單"
-            className="absolute inset-0 bg-black/25"
-            onClick={() => setMenuOpen(false)}
-          />
-          <div
-            id="mobile-navigation"
-            role="dialog"
-            aria-modal="true"
-            aria-label="網站選單"
-            className="mobile-menu-panel relative z-10 grid gap-2 border-t border-borderSoft bg-white px-4 pt-4 shadow-2xl"
-          >
+          <nav className="hidden flex-1 items-center justify-center gap-12 text-lg font-semibold text-textDark lg:flex">
             {visibleNavItems.map((item) => (
               <Link
                 key={item.href}
-                className="rounded-lg px-3 py-3 text-sm font-medium hover:bg-softPurple"
+                className={`relative py-2 ${pathname === item.href ? 'text-deepPurple' : 'hover:text-purpleMain'}`}
                 href={item.href}
                 onClick={(event) => {
-                  setMenuOpen(false)
                   if (item.href !== '/ai-chart' && item.href !== '/booking' && item.href !== '/ai-divination') return
                   event.preventDefault()
                   router.push(`${item.href}?reset=${Date.now()}`)
@@ -338,10 +254,101 @@ export function Header() {
                 {item.label}
               </Link>
             ))}
-            {mobileAuthActions}
+          </nav>
+
+          <div ref={accountMenuRef} className="relative hidden items-center gap-3 lg:flex">
+            <Link
+              href="/cart"
+              aria-label="購物車"
+              className="relative grid h-12 w-12 place-items-center rounded-full bg-[#0d0d11] text-white transition hover:scale-105"
+            >
+              <ShoppingCart size={22} strokeWidth={2.4} />
+              {totalQuantity > 0 ? (
+                <span className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[#ff3d3d] px-1.5 text-xs font-semibold text-white">
+                  {totalQuantity}
+                </span>
+              ) : null}
+            </Link>
+
+            <button
+              type="button"
+              onClick={() => setAccountMenuOpen((open) => !open)}
+              className="grid h-12 w-12 place-items-center rounded-full bg-[#08080a] text-white shadow-[0_10px_24px_rgba(0,0,0,0.18)] transition hover:scale-105"
+              aria-label="會員選單"
+              aria-expanded={accountMenuOpen}
+            >
+              <UserRound size={24} strokeWidth={2.6} />
+            </button>
+            {accountMenuOpen ? accountMenu : null}
+          </div>
+
+          <div className="flex items-center gap-2 lg:hidden">
+            <Link
+              href="/cart"
+              aria-label={totalQuantity > 0 ? `購物車，共 ${totalQuantity} 件商品` : '購物車'}
+              className="focus-ring relative grid h-11 w-11 place-items-center rounded-lg border border-borderSoft bg-white text-textDark"
+              onClick={() => setMenuOpen(false)}
+            >
+              <ShoppingCart size={21} strokeWidth={2.4} />
+              {totalQuantity > 0 ? (
+                <span className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[#ff3d3d] px-1.5 text-xs font-semibold text-white">
+                  {totalQuantity}
+                </span>
+              ) : null}
+            </Link>
+
+            <button
+              type="button"
+              className="focus-ring grid h-11 w-11 place-items-center rounded-lg border border-borderSoft bg-white"
+              aria-label={menuOpen ? '關閉選單' : '開啟選單'}
+              aria-expanded={menuOpen}
+              aria-controls="mobile-navigation"
+              onClick={() => setMenuOpen((value) => !value)}
+            >
+              {menuOpen ? <X size={21} /> : <Menu size={21} />}
+            </button>
           </div>
         </div>
-      )}
-    </header>
+      </header>
+
+      {menuOpen
+        ? createPortal(
+            <div className="mobile-menu-overlay fixed inset-0 z-[45] pointer-events-auto lg:hidden">
+              <button
+                type="button"
+                aria-label="關閉選單"
+                className="mobile-menu-backdrop absolute inset-0 z-0 bg-black/25"
+                onClick={() => setMenuOpen(false)}
+              />
+              <div
+                id="mobile-navigation"
+                role="dialog"
+                aria-modal="true"
+                aria-label="網站選單"
+                className="mobile-menu-panel grid gap-2 border-t border-borderSoft bg-white px-4 pt-4 shadow-2xl"
+                onClick={(event) => event.stopPropagation()}
+              >
+                {visibleNavItems.map((item) => (
+                  <Link
+                    key={item.href}
+                    className="rounded-lg px-3 py-3 text-sm font-medium hover:bg-softPurple"
+                    href={item.href}
+                    onClick={(event) => {
+                      setMenuOpen(false)
+                      if (item.href !== '/ai-chart' && item.href !== '/booking' && item.href !== '/ai-divination') return
+                      event.preventDefault()
+                      router.push(`${item.href}?reset=${Date.now()}`)
+                    }}
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+                {mobileAuthActions}
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
+    </>
   )
 }

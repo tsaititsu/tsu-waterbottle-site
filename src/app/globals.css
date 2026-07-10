@@ -45,10 +45,20 @@ body {
 }
 
 .mobile-menu-overlay {
-  top: var(--site-header-offset);
+  pointer-events: auto;
+}
+
+.mobile-menu-backdrop {
+  pointer-events: auto;
 }
 
 .mobile-menu-panel {
+  position: absolute;
+  top: var(--site-header-offset);
+  right: 0;
+  left: auto;
+  z-index: 1;
+  width: min(400px, calc(100% - 48px));
   max-height: calc(100dvh - var(--site-header-offset));
   overflow-y: auto;
   overscroll-behavior: contain;
