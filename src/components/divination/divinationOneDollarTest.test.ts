@@ -8,7 +8,7 @@ const source = readFileSync(
 )
 
 assert.equal(source.includes('信用卡線上付款 NT$${paymentRequired.amountTwd}'), true)
-assert.equal(source.includes('管理員測試付款 NT$1'), true)
+assert.equal(source.includes('管理員 Apple Pay 測試付款 NT$1'), true)
 assert.equal(
   source.includes('const [isAdminOneDollarTestAvailable, setIsAdminOneDollarTestAvailable] = useState(false)'),
   true,

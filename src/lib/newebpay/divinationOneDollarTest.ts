@@ -22,7 +22,7 @@ import {
  */
 
 export const DIVINATION_ONE_DOLLAR_TEST_SOURCE = 'divination'
-export const DIVINATION_ONE_DOLLAR_TEST_ITEM_DESC = '紫微占卜管理員測試'
+export const DIVINATION_ONE_DOLLAR_TEST_ITEM_DESC = '紫微占卜管理員 Apple Pay 測試'
 
 export type DivinationOneDollarTestUser = {
   id: string
@@ -75,8 +75,10 @@ export function buildDivinationOneDollarTestContext(
     metadata: {
       one_dollar_test_mode: true,
       divination_one_dollar_test: true,
+      divination_apple_pay_test: true,
       test_source: DIVINATION_ONE_DOLLAR_TEST_SOURCE,
       original_amount: AI_DIVINATION_AMOUNT_TWD,
+      payment_method: 'apple_pay',
     },
   })
 }

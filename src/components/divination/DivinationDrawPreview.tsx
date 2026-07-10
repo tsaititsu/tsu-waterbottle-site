@@ -1204,7 +1204,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                         disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled}
                         className="rounded-full border border-deepPurple bg-white px-5 py-3 font-semibold text-deepPurple transition hover:bg-softPurple disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        管理員測試付款 NT$1
+                        管理員 Apple Pay 測試付款 NT$1
                       </button>
                     ) : null}
                   </>
@@ -1264,7 +1264,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                       disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled}
                       className="rounded-full border border-deepPurple bg-white px-5 py-3 text-sm font-semibold text-deepPurple transition hover:bg-softPurple disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      管理員測試付款 NT$1
+                      管理員 Apple Pay 測試付款 NT$1
                     </button>
                   ) : null}
                 </div>

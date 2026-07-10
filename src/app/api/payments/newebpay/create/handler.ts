@@ -537,10 +537,14 @@ export async function handleCreateNewebPayPaymentRequest(
     const getConfig =
       deps.getNewebPayConfig ?? (await import('../../../../../lib/newebpay/config')).getNewebPayConfig
     const config = getConfig()
+    // Client 仍傳既有 credit request shape；只有通過 server 管理員驗證的測試請求會在這裡改用 Apple Pay。
+    const effectivePaymentMode = divinationOneDollarTestContext
+      ? NEWEBPAY_APPLE_PAY_TEST_MODE
+      : paymentMode
     const paymentData = (deps.createNewebPayMpgPaymentData ?? createNewebPayMpgPaymentData)({
       itemKey: item.itemKey,
       config,
-      paymentMode,
+      paymentMode: effectivePaymentMode,
       amount: applePayTestContext?.amount ?? divinationOneDollarTestContext?.amount ?? productOrderPayment?.amountTwd,
       itemDesc: applePayTestContext?.itemDesc ?? divinationOneDollarTestContext?.itemDesc ?? productOrderPayment?.itemDesc,
     })
@@ -564,6 +568,7 @@ export async function handleCreateNewebPayPaymentRequest(
     const pendingPaymentRawPayload = divinationOneDollarTestContext
       ? {
           ...pendingPaymentMetadata.rawPayload,
+          paymentMode: effectivePaymentMode,
           amount: divinationOneDollarTestContext.amount,
           itemDesc: divinationOneDollarTestContext.itemDesc,
           ...divinationOneDollarTestContext.metadata,

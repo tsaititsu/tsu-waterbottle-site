@@ -125,7 +125,7 @@ async function readJson(response: Response) {
 // --- 正式價格保持不變（規格 8、9）---
 
 test('一般使用者（未登入、無測試欄位）維持正式 NT$50', async () => {
-  const { deps, calls } = createDivinationDeps({ requester: null })
+  const { deps, calls } = createDivinationDeps({ requester: null, useRealPaymentData: true })
   const response = await handleCreateNewebPayPaymentRequest(divinationBody(), deps)
 
   assert.equal(response.status, 200)
@@ -133,15 +133,34 @@ test('一般使用者（未登入、無測試欄位）維持正式 NT$50', async
   assert.equal(calls.paymentDataInputs[0].amount, undefined) // 由 item 預設 50 決定
   const serialized = JSON.stringify(calls.pendingPayments[0].rawPayload)
   assert.equal(serialized.includes('test_payment'), false)
+
+  const fields = (await readJson(response)).fields as Record<string, unknown>
+  const params = new URLSearchParams(
+    decryptTradeInfo(String(fields.TradeInfo), fakeConfig.hashKey, fakeConfig.hashIv),
+  )
+  assert.equal(params.get('Amt'), '50')
+  assert.equal(params.get('CREDIT'), '1')
+  assert.equal(params.get('InstFlag'), '0')
+  assert.equal(params.has('APPLEPAY'), false)
 })
 
-test('admin＋flags 全開但未選測試模式，仍為 NT$50', async () => {
-  const { deps, calls } = createDivinationDeps()
+test('admin＋flags 全開但未選測試模式，仍為 NT$50 信用卡', async () => {
+  const { deps, calls } = createDivinationDeps({ useRealPaymentData: true })
   const response = await handleCreateNewebPayPaymentRequest(divinationBody(), deps)
 
   assert.equal(response.status, 200)
   assert.equal(calls.pendingPayments[0].amountTwd, 50)
   assert.equal(JSON.stringify(calls.pendingPayments[0].rawPayload).includes('test_payment'), false)
+  assert.equal(calls.paymentDataInputs[0].paymentMode, 'credit')
+
+  const fields = (await readJson(response)).fields as Record<string, unknown>
+  const params = new URLSearchParams(
+    decryptTradeInfo(String(fields.TradeInfo), fakeConfig.hashKey, fakeConfig.hashIv),
+  )
+  assert.equal(params.get('Amt'), '50')
+  assert.equal(params.get('CREDIT'), '1')
+  assert.equal(params.get('InstFlag'), '0')
+  assert.equal(params.has('APPLEPAY'), false)
 })
 
 // --- 測試模式授權（規格 5、6、24）---
@@ -231,15 +250,16 @@ test('admin 測試模式：payment=1、NewebPay Amt=1、金額同源一致', asy
   assert.equal(response.status, 200)
   // 本地 payment 記錄金額 = 1
   assert.equal(calls.pendingPayments[0].amountTwd, 1)
+  assert.equal(calls.pendingPayments[0].provider, 'newebpay')
+  assert.notEqual(calls.pendingPayments[0].provider, 'line_pay')
   // 傳給 NewebPay MPG 的金額 = 1（Amt=1）
   assert.equal(calls.paymentDataInputs[0].amount, 1)
   // 兩者同源一致（Notify 端以 payments row 金額為對帳基準，同為 1）
   assert.equal(calls.pendingPayments[0].amountTwd, calls.paymentDataInputs[0].amount)
-  // 仍走 credit（CREDIT=1、InstFlag=0 由既有 credit 模式 TradeInfo 邏輯決定）
-  assert.equal(calls.paymentDataInputs[0].paymentMode, 'credit')
-  // itemDesc 標示管理員測試
-  assert.equal(String(calls.paymentDataInputs[0].itemDesc).includes('管理員測試'), true)
-  assert.equal(String(calls.pendingPayments[0].itemName).includes('管理員測試'), true)
+  // 付款工具由 server 授權後派生，client 無法直接指定 Apple Pay。
+  assert.equal(calls.paymentDataInputs[0].paymentMode, 'apple_pay_test')
+  assert.equal(String(calls.paymentDataInputs[0].itemDesc).includes('管理員 Apple Pay 測試'), true)
+  assert.equal(String(calls.pendingPayments[0].itemName).includes('管理員 Apple Pay 測試'), true)
 })
 
 test('測試 payment metadata 完整標記', async () => {
@@ -251,14 +271,17 @@ test('測試 payment metadata 完整標記', async () => {
   assert.equal(rawPayload.test_payment, true)
   assert.equal(rawPayload.one_dollar_test_mode, true)
   assert.equal(rawPayload.divination_one_dollar_test, true)
+  assert.equal(rawPayload.divination_apple_pay_test, true)
   assert.equal(rawPayload.original_amount, 50)
   assert.equal(rawPayload.test_source, 'divination')
+  assert.equal(rawPayload.payment_method, 'apple_pay')
+  assert.equal(rawPayload.paymentMode, 'apple_pay_test')
   // reading 連結照常建立（paid gate 流程不變）
   assert.equal(calls.divinationLinks.length, 1)
   assert.equal((calls.divinationLinks[0] as { readingId?: string }).readingId, readingId)
 })
 
-test('admin 測試模式 MPG payload 只送 CREDIT=1、InstFlag=0 與 Amt=1', async () => {
+test('admin 測試模式 MPG payload 只送 APPLEPAY=1、InstFlag=0 與 Amt=1', async () => {
   const { deps } = createDivinationDeps({ useRealPaymentData: true })
   const response = await handleCreateNewebPayPaymentRequest(
     divinationBody({ divinationOneDollarTest: true }),
@@ -275,10 +298,19 @@ test('admin 測試模式 MPG payload 只送 CREDIT=1、InstFlag=0 與 Amt=1', as
 
   assert.equal(response.status, 200)
   assert.equal(params.get('Amt'), '1')
-  assert.equal(params.get('CREDIT'), '1')
+  assert.equal(params.get('APPLEPAY'), '1')
   assert.equal(params.get('InstFlag'), '0')
 
-  for (const forbidden of ['LINEPAY', 'VACC', 'APPLEPAY', 'ANDROIDPAY', 'SAMSUNGPAY']) {
+  for (const forbidden of [
+    'CREDIT',
+    'LINEPAY',
+    'VACC',
+    'ANDROIDPAY',
+    'SAMSUNGPAY',
+    'WEBATM',
+    'CVS',
+    'BARCODE',
+  ]) {
     assert.equal(params.has(forbidden), false, forbidden)
   }
 })
@@ -353,7 +385,7 @@ test('status API route 由 requireAdminUser 守門並交給獨立 handler', asyn
   assert.equal(source.includes('handleDivinationOneDollarTestStatus'), true)
 })
 
-test('前端保留正式按鈕、測試按鈕受 admin 狀態 gate、不送 LINEPAY/VACC/APPLEPAY 模式', async () => {
+test('前端保留正式按鈕、測試按鈕受 admin 狀態 gate，Apple Pay 由 server 派生', async () => {
   const source = readFileSync(
     join(projectRoot, 'src/components/divination/DivinationDrawPreview.tsx'),
     'utf8',
@@ -361,9 +393,9 @@ test('前端保留正式按鈕、測試按鈕受 admin 狀態 gate、不送 LINE
   // 正式按鈕與文案仍在
   assert.equal(source.includes('信用卡線上付款 NT$${paymentRequired.amountTwd}'), true)
   // 測試按鈕存在且受 isAdminOneDollarTestAvailable 控制
-  assert.equal(source.includes('管理員測試付款 NT$1'), true)
+  assert.equal(source.includes('管理員 Apple Pay 測試付款 NT$1'), true)
   assert.equal(source.includes('isAdminOneDollarTestAvailable'), true)
-  // 測試請求仍為 credit 模式，不使用其他付款模式
+  // Client 維持既有 request shape；server 通過管理員驗證後才派生 Apple Pay。
   assert.equal(source.includes('paymentMode: "credit"'), true)
   assert.equal(source.includes('LINEPAY'), false)
   assert.equal(source.includes('VACC'), false)

@@ -1,7 +1,7 @@
 # 紫微占卜管理員限定 NT$1 實刷測試模式
 
 日期：2026-07-10
-小包：22J-45
+小包：22J-45、22J-47
 
 ## 目的
 
@@ -12,9 +12,10 @@
 ## 正式與測試流程
 
 - 一般使用者：只顯示並建立 NT$50 信用卡付款。
-- 管理員未選測試模式：仍建立 NT$50 信用卡付款。
-- 管理員且所有測試條件成立：額外顯示「管理員測試付款 NT$1」。
+- 管理員未選測試模式：仍建立 NT$50 信用卡付款，不送 Apple Pay。
+- 管理員且所有測試條件成立：額外顯示「管理員 Apple Pay 測試付款 NT$1」。
 - NT$1 請求由 server 重新驗證，不信任前端傳入的測試欄位。
+- Apple Pay 付款模式由 server 通過上述驗證後派生，client 無法自行指定。
 - 測試付款不使用 `mockPaid`，必須等 NewebPay Notify 驗證成功後才能通過 paid gate。
 
 ## 啟用條件
@@ -26,7 +27,7 @@
 3. `ENABLE_DIVINATION_ONE_DOLLAR_TEST_MODE=true`
 4. 使用者已有有效登入狀態
 5. 使用者 email 位於 server-only `ADMIN_EMAILS` allowlist
-6. 使用者明確選擇管理員 NT$1 測試付款
+6. 使用者明確選擇管理員 Apple Pay NT$1 測試付款
 
 任一條件不成立時，admin status API 不開放測試入口；偽造測試 request 會由 create API 拒絕，不會建立 NT$1 payment。
 
@@ -37,24 +38,29 @@ NT$1 測試付款固定使用：
 - provider：`newebpay`
 - amount：`1`
 - NewebPay `Amt=1`
-- `CREDIT=1`
+- `APPLEPAY=1`
 - `InstFlag=0`
 
 不送出：
 
 - `LINEPAY`
 - `VACC`
-- `APPLEPAY`
+- `CREDIT`
 - `ANDROIDPAY`
 - `SAMSUNGPAY`
+- `WEBATM`
+- `CVS`
+- `BARCODE`
 
 pending payment metadata 包含：
 
 - `test_payment=true`
 - `one_dollar_test_mode=true`
 - `divination_one_dollar_test=true`
+- `divination_apple_pay_test=true`
 - `original_amount=50`
 - `test_source=divination`
+- `payment_method=apple_pay`
 
 metadata 不保存管理員 email、allowlist、confirmation 或金流 secret。
 
@@ -75,6 +81,14 @@ metadata 不保存管理員 email、allowlist、confirmation 或金流 secret。
 - 成功只回傳 `ok` 與 `enabled` boolean。
 - 不回傳 env、`ADMIN_EMAILS`、production confirmation 或任何 secret。
 
+## Apple Pay 實刷準備
+
+- 使用支援 Apple Pay 的 iPhone Safari。
+- 裝置 Wallet 需已綁定可用的信用卡。
+- 藍新付款頁應只顯示 Apple Pay，付款金額應為 NT$1。
+- 這是 production 實刷時會產生的真實交易，可能產生金流手續費。
+- 測試 payment 與 reading 必須標示測試用途，不可當作正式營收。
+
 ## 測試限制
 
 本小包只做程式與 mock 測試：
@@ -89,7 +103,7 @@ metadata 不保存管理員 email、allowlist、confirmation 或金流 secret。
 
 ## 關閉方式
 
-測試結束後將 `ENABLE_DIVINATION_ONE_DOLLAR_TEST_MODE` 關閉。若全站不再需要 1 元測試，也一併關閉總開關與前端測試提示。關閉後一般使用者與管理員都只能建立正式 NT$50 占卜付款。
+測試結束後必須將 `ENABLE_DIVINATION_ONE_DOLLAR_TEST_MODE` 與總開關關閉，並重新部署 production。重新部署後再以管理員帳號確認 NT$1 按鈕已消失。關閉後一般使用者與管理員都只能建立正式 NT$50 信用卡付款。
 
 ## 隔離確認
 
@@ -97,4 +111,5 @@ metadata 不保存管理員 email、allowlist、confirmation 或金流 secret。
 - 課程信用卡與 `InstFlag=3,6` 不受影響。
 - 預約付款不受影響。
 - 官方 `provider=line_pay` 保存流程不受影響。
-- 不啟用藍新 `LINEPAY=1`、ATM 或 wallet payments。
+- 只在受保護的管理員 NT$1 測試中使用 Apple Pay；其他 wallet payments 不啟用。
+- 不啟用藍新 `LINEPAY=1` 或 ATM。
