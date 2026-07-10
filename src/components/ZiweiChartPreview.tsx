@@ -30,7 +30,7 @@ const branches = ['巳', '午', '未', '申', '辰', '酉', '卯', '戌', '寅',
 
 export function ZiweiChartPreview() {
   return (
-    <div className="relative ml-auto w-full max-w-[620px] rounded-[26px] border border-white/60 bg-white/50 p-3 shadow-[0_24px_70px_rgba(31,27,46,0.2)] backdrop-blur-md">
+    <div className="relative ml-auto w-full max-w-[620px] rounded-[26px] border border-white/60 bg-white/50 p-2 shadow-[0_24px_70px_rgba(31,27,46,0.2)] backdrop-blur-md md:p-3">
       <div className="grid aspect-[1.38] grid-cols-4 grid-rows-4 border border-[#d9cbea] bg-[#fbf8ff]/78 backdrop-blur-sm">
         {branches.map((branch) => {
           const [row, col] = palaceGrid[branch]
@@ -39,24 +39,24 @@ export function ZiweiChartPreview() {
           return (
             <div
               key={branch}
-              className="relative border border-[#d9cbea] bg-white/22 p-4 md:p-5"
+              className="relative border border-[#d9cbea] bg-white/22 p-2 sm:p-3 md:p-5"
               style={{ gridRow: row + 1, gridColumn: col + 1 }}
             >
               {item && (
-                <div className="space-y-0.5 font-serifTC text-[17px] font-semibold leading-[1.12] text-[#706878] md:text-[22px]">
+                <div className="hero-chart-star space-y-0.5 font-serifTC text-[13px] font-semibold leading-[1.08] text-[#706878] sm:text-[15px] md:text-[22px] md:leading-[1.12]">
                   {item.stars.map((star) => (
                     <div key={star}>{star}</div>
                   ))}
                 </div>
               )}
-              <span className="absolute bottom-2 right-3 font-serifTC text-lg text-[#34283f] md:text-xl">
+              <span className="hero-chart-branch absolute bottom-1.5 right-2 font-serifTC text-[13px] text-[#34283f] sm:text-[15px] md:bottom-2 md:right-3 md:text-xl">
                 {branch}
               </span>
             </div>
           )
         })}
 
-        <div className="col-start-2 col-end-4 row-start-2 row-end-4 flex items-center justify-center overflow-hidden border border-[#d9cbea] bg-white/12 px-5 backdrop-blur-sm">
+        <div className="col-start-2 col-end-4 row-start-2 row-end-4 flex items-center justify-center overflow-hidden border border-[#d9cbea] bg-white/12 px-2 backdrop-blur-sm md:px-5">
           <div className="relative h-[76%] w-[76%] -translate-y-2 md:h-[82%] md:w-[82%] md:-translate-y-3">
             <Image
               src="/brand/waterbottle-logo-transparent-cropped.png"

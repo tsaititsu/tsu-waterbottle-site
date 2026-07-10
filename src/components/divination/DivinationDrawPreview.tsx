@@ -92,11 +92,11 @@ const shufflePreviewCards = [
 ]
 
 const mobileFanTransforms = [
-  "translateY(12px) rotate(-7deg)",
-  "translateY(5px) rotate(-3.5deg)",
+  "translateY(28px) rotate(-12deg)",
+  "translateY(10px) rotate(-6deg)",
   "translateY(0) rotate(0deg)",
-  "translateY(5px) rotate(3.5deg)",
-  "translateY(12px) rotate(7deg)",
+  "translateY(10px) rotate(6deg)",
+  "translateY(28px) rotate(12deg)",
 ]
 
 function getMobileFanTransform(index: number) {
@@ -1077,7 +1077,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
             </div>
           ) : pendingIndex === null ? (
             <div className="w-full min-w-0 max-w-full">
-              <div className="divination-card-scroller w-full min-w-0 max-w-full touch-pan-x overflow-x-auto overscroll-x-contain px-3 pb-7 pt-4 lg:hidden">
+              <div className="divination-card-scroller w-full min-w-0 max-w-full touch-pan-x overflow-x-auto overscroll-x-contain px-5 pb-8 pt-5 lg:hidden">
                 <div className="flex w-max min-w-full items-start justify-start">
                   {ziweiCards.map((card, index) => {
                     return (
@@ -1086,7 +1086,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                         type="button"
                         onClick={() => pickCard(index)}
                         disabled={shuffling || isInterpreting || hasResultPreview}
-                        className={`group flex h-28 w-14 min-w-0 shrink-0 items-start justify-center rounded-xl bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-darkGold/40 ${
+                        className={`group flex h-36 w-[52px] min-w-0 shrink-0 items-start justify-center rounded-xl bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-darkGold/40 ${
                           index % mobileFanTransforms.length === mobileFanTransforms.length - 1 ? "mr-2" : ""
                         } ${
                           shuffling || isInterpreting || hasResultPreview ? "cursor-default opacity-80" : ""

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 const root = process.cwd()
 const hero = readFileSync(join(root, 'src/components/HeroSection.tsx'), 'utf8')
+const chartPreview = readFileSync(join(root, 'src/components/ZiweiChartPreview.tsx'), 'utf8')
 const lineButton = readFileSync(join(root, 'src/components/FloatingLineButton.tsx'), 'utf8')
 const globals = readFileSync(join(root, 'src/app/globals.css'), 'utf8')
 
@@ -20,6 +21,15 @@ assert.equal(hero.includes('overflow-wrap'), false)
 assert.equal(hero.includes('overflow-hidden text'), false)
 assert.equal(hero.includes('立即開始分析'), true)
 assert.equal(hero.includes('預約水瓶先生論命'), true)
+
+// 首頁命盤預覽在手機縮小宮位文字與內距，桌面斷點仍維持原尺寸。
+assert.equal(chartPreview.includes('p-2 sm:p-3 md:p-5'), true)
+assert.equal(chartPreview.includes('text-[13px]'), true)
+assert.equal(chartPreview.includes('hero-chart-star'), true)
+assert.equal(chartPreview.includes('hero-chart-branch'), true)
+assert.equal(chartPreview.includes('sm:text-[15px] md:text-[22px]'), true)
+assert.equal(chartPreview.includes('md:text-xl'), true)
+assert.equal(chartPreview.includes('px-2 backdrop-blur-sm md:px-5'), true)
 
 // `/` 只套既有的手機 hidden class；該 class 僅在 767px 以下生效，桌面 LINE 維持原樣。
 assert.equal(lineButton.includes("pathname === '/'"), true)
