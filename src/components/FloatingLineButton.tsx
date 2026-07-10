@@ -1,5 +1,6 @@
 'use client'
 
+import { usePathname } from 'next/navigation'
 import { type MouseEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from 'react'
 
 const lineSupportUrl = 'https://lin.ee/6Tpje1P'
@@ -16,9 +17,8 @@ const getDefaultPosition = () => {
     return { x: 0, y: 0 }
   }
 
-  const isDesktop = window.innerWidth >= 768
-  const margin = isDesktop ? 24 : 20
-  const buttonSize = isDesktop ? 64 : 56
+  const margin = 24
+  const buttonSize = 64
 
   return {
     x: Math.max(0, window.innerWidth - buttonSize - margin),
@@ -29,47 +29,22 @@ const getDefaultPosition = () => {
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
 export function FloatingLineButton() {
+  const pathname = usePathname()
   const anchorRef = useRef<HTMLAnchorElement | null>(null)
   const draggingRef = useRef(false)
   const startPointRef = useRef({ x: 0, y: 0 })
   const startPositionRef = useRef({ x: 0, y: 0 })
   const movedRef = useRef(false)
+  const positionRef = useRef<Position>({ x: 0, y: 0 })
 
   const [position, setPosition] = useState<Position>({ x: 0, y: 0 })
+  const [isDesktop, setIsDesktop] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
+  const hideOnMobileInteractionPage = pathname.startsWith('/ai-chart') || pathname.startsWith('/ai-divination')
 
-  useEffect(() => {
-    setPosition(getDefaultPosition())
-
-    const saved = localStorage.getItem(storageKey)
-    if (!saved) return
-
-    try {
-      const parsed = JSON.parse(saved) as Position
-      if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
-        const buttonSize = anchorRef.current?.getBoundingClientRect().width || 56
-        const nextPosition = {
-          x: clamp(parsed.x, 0, Math.max(0, window.innerWidth - buttonSize)),
-          y: clamp(parsed.y, 0, Math.max(0, window.innerHeight - buttonSize)),
-        }
-        setPosition(nextPosition)
-      }
-    } catch {
-      // ignore invalid cached position
-    }
-  }, [])
-
-  useEffect(() => {
-    const handleResize = () => {
-      const buttonSize = anchorRef.current?.getBoundingClientRect().width || 56
-      setPosition((current) => ({
-        x: clamp(current.x, 0, Math.max(0, window.innerWidth - buttonSize)),
-        y: clamp(current.y, 0, Math.max(0, window.innerHeight - buttonSize)),
-      }))
-    }
-
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
+  const updatePosition = useCallback((next: Position) => {
+    positionRef.current = next
+    setPosition(next)
   }, [])
 
   const savePosition = useCallback((next: Position) => {
@@ -77,12 +52,64 @@ export function FloatingLineButton() {
   }, [])
 
   const clampToViewport = useCallback((next: Position): Position => {
-    const buttonSize = anchorRef.current?.getBoundingClientRect().width || 56
+    const buttonSize = anchorRef.current?.getBoundingClientRect().width || 64
     return {
       x: clamp(next.x, 0, Math.max(0, window.innerWidth - buttonSize)),
       y: clamp(next.y, 0, Math.max(0, window.innerHeight - buttonSize)),
     }
   }, [])
+
+  useEffect(() => {
+    const desktopMedia = window.matchMedia('(min-width: 768px)')
+
+    const loadDesktopPosition = () => {
+      const desktop = desktopMedia.matches
+      setIsDesktop(desktop)
+
+      if (!desktop) {
+        draggingRef.current = false
+        movedRef.current = false
+        setIsDragging(false)
+        return
+      }
+
+      let nextPosition = getDefaultPosition()
+      const saved = localStorage.getItem(storageKey)
+
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved) as Position
+          if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+            nextPosition = parsed
+          }
+        } catch {
+          // Ignore invalid cached desktop position.
+        }
+      }
+
+      updatePosition(clampToViewport(nextPosition))
+    }
+
+    const clampDesktopPosition = () => {
+      if (!desktopMedia.matches) return
+      updatePosition(clampToViewport(positionRef.current))
+    }
+
+    loadDesktopPosition()
+    desktopMedia.addEventListener('change', loadDesktopPosition)
+    window.addEventListener('resize', clampDesktopPosition)
+    window.addEventListener('orientationchange', clampDesktopPosition)
+    window.addEventListener('pageshow', clampDesktopPosition)
+    window.visualViewport?.addEventListener('resize', clampDesktopPosition)
+
+    return () => {
+      desktopMedia.removeEventListener('change', loadDesktopPosition)
+      window.removeEventListener('resize', clampDesktopPosition)
+      window.removeEventListener('orientationchange', clampDesktopPosition)
+      window.removeEventListener('pageshow', clampDesktopPosition)
+      window.visualViewport?.removeEventListener('resize', clampDesktopPosition)
+    }
+  }, [clampToViewport, updatePosition])
 
   const stopDrag = useCallback(() => {
     if (!draggingRef.current) return
@@ -90,15 +117,12 @@ export function FloatingLineButton() {
     draggingRef.current = false
     setIsDragging(false)
 
-    window.removeEventListener('pointermove', handlePointerMove)
-    window.removeEventListener('pointerup', stopDrag)
-
-    if (movedRef.current) {
-      savePosition(position)
+    if (movedRef.current && isDesktop) {
+      savePosition(positionRef.current)
     }
-  }, [position, savePosition])
+  }, [isDesktop, savePosition])
 
-  const handlePointerMove = useCallback((event: PointerEvent) => {
+  const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLAnchorElement>) => {
     if (!draggingRef.current) return
 
     const dx = event.clientX - startPointRef.current.x
@@ -115,11 +139,11 @@ export function FloatingLineButton() {
       y: startPositionRef.current.y + dy,
     })
 
-    setPosition(next)
-  }, [clampToViewport])
+    updatePosition(next)
+  }, [clampToViewport, updatePosition])
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLAnchorElement>) => {
-    if (!anchorRef.current) return
+    if (!anchorRef.current || !isDesktop) return
 
     movedRef.current = false
     draggingRef.current = true
@@ -128,10 +152,7 @@ export function FloatingLineButton() {
     setIsDragging(true)
 
     anchorRef.current.setPointerCapture(event.pointerId)
-
-    window.addEventListener('pointermove', handlePointerMove)
-    window.addEventListener('pointerup', stopDrag)
-  }, [handlePointerMove, position, stopDrag])
+  }, [isDesktop, position])
 
   const handlePointerUp = useCallback((event: ReactPointerEvent<HTMLAnchorElement>) => {
     if (!draggingRef.current) return
@@ -165,15 +186,18 @@ export function FloatingLineButton() {
       aria-label="加入水瓶先生官方 LINE"
       title="加入水瓶先生官方 LINE"
       onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerCancel={stopDrag}
       onClick={handleClick}
-      className={`touch-none fixed z-50 flex h-14 w-14 items-center justify-center rounded-full bg-[#06c755] text-sm font-black text-white shadow-[0_12px_30px_rgba(6,199,85,0.35)] transition hover:scale-105 hover:shadow-[0_16px_36px_rgba(6,199,85,0.45)] md:h-16 md:w-16 ${
-        isDragging ? 'cursor-grabbing' : 'cursor-grab'
+      data-draggable={isDesktop ? 'true' : 'false'}
+      data-mobile-hidden={hideOnMobileInteractionPage ? 'true' : 'false'}
+      className={`floating-line-button touch-manipulation fixed z-30 flex h-14 w-14 items-center justify-center rounded-full bg-[#06c755] text-sm font-black text-white shadow-[0_12px_30px_rgba(6,199,85,0.35)] transition hover:scale-105 hover:shadow-[0_16px_36px_rgba(6,199,85,0.45)] md:touch-none md:z-50 md:h-16 md:w-16 ${
+        hideOnMobileInteractionPage ? 'floating-line-button--mobile-hidden' : ''
+      } ${
+        isDesktop ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-pointer'
       }`}
-      style={{
-        left: `${position.x}px`,
-        top: `${position.y}px`,
-      }}
+      style={isDesktop ? { left: `${position.x}px`, top: `${position.y}px`, right: 'auto', bottom: 'auto' } : undefined}
     >
       LINE
     </a>

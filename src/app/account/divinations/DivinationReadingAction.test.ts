@@ -26,6 +26,7 @@ const actionSource = readFileSync(
   'utf8',
 )
 const layoutSource = readFileSync(join(process.cwd(), 'src/app/layout.tsx'), 'utf8')
+const globalsSource = readFileSync(join(process.cwd(), 'src/app/globals.css'), 'utf8')
 assert.equal(pageSource.includes('<DivinationReadingAction'), true)
 assert.equal(pageSource.includes('readingId={reading.id}'), true)
 assert.equal(pageSource.includes('status={reading.status}'), true)
@@ -40,6 +41,8 @@ assert.equal(actionSource.includes('min-h-11'), true)
 assert.equal(actionSource.includes('w-full'), true)
 assert.equal(actionSource.includes('sm:w-fit'), true)
 assert.equal(actionSource.includes('hidden'), false)
-assert.equal(layoutSource.includes('pb-20 md:pb-0'), true)
+assert.equal(layoutSource.includes('className="site-main"'), true)
+assert.equal(globalsSource.includes('var(--mobile-bottom-nav-height)'), true)
+assert.equal(globalsSource.includes('env(safe-area-inset-bottom, 0px)'), true)
 
 console.log('✓ account divination reading actions passed')

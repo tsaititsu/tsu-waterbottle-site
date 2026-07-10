@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import '@/features/ziwei-chart/original-chart.css'
 import './globals.css'
 import '@/features/ziwei-chart/package/ziwei-chart-package.css'
@@ -35,6 +35,12 @@ export const metadata: Metadata = {
   }
 }
 
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+}
+
 export default function RootLayout({
   children
 }: Readonly<{
@@ -45,7 +51,7 @@ export default function RootLayout({
       <body className="font-sansTC text-textDark">
         <CartProvider>
           <Header />
-          <main className="pb-20 md:pb-0">{children}</main>
+          <main className="site-main">{children}</main>
           <Footer />
           <FloatingLineButton />
           <MobileBottomNav />

@@ -62,6 +62,28 @@ export function Header() {
   }, [pathname])
 
   useEffect(() => {
+    if (!menuOpen) {
+      delete document.documentElement.dataset.mobileMenuOpen
+      return
+    }
+
+    const previousBodyOverflow = document.body.style.overflow
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+
+    document.documentElement.dataset.mobileMenuOpen = 'true'
+    document.body.style.overflow = 'hidden'
+    document.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      delete document.documentElement.dataset.mobileMenuOpen
+      document.body.style.overflow = previousBodyOverflow
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [menuOpen])
+
+  useEffect(() => {
     if (!accountMenuOpen) return
 
     const handlePointerDown = (event: MouseEvent) => {
@@ -171,15 +193,15 @@ export function Header() {
 
   const mobileAuthActions = user ? (
     <div className="grid gap-3">
-      <Link href="/account" className="rounded-xl border border-[#e8dff2] px-4 py-3 text-center font-semibold">
+      <Link href="/account" onClick={() => setMenuOpen(false)} className="rounded-xl border border-[#e8dff2] px-4 py-3 text-center font-semibold">
         會員中心
       </Link>
       {!hideCoursesServices ? (
-        <Link href="/account/courses" className="rounded-xl border border-[#e8dff2] px-4 py-3 text-center font-semibold">
+        <Link href="/account/courses" onClick={() => setMenuOpen(false)} className="rounded-xl border border-[#e8dff2] px-4 py-3 text-center font-semibold">
           我的課程
         </Link>
       ) : null}
-      <Link href="/account/divinations" className="rounded-xl border border-[#e8dff2] px-4 py-3 text-center font-semibold">
+      <Link href="/account/divinations" onClick={() => setMenuOpen(false)} className="rounded-xl border border-[#e8dff2] px-4 py-3 text-center font-semibold">
         我的占卜紀錄
       </Link>
       <button type="button" onClick={handleLogout} className="rounded-xl bg-[#3d0d74] px-4 py-3 font-semibold text-white">
@@ -209,8 +231,8 @@ export function Header() {
   )
 
   return (
-    <header className="sticky top-0 z-40 border-b border-borderSoft/70 bg-white/94 shadow-[0_8px_30px_rgba(31,27,46,0.04)] backdrop-blur">
-      <div className="mx-auto flex h-[88px] w-[min(1480px,calc(100%-40px))] items-center justify-between gap-8">
+    <header className="site-header sticky top-0 z-50 border-b border-borderSoft/70 bg-white/94 shadow-[0_8px_30px_rgba(31,27,46,0.04)] backdrop-blur">
+      <div className="mx-auto flex h-[var(--mobile-header-height)] w-[min(1480px,calc(100%-28px))] items-center justify-between gap-4 lg:h-[var(--desktop-header-height)] lg:w-[min(1480px,calc(100%-40px))] lg:gap-8">
         <Link href="/" aria-label="回到首頁">
           <LogoMark />
         </Link>
@@ -258,18 +280,49 @@ export function Header() {
           {accountMenuOpen ? accountMenu : null}
         </div>
 
-        <button
-          className="focus-ring grid h-10 w-10 place-items-center rounded-lg border border-borderSoft lg:hidden"
-          aria-label="開啟選單"
-          onClick={() => setMenuOpen((value) => !value)}
-        >
-          {menuOpen ? <X size={20} /> : <Menu size={20} />}
-        </button>
+        <div className="flex items-center gap-2 lg:hidden">
+          <Link
+            href="/cart"
+            aria-label={totalQuantity > 0 ? `購物車，共 ${totalQuantity} 件商品` : '購物車'}
+            className="focus-ring relative grid h-11 w-11 place-items-center rounded-lg border border-borderSoft bg-white text-textDark"
+            onClick={() => setMenuOpen(false)}
+          >
+            <ShoppingCart size={21} strokeWidth={2.4} />
+            {totalQuantity > 0 ? (
+              <span className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[#ff3d3d] px-1.5 text-xs font-semibold text-white">
+                {totalQuantity}
+              </span>
+            ) : null}
+          </Link>
+
+          <button
+            type="button"
+            className="focus-ring grid h-11 w-11 place-items-center rounded-lg border border-borderSoft bg-white"
+            aria-label={menuOpen ? '關閉選單' : '開啟選單'}
+            aria-expanded={menuOpen}
+            aria-controls="mobile-navigation"
+            onClick={() => setMenuOpen((value) => !value)}
+          >
+            {menuOpen ? <X size={21} /> : <Menu size={21} />}
+          </button>
+        </div>
       </div>
 
       {menuOpen && (
-        <div className="border-t border-borderSoft bg-white lg:hidden">
-          <div className="section-shell grid gap-2 py-4">
+        <div className="mobile-menu-overlay fixed inset-x-0 bottom-0 z-[45] lg:hidden">
+          <button
+            type="button"
+            aria-label="關閉選單"
+            className="absolute inset-0 bg-black/25"
+            onClick={() => setMenuOpen(false)}
+          />
+          <div
+            id="mobile-navigation"
+            role="dialog"
+            aria-modal="true"
+            aria-label="網站選單"
+            className="mobile-menu-panel relative z-10 grid gap-2 border-t border-borderSoft bg-white px-4 pt-4 shadow-2xl"
+          >
             {visibleNavItems.map((item) => (
               <Link
                 key={item.href}
@@ -285,9 +338,6 @@ export function Header() {
                 {item.label}
               </Link>
             ))}
-            <Link href="/cart" className="rounded-lg px-3 py-3 text-sm font-medium hover:bg-softPurple" onClick={() => setMenuOpen(false)}>
-              購物車
-            </Link>
             {mobileAuthActions}
           </div>
         </div>

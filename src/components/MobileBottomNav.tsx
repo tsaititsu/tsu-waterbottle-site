@@ -22,7 +22,10 @@ export function MobileBottomNav() {
   const pathname = usePathname()
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-borderSoft bg-white/95 px-2 py-2 shadow-soft backdrop-blur md:hidden">
+    <nav
+      aria-label="手機主要導覽"
+      className="mobile-bottom-nav fixed bottom-0 left-0 right-0 z-40 border-t border-borderSoft bg-white/95 px-2 pt-2 shadow-soft backdrop-blur md:hidden"
+    >
       <div className={`grid ${shouldHideCoursesServices() ? 'grid-cols-4' : 'grid-cols-5'}`}>
         {visibleItems.map((item) => {
           const Icon = item.icon
