@@ -6,6 +6,7 @@ import { LoginModal } from '@/components/LoginModal'
 import { PageHero } from '@/components/PageHero'
 import { formatTaipeiDateTime } from '@/lib/date/formatTaipeiDateTime'
 import { getAuthAccessToken, getMockUser, subscribeAuthChange, type UserProfile } from '@/lib/mockAuth'
+import { DivinationReadingAction } from './DivinationReadingAction'
 
 type AccountDivinationReading = {
   id: string
@@ -49,22 +50,6 @@ function cardText(reading: AccountDivinationReading) {
   if (!reading.cardName) return '尚未抽牌'
   const position = reading.position ? positionLabels[reading.position] ?? reading.position : ''
   return position ? `${reading.cardName}（${position}）` : reading.cardName
-}
-
-function getReadingAction(reading: AccountDivinationReading) {
-  if (reading.status === 'completed') {
-    return { label: '查看解讀', href: `/ai-divination/result/${reading.id}` }
-  }
-
-  if (reading.status === 'paid') {
-    return { label: '繼續產生解讀', href: `/ai-divination/result/${reading.id}?payment=success` }
-  }
-
-  if (reading.status === 'interpreting') {
-    return { label: '查看解讀進度', href: `/ai-divination/result/${reading.id}` }
-  }
-
-  return null
 }
 
 export default function AccountDivinationsPage() {
@@ -130,8 +115,18 @@ export default function AccountDivinationsPage() {
 
     sync()
     const unsubscribe = subscribeAuthChange(sync)
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void loadReadings()
+    }
+    const refreshAfterPageRestore = () => void loadReadings()
+
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    window.addEventListener('pageshow', refreshAfterPageRestore)
+
     return () => {
       unsubscribe()
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+      window.removeEventListener('pageshow', refreshAfterPageRestore)
       cancelled = true
     }
   }, [])
@@ -170,8 +165,6 @@ export default function AccountDivinationsPage() {
             </div>
           ) : (
             readings.map((reading) => {
-              const action = getReadingAction(reading)
-
               return (
                 <article
                   key={reading.id}
@@ -192,18 +185,7 @@ export default function AccountDivinationsPage() {
                     ) : null}
                     <p>建立時間：{formatTaipeiDateTime(reading.createdAt)}</p>
                   </div>
-                  {action ? (
-                    <Link
-                      className="focus-ring w-fit rounded-lg bg-deepPurple px-4 py-2 text-sm font-semibold text-white"
-                      href={action.href}
-                    >
-                      {action.label}
-                    </Link>
-                  ) : reading.status === 'pending_payment' ? (
-                    <p className="text-sm text-textMuted">尚未完成付款。</p>
-                  ) : reading.status === 'failed' ? (
-                    <p className="text-sm text-textMuted">解讀暫時未完成，請聯繫客服協助。</p>
-                  ) : null}
+                  <DivinationReadingAction readingId={reading.id} status={reading.status} />
                 </article>
               )
             })

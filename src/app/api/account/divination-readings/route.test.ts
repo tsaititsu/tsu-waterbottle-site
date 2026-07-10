@@ -145,24 +145,33 @@ test('/account 有「我的占卜紀錄」入口', () => {
 
 test('列表頁狀態與空資料文案正確，且不觸碰 OpenAI', () => {
   const source = readFileSync(join(projectRoot, 'src/app/account/divinations/page.tsx'), 'utf8')
+  const actionSource = readFileSync(
+    join(projectRoot, 'src/app/account/divinations/DivinationReadingAction.tsx'),
+    'utf8',
+  )
+  const actionHelperSource = readFileSync(
+    join(projectRoot, 'src/app/account/divinations/getDivinationReadingAction.ts'),
+    'utf8',
+  )
   assert.equal(source.includes('目前還沒有占卜紀錄。'), true)
   assert.equal(source.includes('前往紫微牌卡占卜'), true)
-  assert.equal(source.includes('查看解讀'), true)
-  assert.equal(source.includes('繼續產生解讀'), true)
-  assert.equal(source.includes('查看解讀進度'), true)
-  assert.equal(source.includes('/ai-divination/result/'), true)
-  assert.equal(source.includes('尚未完成付款。'), true)
-  assert.equal(source.includes('解讀暫時未完成，請聯繫客服協助。'), true)
+  assert.equal(source.includes('DivinationReadingAction'), true)
+  assert.equal(actionHelperSource.includes('查看解讀'), true)
+  assert.equal(actionHelperSource.includes('繼續產生解讀'), true)
+  assert.equal(actionHelperSource.includes('查看解讀進度'), true)
+  assert.equal(actionHelperSource.includes('/ai-divination/result/'), true)
+  assert.equal(actionSource.includes('尚未完成付款。'), true)
+  assert.equal(actionSource.includes('解讀暫時未完成，請聯繫客服協助。'), true)
   assert.equal(source.includes('待付款'), true)
   assert.equal(source.includes('formatTaipeiDateTime'), true)
   assert.equal(source.includes('dangerouslySetInnerHTML'), false)
   assert.equal(source.includes('api.openai.com'), false)
   assert.equal(source.includes('/api/divination/interpret'), false)
-  // completed / paid / interpreting 都可回到同一結果頁；pending_payment 不提供重新付款
-  assert.equal(source.includes("reading.status === 'completed'"), true)
-  assert.equal(source.includes("reading.status === 'paid'"), true)
-  assert.equal(source.includes("reading.status === 'interpreting'"), true)
-  assert.equal(source.includes('重新付款'), false)
+  // paid / interpreting 回結果頁續跑，completed 回會員單筆頁；pending_payment 不提供重新付款
+  assert.equal(actionHelperSource.includes("status === 'completed'"), true)
+  assert.equal(actionHelperSource.includes("status === 'paid'"), true)
+  assert.equal(actionHelperSource.includes("status === 'interpreting'"), true)
+  assert.equal(actionSource.includes('重新付款'), false)
 })
 
 test('單筆頁以純文字渲染 interpretation，顯示台北時間', () => {

@@ -772,6 +772,19 @@ assert.throws(
   })
   assert.equal(pendingItem.hasInterpretation, false)
 
+  const paidItem = mapAccountDivinationReadingListItem({
+    ...completedRow,
+    card_name: '貪狼星',
+    position: 'upright',
+    status: 'paid' as const,
+    interpreted_at: null,
+    result_summary: null,
+  })
+  assert.equal(paidItem.status, 'paid')
+  assert.equal(paidItem.cardName, '貪狼星')
+  assert.equal(paidItem.position, 'upright')
+  assert.equal(paidItem.hasInterpretation, false)
+
   // detail：completed 才輸出 interpretation
   const interpretation = { summary: '解讀內容' }
   const completedDetail = mapAccountDivinationReadingDetail({ ...completedRow, interpretation })
