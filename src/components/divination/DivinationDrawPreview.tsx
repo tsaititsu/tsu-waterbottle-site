@@ -92,15 +92,26 @@ const shufflePreviewCards = [
 ]
 
 const mobileFanTransforms = [
-  "translateY(28px) rotate(-12deg)",
-  "translateY(10px) rotate(-6deg)",
+  "translateY(18px) rotate(-13deg)",
+  "translateY(6px) rotate(-7deg)",
   "translateY(0) rotate(0deg)",
-  "translateY(10px) rotate(6deg)",
-  "translateY(28px) rotate(12deg)",
+  "translateY(6px) rotate(7deg)",
+  "translateY(18px) rotate(13deg)",
 ]
 
-function getMobileFanTransform(index: number) {
-  return mobileFanTransforms[index % mobileFanTransforms.length]
+const mobileFanLeftOffsets = [14, 63, 112, 161, 210]
+const mobileFanZIndexes = [1, 2, 3, 2, 1]
+const mobileFanPageSize = 5
+
+function getMobileFanSlot(localIndex: number, pageSize: number) {
+  if (pageSize === 4) return [0, 1, 3, 4][localIndex]
+  return localIndex
+}
+
+function getMobileFanPages() {
+  return Array.from({ length: Math.ceil(ziweiCards.length / mobileFanPageSize) }, (_, pageIndex) =>
+    ziweiCards.slice(pageIndex * mobileFanPageSize, (pageIndex + 1) * mobileFanPageSize)
+  )
 }
 
 function getFanTransform(index: number) {
@@ -1077,42 +1088,52 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
             </div>
           ) : pendingIndex === null ? (
             <div className="w-full min-w-0 max-w-full">
-              <div className="divination-card-scroller w-full min-w-0 max-w-full touch-pan-x overflow-x-auto overscroll-x-contain px-5 pb-8 pt-5 lg:hidden">
-                <div className="flex w-max min-w-full items-start justify-start">
-                  {ziweiCards.map((card, index) => {
-                    return (
-                      <button
-                        key={card.id}
-                        type="button"
-                        onClick={() => pickCard(index)}
-                        disabled={shuffling || isInterpreting || hasResultPreview}
-                        className={`group flex h-36 w-[52px] min-w-0 shrink-0 items-start justify-center rounded-xl bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-darkGold/40 ${
-                          index % mobileFanTransforms.length === mobileFanTransforms.length - 1 ? "mr-2" : ""
-                        } ${
-                          shuffling || isInterpreting || hasResultPreview ? "cursor-default opacity-80" : ""
-                        }`}
-                        data-mobile-fan-index={index % mobileFanTransforms.length}
-                        aria-label={`選擇第 ${index + 1} 張牌`}
-                      >
-                        <span
-                          className="mobile-card-fan-visual block h-24 w-16 origin-bottom transition-transform duration-200"
-                          style={{ transform: getMobileFanTransform(index) }}
-                        >
-                          <span className="relative block h-full overflow-hidden rounded-xl shadow-sm transition duration-200 group-hover:-translate-y-1 group-hover:scale-[1.03] group-focus-visible:-translate-y-1 group-focus-visible:scale-[1.03]">
-                            <Image
-                              src="/cards/back.png"
-                              alt=""
-                              fill
-                              sizes="64px"
-                              className="object-cover"
-                            />
-                            <span className="sr-only">紫微牌卡牌背</span>
-                          </span>
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
+              <div className="divination-card-scroller grid w-full min-w-0 max-w-full auto-cols-[100%] grid-flow-col snap-x snap-mandatory touch-pan-x overflow-x-auto overscroll-x-contain pb-8 pt-5 lg:hidden">
+                {getMobileFanPages().map((pageCards, pageIndex) => (
+                  <div
+                    key={`mobile-fan-page-${pageIndex}`}
+                    className="mobile-card-fan-page h-40 w-full min-w-0 snap-center"
+                    data-mobile-fan-page={pageIndex}
+                  >
+                    <div className="relative mx-auto h-40 w-[288px] max-w-full">
+                      {pageCards.map((card, localIndex) => {
+                        const index = pageIndex * mobileFanPageSize + localIndex
+                        const fanSlot = getMobileFanSlot(localIndex, pageCards.length)
+
+                        return (
+                          <button
+                            key={card.id}
+                            type="button"
+                            onClick={() => pickCard(index)}
+                            disabled={shuffling || isInterpreting || hasResultPreview}
+                            className={`group absolute top-0 flex h-36 w-16 min-w-0 items-start justify-center rounded-xl bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-darkGold/40 ${
+                              shuffling || isInterpreting || hasResultPreview ? "cursor-default opacity-80" : ""
+                            }`}
+                            data-mobile-fan-index={fanSlot}
+                            style={{ left: `${mobileFanLeftOffsets[fanSlot]}px`, zIndex: mobileFanZIndexes[fanSlot] }}
+                            aria-label={`選擇第 ${index + 1} 張牌`}
+                          >
+                            <span
+                              className="mobile-card-fan-visual block h-24 w-16 origin-bottom transition-transform duration-200"
+                              style={{ transform: mobileFanTransforms[fanSlot] }}
+                            >
+                              <span className="relative block h-full overflow-hidden rounded-xl shadow-sm transition duration-200 group-hover:-translate-y-1 group-hover:scale-[1.03] group-focus-visible:-translate-y-1 group-focus-visible:scale-[1.03]">
+                                <Image
+                                  src="/cards/back.png"
+                                  alt=""
+                                  fill
+                                  sizes="64px"
+                                  className="object-cover"
+                                />
+                                <span className="sr-only">紫微牌卡牌背</span>
+                              </span>
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
 
               <div className="relative hidden h-[340px] w-full max-w-5xl scroll-mt-32 lg:block">
