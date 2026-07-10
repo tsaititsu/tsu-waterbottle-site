@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { BookOpen, CalendarCheck, FileText, LogOut, Menu, ShoppingCart, Sparkles, UserRound, X } from 'lucide-react'
+import { BookOpen, CalendarCheck, FileText, LogOut, Menu, ScrollText, ShoppingCart, Sparkles, UserRound, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import {
   getMockUser,
@@ -119,6 +119,10 @@ export function Header() {
           <FileText size={22} />
           命盤紀錄
         </Link>
+        <Link href="/account/divinations" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
+          <ScrollText size={22} />
+          我的占卜紀錄
+        </Link>
         {!hideAiDivinationServices ? (
           <Link href="/ai-divination" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
             <Sparkles size={22} />
@@ -175,6 +179,9 @@ export function Header() {
           我的課程
         </Link>
       ) : null}
+      <Link href="/account/divinations" className="rounded-xl border border-[#e8dff2] px-4 py-3 text-center font-semibold">
+        我的占卜紀錄
+      </Link>
       <button type="button" onClick={handleLogout} className="rounded-xl bg-[#3d0d74] px-4 py-3 font-semibold text-white">
         登出
       </button>
