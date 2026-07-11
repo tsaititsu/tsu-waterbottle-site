@@ -20,6 +20,7 @@ export function PricingSection() {
               <p className="mt-3 min-h-14 leading-7 text-textMuted">{plan.description}</p>
               <p className="mt-5 text-3xl font-semibold text-deepPurple">{plan.priceLabel}</p>
               <ActionButton
+                href={plan.href}
                 itemType={plan.itemType}
                 itemName={plan.title}
                 amount={plan.price}
