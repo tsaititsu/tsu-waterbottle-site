@@ -1084,7 +1084,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                     data-selected={pendingIndex === index ? "true" : "false"}
                     style={{
                       transform: getMobileFanTransform(index, pendingIndex === index),
-                      zIndex: pendingIndex === index ? 100 : index + 1,
+                      zIndex: index + 1,
                     }}
                     aria-label={`選擇第 ${index + 1} 張牌`}
                   >
@@ -1127,7 +1127,8 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                       data-selected={pendingIndex === index ? "true" : "false"}
                       style={{
                         transform: getDesktopFanTransform(index, pendingIndex === index),
-                        zIndex: pendingIndex === index ? 300 : hoveredCardIndex === index ? 220 : index + 1,
+                        zIndex:
+                          pendingIndex === null && hoveredCardIndex === index ? 220 : index + 1,
                       }}
                       aria-label={`選擇第 ${index + 1} 張牌`}
                     >
