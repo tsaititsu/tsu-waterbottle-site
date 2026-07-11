@@ -95,21 +95,21 @@ function getEllipticalFanTransform(
   index: number,
   radius: number,
   yRadius: number,
-  isPicked: boolean
+  selectedLift: number
 ) {
   const angle = -55 + index * (110 / (ziweiCards.length - 1))
   const x = Math.sin((angle * Math.PI) / 180) * radius
-  const y = -Math.cos((angle * Math.PI) / 180) * yRadius + 65 - (isPicked ? 72 : 0)
+  const y = -Math.cos((angle * Math.PI) / 180) * yRadius + 65 - selectedLift
 
   return `translate(${x}px, ${y}px) rotate(${angle / 3}deg)`
 }
 
 function getMobileFanTransform(index: number, isPicked: boolean) {
-  return getEllipticalFanTransform(index, 150, 78, isPicked)
+  return getEllipticalFanTransform(index, 150, 78, isPicked ? 52 : 0)
 }
 
 function getDesktopFanTransform(index: number, isPicked: boolean) {
-  return getEllipticalFanTransform(index, 340, 130, isPicked)
+  return getEllipticalFanTransform(index, 340, 130, isPicked ? 72 : 0)
 }
 
 function getRandomPosition(): DivinationPosition {
