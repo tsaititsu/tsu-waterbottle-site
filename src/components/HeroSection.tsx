@@ -7,6 +7,7 @@ export function HeroSection() {
   const hideConsultation = shouldHideConsultationServices()
   const hideCourses = shouldHideCoursesServices()
   const showBookingCta = !hideConsultation
+  const secondaryHeroTitle = !hideConsultation ? '水瓶先生論命' : '紫微課程'
 
   return (
     <section className="hero-cosmos overflow-hidden">
@@ -16,12 +17,16 @@ export function HeroSection() {
             <Sparkles size={16} />
             WATERBOTTLE 紫微命理
           </div>
-          <h1 className="min-w-0 max-w-full break-words font-serifTC text-[30px] font-semibold leading-[1.2] text-deepPurple sm:max-w-2xl sm:text-[42px] sm:leading-[1.25] md:text-[52px] md:leading-[1.32]">
-            <span className="block max-w-full whitespace-normal">
+          <h1 className="min-w-0 max-w-full break-words font-serifTC text-[26px] font-semibold leading-[1.2] text-deepPurple sm:max-w-2xl sm:text-[42px] sm:leading-[1.25] md:text-[52px] md:leading-[1.32]">
+            <span className="block max-w-full whitespace-normal sm:hidden">
+              <span className="block">紫微命盤分析 × 紫微牌卡</span>
+              {!hideConsultation || !hideCourses ? <span className="mt-2 block max-w-full">{secondaryHeroTitle}</span> : null}
+            </span>
+            <span className="hidden max-w-full whitespace-normal sm:block">
               <span className="block sm:inline">紫微命盤分析 ×</span>{' '}
               <span className="block sm:inline">紫微牌卡占卜</span>
+              {!hideConsultation || !hideCourses ? <span className="mt-2 block max-w-full">{secondaryHeroTitle}</span> : null}
             </span>
-            {!hideConsultation || !hideCourses ? <span className="mt-2 block max-w-full whitespace-normal">{!hideConsultation ? '水瓶先生論命' : '紫微課程'}</span> : null}
           </h1>
           <p className="mt-6 min-w-0 max-w-xl whitespace-normal text-base leading-7 text-textMuted sm:text-lg sm:leading-8">
             用簡單直覺的方式，看懂自己的命盤、問題與未來方向。
