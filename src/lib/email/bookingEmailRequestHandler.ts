@@ -27,6 +27,8 @@ export type BookingEmailRequester = {
 export type BookingEmailSourceRecord = {
   id: string
   userId?: string | null
+  status?: string | null
+  paymentStatus?: string | null
   customerName: string
   customerEmail: string
   customerPhone?: string
@@ -189,6 +191,7 @@ export type HandleBookingEmailRequestDeps = {
   markEmailsSent?: (bookingId: string) => Promise<void>
   hasBookingDataSource: () => boolean
   adminEmailsRaw?: string | null
+  requireTrustedPaidBooking?: boolean
 }
 
 const GENERIC_ERROR_MESSAGES: Record<BookingEmailKind, string> = {
@@ -231,6 +234,16 @@ export async function handleBookingEmailRequest(
     }
 
     const safeBooking = booking as BookingEmailSourceRecord
+
+    if (
+      deps.requireTrustedPaidBooking &&
+      !(safeBooking.paymentStatus === 'paid' && safeBooking.status === 'confirmed')
+    ) {
+      return NextResponse.json(
+        { ok: false, error: 'payment_not_confirmed', message: '付款尚未確認，無法寄出預約確認信。' },
+        { status: 409 },
+      )
+    }
 
     if (hasBookingEmailAlreadyBeenSent(deps.kind, safeBooking)) {
       return NextResponse.json({ ok: true, alreadySent: true })

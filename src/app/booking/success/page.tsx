@@ -1,11 +1,12 @@
 'use client'
 
 import Link from 'next/link'
-import { CheckCircle2 } from 'lucide-react'
+import { CheckCircle2, Clock3, CircleAlert } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useEffect, useRef, useState } from 'react'
+import { isTrustedPaidBooking } from '@/lib/bookings/bookingSuccess'
 import { getAuthAccessToken } from '@/lib/mockAuth'
-import { getBookingById, updateBookingRecord, type BookingRecord } from '@/lib/mockBooking'
+import { updateBookingRecord, type BookingRecord } from '@/lib/mockBooking'
 
 async function postJson(path: string, body: unknown, accessToken?: string | null) {
   const response = await fetch(path, {
@@ -27,28 +28,36 @@ function BookingSuccessContent() {
   const searchParams = useSearchParams()
   const bookingId = searchParams.get('bookingId')
   const [booking, setBooking] = useState<BookingRecord | null>(null)
+  const [loadStatus, setLoadStatus] = useState<'loading' | 'loaded' | 'error'>('loading')
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'partial' | 'error'>('idle')
   const [syncMessage, setSyncMessage] = useState('')
   const syncStartedRef = useRef(false)
 
   useEffect(() => {
-    if (!bookingId) return
-    const localBooking = getBookingById(bookingId)
-    if (localBooking) {
-      setBooking(localBooking)
+    if (!bookingId) {
+      setLoadStatus('error')
       return
     }
-
     let cancelled = false
     const loadBooking = async () => {
       try {
-        const response = await fetch(`/api/bookings/read?bookingId=${encodeURIComponent(bookingId)}`)
+        const accessToken = await getAuthAccessToken()
+        const response = await fetch(`/api/bookings/read?bookingId=${encodeURIComponent(bookingId)}`, {
+          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+        })
         const data = await response.json().catch(() => ({}))
         if (!cancelled && response.ok && data.ok !== false && data.booking) {
           setBooking(data.booking)
+          setLoadStatus('loaded')
+        } else if (!cancelled) {
+          setBooking(null)
+          setLoadStatus('error')
         }
       } catch {
-        if (!cancelled) setBooking(null)
+        if (!cancelled) {
+          setBooking(null)
+          setLoadStatus('error')
+        }
       }
     }
 
@@ -59,7 +68,7 @@ function BookingSuccessContent() {
   }, [bookingId])
 
   useEffect(() => {
-    if (!booking || syncStartedRef.current) return
+    if (!booking || !isTrustedPaidBooking(booking) || syncStartedRef.current) return
     if (booking.googleCalendarEventId && booking.emailSentToCustomer && booking.emailSentToAdmin) {
       setSyncStatus('success')
       setSyncMessage('Google Calendar 與 Email 已完成。')
@@ -77,46 +86,14 @@ function BookingSuccessContent() {
       let calendarDone = Boolean(booking.googleCalendarEventId)
       let emailDone = booking.emailSentToCustomer && booking.emailSentToAdmin
       const errors: string[] = []
-
-      try {
-        await postJson('/api/bookings/update', {
-          bookingId: booking.id,
-          updates: {
-            status: 'confirmed',
-            paymentId: booking.paymentId ?? `mock-payment-${booking.id}`
-          }
-        })
-      } catch (error) {
-        errors.push(error instanceof Error ? error.message : '付款狀態寫入資料庫失敗')
-      }
+      const accessToken = await getAuthAccessToken()
 
       if (!calendarDone) {
         try {
-          const calendarResult = await postJson('/api/calendar/create-event', {
-            bookingId: booking.id,
-            customerName: booking.customerName,
-            customerEmail: booking.customerEmail,
-            customerPhone: booking.customerPhone,
-            planName: booking.planName,
-            startTime: booking.startTime,
-            endTime: booking.endTime,
-            timezone: booking.timezone,
-            birthDate: booking.birthDate,
-            birthTime: booking.birthTime,
-            birthPlace: booking.birthPlace,
-            gender: booking.gender,
-            question: booking.question
-          })
+          const calendarResult = await postJson('/api/calendar/create-event', { bookingId: booking.id }, accessToken)
           const updated = updateBookingRecord(booking.id, {
             googleCalendarEventId: calendarResult.eventId,
             googleCalendarEventLink: calendarResult.htmlLink
-          })
-          await postJson('/api/bookings/update', {
-            bookingId: booking.id,
-            updates: {
-              googleCalendarEventId: calendarResult.eventId,
-              googleCalendarEventLink: calendarResult.htmlLink
-            }
           })
           if (updated) nextBooking = updated
           calendarDone = true
@@ -128,18 +105,10 @@ function BookingSuccessContent() {
       if (!emailDone) {
         try {
           // 安全設計：只傳 bookingId，信件收件人與內容由後端從 booking record 推導。
-          const accessToken = await getAuthAccessToken()
           await postJson('/api/email/send-booking-confirmation', { bookingId: booking.id }, accessToken)
           const updated = updateBookingRecord(booking.id, {
             emailSentToCustomer: true,
             emailSentToAdmin: true
-          })
-          await postJson('/api/bookings/update', {
-            bookingId: booking.id,
-            updates: {
-              emailSentToCustomer: true,
-              emailSentToAdmin: true
-            }
           })
           if (updated) nextBooking = updated
           emailDone = true
@@ -170,15 +139,23 @@ function BookingSuccessContent() {
     }
   }, [booking])
 
+  const trustedPaid = isTrustedPaidBooking(booking)
+  const title = loadStatus === 'error' ? '無法確認預約' : trustedPaid ? '預約成功' : '付款確認中'
+  const description =
+    loadStatus === 'error'
+      ? '找不到這筆預約，或你沒有權限查看。請回到會員中心確認預約狀態。'
+      : trustedPaid
+        ? '你的水瓶先生論命預約已完成付款。系統會建立 Google Calendar 事件，並寄出確認信給你與老師。'
+        : '付款結果尚未由系統確認。確認完成後才會建立 Google Calendar 事件並寄出確認信。'
+  const StatusIcon = loadStatus === 'error' ? CircleAlert : trustedPaid ? CheckCircle2 : Clock3
+
   return (
     <section className="bg-softPurple py-16 md:py-24">
       <div className="section-shell max-w-2xl rounded-[28px] border border-borderSoft bg-white p-8 text-center shadow-soft">
-        <CheckCircle2 className="mx-auto text-gold" size={54} />
-        <h1 className="mt-5 font-serifTC text-3xl font-semibold text-deepPurple">預約成功</h1>
-        <p className="mt-4 leading-7 text-textMuted">
-          你的水瓶先生論命預約已完成付款。系統會建立 Google Calendar 事件，並寄出確認信給你與老師。
-        </p>
-        {syncMessage && (
+        <StatusIcon className="mx-auto text-gold" size={54} />
+        <h1 className="mt-5 font-serifTC text-3xl font-semibold text-deepPurple">{title}</h1>
+        <p className="mt-4 leading-7 text-textMuted">{description}</p>
+        {trustedPaid && syncMessage && (
           <p
             className={`mt-4 rounded-xl px-4 py-3 text-sm font-semibold ${
               syncStatus === 'success'
@@ -191,7 +168,7 @@ function BookingSuccessContent() {
             {syncMessage}
           </p>
         )}
-        {booking && (
+        {trustedPaid && booking && (
           <div className="mt-6 rounded-2xl border border-borderSoft bg-softPurple p-5 text-left">
             <p className="font-semibold text-deepPurple">{booking.planName}</p>
             <p className="mt-2 text-sm text-textMuted">

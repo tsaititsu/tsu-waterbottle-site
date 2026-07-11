@@ -54,6 +54,19 @@ export type BookingPaymentContext = {
   paymentStatus: string
 }
 
+export type BookingMemberUpdate = {
+  status?: 'cancelled'
+  googleCalendarEventId?: string
+  googleCalendarEventLink?: string
+  googleCalendarCancelled?: boolean
+  emailSentToCustomer?: boolean
+  emailSentToAdmin?: boolean
+  cancellationEmailSentToCustomer?: boolean
+  cancellationEmailSentToAdmin?: boolean
+  cancelledAt?: string
+  cancellationReason?: string
+}
+
 function normalizeBirthTime(value: string) {
   return value.length === 5 ? `${value}:00` : value
 }
@@ -69,6 +82,7 @@ export function mapBookingRow(row: BookingRow): BookingRecord {
     currency: row.currency,
     timezone: row.timezone,
     status: row.status,
+    paymentStatus: row.payment_status,
     startTime: row.starts_at,
     endTime: row.ends_at,
     customerName: row.customer_name,
@@ -222,15 +236,11 @@ export async function getSupabaseBookingPaymentContext(bookingId: string): Promi
   }
 }
 
-export async function updateSupabaseBooking(bookingId: string, updates: Partial<BookingRecord>) {
+export async function updateSupabaseBooking(bookingId: string, updates: BookingMemberUpdate) {
   if (!hasSupabaseAdminConfig()) return null
 
   const patch: Record<string, unknown> = {}
-  if (updates.status) patch.status = updates.status
-  if (updates.paymentId) {
-    patch.payment_status = 'paid'
-    patch.status = updates.status ?? 'confirmed'
-  }
+  if (updates.status === 'cancelled') patch.status = 'cancelled'
   if (updates.googleCalendarEventId !== undefined) patch.google_calendar_event_id = updates.googleCalendarEventId
   if (updates.googleCalendarEventLink !== undefined) patch.google_calendar_event_link = updates.googleCalendarEventLink
   if (updates.googleCalendarCancelled !== undefined) patch.google_calendar_cancelled = updates.googleCalendarCancelled

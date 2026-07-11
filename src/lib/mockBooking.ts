@@ -33,6 +33,7 @@ export type BookingRecord = BookingFormInput & {
   currency: 'TWD'
   timezone: 'Asia/Taipei'
   status: BookingStatus
+  paymentStatus?: string
   paymentId?: string
   googleCalendarEventId?: string
   googleCalendarEventLink?: string
@@ -89,6 +90,7 @@ export function savePendingBooking(input: BookingFormInput, forcedId?: string) {
     currency: 'TWD',
     timezone: 'Asia/Taipei',
     status: 'pending_payment',
+    paymentStatus: 'pending',
     emailSentToCustomer: false,
     emailSentToAdmin: false,
     createdAt: now,

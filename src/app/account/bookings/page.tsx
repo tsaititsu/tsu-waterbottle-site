@@ -150,17 +150,22 @@ export default function AccountBookingsPage() {
       cancellationReason: reason
     }
     try {
-      await postJson('/api/bookings/update', {
-        bookingId: booking.id,
-        updates: {
-          status: 'cancelled',
-          googleCalendarCancelled: calendarCancelled,
-          cancellationEmailSentToCustomer: emailsSent,
-          cancellationEmailSentToAdmin: emailsSent,
-          cancelledAt,
-          cancellationReason: reason
-        }
-      })
+      const accessToken = await getAuthAccessToken()
+      await postJson(
+        '/api/bookings/update',
+        {
+          bookingId: booking.id,
+          updates: {
+            status: 'cancelled',
+            googleCalendarCancelled: calendarCancelled,
+            cancellationEmailSentToCustomer: emailsSent,
+            cancellationEmailSentToAdmin: emailsSent,
+            cancelledAt,
+            cancellationReason: reason
+          }
+        },
+        accessToken,
+      )
     } catch {
       setCancelingId('')
       setStatusMessage('')

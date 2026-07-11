@@ -35,6 +35,8 @@ function makeBooking(overrides: Partial<BookingEmailSourceRecord> = {}): Booking
     birthDate: '1990-01-01',
     birthTime: '08:30',
     question: '工作方向',
+    status: 'confirmed',
+    paymentStatus: 'paid',
     emailSentToCustomer: false,
     emailSentToAdmin: false,
     cancellationEmailSentToCustomer: false,
@@ -277,6 +279,27 @@ test('successful send marks booking flags via injected function', async () => {
 
   assert.equal(response.status, 200)
   assert.deepEqual(markedBookingIds, ['booking-1'])
+})
+
+test('unpaid bookings cannot trigger confirmation email', async () => {
+  const unpaidBooking = makeBooking({ status: 'pending_payment', paymentStatus: 'pending' })
+  const { deps, sentPayloads, markedBookingIds } = makeDeps({
+    getBookingById: async () => unpaidBooking,
+    requireTrustedPaidBooking: true,
+  })
+  const response = await handleBookingEmailRequest(makeRequest({ bookingId: 'booking-1' }), deps)
+
+  assert.equal(response.status, 409)
+  assert.equal(sentPayloads.length, 0)
+  assert.equal(markedBookingIds.length, 0)
+})
+
+test('trusted paid booking can trigger confirmation email', async () => {
+  const { deps, sentPayloads } = makeDeps({ requireTrustedPaidBooking: true })
+  const response = await handleBookingEmailRequest(makeRequest({ bookingId: 'booking-1' }), deps)
+
+  assert.equal(response.status, 200)
+  assert.equal(sentPayloads.length, 1)
 })
 
 test('cancellation reason from body is passed through truncated, confirmation ignores it', async () => {

@@ -13,6 +13,7 @@ export async function POST(req: Request) {
     kind: 'confirmation',
     getRequesterFromRequest: getUserWithEmailFromRequest,
     getBookingById: getSupabaseBooking,
+    requireTrustedPaidBooking: true,
     sendEmails: sendBookingConfirmationEmails,
     markEmailsSent: async (bookingId) => {
       await updateSupabaseBooking(bookingId, {
