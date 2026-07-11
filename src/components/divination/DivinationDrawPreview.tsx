@@ -24,6 +24,7 @@ import {
   buildNewebPayClientFormFields,
   type NewebPayClientFormField,
 } from "@/lib/newebpay/clientForm"
+import { isLineInAppBrowser } from "@/lib/browser/lineInAppBrowser"
 import { getAuthAccessToken, subscribeAuthChange } from "@/lib/mockAuth"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
@@ -62,6 +63,22 @@ type NewebPayCreateResponse =
 
 type StoredReadingSession = DivinationReadingSession & {
   autoMockPaid?: boolean
+}
+
+const lineInAppBrowserPaymentNotice =
+  "目前正在 LINE 內建瀏覽器。為提高付款與返回解讀頁的穩定性，建議點右上角「⋯」，選擇「以預設瀏覽器開啟」後再付款。"
+
+function LineInAppBrowserPaymentNotice({ visible }: { visible: boolean }) {
+  if (!visible) return null
+
+  return (
+    <p
+      className="w-full max-w-full rounded-lg border border-darkGold/25 bg-lightGold/35 px-4 py-3 text-sm leading-6 text-textDark"
+      data-testid="line-in-app-browser-payment-notice"
+    >
+      {lineInAppBrowserPaymentNotice}
+    </p>
+  )
 }
 
 const initialMessage = "請先依照抽牌方式開始抽牌。"
@@ -370,6 +387,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
   const [isNewebPayCheckingOut, setIsNewebPayCheckingOut] = useState(false)
   // 管理員限定 NT$1 測試模式：由 admin-only API 確認可用性，非 admin 永遠 false。
   const [isAdminOneDollarTestAvailable, setIsAdminOneDollarTestAvailable] = useState(false)
+  const [isMobileLineInAppBrowser, setIsMobileLineInAppBrowser] = useState(false)
   const [paymentRequired, setPaymentRequired] = useState<PaymentRequiredState | null>(null)
   const [hasAcceptedTerms, setHasAcceptedTerms] = useState(false)
   const [hoveredCardIndex, setHoveredCardIndex] = useState<number | null>(null)
@@ -399,6 +417,9 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
       : pendingCard.image
     : null
   const hasCompletedInterpretation = Boolean(confirmedCard && confirmedPosition && interpretation)
+  const showLineInAppBrowserPaymentNotice = Boolean(
+    isMobileLineInAppBrowser && paymentRequired && isPersistedReading
+  )
 
   function persistDrawState(selectedCard: ZiweiCard, selectedPosition: DivinationPosition) {
     if (!readingId || !trimmedQuestion || !drawMode) return
@@ -425,6 +446,19 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
         clearTimeout(shuffleTimerRef.current)
       }
     }
+  }, [])
+
+  useEffect(() => {
+    const mobileMedia = window.matchMedia("(max-width: 767px)")
+    const syncLineBrowserState = () => {
+      setIsMobileLineInAppBrowser(
+        mobileMedia.matches && isLineInAppBrowser(window.navigator.userAgent)
+      )
+    }
+
+    syncLineBrowserState()
+    mobileMedia.addEventListener("change", syncLineBrowserState)
+    return () => mobileMedia.removeEventListener("change", syncLineBrowserState)
   }, [])
 
   useEffect(() => {
@@ -1226,6 +1260,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                     : "本次 AI 占卜解讀需 NT$50。"}
                 </p>
               ) : null}
+              <LineInAppBrowserPaymentNotice visible={showLineInAppBrowserPaymentNotice} />
               <div className="grid gap-3 sm:grid-cols-2">
                 {paymentRequired && isPersistedReading ? (
                   <>
@@ -1287,6 +1322,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                   ? "本次 AI 占卜解讀需 NT$50，請完成線上付款後再產生解讀。"
                   : "本次 AI 占卜解讀需 NT$50。"}
               </p>
+              <LineInAppBrowserPaymentNotice visible={showLineInAppBrowserPaymentNotice} />
               {isPersistedReading ? (
                 <div className="flex flex-wrap gap-2">
                   <button
