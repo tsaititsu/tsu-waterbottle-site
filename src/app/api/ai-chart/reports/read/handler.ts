@@ -2,15 +2,11 @@ import { NextResponse } from 'next/server'
 import {
   AI_CHART_REPORT_DEFAULT_AMOUNT_TWD,
   decideAiChartReportResultAccess,
-  getAiChartReportResultById,
+  getAiChartReportForUser,
   type AiChartReportResultContext,
 } from '../../../../../lib/supabase/aiChartReports'
 
-type GetAiChartReportResultByIdDependency = typeof getAiChartReportResultById
-
-type SearchParamsLike = {
-  get(name: string): string | null
-}
+type GetAiChartReportForUserDependency = typeof getAiChartReportForUser
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -65,11 +61,24 @@ function buildReadFailedResponse(error: unknown) {
 }
 
 export async function handleReadAiChartReportRequest(
-  searchParams: SearchParamsLike,
+  request: Request,
   deps: {
-    getAiChartReportResultById?: GetAiChartReportResultByIdDependency
-  } = {},
+    getUserIdFromRequest: (request: Request) => Promise<string | null>
+    getAiChartReportForUser?: GetAiChartReportForUserDependency
+  },
 ): Promise<Response> {
+  const userId = await deps.getUserIdFromRequest(request).catch(() => null)
+  if (!userId) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'unauthorized',
+      },
+      { status: 401 },
+    )
+  }
+
+  const searchParams = new URL(request.url).searchParams
   const reportId = searchParams.get('reportId')?.trim()
 
   if (!reportId) {
@@ -93,8 +102,8 @@ export async function handleReadAiChartReportRequest(
   }
 
   try {
-    const getReport = deps.getAiChartReportResultById ?? getAiChartReportResultById
-    const report = await getReport(reportId)
+    const getReport = deps.getAiChartReportForUser ?? getAiChartReportForUser
+    const report = await getReport(reportId, userId)
     const decision = decideAiChartReportResultAccess(report)
 
     if (decision.result === 'not_found') {

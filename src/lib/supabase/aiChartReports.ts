@@ -516,6 +516,28 @@ export async function getAiChartReportResultById(
   return data ? mapAiChartReportResultContext(data as AiChartReportResultContextRow) : null
 }
 
+export async function getAiChartReportForUser(
+  reportId: string,
+  userId: string,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<AiChartReportResultContext | null> {
+  assertRequiredText(reportId, 'reportId')
+  assertRequiredText(userId, 'userId')
+
+  const { data, error } = await supabase
+    .from('ai_chart_reports')
+    .select('id,title,product_name,amount_twd,status,payment_status,report_content,paid_at,completed_at,error_message')
+    .eq('id', reportId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return data ? mapAiChartReportResultContext(data as AiChartReportResultContextRow) : null
+}
+
 export async function linkAiChartReportPendingPayment(
   input: LinkAiChartReportPendingPaymentInput,
   supabase: SupabaseAdminClient = getSupabaseAdmin(),

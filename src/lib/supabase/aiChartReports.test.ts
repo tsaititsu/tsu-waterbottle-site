@@ -10,6 +10,7 @@ import {
   decideAiChartReportResultAccess,
   decideAiChartReportPaidUpdate,
   decideAiChartReportPendingPaymentLink,
+  getAiChartReportForUser,
   getAiChartReportResultById,
   getAiChartReportPaymentContext,
   linkAiChartReportPendingPayment,
@@ -692,6 +693,47 @@ async function runAsyncHelperTests() {
   assertResultSelectIsSafe(resultContextMock.calls.selects[0])
   assertNoUnsafePaymentKeys(resultContext as unknown as Record<string, unknown>)
   assertNoOtherProductKeys(resultContext as unknown as Record<string, unknown>)
+
+  const ownedResultContextMock = createMockSupabase({
+    data: {
+      id: 'report-result-1',
+      title: 'AI 命盤分析',
+      product_name: 'AI 命盤分析',
+      amount_twd: 100,
+      status: 'completed',
+      payment_status: 'paid',
+      report_content: '本人正式報告',
+      paid_at: '2026-07-06T17:00:00.000Z',
+      completed_at: '2026-07-06T17:05:00.000Z',
+      error_message: null,
+    },
+    error: null,
+  })
+  const ownedResultContext = await getAiChartReportForUser(
+    'report-result-1',
+    'owner-user-id',
+    ownedResultContextMock.supabase,
+  )
+
+  assert.equal(ownedResultContext?.reportContent, '本人正式報告')
+  assert.deepEqual(ownedResultContextMock.calls.eqs, [
+    ['id', 'report-result-1'],
+    ['user_id', 'owner-user-id'],
+  ])
+  assertResultSelectIsSafe(ownedResultContextMock.calls.selects[0])
+
+  const nonOwnerResultContextMock = createMockSupabase({ data: null, error: null })
+  const nonOwnerResultContext = await getAiChartReportForUser(
+    'report-result-1',
+    'different-user-id',
+    nonOwnerResultContextMock.supabase,
+  )
+
+  assert.equal(nonOwnerResultContext, null)
+  assert.deepEqual(nonOwnerResultContextMock.calls.eqs, [
+    ['id', 'report-result-1'],
+    ['user_id', 'different-user-id'],
+  ])
 
   const missingResultContextMock = createMockSupabase({
     data: null,

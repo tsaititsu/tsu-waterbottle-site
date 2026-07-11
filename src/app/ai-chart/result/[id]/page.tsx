@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { Download } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { getAuthAccessToken } from '@/lib/mockAuth'
 
 type AiChartReportReadResponse =
   | {
@@ -103,10 +104,19 @@ export default function AiChartResultPage() {
       setDbReportState({ status: 'loading' })
 
       try {
+        const accessToken = await getAuthAccessToken()
+        if (canceled) return
+
+        if (!accessToken) {
+          setDbReportState({ status: 'unauthorized' })
+          return
+        }
+
         const response = await fetch(`/api/ai-chart/reports/read?reportId=${encodeURIComponent(resultId)}`, {
           method: 'GET',
           headers: {
             Accept: 'application/json',
+            authorization: `Bearer ${accessToken}`,
           },
         })
         const data = (await response.json().catch(() => null)) as AiChartReportReadResponse | null

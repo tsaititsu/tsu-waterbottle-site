@@ -1,6 +1,10 @@
 import { handleReadAiChartReportRequest } from './handler'
+import { getUserIdFromRequest } from '@/lib/supabase/auth'
+
+export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
-  const url = new URL(request.url)
-  return handleReadAiChartReportRequest(url.searchParams)
+  return handleReadAiChartReportRequest(request, {
+    getUserIdFromRequest,
+  })
 }
