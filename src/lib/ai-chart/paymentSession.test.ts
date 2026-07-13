@@ -213,7 +213,7 @@ test('isAiChartPaymentSession rejects unsafe or malformed sessions', () => {
 test('clearAiChartPaymentSession only removes the AI chart payment session key', () => {
   installMockSessionStorage()
   sessionStorage.setItem('waterbottle-chart-current-session', 'keep')
-  sessionStorage.setItem('waterbottle_pending_chart_input', 'keep')
+  sessionStorage.setItem('unrelated_session_storage_key', 'keep')
   sessionStorage.setItem('waterbottle_mock_payments', 'keep')
   sessionStorage.setItem('waterbottle_mock_records', 'keep')
 
@@ -222,7 +222,7 @@ test('clearAiChartPaymentSession only removes the AI chart payment session key',
 
   assert.equal(sessionStorage.getItem(AI_CHART_PAYMENT_SESSION_KEY), null)
   assert.equal(sessionStorage.getItem('waterbottle-chart-current-session'), 'keep')
-  assert.equal(sessionStorage.getItem('waterbottle_pending_chart_input'), 'keep')
+  assert.equal(sessionStorage.getItem('unrelated_session_storage_key'), 'keep')
   assert.equal(sessionStorage.getItem('waterbottle_mock_payments'), 'keep')
   assert.equal(sessionStorage.getItem('waterbottle_mock_records'), 'keep')
 })
