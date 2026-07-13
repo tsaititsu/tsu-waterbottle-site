@@ -6,7 +6,6 @@ import { useEffect, useState } from 'react'
 import { ActionButton } from './ActionButton'
 import { LoginModal } from './LoginModal'
 import { saveAiChartPaymentSession } from '@/lib/ai-chart/paymentSession'
-import { savePendingChartInput } from '@/lib/mockPayment'
 import { getAuthAccessToken } from '@/lib/mockAuth'
 import { buildNewebPayClientFormFields } from '@/lib/newebpay/clientForm'
 import { createZiweiGptPayload, type ChartInput, type ZiweiGptPayload } from '@/features/ziwei-chart/package'
@@ -222,16 +221,10 @@ export function ChartResultSessionView() {
   }
 
   const preparePaidInterpretation = () => {
-    if (!validatePaidInterpretationReadiness() || !chartInput || !session) {
+    if (!validatePaidInterpretationReadiness()) {
       return false
     }
 
-    savePendingChartInput({
-      ...chartInput,
-      category: session.selectedCategory,
-      birthOrder: session.birthOrder,
-      analysisTitle: selectedPlan.title
-    })
     setPaymentSetupMessage('')
     setFormError('')
     return true
