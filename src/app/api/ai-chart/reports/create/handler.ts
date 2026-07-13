@@ -9,6 +9,11 @@ export type CreateAiChartReportRequest = {
   title?: unknown
   productName?: unknown
   amountTwd?: unknown
+  userId?: unknown
+  user_id?: unknown
+  localUserId?: unknown
+  ownerId?: unknown
+  memberId?: unknown
 }
 
 type CreatePendingAiChartReportDependency = typeof createPendingAiChartReport
@@ -16,6 +21,11 @@ type CreatePendingAiChartReportDependency = typeof createPendingAiChartReport
 const DEFAULT_AI_CHART_REPORT_TITLE = 'AI 命盤分析'
 const DEFAULT_AI_CHART_REPORT_PRODUCT_NAME = 'AI 命盤分析'
 const MAX_AI_CHART_REPORT_TEXT_LENGTH = 120
+const CLIENT_OWNERSHIP_FIELDS = ['userId', 'user_id', 'localUserId', 'ownerId', 'memberId'] as const
+
+function includesClientOwnershipField(body: CreateAiChartReportRequest) {
+  return CLIENT_OWNERSHIP_FIELDS.some((field) => Object.prototype.hasOwnProperty.call(body, field))
+}
 
 function parseOptionalText(value: unknown, fallback: string) {
   if (value === undefined || value === null) {
@@ -70,12 +80,35 @@ function createReportFailedResponse(error: unknown) {
 }
 
 export async function handleCreateAiChartReportRequest(
+  request: Request,
   body: CreateAiChartReportRequest | null,
   deps: {
+    getUserIdFromRequest: (request: Request) => Promise<string | null>
     createPendingAiChartReport?: CreatePendingAiChartReportDependency
-  } = {},
+  },
 ): Promise<Response> {
+  const userId = await deps.getUserIdFromRequest(request).catch(() => null)
+  if (!userId) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'unauthorized',
+      },
+      { status: 401 },
+    )
+  }
+
   if (!body) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'invalid_ai_chart_report_input',
+      },
+      { status: 400 },
+    )
+  }
+
+  if (includesClientOwnershipField(body)) {
     return NextResponse.json(
       {
         ok: false,
@@ -112,7 +145,7 @@ export async function handleCreateAiChartReportRequest(
   try {
     const createReport = deps.createPendingAiChartReport ?? createPendingAiChartReport
     const report = await createReport({
-      userId: null,
+      userId,
       chartProfileId: null,
       title,
       productName,

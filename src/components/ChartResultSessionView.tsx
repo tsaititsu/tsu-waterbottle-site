@@ -4,8 +4,10 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { ActionButton } from './ActionButton'
+import { LoginModal } from './LoginModal'
 import { saveAiChartPaymentSession } from '@/lib/ai-chart/paymentSession'
 import { savePendingChartInput } from '@/lib/mockPayment'
+import { getAuthAccessToken } from '@/lib/mockAuth'
 import { buildNewebPayClientFormFields } from '@/lib/newebpay/clientForm'
 import { createZiweiGptPayload, type ChartInput, type ZiweiGptPayload } from '@/features/ziwei-chart/package'
 import { OriginalZiweiChartView } from '@/features/ziwei-chart/components/OriginalZiweiChartView'
@@ -116,6 +118,7 @@ export function ChartResultSessionView() {
   const [formError, setFormError] = useState('')
   const [paymentSetupMessage, setPaymentSetupMessage] = useState('')
   const [isCreatingPendingReport, setIsCreatingPendingReport] = useState(false)
+  const [loginOpen, setLoginOpen] = useState(false)
   const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
@@ -239,6 +242,12 @@ export function ChartResultSessionView() {
       return
     }
 
+    const accessToken = await getAuthAccessToken()
+    if (!accessToken) {
+      setLoginOpen(true)
+      return
+    }
+
     setIsCreatingPendingReport(true)
     setFormError('')
     setPaymentSetupMessage('')
@@ -249,7 +258,8 @@ export function ChartResultSessionView() {
       const reportResponse = await fetch('/api/ai-chart/reports/create', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`
         },
         body: JSON.stringify({
           title: AI_CHART_REPORT_TITLE,
@@ -472,6 +482,14 @@ export function ChartResultSessionView() {
           </ActionButton>
         )}
       </div>
+      <LoginModal
+        open={loginOpen}
+        onClose={() => setLoginOpen(false)}
+        onSuccess={() => {
+          setLoginOpen(false)
+          void createPendingReportForCheckout()
+        }}
+      />
     </div>
   )
 }

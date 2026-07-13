@@ -170,7 +170,7 @@ assertNoOtherProductKeys(pendingReportPayload)
 
 const pendingReportPayloadWithTrimmedText = buildPendingAiChartReportPayload(
   {
-    userId: '  ',
+    userId: '  user-2  ',
     chartProfileId: null,
     title: '  AI 命盤分析  ',
     productName: '  紫微命盤完整分析  ',
@@ -180,7 +180,7 @@ const pendingReportPayloadWithTrimmedText = buildPendingAiChartReportPayload(
   '2026-07-06T10:05:00.000Z',
 )
 
-assert.equal(pendingReportPayloadWithTrimmedText.user_id, null)
+assert.equal(pendingReportPayloadWithTrimmedText.user_id, 'user-2')
 assert.equal(pendingReportPayloadWithTrimmedText.chart_profile_id, null)
 assert.equal(pendingReportPayloadWithTrimmedText.title, 'AI 命盤分析')
 assert.equal(pendingReportPayloadWithTrimmedText.product_name, '紫微命盤完整分析')
@@ -477,6 +477,7 @@ for (const status of ['failed', 'canceled']) {
 assert.throws(
   () =>
     buildPendingAiChartReportPayload({
+      userId: 'user-1',
       title: '',
       productName: 'AI 命盤分析',
       amountTwd: 100,
@@ -486,11 +487,22 @@ assert.throws(
 assert.throws(
   () =>
     buildPendingAiChartReportPayload({
+      userId: 'user-1',
       title: '紫微命盤完整分析',
       productName: 'AI 命盤分析',
       amountTwd: 0,
     }),
   /amountTwd/,
+)
+assert.throws(
+  () =>
+    buildPendingAiChartReportPayload({
+      userId: '  ',
+      title: '紫微命盤完整分析',
+      productName: 'AI 命盤分析',
+      amountTwd: 100,
+    }),
+  /userId/,
 )
 assert.throws(
   () =>
@@ -533,6 +545,7 @@ async function runAsyncHelperTests() {
   })
   const createResult = await createPendingAiChartReport(
     {
+      userId: 'session-owner-1',
       title: '紫微命盤完整分析',
       productName: 'AI 命盤分析',
     },
@@ -546,7 +559,7 @@ async function runAsyncHelperTests() {
   assert.deepEqual(createMock.calls.tables, ['ai_chart_reports'])
   assert.deepEqual(createMock.calls.selects, ['id,payment_status'])
   assert.equal(createMock.calls.inserts.length, 1)
-  assert.equal(createMock.calls.inserts[0].user_id, null)
+  assert.equal(createMock.calls.inserts[0].user_id, 'session-owner-1')
   assert.equal(createMock.calls.inserts[0].chart_profile_id, null)
   assert.equal(createMock.calls.inserts[0].title, '紫微命盤完整分析')
   assert.equal(createMock.calls.inserts[0].product_name, 'AI 命盤分析')
@@ -571,7 +584,7 @@ async function runAsyncHelperTests() {
   })
   await createPendingAiChartReport(
     {
-      userId: null,
+      userId: 'session-owner-2',
       chartProfileId: null,
       title: 'AI 命盤分析',
       productName: '紫微命盤完整分析',
@@ -581,7 +594,7 @@ async function runAsyncHelperTests() {
     createWithNullableInputsMock.supabase,
   )
 
-  assert.equal(createWithNullableInputsMock.calls.inserts[0].user_id, null)
+  assert.equal(createWithNullableInputsMock.calls.inserts[0].user_id, 'session-owner-2')
   assert.equal(createWithNullableInputsMock.calls.inserts[0].chart_profile_id, null)
   assert.equal(createWithNullableInputsMock.calls.inserts[0].report_content, null)
   assert.deepEqual(createWithNullableInputsMock.calls.tables, ['ai_chart_reports'])
@@ -619,6 +632,7 @@ async function runAsyncHelperTests() {
     () =>
       createPendingAiChartReport(
         {
+          userId: 'session-owner-4',
           title: 'AI 命盤分析',
           productName: '紫微命盤完整分析',
         },

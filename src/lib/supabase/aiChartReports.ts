@@ -4,7 +4,7 @@ export type AiChartReportPaymentStatus = 'pending' | 'paid' | 'failed' | 'cancel
 export const AI_CHART_REPORT_DEFAULT_AMOUNT_TWD = 100
 
 export type BuildPendingAiChartReportPayloadInput = {
-  userId?: string | null
+  userId: string
   chartProfileId?: string | null
   title: string
   productName: string
@@ -13,7 +13,7 @@ export type BuildPendingAiChartReportPayloadInput = {
 }
 
 export type CreatePendingAiChartReportInput = {
-  userId?: string | null
+  userId: string
   chartProfileId?: string | null
   title: string
   productName: string
@@ -27,7 +27,7 @@ export type CreatePendingAiChartReportResult = {
 }
 
 export type PendingAiChartReportPayload = {
-  user_id: string | null
+  user_id: string
   chart_profile_id: string | null
   title: string
   product_name: string
@@ -251,7 +251,7 @@ export function buildPendingAiChartReportPayload(
   now = new Date().toISOString(),
 ): PendingAiChartReportPayload {
   return {
-    user_id: normalizeOptionalText(input.userId),
+    user_id: normalizeRequiredText(input.userId, 'userId'),
     chart_profile_id: normalizeOptionalText(input.chartProfileId),
     title: normalizeRequiredText(input.title, 'title'),
     product_name: normalizeRequiredText(input.productName, 'productName'),
