@@ -2,20 +2,34 @@ import assert from 'node:assert/strict'
 import Module from 'node:module'
 import type { NewebPayConfig } from './types'
 
-const originalResolveFilename = Module._resolveFilename
-const originalLoad = Module._load
+// Node 內部 API（官方型別未宣告），測試用來攔截 server-only 匯入。
+type NodeModuleInternals = {
+  _resolveFilename: (request: string, parent: unknown, isMain: boolean, options?: unknown) => string
+  _load: (request: string, parent: unknown, isMain: boolean) => unknown
+}
+
+const moduleInternals = Module as unknown as NodeModuleInternals
+const originalResolveFilename = moduleInternals._resolveFilename
+const originalLoad = moduleInternals._load
 const serverOnlyStubPath = require.resolve('./types')
 
-Module._resolveFilename = function resolveFilenameForTest(request, parent, isMain, options) {
+moduleInternals._resolveFilename = function resolveFilenameForTest(
+  this: unknown,
+  request: string,
+  parent: unknown,
+  isMain: boolean,
+  options?: unknown,
+) {
   if (request === 'server-only') return serverOnlyStubPath
   return originalResolveFilename.call(this, request, parent, isMain, options)
 }
 
-Module._load = function loadForTest(request, parent, isMain) {
+moduleInternals._load = function loadForTest(this: unknown, request: string, parent: unknown, isMain: boolean) {
   if (request === 'server-only') return {}
   return originalLoad.call(this, request, parent, isMain)
 }
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- 必須在攔截 _load 之後才同步載入 mpg；import 會被提升到檔案頂端而繞過攔截。
 const { buildCoursePaymentTradeInfoFields, createCoursePaymentMpgForm, decryptTradeInfo, verifyTradeSha } = require(
   './mpg',
 ) as typeof import('./mpg')

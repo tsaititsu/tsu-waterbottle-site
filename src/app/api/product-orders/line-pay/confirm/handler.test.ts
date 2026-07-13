@@ -3,8 +3,15 @@ import {
   handleProductOrderLinePayConfirmRedirect,
   type ProductOrderLinePayConfirmPaymentContext,
   type ProductOrderLinePayConfirmProductOrderContext,
+  type ProductOrderLinePayPaymentDetailsGetter,
+  type ProductOrderLinePayRequestStatusChecker,
 } from './handler'
 import type { LinePayServerEnv } from '../../../../../lib/linePay'
+import type {
+  LinePayPaymentDetailsResult,
+  LinePayPaymentRequestStatus,
+  LinePayPaymentRequestStatusResult,
+} from '../../../../../lib/linePay/statusClient'
 
 const fullEnv: LinePayServerEnv = {
   NEXT_PUBLIC_ENABLE_LINE_PAY: 'true',
@@ -127,7 +134,7 @@ function createLinePayConfirmer(
 }
 
 function createRequestStatusChecker(
-  result: Record<string, unknown> = {
+  result: LinePayPaymentRequestStatusResult = {
     returnCode: '0123',
     returnMessage: 'payment completed',
     transactionId,
@@ -135,8 +142,8 @@ function createRequestStatusChecker(
   },
   calls: Array<Record<string, unknown>> = [],
   error?: unknown,
-) {
-  return async (input: Record<string, unknown>) => {
+): ProductOrderLinePayRequestStatusChecker {
+  return async (input) => {
     calls.push(input)
 
     if (error) {
@@ -148,7 +155,7 @@ function createRequestStatusChecker(
 }
 
 function createPaymentDetailsGetter(
-  result: Record<string, unknown> = {
+  result: LinePayPaymentDetailsResult = {
     returnCode: '0000',
     returnMessage: 'Success.',
     info: [
@@ -162,8 +169,8 @@ function createPaymentDetailsGetter(
   },
   calls: Array<Record<string, unknown>> = [],
   error?: unknown,
-) {
-  return async (input: Record<string, unknown>) => {
+): ProductOrderLinePayPaymentDetailsGetter {
+  return async (input) => {
     calls.push(input)
 
     if (error) {
@@ -969,7 +976,8 @@ test('request status non-paid outcomes do not call paymentPaidMarker', async () 
         returnCode: '9999',
         returnMessage: status,
         transactionId,
-        status,
+        // 測試刻意包含非列舉值（unknown_status），模擬 LINE Pay 回傳未知狀態。
+        status: status as LinePayPaymentRequestStatus,
       }),
       paymentPaidMarker: createPaymentPaidMarker(paidCalls),
     })

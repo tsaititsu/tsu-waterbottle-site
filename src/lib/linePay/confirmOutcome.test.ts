@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { resolveLinePayConfirmOutcome } from './confirmOutcome'
+import type { LinePayPaymentRequestStatus, LinePayPaymentRequestStatusResult } from './statusClient'
 
 const transactionId = '2026070700000000001'
 const orderId = 'LP_product_order_product-order-1_20260707153000'
@@ -31,7 +32,10 @@ function createConfirmResult(override: Record<string, unknown> = {}) {
   }
 }
 
-function createRequestStatus(status: string, returnCode = '0000') {
+function createRequestStatus(
+  status: LinePayPaymentRequestStatus,
+  returnCode = '0000',
+): LinePayPaymentRequestStatusResult {
   return {
     returnCode,
     returnMessage: 'status message',

@@ -256,7 +256,7 @@ test('createProductOrder orderId response can be used as productOrderId', async 
   })
 
   assert.equal(result.ok, true)
-  if (!result.ok) throw new Error(result.error)
+  if (!result.ok) throw new Error(`unexpected failure: ${JSON.stringify(result)}`)
   assert.equal(result.productOrderId, 'product-order-from-route')
   assert.deepEqual(paymentCalls, [
     {
@@ -303,7 +303,7 @@ test('Apple Pay checkout requests product order Apple Pay mode with formal amoun
   })
 
   assert.equal(result.ok, true)
-  if (!result.ok) throw new Error(result.error)
+  if (!result.ok) throw new Error(`unexpected failure: ${JSON.stringify(result)}`)
   assert.equal(result.amount, 1500)
   assert.deepEqual(paymentCalls, [
     {
@@ -372,7 +372,7 @@ test('successful checkout submits NewebPay form and returns safe result', async 
   })
 
   assert.equal(result.ok, true)
-  if (!result.ok) throw new Error(result.error)
+  if (!result.ok) throw new Error(`unexpected failure: ${JSON.stringify(result)}`)
   assert.equal(result.provider, 'newebpay')
   assert.equal(result.productOrderId, 'product-order-1')
   assert.equal(result.merchantOrderNo, 'WB20260708123456PROD')

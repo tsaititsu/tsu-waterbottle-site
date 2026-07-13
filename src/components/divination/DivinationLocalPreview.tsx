@@ -91,6 +91,7 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
   async function createReadingSession(input: {
     question: string
     drawMode: DrawMode
+    followUpContext?: unknown
   }) {
     const localUserId = getLocalUserId()
     // 已登入時帶上 token，讓後端把占卜紀錄歸戶到會員；未登入維持匿名流程。
@@ -105,6 +106,8 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
         question: input.question,
         drawMode: input.drawMode,
         localUserId,
+        // 追問時把前文一併送到後端，讓安全判斷在建立紀錄（付款之前）就使用完整脈絡。
+        followUpContext: input.followUpContext,
       }),
     })
     const data = (await response.json()) as CreateDivinationReadingResponse
@@ -142,9 +145,13 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
     setSafetyInterpretation(null)
 
     try {
+      const followUpContext = followUpKey
+        ? toDivinationFollowUpContext(loadDivinationFollowUpDraft())
+        : undefined
       const session = await createReadingSession({
         question: payload.question,
         drawMode: payload.mode,
+        followUpContext,
       })
 
       if (session) {
@@ -155,9 +162,6 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
             return
           }
 
-          const followUpContext = followUpKey
-            ? toDivinationFollowUpContext(loadDivinationFollowUpDraft())
-            : undefined
           const readingSession = followUpContext ? { ...session, followUpContext } : session
 
           saveReadingSession(readingSession, {
@@ -211,10 +215,10 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
   return (
     <section className="grid gap-6">
       <div>
-        <p className="text-sm font-semibold tracking-[0.18em] text-darkGold">紫微牌卡占卜流程體驗</p>
+        <p className="text-sm font-semibold tracking-[0.18em] text-darkGold">紫微牌卡占卜</p>
         <h2 className="mt-2 font-serifTC text-3xl font-semibold text-textDark">開始你的紫微牌卡占卜</h2>
         <p className="mt-3 max-w-3xl leading-7 text-textMuted">
-          請先寫下你想詢問的問題，再選擇手動抽牌或自動抽牌。目前先提供牌卡基礎牌義預覽，正式 AI 深度解讀將於後續開放。
+          請先寫下你想詢問的問題，再選擇手動抽牌或自動抽牌。抽牌本身不收費，開始 AI 解讀時每次 NT$50。
         </p>
       </div>
       <section className="grid gap-4">

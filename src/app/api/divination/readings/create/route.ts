@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server"
 import { ziweiCards } from "@/lib/divination/cards"
-import { runPreOpenAISafetyCheck } from "@/lib/divination/legacyReadingEngine"
+import {
+  buildFollowUpSafetyCheckText,
+  runPreOpenAISafetyCheck,
+} from "@/lib/divination/legacyReadingEngine"
 import type {
   CreateDivinationReadingRequest,
   CreateDivinationReadingResponse,
@@ -67,7 +70,11 @@ export async function POST(request: Request) {
     return jsonError("找不到這張紫微牌卡。")
   }
 
-  const safetyResult = runPreOpenAISafetyCheck(question)
+  // 先判斷、再收費：付款單必須綁定這裡建立的紀錄，
+  // 因此在建立紀錄前用「本次問題＋追問前文」做安全檢查（與 interpret 相同輸入），
+  // 被攔下的問題不會產生紀錄，也就不會進入任何付款流程。
+  const safetyCheckText = buildFollowUpSafetyCheckText(question, body.followUpContext)
+  const safetyResult = runPreOpenAISafetyCheck(safetyCheckText)
 
   if (safetyResult.blocked) {
     return NextResponse.json({
