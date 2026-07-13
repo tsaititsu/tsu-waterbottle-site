@@ -87,6 +87,8 @@ export type CreateDivinationReadingRequest = {
   position?: DivinationPosition
   localUserId?: string
   mockPaid?: boolean
+  // 追問時附上前文脈絡，讓建立紀錄前的安全檢查與 interpret 使用同一組輸入（先判斷、再收費）。
+  followUpContext?: unknown
 }
 
 export type DivinationReadingSession = {
