@@ -386,7 +386,7 @@ test('createProductOrder orderId response can be used as productOrderId', async 
   })
 
   assert.equal(result.ok, true)
-  if (!result.ok) throw new Error(result.error)
+  if (!result.ok) throw new Error(`unexpected failure: ${JSON.stringify(result)}`)
   assert.equal(result.productOrderId, 'product-order-from-route')
   assert.deepEqual(requestCalls, [
     {
@@ -460,7 +460,7 @@ test('transactionId remains string and success returns LINE Pay result', async (
   })
 
   assert.equal(result.ok, true)
-  if (!result.ok) throw new Error(result.error)
+  if (!result.ok) throw new Error(`unexpected failure: ${JSON.stringify(result)}`)
   assert.equal(result.provider, 'line_pay')
   assert.equal(result.productOrderId, 'product-order-1')
   assert.equal(result.paymentId, 'payment-line-pay-1')

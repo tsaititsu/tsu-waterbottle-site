@@ -169,8 +169,8 @@ test('merge preserves existing metadata fields', () => {
     createRequestMetadata(),
   )
 
-  assert.equal(merged.source, 'product_order')
-  assert.equal(merged.amount, 1500)
+  assert.equal((merged as Record<string, unknown>).source, 'product_order')
+  assert.equal((merged as Record<string, unknown>).amount, 1500)
 })
 
 test('merge request then confirm preserves request metadata', () => {
@@ -226,7 +226,7 @@ test('merge strips blocked root metadata keys', () => {
   assert.equal('channelSecret' in merged, false)
   assert.equal('TradeInfo' in merged, false)
   assert.equal('TradeSha' in merged, false)
-  assert.equal(merged.keep, true)
+  assert.equal((merged as Record<string, unknown>).keep, true)
 })
 
 test('merge strips blocked nested metadata keys', () => {
@@ -253,7 +253,7 @@ test('merge strips blocked nested metadata keys', () => {
   assert.equal(JSON.stringify(merged).includes('headers'), false)
   assert.equal(JSON.stringify(merged).includes('TradeInfo'), false)
   assert.equal(JSON.stringify(merged).includes('TradeSha'), false)
-  assert.equal(merged.source, 'product_order')
+  assert.equal((merged as Record<string, unknown>).source, 'product_order')
 })
 
 test('metadata helper does not call global fetch', () => {
