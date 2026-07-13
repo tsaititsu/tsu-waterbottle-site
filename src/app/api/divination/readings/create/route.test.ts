@@ -80,6 +80,20 @@ test('divination client sends the auth token when logged in and stays anonymous 
   assert.equal(localPreviewSource.includes('localUserStorageKey'), true)
 })
 
+test('follow-up context is included in the safety check before a reading can be persisted', () => {
+  assert.equal(
+    createRouteSource.includes('buildFollowUpSafetyCheckText(question, body.followUpContext)'),
+    true,
+  )
+  assert.equal(createRouteSource.includes('runPreOpenAISafetyCheck(safetyCheckText)'), true)
+  assert.equal(localPreviewSource.includes('followUpContext: input.followUpContext'), true)
+
+  const safetyCheckIndex = createRouteSource.indexOf('runPreOpenAISafetyCheck(safetyCheckText)')
+  const persistIndex = createRouteSource.indexOf('createPendingDivinationReading({')
+  assert.equal(safetyCheckIndex >= 0, true)
+  assert.equal(persistIndex > safetyCheckIndex, true, '必須先完成完整脈絡安全判題，再建立收費紀錄')
+})
+
 function runTests() {
   for (const { name, fn } of tests) {
     try {

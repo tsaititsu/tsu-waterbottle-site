@@ -13,6 +13,8 @@ function readSource(path: string) {
 }
 
 const divinationSources = [
+  'src/app/ai-divination/page.tsx',
+  'src/components/divination/DivinationLocalPreview.tsx',
   'src/components/divination/DivinationDrawPreview.tsx',
   'src/components/divination/DivinationQuestionForm.tsx',
   'src/app/api/divination/interpret/route.ts',
@@ -44,6 +46,15 @@ test('divination payment button copy uses production wording', () => {
   assert.equal(text.includes('支付 NT$50 開始解讀'), true)
   assert.equal(text.includes('支付 NT$50 開始解讀（'), false)
   assert.equal(text.includes('支付 NT$${paymentRequired.amountTwd} 開始解讀（'), false)
+})
+
+test('divination entry uses current production copy instead of legacy availability wording', () => {
+  const text = readDivinationText()
+
+  assert.equal(text.includes('後續開放'), false)
+  assert.equal(text.includes('保留在獨立系統'), false)
+  assert.equal(text.includes('AI 解讀每次 NT$50'), true)
+  assert.equal(text.includes('開始 AI 解讀時每次 NT$50'), true)
 })
 
 test('missing OpenAI server configuration returns generic maintenance copy', () => {

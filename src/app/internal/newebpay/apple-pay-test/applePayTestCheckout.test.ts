@@ -70,7 +70,7 @@ test('successful checkout creates Apple Pay test payment and submits NewebPay fo
   })
 
   assert.equal(result.ok, true)
-  if (!result.ok) throw new Error(result.error)
+  if (!result.ok) throw new Error(`unexpected failure: ${JSON.stringify(result)}`)
   assert.equal(result.provider, 'newebpay')
   assert.equal(result.amount, 1)
   assert.equal(result.merchantOrderNo, 'WB20260708120000APPL')

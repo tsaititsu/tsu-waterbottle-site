@@ -27,7 +27,7 @@ export default async function AiDivinationPage({ searchParams }: AiDivinationPag
       <PageHero
         eyebrow="紫微牌卡"
         title="紫微牌卡占卜"
-        description="目前占卜功能保留在獨立系統，正式網站先提供安全入口。"
+        description="輸入你的問題，抽一張紫微牌卡，AI 立即為你深度解讀。抽牌免費，AI 解讀每次 NT$50。"
       />
       <section className="bg-white py-12 md:py-16">
         <div className="section-shell grid gap-8">
