@@ -11,7 +11,12 @@ const clientSource = readFileSync(
   'utf8',
 )
 
-assert.equal(pageSource.includes("index: false"), true)
+assert.equal(
+  pageSource.includes("import { NO_INDEX_ROBOTS } from '@/lib/seo/noIndexMetadata'"),
+  true,
+)
+assert.equal(pageSource.includes('robots: NO_INDEX_ROBOTS'), true)
+assert.equal(pageSource.includes("export const dynamic = 'force-dynamic'"), true)
 assert.equal(clientSource.includes('/api/account/divination-readings/'), true)
 assert.equal(clientSource.includes('/api/divination/interpret'), true)
 assert.equal(clientSource.includes('resumeFromDb: true'), true)
