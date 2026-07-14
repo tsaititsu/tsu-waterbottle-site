@@ -1,10 +1,9 @@
 import type { Metadata } from 'next'
 import type { ReactNode } from 'react'
-import AdminLayoutClient from './AdminLayoutClient'
 import { NO_INDEX_METADATA } from '@/lib/seo/noIndexMetadata'
 
 export const metadata: Metadata = NO_INDEX_METADATA
 
-export default function AdminLayout({ children }: { children: ReactNode }) {
-  return <AdminLayoutClient>{children}</AdminLayoutClient>
+export default function AiDivinationDrawLayout({ children }: { children: ReactNode }) {
+  return children
 }
