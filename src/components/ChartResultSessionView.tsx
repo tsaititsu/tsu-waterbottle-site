@@ -283,7 +283,8 @@ export function ChartResultSessionView() {
       const paymentResponse = await fetch('/api/payments/newebpay/create', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`
         },
         body: JSON.stringify({
           itemKey: 'ai_chart_report_single',
