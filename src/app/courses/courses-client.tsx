@@ -10,6 +10,7 @@ import {
   courseCatalog,
   formatCoursePrice,
   getCourseLockedReason,
+  isCourseSalesOpen,
   type CourseId,
   type CourseInfo,
 } from '@/lib/courses'
@@ -114,6 +115,7 @@ function CoursePurchaseNotice({
 
 export default function CoursesPageClient() {
   const router = useRouter()
+  const salesOpen = isCourseSalesOpen()
   const [courses, setCourses] = useState<CourseInfo[]>(courseCatalog)
   const [user, setUser] = useState<UserProfile | null>(null)
   const [purchasedCourseIds, setPurchasedCourseIds] = useState<CourseId[]>([])
@@ -244,7 +246,11 @@ export default function CoursesPageClient() {
       <PageHero
         eyebrow="Courses"
         title="紫微斗數三階段課程"
-        description="依序從基礎觀念、四宮實戰到飛化與占卜應用，完成前一階段後解鎖下一階段。"
+        description={
+          salesOpen
+            ? '依序從基礎觀念、四宮實戰到飛化與占卜應用，完成前一階段後解鎖下一階段。'
+            : '依序從基礎觀念、四宮實戰到飛化與占卜應用，完成前一階段後解鎖下一階段。課程目前籌備中，開課後將在本頁開放購買。'
+        }
       />
       <section className="bg-white py-12 md:py-16">
         <div className="section-shell grid gap-6 lg:grid-cols-3">
@@ -278,27 +284,45 @@ export default function CoursesPageClient() {
                 </ul>
 
                 <p className="mt-5 text-sm font-semibold text-darkGold">
-                  購買條件：{course.prerequisiteCourseId ? `需先購買${course.prerequisiteCourseId === 'basic' ? '初級班' : '進階班'}` : '登入會員即可購買'}
+                  {salesOpen
+                    ? `購買條件：${course.prerequisiteCourseId ? `需先購買${course.prerequisiteCourseId === 'basic' ? '初級班' : '進階班'}` : '登入會員即可購買'}`
+                    : '開課時間：籌備中，開課後將於本頁開放購買'}
                 </p>
 
                 <div className="mt-auto pt-6">
-                  <div className="mb-4">
-                    <CoursePurchaseNotice
-                      courseId={course.id}
-                      accepted={Boolean(acceptedCourseTerms[course.id])}
-                      onAcceptedChange={(courseId, accepted) =>
-                        setAcceptedCourseTerms((current) => ({ ...current, [courseId]: accepted }))
-                      }
-                    />
-                  </div>
+                  {salesOpen ? (
+                    <div className="mb-4">
+                      <CoursePurchaseNotice
+                        courseId={course.id}
+                        accepted={Boolean(acceptedCourseTerms[course.id])}
+                        onAcceptedChange={(courseId, accepted) =>
+                          setAcceptedCourseTerms((current) => ({ ...current, [courseId]: accepted }))
+                        }
+                      />
+                    </div>
+                  ) : null}
 
-                  {!user ? (
+                  {!salesOpen && !purchased ? (
+                    <div className="grid gap-3">
+                      <button type="button" className="w-full rounded-lg bg-lightGold px-4 py-3 font-semibold text-darkGold" disabled>
+                        即將開課
+                      </button>
+                      <a
+                        className="focus-ring block w-full rounded-lg border border-borderSoft px-4 py-3 text-center text-sm font-semibold text-deepPurple"
+                        href="https://lin.ee/6Tpje1P"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        加入官方 LINE，開課第一時間通知你
+                      </a>
+                    </div>
+                  ) : !user ? (
                     <button
                       type="button"
                       className="focus-ring w-full rounded-lg bg-deepPurple px-4 py-3 font-semibold text-white"
                       onClick={() => setLoginOpen(true)}
                     >
-                      請先登入
+                      登入並購買
                     </button>
                   ) : purchased ? (
                     <div className="grid gap-3">
