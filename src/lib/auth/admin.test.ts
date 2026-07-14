@@ -176,14 +176,47 @@ test('all admin booking-slots routes use requireAdminUser instead of login-only 
 })
 
 test('admin layout guards the UI behind the server-side admin session check', () => {
-  const source = readFileSync(join(projectRoot, 'src/app/admin/layout.tsx'), 'utf8')
+  const layoutSource = readFileSync(join(projectRoot, 'src/app/admin/layout.tsx'), 'utf8')
+  const clientSource = readFileSync(join(projectRoot, 'src/app/admin/AdminLayoutClient.tsx'), 'utf8')
 
-  assert.equal(source.includes('/api/admin/session'), true, 'layout 應呼叫 server-side admin 驗證')
-  assert.equal(source.includes('沒有管理權限'), true, '非 admin 應看到沒有管理權限訊息')
+  assert.equal(layoutSource.startsWith("'use client'"), false, 'admin layout 應保持為可匯出 metadata 的 Server Component')
+  assert.match(layoutSource, /import AdminLayoutClient from ['"]\.\/AdminLayoutClient['"]/, 'layout 應匯入 Client 守門')
+  assert.match(layoutSource, /export const metadata:\s*Metadata\s*=\s*NO_INDEX_METADATA/, 'layout 應匯出 noindex metadata')
+  assert.match(
+    layoutSource,
+    /return\s+<AdminLayoutClient>\{children\}<\/AdminLayoutClient>/,
+    'layout 應使用 Client 守門包住 children',
+  )
 
-  const childrenRenderIndex = source.indexOf("accessState === 'authorized'")
-  assert.equal(childrenRenderIndex >= 0, true, '只有 authorized 狀態才能渲染後台 UI')
-  assert.equal(source.includes('ADMIN_EMAILS'), false, '前端不應出現 ADMIN_EMAILS 細節')
+  assert.equal(clientSource.startsWith("'use client'"), true, '互動式守門應留在 Client Component')
+  assert.equal(clientSource.includes('getMockUser()'), true, '應先確認目前登入使用者')
+  assert.equal(clientSource.includes('getAuthAccessToken()'), true, '應取得 access token')
+  assert.equal(clientSource.includes("fetch('/api/admin/session'"), true, '應呼叫 server-side admin 驗證')
+  assert.equal(clientSource.includes("cache: 'no-store'"), true, '管理員驗證不得使用快取結果')
+  assert.match(
+    clientSource,
+    /if \(response\.ok\) \{\s*setAccessState\('authorized'\)\s*} else if \(response\.status === 401\) \{\s*setAccessState\('unauthenticated'\)\s*} else \{\s*setAccessState\('forbidden'\)\s*}/,
+    '只有成功回應可授權，401 與其他拒絕回應必須分流',
+  )
+  assert.match(
+    clientSource,
+    /if \(accessState === 'unauthenticated'\) \{\s*router\.replace\('\/'\)\s*}/,
+    '未登入時應重新導向首頁',
+  )
+  assert.match(
+    clientSource,
+    /if \(accessState === 'authorized'\) \{\s*return <>\{children\}<\/>\s*}/,
+    '只有 authorized 狀態才能渲染後台 UI',
+  )
+  assert.equal(
+    clientSource.match(/<>\{children\}<\/>/g)?.length,
+    1,
+    'children 不得出現在 authorized gate 以外的分支',
+  )
+  assert.equal(clientSource.includes("setAccessState('forbidden')"), true, '403 或驗證錯誤應進入 forbidden 狀態')
+  assert.equal(clientSource.includes('沒有管理權限'), true, '非 admin 應看到沒有管理權限訊息')
+  assert.equal(clientSource.includes('subscribeAuthChange'), true, '登入狀態變更時應重新驗證')
+  assert.equal(clientSource.includes('ADMIN_EMAILS'), false, '前端不應出現 ADMIN_EMAILS 細節')
 })
 
 test('admin session route requires admin', () => {
