@@ -261,7 +261,11 @@ export default function CoursesPageClient() {
             const isPurchasing = purchasingCourseId === course.id
 
             return (
-              <article key={course.id} className="flex h-full flex-col rounded-2xl border border-borderSoft bg-white p-6 shadow-soft">
+              <article
+                id={`course-${course.id}`}
+                key={course.id}
+                className="flex h-full flex-col rounded-2xl border border-borderSoft bg-white p-6 shadow-soft"
+              >
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-sm font-semibold text-darkGold">第 {course.level} 階段</p>
