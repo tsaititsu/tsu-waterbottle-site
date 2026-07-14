@@ -1,8 +1,12 @@
+import type { Metadata } from 'next'
 import { DivinationEntryModule } from '@/components/DivinationEntryModule'
 import { DivinationLocalPreview } from '@/components/divination/DivinationLocalPreview'
 import { PageHero } from '@/components/PageHero'
 import { shouldHideAiDivinationServices } from '@/lib/siteVisibility'
 import { redirect } from 'next/navigation'
+import { createPublicMetadata, PUBLIC_PAGE_METADATA } from '@/lib/seo/publicMetadata'
+
+export const metadata: Metadata = createPublicMetadata(PUBLIC_PAGE_METADATA.aiDivination)
 
 type AiDivinationPageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>
