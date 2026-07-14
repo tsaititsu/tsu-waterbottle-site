@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { ChartBirthForm } from '@/components/ChartBirthForm'
 import { PageHero } from '@/components/PageHero'
 import { createPublicMetadata, PUBLIC_PAGE_METADATA } from '@/lib/seo/publicMetadata'
+import { AI_CHART_SERVICE_JSON_LD, serializeJsonLd } from '@/lib/seo/serviceJsonLd'
 
 export const metadata: Metadata = createPublicMetadata(PUBLIC_PAGE_METADATA.aiChart)
 
@@ -20,10 +21,15 @@ export default async function AiChartPage({ searchParams }: AiChartPageProps) {
 
   return (
     <>
+      <script
+        id="ai-chart-service-structured-data"
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(AI_CHART_SERVICE_JSON_LD) }}
+      />
       <PageHero
         eyebrow="紫微命盤"
         title="紫微命盤分析"
-        description="填寫出生資料，完成分析後會建立命盤分析紀錄並保存到會員中心。"
+        description="填寫出生資料，完成分析後會建立命盤分析紀錄並保存到會員中心。單次分析 NT$100。"
         contentClassName="section-shell max-w-[1400px]"
         centered
         sectionClassName="pt-8 pb-4 md:pt-10 md:pb-6"

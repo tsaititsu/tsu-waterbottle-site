@@ -5,6 +5,7 @@ import { PageHero } from '@/components/PageHero'
 import { shouldHideAiDivinationServices } from '@/lib/siteVisibility'
 import { redirect } from 'next/navigation'
 import { createPublicMetadata, PUBLIC_PAGE_METADATA } from '@/lib/seo/publicMetadata'
+import { AI_DIVINATION_SERVICE_JSON_LD, serializeJsonLd } from '@/lib/seo/serviceJsonLd'
 
 export const metadata: Metadata = createPublicMetadata(PUBLIC_PAGE_METADATA.aiDivination)
 
@@ -28,6 +29,11 @@ export default async function AiDivinationPage({ searchParams }: AiDivinationPag
 
   return (
     <>
+      <script
+        id="ai-divination-service-structured-data"
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(AI_DIVINATION_SERVICE_JSON_LD) }}
+      />
       <PageHero
         eyebrow="紫微牌卡"
         title="紫微牌卡占卜"
