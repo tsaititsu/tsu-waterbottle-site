@@ -1,10 +1,12 @@
 import { getSupabaseAdmin } from './admin'
+import type { CanonicalAiChartBirthInput } from '@/lib/ai-chart/birthInput'
 
 export type AiChartReportPaymentStatus = 'pending' | 'paid' | 'failed' | 'canceled' | 'refunded'
 export const AI_CHART_REPORT_DEFAULT_AMOUNT_TWD = 100
 
 export type BuildPendingAiChartReportPayloadInput = {
   userId: string
+  birthInputSnapshot: CanonicalAiChartBirthInput
   chartProfileId?: string | null
   title: string
   productName: string
@@ -14,6 +16,7 @@ export type BuildPendingAiChartReportPayloadInput = {
 
 export type CreatePendingAiChartReportInput = {
   userId: string
+  birthInputSnapshot: CanonicalAiChartBirthInput
   chartProfileId?: string | null
   title: string
   productName: string
@@ -28,6 +31,7 @@ export type CreatePendingAiChartReportResult = {
 
 export type PendingAiChartReportPayload = {
   user_id: string
+  birth_input_snapshot: CanonicalAiChartBirthInput
   chart_profile_id: string | null
   title: string
   product_name: string
@@ -252,6 +256,14 @@ export function buildPendingAiChartReportPayload(
 ): PendingAiChartReportPayload {
   return {
     user_id: normalizeRequiredText(input.userId, 'userId'),
+    birth_input_snapshot: {
+      version: input.birthInputSnapshot.version,
+      solarDate: input.birthInputSnapshot.solarDate,
+      timeIndex: input.birthInputSnapshot.timeIndex,
+      gender: input.birthInputSnapshot.gender,
+      ...(input.birthInputSnapshot.name ? { name: input.birthInputSnapshot.name } : {}),
+      fixLeap: input.birthInputSnapshot.fixLeap,
+    },
     chart_profile_id: normalizeOptionalText(input.chartProfileId),
     title: normalizeRequiredText(input.title, 'title'),
     product_name: normalizeRequiredText(input.productName, 'productName'),
@@ -449,6 +461,7 @@ export async function createPendingAiChartReport(
 ): Promise<CreatePendingAiChartReportResult> {
   const payload = buildPendingAiChartReportPayload({
     userId: input.userId,
+    birthInputSnapshot: input.birthInputSnapshot,
     chartProfileId: input.chartProfileId,
     title: input.title,
     productName: input.productName,

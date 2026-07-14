@@ -234,6 +234,7 @@ create table if not exists public.chart_profiles (
 create table if not exists public.ai_chart_reports (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references auth.users(id) on delete cascade,
+  birth_input_snapshot jsonb,
   chart_profile_id uuid references public.chart_profiles(id) on delete set null,
   title text not null,
   product_name text not null,
@@ -242,6 +243,9 @@ create table if not exists public.ai_chart_reports (
   report_content text,
   created_at timestamptz not null default now()
 );
+
+alter table public.ai_chart_reports
+add column if not exists birth_input_snapshot jsonb;
 
 create table if not exists public.point_wallets (
   user_id uuid primary key references auth.users(id) on delete cascade,

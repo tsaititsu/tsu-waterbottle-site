@@ -2,9 +2,24 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { handleCreateAiChartReportRequest, type CreateAiChartReportRequest } from './handler'
+import { AI_CHART_BIRTH_INPUT_VERSION } from '@/lib/ai-chart/birthInput'
 
 const tests: Array<{ name: string; fn: () => Promise<void> }> = []
 const OWNER_ID = 'session-owner-id'
+const validBirthInput = {
+  solarDate: '1990-05-20',
+  timeIndex: 6,
+  gender: 'female' as const,
+  name: '測試者',
+  fixLeap: true,
+}
+
+function validBody(overrides: Partial<CreateAiChartReportRequest> = {}): CreateAiChartReportRequest {
+  return {
+    birthInput: { ...validBirthInput },
+    ...overrides,
+  }
+}
 
 function test(name: string, fn: () => Promise<void>) {
   tests.push({ name, fn })
@@ -64,6 +79,9 @@ function assertNoUnsafeResponseKeys(payload: Record<string, unknown>) {
   assert.equal('prompt' in payload, false)
   assert.equal('openAiRequest' in payload, false)
   assert.equal('openAiResponse' in payload, false)
+  assert.equal('birthInput' in payload, false)
+  assert.equal('birthInputSnapshot' in payload, false)
+  assert.equal('birth_input_snapshot' in payload, false)
 }
 
 test('actual route uses the shared Bearer session helper', async () => {
@@ -75,7 +93,7 @@ test('actual route uses the shared Bearer session helper', async () => {
 
 test('unauthenticated request returns 401 before insert', async () => {
   let inserted = false
-  const response = await call({}, {
+  const response = await call(validBody(), {
     userId: null,
     onCreate: () => {
       inserted = true
@@ -87,9 +105,9 @@ test('unauthenticated request returns 401 before insert', async () => {
   assert.equal(inserted, false)
 })
 
-test('authenticated default body creates a pending report owned by the session user', async () => {
+test('authenticated valid birth input creates a pending report owned by the session user', async () => {
   const calls: Record<string, unknown>[] = []
-  const response = await call({}, { onCreate: (input) => calls.push(input) })
+  const response = await call(validBody(), { onCreate: (input) => calls.push(input) })
   const json = await readJson(response)
 
   assert.equal(response.status, 200)
@@ -102,6 +120,10 @@ test('authenticated default body creates a pending report owned by the session u
   assert.deepEqual(calls, [
     {
       userId: OWNER_ID,
+      birthInputSnapshot: {
+        version: AI_CHART_BIRTH_INPUT_VERSION,
+        ...validBirthInput,
+      },
       chartProfileId: null,
       title: 'AI 命盤分析',
       productName: 'AI 命盤分析',
@@ -112,10 +134,24 @@ test('authenticated default body creates a pending report owned by the session u
   assertNoUnsafeResponseKeys(json)
 })
 
-test('client ownership fields are rejected and never reach insert', async () => {
-  for (const field of ['userId', 'user_id', 'localUserId', 'ownerId', 'memberId'] as const) {
+test('unknown top-level owner, payment, chart, and AI fields are rejected before insert', async () => {
+  for (const field of [
+    'userId',
+    'user_id',
+    'owner',
+    'ownerId',
+    'paid',
+    'success',
+    'paymentStatus',
+    'chartContext',
+    'palaces',
+    'messages',
+    'responseSchema',
+    'reportContent',
+    'openAiResponse',
+  ]) {
     let inserted = false
-    const response = await call({ [field]: 'attacker-selected-owner' }, {
+    const response = await call({ ...validBody(), [field]: 'untrusted-value' }, {
       onCreate: () => {
         inserted = true
       },
@@ -134,6 +170,7 @@ test('explicit valid title and productName are trimmed before creating the repor
       title: '  紫微命盤完整分析  ',
       productName: '  AI 命盤分析  ',
       amountTwd: 100,
+      birthInput: { ...validBirthInput },
     },
     { onCreate: (input) => calls.push(input) },
   )
@@ -144,8 +181,67 @@ test('explicit valid title and productName are trimmed before creating the repor
   assert.equal(calls[0].userId, OWNER_ID)
 })
 
-test('invalid input and amount are rejected without insert', async () => {
-  for (const body of [null, { amountTwd: 99 }, { title: 'A'.repeat(121) }, { productName: 'A'.repeat(121) }]) {
+test('canonical snapshot adds version, defaults fixLeap, trims name, and omits blank name', async () => {
+  const calls: Record<string, unknown>[] = []
+  const responseWithName = await call(validBody({
+    birthInput: {
+      solarDate: '2001-02-03',
+      timeIndex: 0,
+      gender: 'male',
+      name: '  修整姓名  ',
+    },
+  }), { onCreate: (input) => calls.push(input) })
+  const responseWithoutName = await call(validBody({
+    birthInput: {
+      solarDate: '2001-02-03',
+      timeIndex: 0,
+      gender: 'male',
+      name: '   ',
+    },
+  }), { onCreate: (input) => calls.push(input) })
+
+  assert.equal(responseWithName.status, 200)
+  assert.equal(responseWithoutName.status, 200)
+  assert.deepEqual(calls[0].birthInputSnapshot, {
+    version: AI_CHART_BIRTH_INPUT_VERSION,
+    solarDate: '2001-02-03',
+    timeIndex: 0,
+    gender: 'male',
+    name: '修整姓名',
+    fixLeap: false,
+  })
+  assert.deepEqual(calls[1].birthInputSnapshot, {
+    version: AI_CHART_BIRTH_INPUT_VERSION,
+    solarDate: '2001-02-03',
+    timeIndex: 0,
+    gender: 'male',
+    fixLeap: false,
+  })
+})
+
+test('missing or invalid birth input returns a safe error without insert', async () => {
+  for (const body of [
+    {},
+    validBody({ birthInput: { ...validBirthInput, solarDate: '2023-02-29' } }),
+    validBody({ birthInput: { ...validBirthInput, timeIndex: 13 } }),
+    validBody({ birthInput: { ...validBirthInput, chartContext: {} } }),
+  ]) {
+    let insertCount = 0
+    const response = await call(body, { onCreate: () => { insertCount += 1 } })
+
+    assert.equal(response.status, 400)
+    assert.deepEqual(await readJson(response), { ok: false, error: 'invalid_ai_chart_birth_input' })
+    assert.equal(insertCount, 0)
+  }
+})
+
+test('invalid body, title, product, and amount are rejected without insert', async () => {
+  for (const body of [
+    null,
+    validBody({ amountTwd: 99 }),
+    validBody({ title: 'A'.repeat(121) }),
+    validBody({ productName: 'A'.repeat(121) }),
+  ]) {
     let inserted = false
     const response = await call(body, { onCreate: () => { inserted = true } })
 
@@ -155,7 +251,7 @@ test('invalid input and amount are rejected without insert', async () => {
 })
 
 test('helper failure returns a safe error response', async () => {
-  const response = await call({}, { failCreate: true })
+  const response = await call(validBody(), { failCreate: true })
   const json = await readJson(response)
 
   assert.equal(response.status, 500)

@@ -4,16 +4,13 @@ import {
   createPendingAiChartReport,
   type CreatePendingAiChartReportResult,
 } from '../../../../../lib/supabase/aiChartReports'
+import { parseAiChartBirthInput } from '@/lib/ai-chart/birthInput'
 
 export type CreateAiChartReportRequest = {
   title?: unknown
   productName?: unknown
   amountTwd?: unknown
-  userId?: unknown
-  user_id?: unknown
-  localUserId?: unknown
-  ownerId?: unknown
-  memberId?: unknown
+  birthInput?: unknown
 }
 
 type CreatePendingAiChartReportDependency = typeof createPendingAiChartReport
@@ -21,10 +18,17 @@ type CreatePendingAiChartReportDependency = typeof createPendingAiChartReport
 const DEFAULT_AI_CHART_REPORT_TITLE = 'AI 命盤分析'
 const DEFAULT_AI_CHART_REPORT_PRODUCT_NAME = 'AI 命盤分析'
 const MAX_AI_CHART_REPORT_TEXT_LENGTH = 120
-const CLIENT_OWNERSHIP_FIELDS = ['userId', 'user_id', 'localUserId', 'ownerId', 'memberId'] as const
+const ALLOWED_REQUEST_FIELDS = new Set(['title', 'productName', 'amountTwd', 'birthInput'])
 
-function includesClientOwnershipField(body: CreateAiChartReportRequest) {
-  return CLIENT_OWNERSHIP_FIELDS.some((field) => Object.prototype.hasOwnProperty.call(body, field))
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+function hasOnlyAllowedRequestFields(body: CreateAiChartReportRequest) {
+  return Object.keys(body).every((field) => ALLOWED_REQUEST_FIELDS.has(field))
 }
 
 function parseOptionalText(value: unknown, fallback: string) {
@@ -98,7 +102,7 @@ export async function handleCreateAiChartReportRequest(
     )
   }
 
-  if (!body) {
+  if (!isPlainObject(body)) {
     return NextResponse.json(
       {
         ok: false,
@@ -108,11 +112,22 @@ export async function handleCreateAiChartReportRequest(
     )
   }
 
-  if (includesClientOwnershipField(body)) {
+  if (!hasOnlyAllowedRequestFields(body)) {
     return NextResponse.json(
       {
         ok: false,
         error: 'invalid_ai_chart_report_input',
+      },
+      { status: 400 },
+    )
+  }
+
+  const parsedBirthInput = parseAiChartBirthInput(body.birthInput)
+  if (!parsedBirthInput.ok) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'invalid_ai_chart_birth_input',
       },
       { status: 400 },
     )
@@ -146,6 +161,7 @@ export async function handleCreateAiChartReportRequest(
     const createReport = deps.createPendingAiChartReport ?? createPendingAiChartReport
     const report = await createReport({
       userId,
+      birthInputSnapshot: parsedBirthInput.value,
       chartProfileId: null,
       title,
       productName,

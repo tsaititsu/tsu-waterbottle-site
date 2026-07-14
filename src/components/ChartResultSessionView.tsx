@@ -234,6 +234,9 @@ export function ChartResultSessionView() {
     if (!validatePaidInterpretationReadiness()) {
       return
     }
+    if (!chartInput) {
+      return
+    }
 
     const accessToken = await getAuthAccessToken()
     if (!accessToken) {
@@ -257,7 +260,16 @@ export function ChartResultSessionView() {
         body: JSON.stringify({
           title: AI_CHART_REPORT_TITLE,
           productName: AI_CHART_REPORT_PRODUCT_NAME,
-          amountTwd: selectedPlan.amount
+          amountTwd: selectedPlan.amount,
+          birthInput: {
+            solarDate: chartInput.solarDate,
+            timeIndex: chartInput.timeIndex,
+            gender: chartInput.gender,
+            ...(chartInput.name ? { name: chartInput.name } : {}),
+            ...(typeof chartInput.fixLeap === 'boolean'
+              ? { fixLeap: chartInput.fixLeap }
+              : {})
+          }
         })
       })
       const reportData = (await reportResponse.json().catch(() => null)) as CreateAiChartReportResponse | null

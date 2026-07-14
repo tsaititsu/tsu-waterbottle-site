@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict'
 import {
+  AI_CHART_BIRTH_INPUT_VERSION,
+  type CanonicalAiChartBirthInput,
+} from '@/lib/ai-chart/birthInput'
+import {
   buildAiChartReportCompletedPayload,
   buildAiChartReportFailedPayload,
   buildAiChartReportPaidUpdatePayload,
@@ -142,9 +146,19 @@ function createResultReport(
   }
 }
 
+const canonicalBirthInput: CanonicalAiChartBirthInput = {
+  version: AI_CHART_BIRTH_INPUT_VERSION,
+  solarDate: '1990-05-20',
+  timeIndex: 6,
+  gender: 'female',
+  name: '測試者',
+  fixLeap: false,
+}
+
 const pendingReportPayload = buildPendingAiChartReportPayload(
   {
     userId: 'user-1',
+    birthInputSnapshot: canonicalBirthInput,
     chartProfileId: 'chart-profile-1',
     title: '紫微命盤完整分析',
     productName: 'AI 命盤分析',
@@ -156,6 +170,7 @@ const pendingReportPayload = buildPendingAiChartReportPayload(
 
 assert.deepEqual(pendingReportPayload, {
   user_id: 'user-1',
+  birth_input_snapshot: canonicalBirthInput,
   chart_profile_id: 'chart-profile-1',
   title: '紫微命盤完整分析',
   product_name: 'AI 命盤分析',
@@ -171,6 +186,7 @@ assertNoOtherProductKeys(pendingReportPayload)
 const pendingReportPayloadWithTrimmedText = buildPendingAiChartReportPayload(
   {
     userId: '  user-2  ',
+    birthInputSnapshot: canonicalBirthInput,
     chartProfileId: null,
     title: '  AI 命盤分析  ',
     productName: '  紫微命盤完整分析  ',
@@ -185,6 +201,59 @@ assert.equal(pendingReportPayloadWithTrimmedText.chart_profile_id, null)
 assert.equal(pendingReportPayloadWithTrimmedText.title, 'AI 命盤分析')
 assert.equal(pendingReportPayloadWithTrimmedText.product_name, '紫微命盤完整分析')
 assert.equal(pendingReportPayloadWithTrimmedText.report_content, '付款前安全摘要')
+
+const expectedIsolatedSnapshot: CanonicalAiChartBirthInput = {
+  ...canonicalBirthInput,
+  name: '原始姓名',
+}
+const mutableBirthInput = Object.assign(
+  { ...expectedIsolatedSnapshot },
+  {
+    userId: 'must-not-persist',
+    paid: true,
+    chartContext: { palaces: [] },
+    prompt: 'must-not-persist',
+  },
+)
+const originalBirthInput = structuredClone(mutableBirthInput)
+const isolatedSnapshotPayload = buildPendingAiChartReportPayload({
+  userId: 'user-snapshot-isolation',
+  birthInputSnapshot: mutableBirthInput,
+  title: 'AI 命盤分析',
+  productName: 'AI 命盤分析',
+  amountTwd: 100,
+})
+
+assert.deepEqual(mutableBirthInput, originalBirthInput)
+assert.notEqual(isolatedSnapshotPayload.birth_input_snapshot, mutableBirthInput)
+mutableBirthInput.name = '修改後姓名'
+mutableBirthInput.solarDate = '2000-01-01'
+assert.deepEqual(isolatedSnapshotPayload.birth_input_snapshot, expectedIsolatedSnapshot)
+assert.deepEqual(Object.keys(isolatedSnapshotPayload.birth_input_snapshot).sort(), [
+  'fixLeap',
+  'gender',
+  'name',
+  'solarDate',
+  'timeIndex',
+  'version',
+])
+for (const forbiddenField of [
+  'userId',
+  'owner',
+  'paid',
+  'paymentStatus',
+  'chartContext',
+  'lunarDate',
+  'palaces',
+  'stars',
+  'mutagens',
+  'messages',
+  'prompt',
+  'responseSchema',
+  'openAiResponse',
+]) {
+  assert.equal(forbiddenField in isolatedSnapshotPayload.birth_input_snapshot, false, forbiddenField)
+}
 
 const pendingPaymentLinkPayload = buildAiChartReportPendingPaymentLinkPayload(
   {
@@ -478,6 +547,7 @@ assert.throws(
   () =>
     buildPendingAiChartReportPayload({
       userId: 'user-1',
+      birthInputSnapshot: canonicalBirthInput,
       title: '',
       productName: 'AI 命盤分析',
       amountTwd: 100,
@@ -488,6 +558,7 @@ assert.throws(
   () =>
     buildPendingAiChartReportPayload({
       userId: 'user-1',
+      birthInputSnapshot: canonicalBirthInput,
       title: '紫微命盤完整分析',
       productName: 'AI 命盤分析',
       amountTwd: 0,
@@ -498,6 +569,7 @@ assert.throws(
   () =>
     buildPendingAiChartReportPayload({
       userId: '  ',
+      birthInputSnapshot: canonicalBirthInput,
       title: '紫微命盤完整分析',
       productName: 'AI 命盤分析',
       amountTwd: 100,
@@ -546,6 +618,7 @@ async function runAsyncHelperTests() {
   const createResult = await createPendingAiChartReport(
     {
       userId: 'session-owner-1',
+      birthInputSnapshot: canonicalBirthInput,
       title: '紫微命盤完整分析',
       productName: 'AI 命盤分析',
     },
@@ -560,6 +633,7 @@ async function runAsyncHelperTests() {
   assert.deepEqual(createMock.calls.selects, ['id,payment_status'])
   assert.equal(createMock.calls.inserts.length, 1)
   assert.equal(createMock.calls.inserts[0].user_id, 'session-owner-1')
+  assert.deepEqual(createMock.calls.inserts[0].birth_input_snapshot, canonicalBirthInput)
   assert.equal(createMock.calls.inserts[0].chart_profile_id, null)
   assert.equal(createMock.calls.inserts[0].title, '紫微命盤完整分析')
   assert.equal(createMock.calls.inserts[0].product_name, 'AI 命盤分析')
@@ -585,6 +659,7 @@ async function runAsyncHelperTests() {
   await createPendingAiChartReport(
     {
       userId: 'session-owner-2',
+      birthInputSnapshot: canonicalBirthInput,
       chartProfileId: null,
       title: 'AI 命盤分析',
       productName: '紫微命盤完整分析',
@@ -609,6 +684,7 @@ async function runAsyncHelperTests() {
   await createPendingAiChartReport(
     {
       userId: 'user-1',
+      birthInputSnapshot: canonicalBirthInput,
       chartProfileId: null,
       title: 'AI 命盤分析',
       productName: '紫微命盤完整分析',
@@ -633,6 +709,7 @@ async function runAsyncHelperTests() {
       createPendingAiChartReport(
         {
           userId: 'session-owner-4',
+          birthInputSnapshot: canonicalBirthInput,
           title: 'AI 命盤分析',
           productName: '紫微命盤完整分析',
         },
