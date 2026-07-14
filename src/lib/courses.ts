@@ -92,3 +92,9 @@ export function getCourseLockedReason(courseId: CourseId, purchasedCourseIds: Co
 export function formatCoursePrice(price: number) {
   return `NT$${price.toLocaleString('zh-TW')}`
 }
+
+// 課程販售開關：預設為「即將開課」，不開放購買（前端顯示與後端付款入口都會檢查）。
+// 正式開課時，在 Vercel 設定環境變數 NEXT_PUBLIC_ENABLE_COURSE_SALES=true 並重新部署即可開賣，不需改程式。
+export function isCourseSalesOpen(value = process.env.NEXT_PUBLIC_ENABLE_COURSE_SALES) {
+  return value === 'true'
+}
