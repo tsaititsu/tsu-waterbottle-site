@@ -86,6 +86,9 @@ type ValidateDivinationReadingPaymentDependency = (
 type GetAiChartReportPaymentContextDependency = (
   reportId: string,
 ) => Promise<NewebPayAiChartReportPaymentContext | null>
+type AuthorizeAiChartReportPaymentDependency = (
+  reportId: string,
+) => Promise<{ ok: true; userId: string } | { ok: false; reason: 'unauthorized' | 'not_found' }>
 type GetProductOrderForPaymentDependency = (orderId: string) => Promise<ProductOrderForPayment | null>
 type LinkDivinationReadingPendingPaymentDependency = (input: {
   readingId: string
@@ -119,6 +122,7 @@ type CreateNewebPayPaymentDependencies = {
   getDivinationReadingPaymentContext?: GetDivinationReadingPaymentContextDependency
   validateDivinationReadingPayment?: ValidateDivinationReadingPaymentDependency
   getAiChartReportPaymentContext?: GetAiChartReportPaymentContextDependency
+  authorizeAiChartReportPayment?: AuthorizeAiChartReportPaymentDependency
   getProductOrderForPayment?: GetProductOrderForPaymentDependency
   createPendingPayment?: CreatePendingPaymentDependency
   getExistingPaymentByItemTarget?: GetExistingPaymentByItemTargetDependency
@@ -596,6 +600,7 @@ export async function handleCreateNewebPayPaymentRequest(
   const orderId = orderIdResolution.orderId
   let productOrderPayment: ProductOrderPaymentMapping | null = null
   let divinationPaymentUserId: string | null = null
+  let aiChartReportPaymentUserId: string | null = null
 
   if (bookingId) {
     let booking
@@ -696,6 +701,28 @@ export async function handleCreateNewebPayPaymentRequest(
   }
 
   if (reportId) {
+    let authorization: Awaited<ReturnType<AuthorizeAiChartReportPaymentDependency>>
+
+    try {
+      authorization = deps.authorizeAiChartReportPayment
+        ? await deps.authorizeAiChartReportPayment(reportId)
+        : { ok: false, reason: 'unauthorized' }
+    } catch (error) {
+      return aiChartReportLookupErrorResponse({ reportId, error })
+    }
+
+    if (!authorization.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: authorization.reason === 'unauthorized' ? 'unauthorized' : 'ai_chart_report_not_found',
+        },
+        { status: authorization.reason === 'unauthorized' ? 401 : 404 },
+      )
+    }
+
+    aiChartReportPaymentUserId = authorization.userId
+
     let report
 
     try {
@@ -849,7 +876,7 @@ export async function handleCreateNewebPayPaymentRequest(
         deps.createPendingPayment ?? (await import('../../../../../lib/supabase/payments')).createPendingPayment
       pendingPayment = await createPayment({
         provider: 'newebpay',
-        userId: divinationPaymentUserId,
+        userId: aiChartReportPaymentUserId ?? divinationPaymentUserId,
         itemType: pendingPaymentMetadata.itemType,
         itemId: pendingPaymentMetadata.itemId,
         itemName,

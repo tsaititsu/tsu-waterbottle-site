@@ -8,7 +8,10 @@ import { PRODUCT_ORDER_PAYMENT_ITEM_KEY } from '../../../../../lib/payments/prod
 import { ONE_DOLLAR_TEST_CONFIRMATION_VALUE } from '../../../../../lib/newebpay/oneDollarTestMode'
 import type { CreatePendingPaymentInput } from '../../../../../lib/supabase/payments'
 import type { ProductOrderPaymentContext } from '../../../../../lib/supabase/productOrders'
-import type { NewebPayMpgPaymentData } from '../../../../../lib/newebpay/paymentForm'
+import type {
+  NewebPayAiChartReportPaymentContext,
+  NewebPayMpgPaymentData,
+} from '../../../../../lib/newebpay/paymentForm'
 import type { NewebPayConfig } from '../../../../../lib/newebpay/types'
 
 const tests: Array<{ name: string; fn: () => Promise<void> }> = []
@@ -17,6 +20,8 @@ const orderId = 'c0bd4cbf-64db-4e2d-a1d7-e2215d96802b'
 const paymentId = 'e7bd0667-9b8f-494a-9954-d889ef195f75'
 const merchantOrderNo = 'WB20260707144224PROD'
 const orderNo = 'PO202607071442240CDE'
+const aiChartReportId = '0c5e7b4a-e6c2-4f1f-b6c5-02fa1f0bd01a'
+const aiChartReportOwnerId = '9ca02d19-9e78-4f64-9d17-69d877a95923'
 
 const fakeConfig: NewebPayConfig = {
   env: 'test',
@@ -50,6 +55,16 @@ function validBody(overrides: Record<string, unknown> = {}) {
     source: 'product_order',
     paymentMode: 'credit',
     orderId,
+    ...overrides,
+  }
+}
+
+function validAiChartBody(overrides: Record<string, unknown> = {}) {
+  return {
+    itemKey: 'ai_chart_report_single',
+    source: 'ai_chart_report',
+    paymentMode: 'credit',
+    reportId: aiChartReportId,
     ...overrides,
   }
 }
@@ -131,6 +146,55 @@ function createProductDeps(input: {
       linkAiChartReportPendingPayment: async (linkInput: unknown) => {
         calls.aiChartLinks.push(linkInput)
         return { result: 'linked' as const, reportId: 'unused' }
+      },
+    },
+  }
+}
+
+function createAiChartDeps(input: {
+  authorization?: { ok: true; userId: string } | { ok: false; reason: 'unauthorized' | 'not_found' }
+  report?: NewebPayAiChartReportPaymentContext | null
+} = {}) {
+  const calls: {
+    authorizedReportIds: string[]
+    pendingPayments: CreatePendingPaymentInput[]
+    aiChartLinks: Array<{ reportId: string; paymentId: string; merchantOrderNo: string }>
+  } = {
+    authorizedReportIds: [],
+    pendingPayments: [],
+    aiChartLinks: [],
+  }
+
+  return {
+    calls,
+    deps: {
+      generateMerchantOrderNo: () => merchantOrderNo,
+      getNewebPayConfig: () => fakeConfig,
+      createNewebPayMpgPaymentData: (paymentInput: Parameters<typeof createNewebPayMpgPaymentData>[0]) =>
+        buildPaymentData(paymentInput),
+      authorizeAiChartReportPayment: async (reportId: string) => {
+        calls.authorizedReportIds.push(reportId)
+        return input.authorization ?? { ok: true as const, userId: aiChartReportOwnerId }
+      },
+      getAiChartReportPaymentContext: async () =>
+        input.report ?? {
+          id: aiChartReportId,
+          amountTwd: 100,
+          paymentStatus: 'pending',
+          paymentId: null,
+          merchantOrderNo: null,
+        },
+      createPendingPayment: async (paymentInput: CreatePendingPaymentInput) => {
+        calls.pendingPayments.push(paymentInput)
+        return { id: paymentId }
+      },
+      linkAiChartReportPendingPayment: async (linkInput: {
+        reportId: string
+        paymentId: string
+        merchantOrderNo: string
+      }) => {
+        calls.aiChartLinks.push(linkInput)
+        return { result: 'linked' as const, reportId: linkInput.reportId }
       },
     },
   }
@@ -572,6 +636,68 @@ test('product order response does not expose backend secrets or raw payload', as
   assert.equal('rawPayload' in json, false)
   assert.equal('customerPhone' in json, false)
   assert.equal('customerEmail' in json, false)
+})
+
+test('AI 命盤付款在沒有 Bearer session 時回傳 unauthorized', async () => {
+  const { calls, deps } = createAiChartDeps({ authorization: { ok: false, reason: 'unauthorized' } })
+  const response = await handleCreateNewebPayPaymentRequest(validAiChartBody(), deps)
+
+  assert.equal(response.status, 401)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'unauthorized' })
+  assert.deepEqual(calls.pendingPayments, [])
+})
+
+test('AI 命盤付款在 Bearer session 無效時回傳 unauthorized', async () => {
+  const { calls, deps } = createAiChartDeps({ authorization: { ok: false, reason: 'unauthorized' } })
+  const response = await handleCreateNewebPayPaymentRequest(validAiChartBody(), deps)
+
+  assert.equal(response.status, 401)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'unauthorized' })
+  assert.deepEqual(calls.pendingPayments, [])
+})
+
+test('AI 命盤付款將不存在的 report 隱藏為 not found', async () => {
+  const { calls, deps } = createAiChartDeps({ authorization: { ok: false, reason: 'not_found' } })
+  const response = await handleCreateNewebPayPaymentRequest(validAiChartBody(), deps)
+
+  assert.equal(response.status, 404)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'ai_chart_report_not_found' })
+  assert.deepEqual(calls.pendingPayments, [])
+})
+
+test('AI 命盤付款將其他使用者的 report 隱藏為 not found', async () => {
+  const { calls, deps } = createAiChartDeps({ authorization: { ok: false, reason: 'not_found' } })
+  const response = await handleCreateNewebPayPaymentRequest(validAiChartBody(), deps)
+
+  assert.equal(response.status, 404)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'ai_chart_report_not_found' })
+  assert.deepEqual(calls.pendingPayments, [])
+})
+
+test('AI 命盤 owner 可建立付款，且 payment userId 採用 server 驗證的 owner', async () => {
+  const { calls, deps } = createAiChartDeps()
+  const response = await handleCreateNewebPayPaymentRequest(validAiChartBody(), deps)
+
+  assert.equal(response.status, 200)
+  assert.equal((await readJson(response)).ok, true)
+  assert.deepEqual(calls.authorizedReportIds, [aiChartReportId])
+  assert.equal(calls.pendingPayments.length, 1)
+  assert.equal(calls.pendingPayments[0].userId, aiChartReportOwnerId)
+  assert.deepEqual(calls.aiChartLinks, [{ reportId: aiChartReportId, paymentId, merchantOrderNo }])
+})
+
+test('AI 命盤付款不採用 request body 的 userId 決定 owner', async () => {
+  const { calls, deps } = createAiChartDeps()
+  const response = await handleCreateNewebPayPaymentRequest(
+    { ...validAiChartBody(), userId: 'attacker-controlled-user-id' } as unknown as Parameters<
+      typeof handleCreateNewebPayPaymentRequest
+    >[0],
+    deps,
+  )
+
+  assert.equal(response.status, 200)
+  assert.equal(calls.pendingPayments.length, 1)
+  assert.equal(calls.pendingPayments[0].userId, aiChartReportOwnerId)
 })
 
 async function runTests() {
