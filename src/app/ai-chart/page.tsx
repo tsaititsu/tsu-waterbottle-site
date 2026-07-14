@@ -1,5 +1,9 @@
+import type { Metadata } from 'next'
 import { ChartBirthForm } from '@/components/ChartBirthForm'
 import { PageHero } from '@/components/PageHero'
+import { createPublicMetadata, PUBLIC_PAGE_METADATA } from '@/lib/seo/publicMetadata'
+
+export const metadata: Metadata = createPublicMetadata(PUBLIC_PAGE_METADATA.aiChart)
 
 type AiChartPageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>

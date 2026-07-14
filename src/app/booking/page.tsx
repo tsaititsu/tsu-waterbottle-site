@@ -1,8 +1,12 @@
+import type { Metadata } from 'next'
 import { BookingForm } from '@/components/BookingForm'
 import { PageHero } from '@/components/PageHero'
 import { AddConsultationToCartButton } from '@/components/AddConsultationToCartButton'
 import { shouldHideConsultationServices } from '@/lib/siteVisibility'
 import { redirect } from 'next/navigation'
+import { createPublicMetadata, PUBLIC_PAGE_METADATA } from '@/lib/seo/publicMetadata'
+
+export const metadata: Metadata = createPublicMetadata(PUBLIC_PAGE_METADATA.booking)
 
 type BookingPageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>

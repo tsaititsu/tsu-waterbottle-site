@@ -7,11 +7,15 @@ import { FloatingLineButton } from '@/components/FloatingLineButton'
 import { CartProvider } from '@/components/CartContext'
 import { Header } from '@/components/Header'
 import { MobileBottomNav } from '@/components/MobileBottomNav'
+import { SITE_DESCRIPTION, SITE_NAME, SITE_TITLE } from '@/lib/seo/publicMetadata'
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? 'https://tsu-waterbottle.com'),
-  title: 'WATERBOTTLE 紫微命理',
-  description: '紫微命盤分析、紫微牌卡占卜、水瓶先生論命預約與紫微課程服務。',
+  title: {
+    default: SITE_TITLE,
+    template: `%s｜${SITE_TITLE}`,
+  },
+  description: SITE_DESCRIPTION,
   icons: {
     icon: [
       {
@@ -22,16 +26,17 @@ export const metadata: Metadata = {
     shortcut: '/brand/waterbottle-logo-transparent-cropped.png',
     apple: '/brand/waterbottle-logo-web.png'
   },
-  alternates: {
-    canonical: '/'
-  },
   openGraph: {
-    title: 'WATERBOTTLE 紫微命理',
-    description: '紫微命盤分析、紫微牌卡占卜、水瓶先生論命預約與紫微課程服務。',
-    url: '/',
-    siteName: 'WATERBOTTLE',
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    siteName: SITE_NAME,
     locale: 'zh_TW',
     type: 'website'
+  },
+  twitter: {
+    card: 'summary',
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
   }
 }
 
