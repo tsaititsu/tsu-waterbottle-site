@@ -4,7 +4,14 @@ import {
   createPendingAiChartReport,
   type CreatePendingAiChartReportResult,
 } from '../../../../../lib/supabase/aiChartReports'
-import { parseAiChartBirthInput } from '@/lib/ai-chart/birthInput'
+import {
+  parseAiChartBirthInput,
+  type CanonicalAiChartBirthInput,
+} from '@/lib/ai-chart/birthInput'
+import {
+  createCanonicalAiChartSnapshot,
+} from '@/lib/ai-chart/chartSnapshot.server'
+import type { CanonicalAiChartSnapshot } from '@/lib/ai-chart/chartSnapshot'
 
 export type CreateAiChartReportRequest = {
   title?: unknown
@@ -14,6 +21,9 @@ export type CreateAiChartReportRequest = {
 }
 
 type CreatePendingAiChartReportDependency = typeof createPendingAiChartReport
+type CreateChartSnapshotDependency = (
+  input: CanonicalAiChartBirthInput,
+) => CanonicalAiChartSnapshot
 
 const DEFAULT_AI_CHART_REPORT_TITLE = 'AI 命盤分析'
 const DEFAULT_AI_CHART_REPORT_PRODUCT_NAME = 'AI 命盤分析'
@@ -69,9 +79,23 @@ function createReportSuccessResponse(report: CreatePendingAiChartReportResult) {
   })
 }
 
-function createReportFailedResponse(error: unknown) {
+function createChartCalculationFailedResponse() {
+  console.error('AI 命盤 Server 排盤失敗', {
+    error: 'ai_chart_calculation_failed',
+  })
+
+  return NextResponse.json(
+    {
+      ok: false,
+      error: 'ai_chart_calculation_failed',
+    },
+    { status: 500 },
+  )
+}
+
+function createReportFailedResponse() {
   console.error('建立 AI 命盤 pending report 失敗', {
-    error: error instanceof Error ? error.message : 'unknown_error',
+    error: 'ai_chart_report_create_failed',
   })
 
   return NextResponse.json(
@@ -88,6 +112,7 @@ export async function handleCreateAiChartReportRequest(
   body: CreateAiChartReportRequest | null,
   deps: {
     getUserIdFromRequest: (request: Request) => Promise<string | null>
+    createChartSnapshot?: CreateChartSnapshotDependency
     createPendingAiChartReport?: CreatePendingAiChartReportDependency
   },
 ): Promise<Response> {
@@ -157,11 +182,20 @@ export async function handleCreateAiChartReportRequest(
     )
   }
 
+  let chartSnapshot: CanonicalAiChartSnapshot
+  try {
+    const createSnapshot = deps.createChartSnapshot ?? createCanonicalAiChartSnapshot
+    chartSnapshot = createSnapshot(parsedBirthInput.value)
+  } catch {
+    return createChartCalculationFailedResponse()
+  }
+
   try {
     const createReport = deps.createPendingAiChartReport ?? createPendingAiChartReport
     const report = await createReport({
       userId,
       birthInputSnapshot: parsedBirthInput.value,
+      chartSnapshot,
       chartProfileId: null,
       title,
       productName,
@@ -170,7 +204,7 @@ export async function handleCreateAiChartReportRequest(
     })
 
     return createReportSuccessResponse(report)
-  } catch (error) {
-    return createReportFailedResponse(error)
+  } catch {
+    return createReportFailedResponse()
   }
 }

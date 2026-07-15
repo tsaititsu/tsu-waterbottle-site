@@ -4,6 +4,12 @@ import {
   type CanonicalAiChartBirthInput,
 } from '@/lib/ai-chart/birthInput'
 import {
+  AI_CHART_ENGINE_NAME,
+  AI_CHART_ENGINE_VERSION,
+  AI_CHART_SNAPSHOT_VERSION,
+  type CanonicalAiChartSnapshot,
+} from '@/lib/ai-chart/chartSnapshot'
+import {
   buildAiChartReportCompletedPayload,
   buildAiChartReportFailedPayload,
   buildAiChartReportPaidUpdatePayload,
@@ -154,11 +160,53 @@ const canonicalBirthInput: CanonicalAiChartBirthInput = {
   name: '測試者',
   fixLeap: false,
 }
+const palaceNames = [
+  '命宮',
+  '兄弟',
+  '夫妻',
+  '子女',
+  '財帛',
+  '疾厄',
+  '遷移',
+  '僕役',
+  '官祿',
+  '田宅',
+  '福德',
+  '父母',
+] as const
+const heavenlyStems = ['甲', '乙', '丙', '丁', '戊', '己', '庚', '辛', '壬', '癸', '甲', '乙'] as const
+const earthlyBranches = ['子', '丑', '寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥'] as const
+const canonicalChartSnapshot: CanonicalAiChartSnapshot = {
+  version: AI_CHART_SNAPSHOT_VERSION,
+  source: AI_CHART_ENGINE_NAME,
+  engineVersion: AI_CHART_ENGINE_VERSION,
+  birthInputVersion: AI_CHART_BIRTH_INPUT_VERSION,
+  lunarDate: '庚午年四月廿六',
+  fiveElementsClass: '木三局',
+  palaces: palaceNames.map((name, index) => ({
+    index,
+    name,
+    isMingPalace: index === 0,
+    isBodyPalace: index === 1,
+    heavenlyStem: heavenlyStems[index],
+    earthlyBranch: earthlyBranches[index],
+    majorStars: index === 0 ? [{ name: '紫微', type: 'major', scope: 'origin' }] : [],
+    minorStars: [],
+    adjectiveStars: [],
+    decadal: {
+      range: [index + 1, index + 10],
+      heavenlyStem: heavenlyStems[index],
+      earthlyBranch: earthlyBranches[index],
+    },
+    ages: [index + 1],
+  })),
+}
 
 const pendingReportPayload = buildPendingAiChartReportPayload(
   {
     userId: 'user-1',
     birthInputSnapshot: canonicalBirthInput,
+    chartSnapshot: canonicalChartSnapshot,
     chartProfileId: 'chart-profile-1',
     title: '紫微命盤完整分析',
     productName: 'AI 命盤分析',
@@ -171,6 +219,7 @@ const pendingReportPayload = buildPendingAiChartReportPayload(
 assert.deepEqual(pendingReportPayload, {
   user_id: 'user-1',
   birth_input_snapshot: canonicalBirthInput,
+  chart_snapshot: canonicalChartSnapshot,
   chart_profile_id: 'chart-profile-1',
   title: '紫微命盤完整分析',
   product_name: 'AI 命盤分析',
@@ -187,6 +236,7 @@ const pendingReportPayloadWithTrimmedText = buildPendingAiChartReportPayload(
   {
     userId: '  user-2  ',
     birthInputSnapshot: canonicalBirthInput,
+    chartSnapshot: canonicalChartSnapshot,
     chartProfileId: null,
     title: '  AI 命盤分析  ',
     productName: '  紫微命盤完整分析  ',
@@ -219,6 +269,7 @@ const originalBirthInput = structuredClone(mutableBirthInput)
 const isolatedSnapshotPayload = buildPendingAiChartReportPayload({
   userId: 'user-snapshot-isolation',
   birthInputSnapshot: mutableBirthInput,
+  chartSnapshot: canonicalChartSnapshot,
   title: 'AI 命盤分析',
   productName: 'AI 命盤分析',
   amountTwd: 100,
@@ -253,6 +304,51 @@ for (const forbiddenField of [
   'openAiResponse',
 ]) {
   assert.equal(forbiddenField in isolatedSnapshotPayload.birth_input_snapshot, false, forbiddenField)
+}
+
+const mutableChartSnapshot = Object.assign(structuredClone(canonicalChartSnapshot), {
+  horoscope: 'must-not-persist',
+  chartContext: { palaces: [] },
+  prompt: 'must-not-persist',
+})
+const expectedIsolatedChartSnapshot = structuredClone(canonicalChartSnapshot)
+const isolatedChartPayload = buildPendingAiChartReportPayload({
+  userId: 'user-chart-snapshot-isolation',
+  birthInputSnapshot: canonicalBirthInput,
+  chartSnapshot: mutableChartSnapshot,
+  title: 'AI 命盤分析',
+  productName: 'AI 命盤分析',
+  amountTwd: 100,
+})
+
+assert.notEqual(isolatedChartPayload.chart_snapshot, mutableChartSnapshot)
+assert.notEqual(isolatedChartPayload.chart_snapshot.palaces, mutableChartSnapshot.palaces)
+assert.notEqual(isolatedChartPayload.chart_snapshot.palaces[0], mutableChartSnapshot.palaces[0])
+assert.notEqual(
+  isolatedChartPayload.chart_snapshot.palaces[0].majorStars[0],
+  mutableChartSnapshot.palaces[0].majorStars[0],
+)
+assert.notEqual(
+  isolatedChartPayload.chart_snapshot.palaces[0].decadal.range,
+  mutableChartSnapshot.palaces[0].decadal.range,
+)
+mutableChartSnapshot.palaces[0].name = '修改後宮名'
+mutableChartSnapshot.palaces[0].majorStars[0].name = '修改後星曜'
+mutableChartSnapshot.palaces[0].ages[0] = 999
+assert.deepEqual(isolatedChartPayload.chart_snapshot, expectedIsolatedChartSnapshot)
+for (const forbiddenField of [
+  'horoscope',
+  'chartContext',
+  'keyPalaces',
+  'mutagenSummary',
+  'sanFangSiZheng',
+  'messages',
+  'prompt',
+  'responseSchema',
+  'openAiRequest',
+  'openAiResponse',
+]) {
+  assert.equal(JSON.stringify(isolatedChartPayload.chart_snapshot).includes(`"${forbiddenField}"`), false)
 }
 
 const pendingPaymentLinkPayload = buildAiChartReportPendingPaymentLinkPayload(
@@ -548,6 +644,7 @@ assert.throws(
     buildPendingAiChartReportPayload({
       userId: 'user-1',
       birthInputSnapshot: canonicalBirthInput,
+      chartSnapshot: canonicalChartSnapshot,
       title: '',
       productName: 'AI 命盤分析',
       amountTwd: 100,
@@ -559,6 +656,7 @@ assert.throws(
     buildPendingAiChartReportPayload({
       userId: 'user-1',
       birthInputSnapshot: canonicalBirthInput,
+      chartSnapshot: canonicalChartSnapshot,
       title: '紫微命盤完整分析',
       productName: 'AI 命盤分析',
       amountTwd: 0,
@@ -570,6 +668,7 @@ assert.throws(
     buildPendingAiChartReportPayload({
       userId: '  ',
       birthInputSnapshot: canonicalBirthInput,
+      chartSnapshot: canonicalChartSnapshot,
       title: '紫微命盤完整分析',
       productName: 'AI 命盤分析',
       amountTwd: 100,
@@ -619,6 +718,7 @@ async function runAsyncHelperTests() {
     {
       userId: 'session-owner-1',
       birthInputSnapshot: canonicalBirthInput,
+      chartSnapshot: canonicalChartSnapshot,
       title: '紫微命盤完整分析',
       productName: 'AI 命盤分析',
     },
@@ -634,6 +734,8 @@ async function runAsyncHelperTests() {
   assert.equal(createMock.calls.inserts.length, 1)
   assert.equal(createMock.calls.inserts[0].user_id, 'session-owner-1')
   assert.deepEqual(createMock.calls.inserts[0].birth_input_snapshot, canonicalBirthInput)
+  assert.deepEqual(createMock.calls.inserts[0].chart_snapshot, canonicalChartSnapshot)
+  assert.notEqual(createMock.calls.inserts[0].chart_snapshot, canonicalChartSnapshot)
   assert.equal(createMock.calls.inserts[0].chart_profile_id, null)
   assert.equal(createMock.calls.inserts[0].title, '紫微命盤完整分析')
   assert.equal(createMock.calls.inserts[0].product_name, 'AI 命盤分析')
@@ -660,6 +762,7 @@ async function runAsyncHelperTests() {
     {
       userId: 'session-owner-2',
       birthInputSnapshot: canonicalBirthInput,
+      chartSnapshot: canonicalChartSnapshot,
       chartProfileId: null,
       title: 'AI 命盤分析',
       productName: '紫微命盤完整分析',
@@ -685,6 +788,7 @@ async function runAsyncHelperTests() {
     {
       userId: 'user-1',
       birthInputSnapshot: canonicalBirthInput,
+      chartSnapshot: canonicalChartSnapshot,
       chartProfileId: null,
       title: 'AI 命盤分析',
       productName: '紫微命盤完整分析',
@@ -710,6 +814,7 @@ async function runAsyncHelperTests() {
         {
           userId: 'session-owner-4',
           birthInputSnapshot: canonicalBirthInput,
+          chartSnapshot: canonicalChartSnapshot,
           title: 'AI 命盤分析',
           productName: '紫微命盤完整分析',
         },
