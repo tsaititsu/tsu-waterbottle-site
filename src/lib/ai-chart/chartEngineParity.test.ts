@@ -14,6 +14,12 @@ const syntheticInputs: ServerChartInput[] = [
     fixLeap: false,
   },
   {
+    solarDate: '1990-05-20',
+    timeIndex: 6,
+    gender: 'female',
+    fixLeap: true,
+  },
+  {
     solarDate: '1988-02-17',
     timeIndex: 0,
     gender: 'male',
