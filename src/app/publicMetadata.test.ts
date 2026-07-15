@@ -21,10 +21,18 @@ for (const [index, entry] of entries.entries()) {
   assert.equal(pageMetadata.openGraph?.url, entry.path)
   assert.equal(pageMetadata.openGraph?.description, entry.description)
   assert.ok(pageMetadata.twitter && 'card' in pageMetadata.twitter)
-  assert.equal(pageMetadata.twitter.card, 'summary')
+  assert.equal(pageMetadata.twitter.card, 'summary_large_image')
   assert.equal(pageMetadata.twitter.description, entry.description)
-  assert.equal(pageMetadata.openGraph?.images, undefined)
-  assert.equal(pageMetadata.twitter.images, undefined)
+  assert.deepEqual(pageMetadata.openGraph?.images, [
+    {
+      url: '/opengraph-image',
+      width: 1200,
+      height: 630,
+      alt: 'WATERBOTTLE 紫微命理',
+      type: 'image/png',
+    },
+  ])
+  assert.deepEqual(pageMetadata.twitter.images, ['/twitter-image'])
 }
 
 assert.deepEqual(metadata[0].title, { absolute: SITE_TITLE })

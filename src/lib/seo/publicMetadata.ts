@@ -70,11 +70,21 @@ export function createPublicMetadata({
       siteName: SITE_NAME,
       locale: 'zh_TW',
       type: 'website',
+      images: [
+        {
+          url: '/opengraph-image',
+          width: 1200,
+          height: 630,
+          alt: 'WATERBOTTLE 紫微命理',
+          type: 'image/png',
+        },
+      ],
     },
     twitter: {
-      card: 'summary',
+      card: 'summary_large_image',
       title: socialTitle,
       description,
+      images: ['/twitter-image'],
     },
   }
 }
