@@ -175,6 +175,6 @@ GitHub auto-merge 必須由 Repository 事先啟用。Codex 不直接執行 `gh 
 - 已提交工作分支。
 - 已使用 `codex-safe-push` 推送。
 - 已建立 PR。
-- 已標示風險等級與合併方式。
+- 已標示 PR 合併風險與合併方式。
 - 任務指令、完成報告與 PR 已標示 SOL 模式及 Codex 任務等級。
 - 低風險 PR 僅交由已設定的 auto-merge；UI 已完成人工畫面確認；高風險未自動合併。
