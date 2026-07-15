@@ -485,7 +485,7 @@ export async function createPendingAiChartReport(
     .single()
 
   if (error) {
-    throw new Error(error.message)
+    throw new Error('ai_chart_report_create_failed')
   }
 
   if (!data) {

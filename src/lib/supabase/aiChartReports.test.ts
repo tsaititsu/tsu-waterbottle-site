@@ -820,7 +820,12 @@ async function runAsyncHelperTests() {
         },
         createFailureMock.supabase,
       ),
-    /insert_failed/,
+    (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.equal(error.message, 'ai_chart_report_create_failed')
+      assert.equal(error.message.includes('insert_failed'), false)
+      return true
+    },
   )
   assert.equal(createFailureMock.calls.inserts.length, 1)
 
