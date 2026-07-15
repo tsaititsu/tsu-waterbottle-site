@@ -1,5 +1,9 @@
 import { getSupabaseAdmin } from './admin'
 import type { CanonicalAiChartBirthInput } from '@/lib/ai-chart/birthInput'
+import {
+  copyCanonicalAiChartSnapshot,
+  type CanonicalAiChartSnapshot,
+} from '@/lib/ai-chart/chartSnapshot'
 
 export type AiChartReportPaymentStatus = 'pending' | 'paid' | 'failed' | 'canceled' | 'refunded'
 export const AI_CHART_REPORT_DEFAULT_AMOUNT_TWD = 100
@@ -7,6 +11,7 @@ export const AI_CHART_REPORT_DEFAULT_AMOUNT_TWD = 100
 export type BuildPendingAiChartReportPayloadInput = {
   userId: string
   birthInputSnapshot: CanonicalAiChartBirthInput
+  chartSnapshot: CanonicalAiChartSnapshot
   chartProfileId?: string | null
   title: string
   productName: string
@@ -17,6 +22,7 @@ export type BuildPendingAiChartReportPayloadInput = {
 export type CreatePendingAiChartReportInput = {
   userId: string
   birthInputSnapshot: CanonicalAiChartBirthInput
+  chartSnapshot: CanonicalAiChartSnapshot
   chartProfileId?: string | null
   title: string
   productName: string
@@ -32,6 +38,7 @@ export type CreatePendingAiChartReportResult = {
 export type PendingAiChartReportPayload = {
   user_id: string
   birth_input_snapshot: CanonicalAiChartBirthInput
+  chart_snapshot: CanonicalAiChartSnapshot
   chart_profile_id: string | null
   title: string
   product_name: string
@@ -264,6 +271,7 @@ export function buildPendingAiChartReportPayload(
       ...(input.birthInputSnapshot.name ? { name: input.birthInputSnapshot.name } : {}),
       fixLeap: input.birthInputSnapshot.fixLeap,
     },
+    chart_snapshot: copyCanonicalAiChartSnapshot(input.chartSnapshot),
     chart_profile_id: normalizeOptionalText(input.chartProfileId),
     title: normalizeRequiredText(input.title, 'title'),
     product_name: normalizeRequiredText(input.productName, 'productName'),
@@ -462,6 +470,7 @@ export async function createPendingAiChartReport(
   const payload = buildPendingAiChartReportPayload({
     userId: input.userId,
     birthInputSnapshot: input.birthInputSnapshot,
+    chartSnapshot: input.chartSnapshot,
     chartProfileId: input.chartProfileId,
     title: input.title,
     productName: input.productName,
@@ -476,7 +485,7 @@ export async function createPendingAiChartReport(
     .single()
 
   if (error) {
-    throw new Error(error.message)
+    throw new Error('ai_chart_report_create_failed')
   }
 
   if (!data) {
