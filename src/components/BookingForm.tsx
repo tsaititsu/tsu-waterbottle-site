@@ -255,7 +255,6 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
     }
 
     return {
-      userId: user.id,
       slotId: selectedBookingSlot.id,
       planId,
       startTime,

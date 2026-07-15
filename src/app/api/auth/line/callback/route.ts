@@ -6,6 +6,7 @@ import {
   LINE_NEXT_COOKIE,
   LINE_NONCE_COOKIE,
   LINE_SESSION_COOKIE,
+  LINE_SESSION_MAX_AGE_SECONDS,
   LINE_STATE_COOKIE,
   sanitizeNextPath,
   upsertLineSupabaseUser,
@@ -78,7 +79,7 @@ export async function GET(request: NextRequest) {
       sameSite: 'lax',
       secure: secureCookie(request),
       path: '/',
-      maxAge: 60 * 60 * 24 * 30,
+      maxAge: LINE_SESSION_MAX_AGE_SECONDS,
     })
     clearTransientCookies(response)
 

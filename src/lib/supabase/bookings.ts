@@ -67,6 +67,22 @@ export type BookingMemberUpdate = {
   cancellationReason?: string
 }
 
+export type CreateSupabaseBookingInput = Omit<BookingFormInput, 'userId'> & {
+  userId: string
+}
+
+type CreateSupabaseBookingDependencies = {
+  hasAdminConfig: typeof hasSupabaseAdminConfig
+  getAdminClient: typeof getSupabaseAdmin
+  now: () => Date
+}
+
+const createSupabaseBookingDependencies: CreateSupabaseBookingDependencies = {
+  hasAdminConfig: hasSupabaseAdminConfig,
+  getAdminClient: getSupabaseAdmin,
+  now: () => new Date(),
+}
+
 function normalizeBirthTime(value: string) {
   return value.length === 5 ? `${value}:00` : value
 }
@@ -110,13 +126,19 @@ export function mapBookingRow(row: BookingRow): BookingRecord {
   }
 }
 
-export async function createSupabaseBooking(input: BookingFormInput) {
-  if (!hasSupabaseAdminConfig()) return null
+export async function createSupabaseBooking(
+  input: CreateSupabaseBookingInput,
+  deps: CreateSupabaseBookingDependencies = createSupabaseBookingDependencies,
+) {
+  const userId = typeof input.userId === 'string' ? input.userId.trim() : ''
+  if (!userId) throw new Error('Booking userId 不可為空')
+
+  if (!deps.hasAdminConfig()) return null
 
   const plan = getBookingPlan(input.planId)
   if (!plan) throw new Error('方案不存在')
 
-  const supabase = getSupabaseAdmin()
+  const supabase = deps.getAdminClient()
 
   const { data: planRecord, error: planLookupError } = await supabase
     .from('consultation_plans')
@@ -145,7 +167,7 @@ export async function createSupabaseBooking(input: BookingFormInput) {
     .from('bookings')
     .insert({
       plan_id: input.planId,
-      user_id: input.userId ?? null,
+      user_id: userId,
       plan_name: plan.name,
       amount_twd: plan.price,
       currency: 'TWD',
@@ -165,7 +187,7 @@ export async function createSupabaseBooking(input: BookingFormInput) {
       starts_at: input.startTime,
       ends_at: input.endTime,
       timezone: 'Asia/Taipei',
-      accepted_notice_at: new Date().toISOString()
+      accepted_notice_at: deps.now().toISOString()
     })
     .select('*')
     .single()

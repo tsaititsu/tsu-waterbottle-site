@@ -9,6 +9,9 @@ export const LINE_STATE_COOKIE = 'waterbottle_line_state'
 export const LINE_NONCE_COOKIE = 'waterbottle_line_nonce'
 export const LINE_NEXT_COOKIE = 'waterbottle_line_next'
 export const LINE_SESSION_COOKIE = 'waterbottle_line_session'
+export const LINE_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
+
+const LINE_SESSION_FUTURE_TOLERANCE_SECONDS = 60
 
 const LINE_AUTHORIZE_URL = 'https://access.line.me/oauth2/v2.1/authorize'
 const LINE_TOKEN_URL = 'https://api.line.me/oauth2/v2.1/token'
@@ -302,12 +305,24 @@ function signPayload(payload: string) {
   return toBase64Url(createHmac('sha256', secret).update(payload).digest())
 }
 
-export function createLineSessionCookieValue(user: UserProfile) {
-  const payload = toBase64Url(JSON.stringify({ user, iat: Date.now() }))
+export function createLineSessionCookieValue(user: UserProfile, now = new Date()) {
+  const payload = toBase64Url(
+    JSON.stringify({ user, iat: Math.floor(now.getTime() / 1000) }),
+  )
   return `${payload}.${signPayload(payload)}`
 }
 
-export function readLineSessionCookieValue(value?: string | null) {
+function normalizeLineSessionIssuedAtSeconds(iat: unknown) {
+  if (typeof iat !== 'number' || !Number.isInteger(iat) || iat <= 0) return null
+
+  // 既有 Cookie 使用 Unix 毫秒；在其自然到期前仍套用相同 TTL 驗證。
+  return iat > 10_000_000_000 ? Math.floor(iat / 1000) : iat
+}
+
+export function readLineSessionCookieValue(
+  value?: string | null,
+  now = new Date(),
+) {
   if (!value) return null
 
   const [payload, signature] = value.split('.')
@@ -329,9 +344,18 @@ export function readLineSessionCookieValue(value?: string | null) {
   try {
     const parsed = JSON.parse(fromBase64Url(payload).toString('utf8')) as {
       user?: UserProfile
+      iat?: unknown
     }
 
-    return parsed.user?.provider === 'line' ? parsed.user : null
+    const nowSeconds = Math.floor(now.getTime() / 1000)
+    const issuedAtSeconds = normalizeLineSessionIssuedAtSeconds(parsed.iat)
+    if (!Number.isFinite(nowSeconds) || issuedAtSeconds === null) return null
+    if (issuedAtSeconds > nowSeconds + LINE_SESSION_FUTURE_TOLERANCE_SECONDS) return null
+    if (nowSeconds - issuedAtSeconds > LINE_SESSION_MAX_AGE_SECONDS) return null
+
+    return parsed.user?.provider === 'line' && parsed.user.id?.trim()
+      ? parsed.user
+      : null
   } catch {
     return null
   }
