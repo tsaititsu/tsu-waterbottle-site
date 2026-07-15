@@ -61,6 +61,24 @@
 - 不自動合併。
 - 由老師人工檢查 Preview。
 
+## LINE Pay Gateway 成本與停用注意事項
+
+LINE Pay 官方直串將使用 DigitalOcean Droplet 搭配 Reserved IPv4，作為固定出口 IP Gateway。
+
+Reserved IPv4 綁定在 Droplet 上時不另外收取 IP 費用；若 Reserved IPv4 保留在帳號內，但沒有綁定任何 Droplet，將產生額外費用。
+
+因此，未來若網站永久關閉、商品付款功能停止，或不再使用 LINE Pay 官方直串，必須同步停用下列資源：
+
+1. 關閉網站購物車的 LINE Pay 付款入口。
+2. 停止 LINE Pay 背景對帳、補單與退款排程。
+3. 移除 Vercel 與 Gateway 內的 LINE Pay 金鑰及內部驗證金鑰。
+4. 向 LINE Pay 移除固定 IP 白名單或停用該付款 Channel。
+5. 刪除 DigitalOcean Gateway Droplet。
+6. 刪除 DigitalOcean Reserved IPv4，不可只解除綁定。
+7. 刪除 Gateway 使用的網域、DNS、SSL 與監控設定。
+
+注意：網站與 Gateway 是同一套付款系統。網站停止營運時，Gateway、Reserved IP、LINE Pay Channel 與相關排程也必須一併停用，避免留下持續計費、安全漏洞或仍可被呼叫的付款服務。
+
 ## 5. 資料庫環境與資料建立
 
 ### Local／Preview
