@@ -3,9 +3,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { UserProfile } from '@/lib/auth/types'
 import type { BookingRecord } from '@/lib/mockBooking'
-import {
-  handleBookingCreateRequest,
-} from './route'
+import * as bookingCreateRoute from './route'
+import { handleBookingCreateRequest } from './handler'
 
 const tests: Array<{ name: string; fn: () => Promise<void> }> = []
 const BEARER_USER_ID = '5f0b8f2e-1234-4c56-9abc-def012345678'
@@ -420,6 +419,21 @@ test('Debug flag 開啟且 Booking 寫入失敗時 500 仍固定並還原時段'
 
     await assertSafeInternalErrorResponse(response)
     assert.equal(restoreCalls, 1)
+  })
+})
+
+test('Route entry 只匯出合法 POST 且 production POST 使用受測 handler', async () => {
+  const exportKeys = Object.keys(bookingCreateRoute)
+    .filter((key) => key !== 'default')
+    .sort()
+
+  assert.deepEqual(exportKeys, ['POST'])
+
+  const response = await bookingCreateRoute.POST(request(validBody()))
+  assert.equal(response.status, 401)
+  assert.deepEqual(await readJson(response), {
+    ok: false,
+    message: '請先登入會員，再建立預約。',
   })
 })
 
