@@ -1,0 +1,155 @@
+{
+  "manifestVersion": "ai-chart-d1-assets/v1",
+  "scope": "D1",
+  "baseCommit": "e2ee817010e55e86f764f8a397f596ead300f321",
+  "modelTarget": "gpt-5.6-sol",
+  "modelEnvironmentVariable": "OPENAI_AI_CHART_MODEL",
+  "runtimeEnabled": false,
+  "sourceRoot": "AI 命盤 OpenAI/",
+  "files": [
+    {
+      "path": "content/ai-chart/d1-v1/prompt/0_主控.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/0_主控.md",
+      "sha256": "a45ac9e0990570f1d6ae12205d2438835ebedba2016e1a35985ff48a146fc186",
+      "classification": "prompt",
+      "status": "prompt_source_candidate",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/prompt/1_五步任務卡.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/1_五步任務卡.md",
+      "sha256": "5c662f8f7879cc19f6a68eb94dea36f015b5986dac1cedbe7291310e1c98b465",
+      "classification": "prompt",
+      "status": "prompt_source_candidate",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/quality/2_風格與品管.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/2_風格與品管.md",
+      "sha256": "d164e44292d69aadb5855fb47a3dd355f64cbe3aa0d674d09c6a7bf968a030f2",
+      "classification": "quality_rules",
+      "status": "prompt_source_candidate",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/spec/reference/3_網站API管線設計.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/3_網站API管線設計.md",
+      "sha256": "770b23bb1c46acf430e1e5cd8bd4aa25e7b6f1e62aab4902b829dbfc4af574fc",
+      "classification": "reference_spec",
+      "status": "reference_only",
+      "runtimeEligible": false,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/knowledge/reasoning/06_D1_飛化推理模組.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/紫微斗數_AI推理引擎_工作區 /06_D1_飛化推理模組.md",
+      "sha256": "af5714687ec1bb55ace472b9af986c4eaf99c8cd5bd348b093c06ea18b517c20",
+      "classification": "reasoning_knowledge",
+      "status": "reasoning_source_candidate",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/spec/primary/20_D1_本命人格推理總控流程.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/紫微斗數_AI推理引擎_工作區 /20_D1_本命人格推理總控流程.md",
+      "sha256": "a9542911383120051026e242b61efed52aa26edda930a8fef2bb546581feee51",
+      "classification": "primary_engineering_spec",
+      "status": "primary_spec",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/spec/primary/21_D1_OpenAI多次呼叫編排規格.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/紫微斗數_AI推理引擎_工作區 /21_D1_OpenAI多次呼叫編排規格.md",
+      "sha256": "f9d5f106f0e8930efc57bead0ffff25824d8b3a85e4d9e3559bd6cb247da7ad9",
+      "classification": "primary_engineering_spec",
+      "status": "primary_spec",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/spec/drafts/22_D1_各呼叫輸入輸出Schema_工作版.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/紫微斗數_AI推理引擎_工作區 /22_D1_各呼叫輸入輸出Schema_工作版.md",
+      "sha256": "4e7dc85b552fdded8a0330ee39a2480253d1bf0f30a9b2a39d3a398d1635e944",
+      "classification": "draft_schema_spec",
+      "status": "draft",
+      "runtimeEligible": false,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/spec/reference/23_Codex_D1多呼叫實作任務包.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/紫微斗數_AI推理引擎_工作區 /23_Codex_D1多呼叫實作任務包.md",
+      "sha256": "01849709d818d8a63135e7acf9900b446d33ca070ff526dd4f9e4c568a9a1ba2",
+      "classification": "reference_spec",
+      "status": "reference_only",
+      "runtimeEligible": false,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/knowledge/README_知識庫使用說明.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/知識庫_v1.0/README_知識庫使用說明.md",
+      "sha256": "b6cb5f6987f7afc6c54aba480f2dcc5c3ca1a262e3002f2221fd90feec4de930",
+      "classification": "current_knowledge_source",
+      "status": "current_source_candidate",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/knowledge/core/A_十四主星與輔煞四化.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/知識庫_v1.0/A_十四主星與輔煞四化.md",
+      "sha256": "d884804902fd587ba95d5bb4c5ec930ffd23b6e92b20a02dc97a0644e21a0592",
+      "classification": "current_knowledge_source",
+      "status": "current_source_candidate",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/knowledge/core/B1_雙星組合_紫府武廉殺破狼相.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/知識庫_v1.0/B1_雙星組合_紫府武廉殺破狼相.md",
+      "sha256": "5e482a826ce03787058c8ee4b72471a4b8d85531f1406451d4d46f2f12217984",
+      "classification": "current_knowledge_source",
+      "status": "current_source_candidate",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/knowledge/core/B2_雙星組合_機月同梁日巨.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/知識庫_v1.0/B2_雙星組合_機月同梁日巨.md",
+      "sha256": "16529a0272a8fced01b09fe6e30b013683cdf57b19874f24bb5299583f3e1ea9",
+      "classification": "current_knowledge_source",
+      "status": "current_source_candidate",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/knowledge/core/C_十二宮分面與身宮疾厄田宅.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/知識庫_v1.0/C_十二宮分面與身宮疾厄田宅.md",
+      "sha256": "987ad55e32bdc7e51e9a220c2a18f2446b385c9a0b4c4b199086ad4d46932598",
+      "classification": "current_knowledge_source",
+      "status": "current_source_candidate",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/knowledge/core/紫微斗數知識庫_v1.2_A_十四主星核心字典_正式定稿版.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/知識庫_v1.0/紫微斗數知識庫_v1.2_A_十四主星核心字典_正式定稿版.md",
+      "sha256": "f029b9e517822a071e50255b9763fcca3805ef98a28b516b721ed8fa0a5757f2",
+      "classification": "formal_knowledge",
+      "status": "formal_confirmed",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/knowledge/core/紫微斗數知識庫_v1.2_A_十四主星核心字典_正式定稿版.json",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/知識庫_v1.0/紫微斗數知識庫_v1.2_A_十四主星核心字典_正式定稿版.json",
+      "sha256": "e95df53e854aec966f0c3df4ec9239b09a3070104f99183c7261267ce09c6a3f",
+      "classification": "formal_knowledge",
+      "status": "formal_confirmed",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    }
+  ]
+}
