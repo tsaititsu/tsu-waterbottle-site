@@ -6,8 +6,14 @@ env_file="${GATEWAY_ENV_FILE:-/etc/line-pay-gateway/gateway.env}"
 caddyfile="${CADDYFILE:-/etc/caddy/Caddyfile}"
 expected_egress_ip="${EXPECTED_EGRESS_IP:-}"
 gateway_bind_port="${GATEWAY_BIND_PORT:-3000}"
+gateway_image_name="${GATEWAY_IMAGE_NAME:-line-pay-fixed-ip-gateway}"
+gateway_image_tag="${GATEWAY_IMAGE_TAG:-}"
+gateway_domain="linepay-gateway.tsu-waterbottle.com"
 minimum_memory_kib="${MINIMUM_MEMORY_KIB:-524288}"
 minimum_disk_kib="${MINIMUM_DISK_KIB:-2097152}"
+
+# shellcheck source=validators.sh
+source "$script_dir/validators.sh"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -84,6 +90,9 @@ pass "Docker Compose plugin is available"
 docker info >/dev/null 2>&1 || fail "Docker daemon is unavailable or the operator lacks permission"
 pass "Docker daemon is reachable"
 
+validate_release_inputs "$gateway_image_name" "$gateway_image_tag"
+pass "Gateway image name and full commit SHA are valid"
+
 [[ -f "$env_file" ]] || fail "Gateway env file is missing: $env_file"
 [[ ! -L "$env_file" ]] || fail "Gateway env file must not be a symbolic link"
 [[ "$(stat -c '%a' "$env_file")" == "600" ]] || fail "Gateway env file mode must be 600"
@@ -123,13 +132,12 @@ gateway_port="$(read_env_value PORT)"
 ((gateway_bind_port >= 1024 && gateway_bind_port <= 65535)) || fail "GATEWAY_BIND_PORT is outside the allowed range"
 
 [[ -f "$caddyfile" ]] || fail "Caddyfile is missing: $caddyfile"
-if grep -Eq '(^|[^A-Za-z0-9.-])linepay-gateway\.example\.com([^A-Za-z0-9.-]|$)' "$caddyfile"; then
-  fail "Caddyfile still contains the placeholder domain"
-fi
+grep -Eq "^${gateway_domain//./\\.}[[:space:]]*\\{" "$caddyfile" \
+  || fail "Caddyfile must use the approved Sandbox domain: $gateway_domain"
 if grep -Eqi 'LINE_PAY_GATEWAY_SECRET|X-Gateway-Signature|X-LINE-Authorization' "$caddyfile"; then
   fail "Caddyfile must not contain secrets or sensitive authorization headers"
 fi
-pass "Caddyfile is non-placeholder and contains no sensitive header names"
+pass "Caddyfile uses the approved Sandbox domain and contains no sensitive header names"
 
 check_port_free 80
 check_port_free 443

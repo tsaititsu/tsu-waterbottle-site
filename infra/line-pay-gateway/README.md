@@ -142,24 +142,32 @@ curl --fail http://127.0.0.1:3000/health
 
 Phase 2A 的可審核部署資料位於 `deploy/`：
 
-- `compose.yaml`：只啟動 Sandbox Gateway，application port 只綁 host localhost。
-- `Caddyfile.example`：使用 placeholder domain 的 HTTPS reverse proxy 範例。
+- `compose.yaml`：只啟動 Sandbox Gateway，application port 只綁 host localhost；必須經 `scripts/compose.sh` 驗證完整 commit SHA 後執行。
+- `Caddyfile.example`：固定使用已核准的 Sandbox domain `linepay-gateway.tsu-waterbottle.com`。
 - `gateway.env.example`：只含假值與欄位格式。
 - `SANDBOX_DEPLOY_RUNBOOK.md`：分階段主機部署、檢查與停止條件。
 - `SANDBOX_ROLLBACK_RUNBOOK.md`：只回復既有 image tag，不刪除資料或雲端資源。
-- `scripts/`：preflight、egress、localhost health、TLS 與 guarded rollback。
+- `scripts/`：完整 SHA／image name validator、受保護 Compose wrapper、preflight、egress、嚴格 localhost health、TLS、secure log directory 與 guarded rollback。
 
 部署架構固定為：
 
 ```text
-Internet :80/:443
+Vercel / browser
+→ https://linepay-gateway.tsu-waterbottle.com :80/:443
 → host Caddy
 → 127.0.0.1:3000
 → Gateway container
-→ LINE Pay Sandbox
+→ LINE Pay Sandbox（來源 IPv4：165.245.144.110）
 ```
 
-Compose 不包含 Caddy container；Caddy 以 host systemd service 執行，才能直接 reverse proxy 到只綁 localhost 的 Gateway port。部署前必須由使用者決定 Sandbox 子網域並人工建立 DNS，本 repository 不猜測或修改 DNS。
+Compose 不包含 Caddy container；Caddy 以 host systemd service 執行，才能直接 reverse proxy 到只綁 localhost 的 Gateway port。
+
+Sandbox 的入站與出站目前共用 Reserved IPv4 `165.245.144.110`，但用途不同：
+
+- 入站：DNS A record `linepay-gateway.tsu-waterbottle.com → 165.245.144.110`，讓網站透過 `https://linepay-gateway.tsu-waterbottle.com` 找到 Gateway。
+- 出站：Gateway 呼叫 LINE Pay Sandbox 時，LINE Pay 看到的來源 IP 是 `165.245.144.110`；LINE Pay 白名單必須使用 `165.245.144.110/32`，不得使用原始 Droplet IP `168.144.142.127`。
+
+建立 A record 前必須先確認 Reserved IP 仍綁定正確 Droplet；部署初期建議 TTL `300` 秒。DNS 尚未生效前不得啟動 Caddy 自動申請正式憑證。本 repository 只記錄已決定的公開網域與 IP，不會修改 DNS、申請憑證或變更 LINE Pay 白名單。
 
 本階段不部署、不產生 secret、不修改 DigitalOcean、防火牆、LINE Pay 後台或 Vercel 環境變數。詳細步驟請從 `deploy/SANDBOX_DEPLOY_RUNBOOK.md` 開始，不要把 runbook 合併成無停頓的一鍵腳本。
 
@@ -181,6 +189,8 @@ Compose 不包含 Caddy container；Caddy 以 host systemd service 執行，才�
 - [ ] 使用獨立隨機 Gateway secret；不重用 Channel Secret，且只透過受控 secret 管理提供。
 - [ ] Droplet 使用 Node 24 container、非 root runtime、restart policy 與最小權限。
 - [ ] Reserved IP 對外出口與 LINE Pay 後台白名單值由人工再次核對。
+- [ ] Reserved IP `165.245.144.110` 仍綁定正確 Droplet；DNS A record 使用該入站 IP，LINE Pay 白名單使用 `165.245.144.110/32`。
+- [ ] 原始 Droplet IP `168.144.142.127` 沒有被填入 LINE Pay 白名單。
 - [ ] DNS、TLS 憑證與 HTTPS reverse proxy 完成；外部不能連到未加密的 application port。
 - [ ] 僅允許 Vercel 所需流量的網路政策、rate limit、監控與告警已另行審核。
 - [ ] Gateway 與網站 clock 同步，timestamp 容許窗維持最小合理值。
