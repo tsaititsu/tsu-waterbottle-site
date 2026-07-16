@@ -13,10 +13,17 @@ Vercel / Next.js server
   2. 建立 Gateway canonical string 與 HMAC-SHA256
     │ HTTPS + x-gateway-* headers
     ▼
+Host Caddy
+  1. 以獨立 Proxy Token 證明請求經受控 Caddy
+  2. 以實際 TCP remote_host 強制覆寫 X-Gateway-Client-IP
+  3. 只轉送到 localhost-published Gateway port
+    │ HTTP through Docker port publishing
+    ▼
 Fixed IP Gateway (DigitalOcean Droplet)
-  1. 64 KB／JSON／rate limit
-  2. timestamp／HMAC／replay 驗證
-  3. operation 白名單推導固定 host + path
+  1. timing-safe 驗證獨立 Proxy Token
+  2. 嚴格解析 Client IP，執行 per-client rate limit
+  3. timestamp／網站 HMAC／replay 驗證
+  4. operation 白名單推導固定 host + path
     │ HTTPS，redirect=error，無重試
     ▼
 LINE Pay Sandbox 或 Production API
@@ -74,6 +81,8 @@ SHA256_BODY
 
 `SHA256_BODY` 是 HTTP adapter 收到、尚未 parse JSON 的原始 UTF-8 request body bytes 的小寫 hex SHA-256，不會先 parse 再重新 stringify。簽章是 `HMAC-SHA256(LINE_PAY_GATEWAY_SECRET, canonicalString)`。`requestId` 同時存在 header 與 JSON body，Gateway 驗證兩者一致；因 body hash 被簽署，requestId 也受到完整性保護。
 
+`X-Gateway-Proxy-Token` 不屬於網站 HMAC canonical string，也不屬於 LINE Pay 官方簽章。它是 Caddy 與 Gateway 之間獨立的 64 字元小寫 hex token，只證明請求經過受控 reverse proxy。
+
 預設 timestamp 容許誤差為 60 秒。nonce 與 requestId 使用單機 TTL cache 防重播；多 instance 部署前必須改成共享且具原子 claim 的儲存。
 
 ## 環境變數
@@ -86,6 +95,7 @@ Gateway：
 | `LINE_PAY_GATEWAY_ENV` | 是 | 無 | 僅 `sandbox` 或 `production` |
 | `LINE_PAY_GATEWAY_KEY_ID` | 是 | 無 | 內部金鑰識別，不是秘密 |
 | `LINE_PAY_GATEWAY_SECRET` | 是 | 無 | Vercel 與 Gateway 的獨立共享秘密 |
+| `LINE_PAY_GATEWAY_PROXY_TOKEN` | 是 | 無 | Caddy 與 Gateway 的獨立 64 字元小寫 hex token，不得與 Gateway secret 共用 |
 | `LINE_PAY_UPSTREAM_TIMEOUT_MS` | 否 | `5000` | Gateway 到 LINE Pay timeout，100–30000 ms |
 | `GATEWAY_TIMESTAMP_TOLERANCE_SECONDS` | 否 | `60` | HMAC timestamp 容許誤差，1–300 秒 |
 | `GATEWAY_REPLAY_TTL_SECONDS` | 否 | `120` | nonce/requestId 單機 TTL，60–600 秒 |
@@ -145,6 +155,7 @@ Phase 2A 的可審核部署資料位於 `deploy/`：
 - `compose.yaml`：只啟動 Sandbox Gateway，application port 只綁 host localhost；必須經 `scripts/compose.sh` 驗證完整 commit SHA 後執行。
 - `Caddyfile.example`：固定使用已核准的 Sandbox domain `linepay-gateway.tsu-waterbottle.com`。
 - `gateway.env.example`：只含假值與欄位格式。
+- `proxy.env.example`：只含獨立 Proxy Token 假值；正式檔案是 `/etc/line-pay-gateway/proxy.env`。
 - `SANDBOX_DEPLOY_RUNBOOK.md`：分階段主機部署、檢查與停止條件。
 - `SANDBOX_ROLLBACK_RUNBOOK.md`：只回復既有 image tag，不刪除資料或雲端資源。
 - `scripts/`：完整 SHA／image name validator、受保護 Compose wrapper、preflight、egress、嚴格 localhost health、TLS、secure log directory 與 guarded rollback。
@@ -160,7 +171,9 @@ Vercel / browser
 → LINE Pay Sandbox（來源 IPv4：165.245.144.110）
 ```
 
-Compose 不包含 Caddy container；Caddy 以 host systemd service 執行，才能直接 reverse proxy 到只綁 localhost 的 Gateway port。
+Compose 不包含 Caddy container；Caddy 以 host systemd service 執行，reverse proxy 到只綁 host localhost 的 Gateway published port。Docker 轉送後的 Node socket peer 不作為信任依據；信任邊界只由獨立 Proxy Token 建立。
+
+正式部署分離兩個 root-owned `0600` secret file：Gateway container 同時讀取 `gateway.env` 與 `proxy.env`，host Caddy systemd service 只能透過 `EnvironmentFile=/etc/line-pay-gateway/proxy.env` 取得 Proxy Token，不能取得網站至 Gateway 的 HMAC secret。
 
 Sandbox 的入站與出站目前共用 Reserved IPv4 `165.245.144.110`，但用途不同：
 
@@ -169,13 +182,18 @@ Sandbox 的入站與出站目前共用 Reserved IPv4 `165.245.144.110`，但用�
 
 建立 A record 前必須先確認 Reserved IP 仍綁定正確 Droplet；部署初期建議 TTL `300` 秒。DNS 尚未生效前不得啟動 Caddy 自動申請正式憑證。本 repository 只記錄已決定的公開網域與 IP，不會修改 DNS、申請憑證或變更 LINE Pay 白名單。
 
+Sandbox 初期的 Cloudflare DNS record 必須使用 **DNS only／灰雲**，不得開啟 **Cloudflare Proxy／橘雲**。只有 DNS only 時，Caddy 的 `{remote_host}` 才是直接連線來源，才能安全覆寫 `X-Gateway-Client-IP`。若日後要啟用橘雲，必須先另行設計並測試 Cloudflare trusted proxy 邊界；現有設定不支援直接切換。
+
 本階段不部署、不產生 secret、不修改 DigitalOcean、防火牆、LINE Pay 後台或 Vercel 環境變數。詳細步驟請從 `deploy/SANDBOX_DEPLOY_RUNBOOK.md` 開始，不要把 runbook 合併成無停頓的一鍵腳本。
 
 ## 安全限制與日誌
 
 - HTTP body 上限 64 KB，只接受 JSON。
 - HMAC 使用 timing-safe comparison；錯誤簽章與過期 timestamp 回 401，重播回 409。
-- 單機來源 IP fixed-window rate limit，只使用 socket remote address，不信任可由呼叫端偽造的 forwarded headers。
+- `POST /v1/line-pay/proxy` 先 timing-safe 驗證 `X-Gateway-Proxy-Token`，成功後才信任 Caddy 覆寫的單一合法 `X-Gateway-Client-IP`。缺少／錯誤 token 回同一個 401；Client IP 缺失或不合法回固定 400，兩者都不 fallback 到 socket peer 或共同 bucket。
+- 單機來源 IP fixed-window rate limit 只使用已通過 Proxy Token 邊界後解析的 Client IP；不信任 `X-Forwarded-For`、Docker bridge IP、任意 proxy CIDR 或 `request.socket.remoteAddress`。
+- `X-Gateway-Client-IP` 只作 rate-limit key，不參與 Gateway HMAC、LINE Pay 官方簽章或付款授權，不會轉送至 LINE Pay，也不加入一般付款 metadata log。
+- Proxy Token 不寫入 Caddy access log、Gateway log、錯誤回應或 LINE Pay upstream headers。
 - 只轉送四個 LINE Pay headers；額外 headers 與 `Host`、`Connection`、`Content-Length`、`Transfer-Encoding`、`Keep-Alive`、`Upgrade` 等 hop-by-hop headers 都會被拒絕。
 - 上游只用 HTTPS，送出前再次檢查固定 hostname 且禁止自訂 port。
 - `redirect: error`、AbortController timeout、所有 operation 都不自動重試，尤其 Request API 不可重送。
@@ -187,11 +205,13 @@ Sandbox 的入站與出站目前共用 Reserved IPv4 `165.245.144.110`，但用�
 
 - [ ] 本分支經人工 review，Gateway 與網站測試、typecheck、lint、build 全數通過。
 - [ ] 使用獨立隨機 Gateway secret；不重用 Channel Secret，且只透過受控 secret 管理提供。
+- [ ] 使用另一個獨立 Proxy Token；`gateway.env` 與 `proxy.env` 是不同 root-owned `0600` 非 symlink 檔案，Caddy 只能讀後者。
 - [ ] Droplet 使用 Node 24 container、非 root runtime、restart policy 與最小權限。
 - [ ] Reserved IP 對外出口與 LINE Pay 後台白名單值由人工再次核對。
 - [ ] Reserved IP `165.245.144.110` 仍綁定正確 Droplet；DNS A record 使用該入站 IP，LINE Pay 白名單使用 `165.245.144.110/32`。
 - [ ] 原始 Droplet IP `168.144.142.127` 沒有被填入 LINE Pay 白名單。
 - [ ] DNS、TLS 憑證與 HTTPS reverse proxy 完成；外部不能連到未加密的 application port。
+- [ ] Cloudflare DNS record 是 DNS only／灰雲；未完成 trusted proxy 重新設計前不得開啟 Cloudflare Proxy／橘雲。
 - [ ] 僅允許 Vercel 所需流量的網路政策、rate limit、監控與告警已另行審核。
 - [ ] Gateway 與網站 clock 同步，timestamp 容許窗維持最小合理值。
 - [ ] 先使用 Sandbox 做 request／confirm／status／details 完整驗收。

@@ -11,6 +11,7 @@ services:
     user: node
     env_file:
       - ${LINE_PAY_GATEWAY_ENV_FILE:-/etc/line-pay-gateway/gateway.env}
+      - ${LINE_PAY_GATEWAY_PROXY_ENV_FILE:-/etc/line-pay-gateway/proxy.env}
     environment:
       PORT: "3000"
       LINE_PAY_GATEWAY_ENV: sandbox
