@@ -1,24 +1,20 @@
-import { getLinePayBaseUrl, normalizeLinePayEnvironment, stringifyLinePayJsonBody } from './config'
+import { normalizeLinePayEnvironment, stringifyLinePayJsonBody } from './config'
 import { buildLinePayRequestPayload, type LinePayRequestPayloadInput } from './requestPayload'
 import { parseLinePayRequestResponse, type ParsedLinePayRequestResponse } from './responseParser'
 import { buildLinePayRequestHeaders } from './signature'
+import {
+  sendLinePayRequest,
+  type LinePayTransportEnv,
+  type LinePayTransportFetch,
+  type LinePayTransportFetchInit,
+  type LinePayTransportResponse,
+} from './transport'
 
 export const LINE_PAY_REQUEST_PAYMENT_PATH = '/v3/payments/request'
 
-export type LinePayRequestPaymentFetchInit = {
-  method: 'POST'
-  headers: Record<string, string>
-  body: string
-}
-
-export type LinePayRequestPaymentFetchResponse = {
-  json: () => Promise<unknown>
-}
-
-export type LinePayRequestPaymentFetch = (
-  url: string,
-  init: LinePayRequestPaymentFetchInit,
-) => Promise<LinePayRequestPaymentFetchResponse>
+export type LinePayRequestPaymentFetchInit = LinePayTransportFetchInit
+export type LinePayRequestPaymentFetchResponse = LinePayTransportResponse
+export type LinePayRequestPaymentFetch = LinePayTransportFetch
 
 export type RequestLinePayPaymentInput = {
   environment?: string | null
@@ -26,6 +22,7 @@ export type RequestLinePayPaymentInput = {
   channelSecret: string
   nonce: string
   fetchFn?: LinePayRequestPaymentFetch | null
+  transportEnv?: LinePayTransportEnv
   payloadInput: LinePayRequestPayloadInput
 }
 
@@ -49,10 +46,15 @@ export async function requestLinePayPayment(
     nonce: input.nonce,
   })
 
-  const response = await input.fetchFn(`${getLinePayBaseUrl(environment)}${apiPath}`, {
+  const response = await sendLinePayRequest({
+    operation: 'request',
+    environment,
     method: 'POST',
-    headers,
-    body: bodyText,
+    apiPath,
+    bodyText,
+    linePayHeaders: headers,
+    fetchFn: input.fetchFn,
+    transportEnv: input.transportEnv,
   })
 
   if (!response || typeof response.json !== 'function') {
