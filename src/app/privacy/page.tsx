@@ -37,6 +37,7 @@ function getSections() {
           : 'Supabase 資料庫與會員服務：用於保存會員、訂單、課程權限與服務紀錄',
         'Resend 電子郵件服務：用於寄送必要通知',
         !hideConsultationServices ? 'Google Calendar 預約排程服務：用於真人論命預約排程' : null,
+        'Google Analytics：用於統計公開頁面的瀏覽與使用情況，可能透過 Cookie 處理頁面路徑、頁面標題、裝置／瀏覽器及大致地區等資訊。本網站不會主動將姓名、生日、命盤內容、占卜問題、Email、會員 ID、訂單編號或付款資料作為 Analytics 事件參數傳送。',
         'Vercel 網站部署服務：用於網站託管與部署',
       ].filter((item): item is string => Boolean(item)),
     },

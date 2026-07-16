@@ -5,6 +5,7 @@ import '@/features/ziwei-chart/package/ziwei-chart-package.css'
 import { Footer } from '@/components/Footer'
 import { FloatingLineButton } from '@/components/FloatingLineButton'
 import { CartProvider } from '@/components/CartContext'
+import { GoogleAnalytics } from '@/components/analytics/GoogleAnalytics'
 import { Header } from '@/components/Header'
 import { MobileBottomNav } from '@/components/MobileBottomNav'
 import { SITE_DESCRIPTION, SITE_NAME, SITE_TITLE } from '@/lib/seo/publicMetadata'
@@ -61,6 +62,7 @@ export default function RootLayout({
           <FloatingLineButton />
           <MobileBottomNav />
         </CartProvider>
+        <GoogleAnalytics />
       </body>
     </html>
   )
