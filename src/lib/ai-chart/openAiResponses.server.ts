@@ -98,6 +98,9 @@ export async function requestAiChartOpenAiStructuredResponse<T>(
     try {
       rawResponse = await response.json()
     } catch {
+      if (timeoutTriggered) {
+        throw new AiChartOpenAiError(AI_CHART_OPENAI_TIMEOUT, true)
+      }
       responseInvalid()
     }
 

@@ -633,6 +633,72 @@ async function run() {
     assert.equal(abortCount, 1)
   })
 
+  let bodyTimeoutFetchCount = 0
+  let bodyTimeoutAbortCount = 0
+  const bodyTimeoutError = await captureSafeError(
+    () =>
+      requestAiChartOpenAiStructuredResponse(
+        requestFixture({ timeoutMs: 1_000 }),
+        {
+          env: syntheticEnv(),
+          fetchImpl: mockFetch(async (_input, init) => {
+            bodyTimeoutFetchCount += 1
+            const signal = init?.signal
+
+            return {
+              ok: true,
+              status: 200,
+              json: () =>
+                new Promise<unknown>((_resolve, reject) => {
+                  if (!(signal instanceof AbortSignal)) {
+                    reject(new Error('missing synthetic signal'))
+                    return
+                  }
+
+                  const rejectOnAbort = () => {
+                    bodyTimeoutAbortCount += 1
+                    reject(
+                      new Error(
+                        `${SYNTHETIC_API_KEY} ${SYNTHETIC_PROMPT} ${SYNTHETIC_RESPONSE_BODY}`,
+                      ),
+                    )
+                  }
+
+                  if (signal.aborted) {
+                    rejectOnAbort()
+                    return
+                  }
+
+                  signal.addEventListener('abort', rejectOnAbort, {
+                    once: true,
+                  })
+                }),
+            } as unknown as Response
+          }),
+        },
+      ),
+    AI_CHART_OPENAI_TIMEOUT,
+    true,
+    [SYNTHETIC_API_KEY, SYNTHETIC_PROMPT, SYNTHETIC_RESPONSE_BODY],
+  )
+
+  test('response.json() waiting for abort returns retryable timeout', () => {
+    assert.equal(bodyTimeoutError.code, AI_CHART_OPENAI_TIMEOUT)
+    assert.equal(bodyTimeoutError.retryable, true)
+    assert.equal(bodyTimeoutAbortCount, 1)
+  })
+
+  test('JSON body timeout fetch executes once with no retry', () => {
+    assert.equal(bodyTimeoutFetchCount, 1)
+  })
+
+  test('JSON body timeout error excludes synthetic sensitive markers', () => {
+    const serializedError = JSON.stringify(bodyTimeoutError)
+    assert.equal(serializedError.includes(SYNTHETIC_API_KEY), false)
+    assert.equal(serializedError.includes(SYNTHETIC_PROMPT), false)
+    assert.equal(serializedError.includes(SYNTHETIC_RESPONSE_BODY), false)
+  })
+
   await asyncTest('invalid response JSON becomes fixed response invalid', async () => {
     await captureSafeError(
       () =>
@@ -796,7 +862,7 @@ async function run() {
     assert.equal(SYNTHETIC_API_KEY.startsWith('synthetic-'), true)
   })
 
-  assert.equal(testCount >= 34, true)
+  assert.equal(testCount >= 38, true)
   console.log(`AI chart OpenAI Responses server mock tests passed: ${testCount}`)
 }
 
