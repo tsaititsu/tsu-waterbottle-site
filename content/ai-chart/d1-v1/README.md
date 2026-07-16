@@ -8,8 +8,15 @@
 - 素材完整性驗證：已建立
 - Manifest SHA 版本鎖定：已建立
 - Runtime loader：只有 disabled guard，尚未啟用
-- OpenAI adapter：未建立
-- Structured Output runtime schema：未建立
+- OpenAI Responses adapter core：已建立
+- 模型 contract：鎖定 `gpt-5.6-sol`
+- Structured Output transport：已建立
+- `store: false`：強制
+- Timeout：已建立
+- 固定安全錯誤碼：已建立
+- Runtime 接線：未建立
+- D1 正式 Schema：未建立
+- Prompt 組裝：未建立
 - Background job：未建立
 - Production：未啟用
 
@@ -18,6 +25,14 @@ Manifest 與 16 份素材會在 Server 端驗證原始位元組 SHA-256。
 `runtimeEnabled` 仍為 `false`。
 
 本階段不會讀取或回傳 Prompt 全文給任何 Route。
+
+Responses adapter 尚未被 Route、Report、付款或 Supabase 流程引用。
+測試只使用 mock fetch，沒有測試會呼叫 OpenAI；目前也不會讀取或
+傳送本目錄的 D1 素材。所有 `runtimeEnabled` 仍為 `false`。
+
+Adapter 使用原生 REST fetch 解析原始 `output` array，不依賴 SDK-only
+的頂層 `output_text`。後續必須先建立 D1 階段 Schema 與 Prompt 組裝，
+才能進行受控 Preview 測試。
 
 ## 功能邊界
 
