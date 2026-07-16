@@ -2,12 +2,18 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  bootstrapGoogleAnalytics,
+  createGoogleAnalyticsPageViewTracker,
   createGoogleAnalyticsPageViewPayload,
   GA_MEASUREMENT_ID,
   GOOGLE_ANALYTICS_PUBLIC_PATHS,
   isGoogleAnalyticsProductionHost,
   sanitizeGoogleAnalyticsPath,
   shouldTrackGoogleAnalyticsPath,
+} from '../lib/analytics/googleAnalytics'
+import type {
+  GoogleAnalyticsPageViewPayload,
+  GoogleAnalyticsWindowLike,
 } from '../lib/analytics/googleAnalytics'
 
 const root = process.cwd()
@@ -89,16 +95,137 @@ assert.deepEqual(
   },
 )
 
+const existingDataLayerEntry = { existing: true }
+const dataLayer: unknown[] = [existingDataLayerEntry]
+const analyticsWindow: GoogleAnalyticsWindowLike = { dataLayer }
+const initializedAt = new Date('2026-07-16T00:00:00.000Z')
+
+bootstrapGoogleAnalytics(analyticsWindow, initializedAt)
+bootstrapGoogleAnalytics(analyticsWindow, new Date('2026-07-17T00:00:00.000Z'))
+
+assert.equal(analyticsWindow.dataLayer, dataLayer)
+assert.equal(dataLayer[0], existingDataLayerEntry)
+assert.equal(dataLayer.length, 3)
+assert.equal(typeof analyticsWindow.gtag, 'function')
+
+const jsCommand = dataLayer[1] as ArrayLike<unknown>
+const configCommand = dataLayer[2] as ArrayLike<unknown>
+
+for (const command of [jsCommand, configCommand]) {
+  assert.equal(Array.isArray(command), false)
+  assert.equal(Object.prototype.toString.call(command), '[object Arguments]')
+}
+
+assert.equal(jsCommand[0], 'js')
+assert.equal(jsCommand[1], initializedAt)
+assert.equal(configCommand[0], 'config')
+assert.equal(configCommand[1], GA_MEASUREMENT_ID)
+assert.deepEqual(configCommand[2], { send_page_view: false })
+
+const queuedPageView = createGoogleAnalyticsPageViewPayload(
+  '/ai-chart',
+  'https://tsu-waterbottle.com',
+  'AI 命盤',
+)
+analyticsWindow.gtag?.('event', 'page_view', queuedPageView)
+
+assert.equal(dataLayer.length, 4)
+const eventCommand = dataLayer[3] as ArrayLike<unknown>
+assert.equal(Array.isArray(eventCommand), false)
+assert.equal(Object.prototype.toString.call(eventCommand), '[object Arguments]')
+assert.equal(eventCommand[0], 'event')
+assert.equal(eventCommand[1], 'page_view')
+assert.equal(eventCommand[2], queuedPageView)
+
+const sentPageViews: GoogleAnalyticsPageViewPayload[] = []
+const pageViewTracker = createGoogleAnalyticsPageViewTracker()
+const homePageView = createGoogleAnalyticsPageViewPayload(
+  '/',
+  'https://tsu-waterbottle.com',
+  '首頁',
+)
+const aiChartPageView = createGoogleAnalyticsPageViewPayload(
+  '/ai-chart',
+  'https://tsu-waterbottle.com',
+  'AI 命盤',
+)
+const recordPageView = (payload: GoogleAnalyticsPageViewPayload) => {
+  sentPageViews.push(payload)
+}
+
+assert.equal(
+  pageViewTracker.processPageView(
+    { pathname: '/', payload: homePageView },
+    false,
+    recordPageView,
+  ),
+  0,
+)
+assert.deepEqual(sentPageViews, [])
+assert.equal(
+  pageViewTracker.processPageView(
+    { pathname: '/', payload: homePageView },
+    false,
+    recordPageView,
+  ),
+  0,
+)
+assert.deepEqual(sentPageViews, [])
+assert.equal(
+  pageViewTracker.processPageView(
+    { pathname: '/ai-chart', payload: aiChartPageView },
+    false,
+    recordPageView,
+  ),
+  0,
+)
+assert.deepEqual(sentPageViews, [])
+assert.equal(
+  pageViewTracker.processPageView(
+    { pathname: '/ai-chart', payload: aiChartPageView },
+    true,
+    recordPageView,
+  ),
+  2,
+)
+assert.deepEqual(sentPageViews, [homePageView, aiChartPageView])
+assert.equal(
+  pageViewTracker.processPageView(
+    { pathname: '/ai-chart', payload: aiChartPageView },
+    true,
+    recordPageView,
+  ),
+  0,
+)
+assert.deepEqual(sentPageViews, [homePageView, aiChartPageView])
+assert.equal(
+  pageViewTracker.processPageView(
+    { pathname: '/', payload: homePageView },
+    true,
+    recordPageView,
+  ),
+  1,
+)
+assert.deepEqual(sentPageViews, [homePageView, aiChartPageView, homePageView])
+
 assert.ok(componentSource.startsWith("'use client'"))
 assert.ok(componentSource.includes("import Script from 'next/script'"))
 assert.ok(componentSource.includes("import { usePathname } from 'next/navigation'"))
 assert.equal(componentSource.match(/googletagmanager\.com/g)?.length, 1)
 assert.ok(componentSource.includes('strategy="afterInteractive"'))
-assert.ok(componentSource.includes('send_page_view: false'))
+assert.ok(helperSource.includes('send_page_view: false'))
 assert.ok(componentSource.includes("'page_view'"))
 assert.ok(componentSource.includes('window.location.origin'))
 assert.ok(componentSource.includes("page_referrer: ''") || helperSource.includes("page_referrer: ''"))
-assert.ok(componentSource.includes('lastTrackedPath.current === sanitizedPath'))
+assert.ok(componentSource.includes('bootstrapGoogleAnalytics(window)'))
+assert.ok(componentSource.includes('isScriptReady'))
+assert.ok(componentSource.includes('pageViewTracker.processPageView'))
+assert.ok(componentSource.includes('onReady={() => setIsScriptReady(true)}'))
+assert.ok(helperSource.includes('dataLayer.push(arguments)'))
+assert.equal(helperSource.includes('dataLayer.push(command)'), false)
+assert.ok(helperSource.includes('pendingPageViews'))
+assert.ok(helperSource.includes('lastSentPathname'))
+assert.equal(helperSource.includes('trackedPaths'), false)
 assert.equal(componentSource.includes('useSearchParams'), false)
 assert.equal(componentSource.includes('window.location.href'), false)
 
@@ -119,6 +246,7 @@ for (const forbiddenValue of [
   'email',
   'birth',
   'birthday',
+  'birthTime',
   'gender',
   'readingId',
   'reportId',
@@ -128,9 +256,14 @@ for (const forbiddenValue of [
   'transaction',
   'question',
   'prompt',
+  'session',
 ]) {
   assert.equal(analyticsSources.includes(forbiddenValue), false)
 }
+
+assert.equal(analyticsSources.match(/G-239FT0JGEC/g)?.length, 1)
+assert.equal(analyticsSources.match(/googletagmanager\.com/g)?.length, 1)
+assert.equal(analyticsSources.includes('googletagmanager.com/gtm.js'), false)
 
 assert.ok(
   privacySource.includes(

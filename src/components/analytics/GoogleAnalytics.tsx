@@ -2,52 +2,32 @@
 
 import Script from 'next/script'
 import { usePathname } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
+  bootstrapGoogleAnalytics,
   createGoogleAnalyticsPageViewPayload,
+  createGoogleAnalyticsPageViewTracker,
   GA_MEASUREMENT_ID,
   isGoogleAnalyticsProductionHost,
   sanitizeGoogleAnalyticsPath,
   shouldTrackGoogleAnalyticsPath,
 } from '@/lib/analytics/googleAnalytics'
-
-type GoogleAnalyticsPageViewPayload = ReturnType<typeof createGoogleAnalyticsPageViewPayload>
-
-type GoogleAnalyticsCommand =
-  | ['js', Date]
-  | ['config', string, { send_page_view: false }]
-  | ['event', 'page_view', GoogleAnalyticsPageViewPayload]
-
-type GoogleAnalyticsFunction = (...command: GoogleAnalyticsCommand) => void
+import type { GoogleAnalyticsFunction } from '@/lib/analytics/googleAnalytics'
 
 declare global {
   interface Window {
-    dataLayer?: GoogleAnalyticsCommand[]
+    dataLayer?: unknown[]
     gtag?: GoogleAnalyticsFunction
     waterbottleGoogleAnalyticsInitialized?: boolean
   }
 }
 
-function initializeGoogleAnalytics() {
-  if (window.waterbottleGoogleAnalyticsInitialized) return
-
-  window.dataLayer = window.dataLayer || []
-  const gtag: GoogleAnalyticsFunction = (...command) => {
-    window.dataLayer?.push(command)
-  }
-  window.gtag = window.gtag || gtag
-
-  window.gtag('js', new Date())
-  window.gtag('config', GA_MEASUREMENT_ID, {
-    send_page_view: false,
-  })
-  window.waterbottleGoogleAnalyticsInitialized = true
-}
-
 export function GoogleAnalytics() {
   const pathname = usePathname()
   const [isProductionHost, setIsProductionHost] = useState(false)
-  const lastTrackedPath = useRef<string | null>(null)
+  const [isBootstrapped, setIsBootstrapped] = useState(false)
+  const [isScriptReady, setIsScriptReady] = useState(false)
+  const [pageViewTracker] = useState(createGoogleAnalyticsPageViewTracker)
   const sanitizedPath = sanitizeGoogleAnalyticsPath(pathname)
   const shouldTrackPath = shouldTrackGoogleAnalyticsPath(sanitizedPath)
 
@@ -56,25 +36,46 @@ export function GoogleAnalytics() {
   }, [])
 
   useEffect(() => {
-    if (!isProductionHost || !shouldTrackPath || lastTrackedPath.current === sanitizedPath) return
+    if (!isProductionHost || !shouldTrackPath || isBootstrapped) return
 
-    initializeGoogleAnalytics()
-    window.gtag?.(
-      'event',
-      'page_view',
-      createGoogleAnalyticsPageViewPayload(sanitizedPath, window.location.origin, document.title),
+    bootstrapGoogleAnalytics(window)
+    setIsBootstrapped(true)
+  }, [isBootstrapped, isProductionHost, shouldTrackPath])
+
+  useEffect(() => {
+    const gtag = window.gtag
+
+    if (!isProductionHost || !shouldTrackPath || !isBootstrapped || !gtag) return
+
+    pageViewTracker.processPageView(
+      {
+        pathname: sanitizedPath,
+        payload: createGoogleAnalyticsPageViewPayload(
+          sanitizedPath,
+          window.location.origin,
+          document.title,
+        ),
+      },
+      isScriptReady,
+      (payload) => gtag('event', 'page_view', payload),
     )
-    lastTrackedPath.current = sanitizedPath
-  }, [isProductionHost, sanitizedPath, shouldTrackPath])
+  }, [
+    isBootstrapped,
+    isProductionHost,
+    isScriptReady,
+    pageViewTracker,
+    sanitizedPath,
+    shouldTrackPath,
+  ])
 
-  if (!isProductionHost || !shouldTrackPath) return null
+  if (!isProductionHost || !shouldTrackPath || !isBootstrapped) return null
 
   return (
     <Script
       id="google-analytics"
       src={`https://www.googletagmanager.com/gtag/js?id=${GA_MEASUREMENT_ID}`}
       strategy="afterInteractive"
-      onReady={initializeGoogleAnalytics}
+      onReady={() => setIsScriptReady(true)}
     />
   )
 }
