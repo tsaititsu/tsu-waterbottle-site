@@ -21,7 +21,7 @@ Host Caddy
     ▼
 Fixed IP Gateway (DigitalOcean Droplet)
   1. timing-safe 驗證獨立 Proxy Token
-  2. 嚴格解析 Client IP，執行 per-client rate limit
+  2. 嚴格解析直接連入 Caddy 的網路來源 IP，執行 per-source rate limit
   3. timestamp／網站 HMAC／replay 驗證
   4. operation 白名單推導固定 host + path
     │ HTTPS，redirect=error，無重試
@@ -163,7 +163,7 @@ Phase 2A 的可審核部署資料位於 `deploy/`：
 部署架構固定為：
 
 ```text
-Vercel / browser
+Vercel / Next.js server（付款 proxy）或受控 health check client
 → https://linepay-gateway.tsu-waterbottle.com :80/:443
 → host Caddy
 → 127.0.0.1:3000
@@ -184,6 +184,8 @@ Sandbox 的入站與出站目前共用 Reserved IPv4 `165.245.144.110`，但用�
 
 Sandbox 初期的 Cloudflare DNS record 必須使用 **DNS only／灰雲**，不得開啟 **Cloudflare Proxy／橘雲**。只有 DNS only 時，Caddy 的 `{remote_host}` 才是直接連線來源，才能安全覆寫 `X-Gateway-Client-IP`。若日後要啟用橘雲，必須先另行設計並測試 Cloudflare trusted proxy 邊界；現有設定不支援直接切換。
 
+`X-Gateway-Client-IP` 代表直接連入 Caddy 的網路來源 IP。網站正常付款流程由 Vercel server 呼叫 Gateway，因此它通常是 Vercel 出口 IP，不是最終消費者的瀏覽器或裝置 IP。
+
 本階段不部署、不產生 secret、不修改 DigitalOcean、防火牆、LINE Pay 後台或 Vercel 環境變數。詳細步驟請從 `deploy/SANDBOX_DEPLOY_RUNBOOK.md` 開始，不要把 runbook 合併成無停頓的一鍵腳本。
 
 ## 安全限制與日誌
@@ -191,7 +193,7 @@ Sandbox 初期的 Cloudflare DNS record 必須使用 **DNS only／灰雲**，不
 - HTTP body 上限 64 KB，只接受 JSON。
 - HMAC 使用 timing-safe comparison；錯誤簽章與過期 timestamp 回 401，重播回 409。
 - `POST /v1/line-pay/proxy` 先 timing-safe 驗證 `X-Gateway-Proxy-Token`，成功後才信任 Caddy 覆寫的單一合法 `X-Gateway-Client-IP`。缺少／錯誤 token 回同一個 401；Client IP 缺失或不合法回固定 400，兩者都不 fallback 到 socket peer 或共同 bucket。
-- 單機來源 IP fixed-window rate limit 只使用已通過 Proxy Token 邊界後解析的 Client IP；不信任 `X-Forwarded-For`、Docker bridge IP、任意 proxy CIDR 或 `request.socket.remoteAddress`。
+- 單機來源 IP fixed-window rate limit 只使用已通過 Proxy Token 邊界後解析的直接網路來源 IP；不信任 `X-Forwarded-For`、Docker bridge IP、任意 proxy CIDR 或 `request.socket.remoteAddress`。
 - `X-Gateway-Client-IP` 只作 rate-limit key，不參與 Gateway HMAC、LINE Pay 官方簽章或付款授權，不會轉送至 LINE Pay，也不加入一般付款 metadata log。
 - Proxy Token 不寫入 Caddy access log、Gateway log、錯誤回應或 LINE Pay upstream headers。
 - 只轉送四個 LINE Pay headers；額外 headers 與 `Host`、`Connection`、`Content-Length`、`Transfer-Encoding`、`Keep-Alive`、`Upgrade` 等 hop-by-hop headers 都會被拒絕。

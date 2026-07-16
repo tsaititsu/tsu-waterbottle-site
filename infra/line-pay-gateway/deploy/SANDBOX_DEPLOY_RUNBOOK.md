@@ -20,7 +20,7 @@
 
 入站用途與出站用途必須分開理解：
 
-- 入站用途：Vercel／瀏覽器透過 `https://linepay-gateway.tsu-waterbottle.com` 連入 Gateway；DNS A record 讓外部找到 Reserved IP。
+- 入站用途：Vercel server（付款 proxy）或受控 health check client 透過 `https://linepay-gateway.tsu-waterbottle.com` 連入 Gateway；DNS A record 讓外部找到 Reserved IP。
 - 出站用途：Gateway 呼叫 LINE Pay Sandbox API 時，LINE Pay 看到的來源 IPv4 是 `165.245.144.110`；LINE Pay 白名單使用 `165.245.144.110/32`。
 
 兩者目前使用同一個 Reserved IP，但 DNS 不等於 LINE Pay 白名單。原始 Droplet IP `168.144.142.127` 不得填入 LINE Pay 白名單。網域與公開 IP 不是秘密，可以記錄在 Git；本 runbook 不會建立 DNS 或修改 LINE Pay 後台。
@@ -582,7 +582,7 @@ sudo systemctl status caddy --no-pager
 架構必須保持：
 
 ```text
-Vercel / browser
+Vercel / Next.js server（付款 proxy）或受控 health check client
 → https://linepay-gateway.tsu-waterbottle.com :80/:443
 → host Caddy
 → 127.0.0.1:3000
@@ -592,7 +592,7 @@ Vercel / browser
 
 Caddy 預設保留 request method、URI、headers 與 body；本設定不重寫 HMAC request body。`request_body max_size 64KB` 在 reverse proxy 前再次限制 body。
 
-付款 proxy route 同時以 `header_up X-Gateway-Proxy-Token {$LINE_PAY_GATEWAY_PROXY_TOKEN}` 與 `header_up X-Gateway-Client-IP {remote_host}` 強制覆寫任何呼叫端提供的同名 headers。Gateway 先 timing-safe 驗證 Proxy Token，再信任 Client IP 作 per-client rate limit；不依賴 Docker NAT 後的 socket peer、Docker bridge IP、`X-Forwarded-For` 或任意 proxy CIDR。
+付款 proxy route 同時以 `header_up X-Gateway-Proxy-Token {$LINE_PAY_GATEWAY_PROXY_TOKEN}` 與 `header_up X-Gateway-Client-IP {remote_host}` 強制覆寫任何呼叫端提供的同名 headers。Gateway 先 timing-safe 驗證 Proxy Token，再使用直接連入 Caddy 的網路來源 IP 作 per-source rate limit；不依賴 Docker NAT 後的 socket peer、Docker bridge IP、`X-Forwarded-For` 或任意 proxy CIDR。網站正常付款流程由 Vercel server 呼叫 Gateway，因此此來源通常是 Vercel 出口 IP，不是最終消費者的瀏覽器或裝置 IP。
 
 Proxy Token 不參與網站 HMAC canonical string、LINE Pay 官方簽章或付款授權；Proxy Token 與 Client IP 都不轉送到 LINE Pay，也不進入一般付款 log。
 
