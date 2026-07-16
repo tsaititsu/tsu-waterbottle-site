@@ -2,13 +2,22 @@
 
 ## 目前狀態
 
-本目錄只完成版本化素材納管，尚未接入網站 Runtime。
+本目錄已完成版本化素材納管與 Server 端完整性驗證，尚未接入網站 Runtime。
 
-- Runtime loader：未建立
+- Manifest validator：已建立
+- 素材完整性驗證：已建立
+- Manifest SHA 版本鎖定：已建立
+- Runtime loader：只有 disabled guard，尚未啟用
 - OpenAI adapter：未建立
 - Structured Output runtime schema：未建立
 - Background job：未建立
 - Production：未啟用
+
+Manifest 與 16 份素材會在 Server 端驗證原始位元組 SHA-256。
+`draft` 與 `reference_only` 素材不能被 Runtime 啟用，目前所有
+`runtimeEnabled` 仍為 `false`。
+
+本階段不會讀取或回傳 Prompt 全文給任何 Route。
 
 ## 功能邊界
 
@@ -64,5 +73,18 @@
 
 `runtimeEnabled: false`
 
-後續完成 loader、validator、Structured Outputs、
-Prompt 組裝測試與金標回歸後，才能另外啟用。
+後續完成 Structured Outputs、Prompt 組裝測試與金標回歸後，
+才能另外啟用。
+
+## 素材更新流程
+
+未來若要更新任一素材，必須：
+
+1. 另開人工審查 PR。
+2. 更新素材。
+3. 更新 manifest 內對應的素材 SHA-256。
+4. 更新程式鎖定的 manifest SHA-256。
+5. 重跑完整性驗證與金標回歸。
+
+Vercel Serverless 是否包含素材檔案，需在未來 Runtime 接入 PR
+透過 Preview 實際驗證；本 PR 不宣稱已完成部署打包接入。
