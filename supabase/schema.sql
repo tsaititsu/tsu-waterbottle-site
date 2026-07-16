@@ -448,6 +448,12 @@ grant all on public.lesson_assets to service_role;
 grant all on public.lesson_progress to service_role;
 grant all on public.course_group_links to service_role;
 
+-- Profiles are synchronized by trusted server-side flows.
+-- Authenticated clients must not directly update authorization data.
+revoke update
+on table public.profiles
+from authenticated;
+
 create or replace function public.is_admin()
 returns boolean
 language sql
@@ -466,8 +472,18 @@ $$;
 create policy "profiles_select_own_or_admin" on public.profiles
 for select using (auth.uid() = id or public.is_admin());
 
-create policy "profiles_update_own_or_admin" on public.profiles
-for update using (auth.uid() = id or public.is_admin());
+create policy "profiles_update_own_or_admin"
+on public.profiles
+for update
+to authenticated
+using (
+  (select auth.uid()) = id
+  or (select public.is_admin())
+)
+with check (
+  (select auth.uid()) = id
+  or (select public.is_admin())
+);
 
 create policy "public_read_active_plans" on public.consultation_plans
 for select using (is_active = true or public.is_admin());
