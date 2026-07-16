@@ -4,9 +4,13 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck source=validators.sh
-source "$script_dir/validators.sh"
+if ! declare -F validate_proxy_token >/dev/null; then
+  source "$script_dir/validators.sh"
+fi
 # shellcheck source=secure-log-directory.sh
-source "$script_dir/secure-log-directory.sh"
+if ! declare -F path_mode >/dev/null || ! declare -F path_uid >/dev/null || ! declare -F path_gid >/dev/null; then
+  source "$script_dir/secure-log-directory.sh"
+fi
 
 proxy_env_error() {
   echo "Proxy env check failed: $*" >&2
