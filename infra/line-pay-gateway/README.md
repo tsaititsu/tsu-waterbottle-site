@@ -154,11 +154,12 @@ Phase 2A 的可審核部署資料位於 `deploy/`：
 
 - `compose.yaml`：只啟動 Sandbox Gateway，application port 只綁 host localhost；必須經 `scripts/compose.sh` 驗證完整 commit SHA 後執行。
 - `Caddyfile.example`：固定使用已核准的 Sandbox domain `linepay-gateway.tsu-waterbottle.com`。
+- `caddy.service.d/line-pay-gateway.conf.example`：清除官方 package 含 `--environ` 的 ExecStart，再以不輸出環境的直接 Caddy command 啟動。
 - `gateway.env.example`：只含假值與欄位格式。
 - `proxy.env.example`：只含獨立 Proxy Token 假值；正式檔案是 `/etc/line-pay-gateway/proxy.env`。
 - `SANDBOX_DEPLOY_RUNBOOK.md`：分階段主機部署、檢查與停止條件。
 - `SANDBOX_ROLLBACK_RUNBOOK.md`：只回復既有 image tag，不刪除資料或雲端資源。
-- `scripts/`：完整 SHA／image name validator、受保護 Compose wrapper、preflight、egress、嚴格 localhost health、TLS、secure log directory 與 guarded rollback。
+- `scripts/`：完整 SHA／image name validator、受保護 Compose wrapper、顯式階段 preflight、Caddy systemd 有效設定驗證、journal 洩漏 guard、egress、嚴格 localhost health、TLS、secure log directory 與 guarded rollback。
 
 部署架構固定為：
 
@@ -174,6 +175,23 @@ Vercel / Next.js server（付款 proxy）或受控 health check client
 Compose 不包含 Caddy container；Caddy 以 host systemd service 執行，reverse proxy 到只綁 host localhost 的 Gateway published port。Docker 轉送後的 Node socket peer 不作為信任依據；信任邊界只由獨立 Proxy Token 建立。
 
 正式部署分離兩個 root-owned `0600` secret file：Gateway container 同時讀取 `gateway.env` 與 `proxy.env`，host Caddy systemd service 只能透過 `EnvironmentFile=/etc/line-pay-gateway/proxy.env` 取得 Proxy Token，不能取得網站至 Gateway 的 HMAC secret。
+
+官方 Caddy package unit 的 ExecStart 可能含 `--environ`，會在啟動時把 process environment 寫入 journal。部署時必須從已核准 release 原子安裝 committed drop-in，先以空的 `ExecStart=` 清除 vendor command，再把唯一有效命令固定為：
+
+```text
+/usr/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+drop-in 不覆寫 `User=caddy`、`Group=caddy`、ExecReload 或其他 vendor hardening，也不使用 shell wrapper、env-file command flag 或 `gateway.env`。`validate-caddy-systemd.sh` 會同時驗證 committed drop-in 與 `systemctl cat caddy` 的有效設定。
+
+完整 preflight 的模式是必要參數：
+
+- `prepare`：Gateway 尚未啟動，80／443／3000 必須空閒。
+- `gateway-running`：3000 必須只在 `127.0.0.1`，Gateway container 與 localhost health 必須 healthy，80／443仍空閒。
+- `public-caddy pre-start`：Gateway healthy、80／443 空閒、2019 不得對外。
+- `public-caddy post-start`：80／443 必須由 Caddy 監聽，3000 仍只在 localhost，2019 缺席或只在 loopback。
+
+缺少或未知模式會 fail closed，不會依目前 listener 自動猜測部署階段。
 
 Sandbox 的入站與出站目前共用 Reserved IPv4 `165.245.144.110`，但用途不同：
 
@@ -196,6 +214,7 @@ Sandbox 初期的 Cloudflare DNS record 必須使用 **DNS only／灰雲**，不
 - 單機來源 IP fixed-window rate limit 只使用已通過 Proxy Token 邊界後解析的直接網路來源 IP；不信任 `X-Forwarded-For`、Docker bridge IP、任意 proxy CIDR 或 `request.socket.remoteAddress`。
 - `X-Gateway-Client-IP` 只作 rate-limit key，不參與 Gateway HMAC、LINE Pay 官方簽章或付款授權，不會轉送至 LINE Pay，也不加入一般付款 metadata log。
 - Proxy Token 不寫入 Caddy access log、Gateway log、錯誤回應或 LINE Pay upstream headers。
+- Caddy systemd 的唯一有效 ExecStart 不含 `--environ`；部署前記錄 journal 時間點，啟動後只掃描新範圍。掃描用 root-only 暫存 pattern file，不把 Proxy Token 放入 grep command line；若命中會立即 stop、disable Caddy 並停止部署。
 - 只轉送四個 LINE Pay headers；額外 headers 與 `Host`、`Connection`、`Content-Length`、`Transfer-Encoding`、`Keep-Alive`、`Upgrade` 等 hop-by-hop headers 都會被拒絕。
 - 上游只用 HTTPS，送出前再次檢查固定 hostname 且禁止自訂 port。
 - `redirect: error`、AbortController timeout、所有 operation 都不自動重試，尤其 Request API 不可重送。
@@ -208,6 +227,8 @@ Sandbox 初期的 Cloudflare DNS record 必須使用 **DNS only／灰雲**，不
 - [ ] 本分支經人工 review，Gateway 與網站測試、typecheck、lint、build 全數通過。
 - [ ] 使用獨立隨機 Gateway secret；不重用 Channel Secret，且只透過受控 secret 管理提供。
 - [ ] 使用另一個獨立 Proxy Token；`gateway.env` 與 `proxy.env` 是不同 root-owned `0600` 非 symlink 檔案，Caddy 只能讀後者。
+- [ ] 已審查 `systemctl cat caddy`；committed drop-in 是 root:root `0644` regular file、非 symlink，有效 ExecStart 唯一且不含 `--environ`。
+- [ ] Caddy 啟動前已記錄 journal 起點；post-start journal guard 與 `public-caddy post-start` preflight 均通過。
 - [ ] Droplet 使用 Node 24 container、非 root runtime、restart policy 與最小權限。
 - [ ] Reserved IP 對外出口與 LINE Pay 後台白名單值由人工再次核對。
 - [ ] Reserved IP `165.245.144.110` 仍綁定正確 Droplet；DNS A record 使用該入站 IP，LINE Pay 白名單使用 `165.245.144.110/32`。

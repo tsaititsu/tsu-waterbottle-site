@@ -404,12 +404,12 @@ sudo \
   CLOUDFLARE_DNS_MODE=dns-only \
   EXPECTED_EGRESS_IP=165.245.144.110 \
   GATEWAY_BIND_PORT=3000 \
-  infra/line-pay-gateway/deploy/scripts/preflight.sh
+  infra/line-pay-gateway/deploy/scripts/preflight.sh prepare
 ```
 
-preflight 只做檢查，不安裝套件、不改檔案、不啟停服務。
+`prepare` 是必要的明確模式，要求 80、443 與 3000 都尚未監聽。preflight 只做檢查，不安裝套件、不改檔案、不啟停服務。舊的不帶模式呼叫與未知模式都會在其他檢查前 fail closed。
 
-成功標準：最後顯示 `Preflight checks passed. No system changes were made.`
+成功標準：最後顯示 `Preflight mode 'prepare' passed. No system changes were made.`
 
 失敗時：依第一個 `FAIL` 停止。不可用改 script、放寬權限或改成 Production 來繞過。
 
@@ -474,7 +474,14 @@ sudo \
   LINE_PAY_GATEWAY_PROXY_ENV_FILE=/etc/line-pay-gateway/proxy.env \
   GATEWAY_BIND_PORT=3000 \
   deploy/scripts/compose.sh up -d --no-build gateway
-deploy/scripts/verify-health.sh http://127.0.0.1:3000/health
+sudo \
+  GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
+  GATEWAY_IMAGE_TAG="$DEPLOY_SHA" \
+  GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  GATEWAY_PROXY_ENV_FILE=/etc/line-pay-gateway/proxy.env \
+  EXPECTED_EGRESS_IP=165.245.144.110 \
+  GATEWAY_BIND_PORT=3000 \
+  infra/line-pay-gateway/deploy/scripts/preflight.sh gateway-running
 ```
 
 成功標準：
@@ -482,6 +489,7 @@ deploy/scripts/verify-health.sh http://127.0.0.1:3000/health
 - container health 是 healthy。
 - localhost health 回固定安全 JSON。
 - `ss -ltn` 只看到 `127.0.0.1:3000`，沒有 `0.0.0.0:3000` 或 `[::]:3000`。
+- `gateway-running` 明確接受已啟動的 localhost Gateway，同時要求 80／443 仍空閒。
 
 失敗時：停止，不設定 DNS 或 Caddy。保留 logs：
 
@@ -497,59 +505,95 @@ sudo \
 
 回復方式：依 `SANDBOX_ROLLBACK_RUNBOOK.md` 回到已存在的上一個 image；不要執行 `docker compose down -v`。
 
-## 14. 安裝並設定 Caddy
+## 14. 安全設定 Caddy systemd 與公開入口
 
-先確認沒有其他服務占用 80／443。若有任何 listener，停止並確認用途；不得為了 Caddy 任意停止未知服務：
+本段假設 Caddy 已由有權限人員透過官方 stable Ubuntu repository 安裝。本 runbook 不把安裝與公開啟動合併成一鍵操作。先確認 Caddy 仍是 inactive／disabled，並唯讀檢查 package unit 與 80／443。若有未知 listener，停止並確認用途：
 
 ```bash
+sudo systemctl is-active caddy
+sudo systemctl is-enabled caddy
+sudo systemctl cat caddy
+sudo systemctl cat caddy | grep -F -- '--environ' || true
 sudo ss -ltnp | grep -E ':(80|443)[[:space:]]' || true
 ```
 
-使用 Caddy 官方 stable Debian／Ubuntu package repository，不使用不明 binary 或 `curl | sh`。逐段執行：
+`systemctl cat caddy` 只顯示 unit 與 drop-in，不顯示 `EnvironmentFile` 的內容。官方 package unit 若含 `/usr/bin/caddy run --environ ...`，必須由 repository committed drop-in 清空後重設 ExecStart；不得修改 `/lib/systemd/system/caddy.service` 或 `/usr/lib/systemd/system/caddy.service`。
+
+先建立唯一的 root-only 備份目錄，保存 Caddyfile、既有 drop-in 狀態與不含環境值的 unit metadata：
 
 ```bash
-sudo apt-get install -y \
-  debian-keyring \
-  debian-archive-keyring \
-  apt-transport-https \
-  curl
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-  | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-  | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-sudo chmod o+r /etc/apt/sources.list.d/caddy-stable.list
-sudo apt-get update
-sudo apt-get install caddy
+export CADDY_BACKUP_DIR="/root/line-pay-gateway-caddy-backup-$(date -u +%Y%m%dT%H%M%SZ)"
+sudo install -d -o root -g root -m 0700 "$CADDY_BACKUP_DIR"
+sudo cp --archive /etc/caddy/Caddyfile "$CADDY_BACKUP_DIR/Caddyfile.before"
+if sudo test -e /etc/systemd/system/caddy.service.d/line-pay-gateway.conf; then
+  sudo cp --archive \
+    /etc/systemd/system/caddy.service.d/line-pay-gateway.conf \
+    "$CADDY_BACKUP_DIR/line-pay-gateway.conf.before"
+else
+  sudo install -o root -g root -m 0600 /dev/null "$CADDY_BACKUP_DIR/drop-in-was-absent"
+fi
+sudo systemctl cat caddy | sudo tee "$CADDY_BACKUP_DIR/caddy.systemd.before.txt" >/dev/null
 ```
 
-官方 package 可能自動啟動 systemd service。尚未放入已審核 config 與確認 DNS 前，先停止：
-
-```bash
-sudo systemctl stop caddy
-```
-
-再把已審核的 candidate 放到正式位置，並建立只讀取 Proxy Token 的 systemd override。Caddy 不得讀取 `gateway.env`：
+從同一個已核准 release 原子安裝 Caddyfile 與 committed drop-in。不得使用 editor 手動重打 drop-in；Caddy 不得讀取 `gateway.env`：
 
 ```bash
 caddy version
 sudo install -o root -g root -m 0644 \
   /opt/line-pay-gateway/Caddyfile.sandbox \
   /etc/caddy/Caddyfile
-sudo systemctl edit caddy
+sudo install -d -o root -g root -m 0755 /etc/systemd/system/caddy.service.d
+if sudo test -L /etc/systemd/system/caddy.service.d/line-pay-gateway.conf; then
+  echo "既有 Caddy drop-in 是 symlink；停止並人工確認。"
+  exit 1
+fi
+export CADDY_DROP_IN_TEMP="$(
+  sudo mktemp /etc/systemd/system/caddy.service.d/.line-pay-gateway.conf.XXXXXX
+)"
+sudo install -o root -g root -m 0644 \
+  infra/line-pay-gateway/deploy/caddy.service.d/line-pay-gateway.conf.example \
+  "$CADDY_DROP_IN_TEMP"
+sudo test -f "$CADDY_DROP_IN_TEMP"
+sudo test ! -L "$CADDY_DROP_IN_TEMP"
+sudo mv -f \
+  "$CADDY_DROP_IN_TEMP" \
+  /etc/systemd/system/caddy.service.d/line-pay-gateway.conf
+sudo stat -c '%U:%G %a %F %n' \
+  /etc/systemd/system/caddy.service.d/line-pay-gateway.conf
+infra/line-pay-gateway/deploy/scripts/validate-caddy-systemd.sh \
+  installed \
+  /etc/systemd/system/caddy.service.d/line-pay-gateway.conf
+sudo systemctl daemon-reload
+sudo systemctl cat caddy \
+  | infra/line-pay-gateway/deploy/scripts/validate-caddy-systemd.sh effective -
 ```
 
-在 editor 中只加入：
+有效設定必須保留官方 unit 的 `User=caddy`、`Group=caddy` 與其他安全設定，最後只能有一個：
 
-```ini
-[Service]
-EnvironmentFile=/etc/line-pay-gateway/proxy.env
+```text
+ExecStart=/usr/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
 ```
 
-儲存後：
+drop-in 必須是 root:root、`0644`、regular file、非 symlink；`EnvironmentFile` 只能是 `/etc/line-pay-gateway/proxy.env`。不得覆寫 User、Group、ExecReload 或其他 vendor hardening。
+
+禁止執行 `caddy environ`。
+
+禁止執行 `caddy run --environ`。
+
+禁止執行 `caddy adapt --pretty`。
+
+禁止執行 `systemctl show caddy --property=Environment`。
+
+禁止執行 `ps e`。
+
+禁止讀取 `/proc/<pid>/environ`。
+不得以其他命令輸出完整 process 或 systemd environment。
+
+驗證 Proxy env 後，以不顯示 token 的受控 shell 只執行 Caddy config validation：
 
 ```bash
-sudo systemctl daemon-reload
+sudo infra/line-pay-gateway/deploy/scripts/validate-proxy-env.sh \
+  /etc/line-pay-gateway/proxy.env
 sudo sh -c '
   set -a
   . /etc/line-pay-gateway/proxy.env
@@ -558,7 +602,7 @@ sudo sh -c '
 '
 ```
 
-上述驗證只在 `validate-proxy-env.sh` 與完整 preflight 已成功後執行，不輸出 token，也不把 token 放在 command line。systemd manager 只從 root-owned `proxy.env` 注入 Caddy 所需變數。
+這個 validation 不輸出 token，也不把 token 放在 command line。systemd manager 只從 root-owned `proxy.env` 注入 Caddy 所需變數。
 
 在啟用 Caddy 前，必須先由有權限人員確認 Reserved IP `165.245.144.110` 仍綁定 `linepay-gateway-sgp1`，再人工建立：
 
@@ -572,11 +616,53 @@ Proxy status: DNS only（灰雲）
 
 本 runbook 不執行上述 DNS 修改。Sandbox 初期禁止開啟 Cloudflare Proxy／橘雲；DNS only 時 Caddy 的 `{remote_host}` 才是直接 TCP 來源。若日後需要橘雲，必須先另行設計與測試 Cloudflare trusted proxy 邊界，不得直接沿用現有 client IP 信任規則。DNS 生效前不得啟動 Caddy 自動申請正式憑證。從 Droplet 與另一個外部 resolver 查詢，結果都必須只包含 `165.245.144.110`；若仍指向原始 Droplet IP `168.144.142.127` 或其他 IP，立即停止。
 
-只有 config validation 成功、80／443 沒有未知服務占用，且 DNS 已由使用者確認生效後，才啟用：
+只有 config validation 與有效 unit 驗證成功，且 DNS 已由使用者確認生效後，先記錄 journal 起始時間並執行明確的啟動前 preflight：
 
 ```bash
+sudo install -d -o root -g root -m 0700 /run/line-pay-gateway
+export CADDY_JOURNAL_START="/run/line-pay-gateway/caddy-journal-start-$(date -u +%Y%m%dT%H%M%SZ)"
+sudo infra/line-pay-gateway/deploy/scripts/caddy-journal-guard.sh \
+  record \
+  "$CADDY_JOURNAL_START"
+sudo \
+  GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
+  GATEWAY_IMAGE_TAG="$DEPLOY_SHA" \
+  GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  GATEWAY_PROXY_ENV_FILE=/etc/line-pay-gateway/proxy.env \
+  EXPECTED_EGRESS_IP=165.245.144.110 \
+  GATEWAY_BIND_PORT=3000 \
+  infra/line-pay-gateway/deploy/scripts/preflight.sh gateway-running
+sudo \
+  GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
+  GATEWAY_IMAGE_TAG="$DEPLOY_SHA" \
+  GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  GATEWAY_PROXY_ENV_FILE=/etc/line-pay-gateway/proxy.env \
+  CADDYFILE=/etc/caddy/Caddyfile \
+  CLOUDFLARE_DNS_MODE=dns-only \
+  EXPECTED_EGRESS_IP=165.245.144.110 \
+  GATEWAY_BIND_PORT=3000 \
+  infra/line-pay-gateway/deploy/scripts/preflight.sh public-caddy pre-start
 sudo systemctl enable --now caddy
 sudo systemctl status caddy --no-pager
+```
+
+啟動後立即執行 post-start 與 journal guard。journal guard 只查記錄時間之後的 Caddy journal，透過 root-only 暫存 pattern file 比對實際 Proxy Token；token 不會出現在 grep command line 或輸出。若偵測到 token，script 會 stop、disable Caddy 並以非 0 結束：
+
+```bash
+sudo \
+  GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
+  GATEWAY_IMAGE_TAG="$DEPLOY_SHA" \
+  GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  GATEWAY_PROXY_ENV_FILE=/etc/line-pay-gateway/proxy.env \
+  CADDYFILE=/etc/caddy/Caddyfile \
+  CLOUDFLARE_DNS_MODE=dns-only \
+  EXPECTED_EGRESS_IP=165.245.144.110 \
+  GATEWAY_BIND_PORT=3000 \
+  infra/line-pay-gateway/deploy/scripts/preflight.sh public-caddy post-start
+sudo infra/line-pay-gateway/deploy/scripts/caddy-journal-guard.sh \
+  scan \
+  /etc/line-pay-gateway/proxy.env \
+  "$CADDY_JOURNAL_START"
 ```
 
 架構必須保持：
@@ -602,12 +688,15 @@ Proxy Token 不參與網站 HMAC canonical string、LINE Pay 官方簽章或付�
 
 - Caddy config validation 通過。
 - Caddy service 正常。
-- systemd override 只引用 `/etc/line-pay-gateway/proxy.env`，沒有引用 `gateway.env`。
+- 有效 ExecStart 唯一且精確使用 `/usr/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile`，沒有 `--environ`、env-file flag 或 shell wrapper。
+- systemd drop-in 只引用 `/etc/line-pay-gateway/proxy.env`，沒有引用 `gateway.env`，且 Caddy 仍以 caddy user 執行。
 - 只有 80／443 對外，Gateway 3000 仍只在 localhost。
+- 2019 未監聽或只在 loopback。
+- 新 journal 範圍沒有 Proxy Token 原值。
 
 失敗時：停止，不反覆申請憑證、不改成固定 IP 純 HTTP URL。
 
-回復方式：恢復上一份已驗證 Caddyfile 並 reload；Gateway localhost service 可保持，網站流量仍不可切入。
+回復方式：立即 stop、disable Caddy，依 `SANDBOX_ROLLBACK_RUNBOOK.md` 回復 Caddyfile 與 systemd drop-in，執行 `systemctl daemon-reload`；Gateway localhost service 可保持，網站流量仍不可切入。
 
 ## 15. DNS A record 生效後驗證 TLS
 

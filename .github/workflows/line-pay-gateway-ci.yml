@@ -63,14 +63,21 @@ jobs:
           expect_exit 2 deploy/scripts/verify-egress.sh
           expect_exit 2 deploy/scripts/verify-health.sh https://linepay-gateway.example.com/health
           expect_exit 2 deploy/scripts/verify-tls.sh linepay-gateway.example.com
+          expect_exit 2 deploy/scripts/preflight.sh
+          expect_exit 2 deploy/scripts/preflight.sh automatic
+          expect_exit 2 deploy/scripts/preflight-network.sh
+          expect_exit 2 deploy/scripts/preflight-network.sh public-caddy
           deploy/scripts/rollback.sh --help >/dev/null
-          ! grep -Eq '(^|[[:space:]])(sudo|apt|apt-get|systemctl|chmod|chown|mkdir|install|tee)([[:space:]]|$)' \
+          ! grep -Eq '(^|[[:space:]])(sudo|apt|apt-get|chmod|chown|mkdir|install|tee)([[:space:]]|$)' \
+            deploy/scripts/preflight.sh
+          ! grep -Eq 'systemctl[[:space:]]+(start|stop|restart|reload|enable|disable|daemon-reload)' \
             deploy/scripts/preflight.sh
 
       - name: Test deployment security hardening
         run: |
           set -euo pipefail
           deploy/tests/security-hardening.test.sh
+          deploy/tests/caddy-systemd-security.test.sh
 
           proxy_env_file="$(mktemp)"
           printf '%s\n' \
@@ -117,11 +124,61 @@ jobs:
           ! grep -Eq 'header_up X-Gateway-Client-IP \{http\.request\.header\.' deploy/Caddyfile.example
           grep -Fq 'DNS only／灰雲' deploy/SANDBOX_DEPLOY_RUNBOOK.md
           grep -Fq '禁止開啟 Cloudflare Proxy／橘雲' deploy/SANDBOX_DEPLOY_RUNBOOK.md
-          ! grep -Eqi '(BEGIN [A-Z ]*PRIVATE KEY|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,})' \
-            deploy/Caddyfile.example \
-            deploy/gateway.env.example \
-            deploy/proxy.env.example \
-            deploy/compose.yaml
+          deploy/scripts/validate-caddy-systemd.sh \
+            drop-in \
+            deploy/caddy.service.d/line-pay-gateway.conf.example
+          installed_drop_in="$(mktemp)"
+          sudo install -o root -g root -m 0644 \
+            deploy/caddy.service.d/line-pay-gateway.conf.example \
+            "$installed_drop_in"
+          sudo deploy/scripts/validate-caddy-systemd.sh installed "$installed_drop_in"
+          sudo unlink "$installed_drop_in"
+          {
+            cat deploy/tests/fixtures/caddy.service
+            printf '\n# /etc/systemd/system/caddy.service.d/line-pay-gateway.conf\n'
+            cat deploy/caddy.service.d/line-pay-gateway.conf.example
+          } | deploy/scripts/validate-caddy-systemd.sh effective -
+          grep -Fxq 'EnvironmentFile=/etc/line-pay-gateway/proxy.env' \
+            deploy/caddy.service.d/line-pay-gateway.conf.example
+          grep -Fxq 'ExecStart=' deploy/caddy.service.d/line-pay-gateway.conf.example
+          grep -Fxq \
+            'ExecStart=/usr/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile' \
+            deploy/caddy.service.d/line-pay-gateway.conf.example
+          ! grep -Fq -- '--environ' deploy/caddy.service.d/line-pay-gateway.conf.example
+          ! grep -Fq -- '--envfile' deploy/caddy.service.d/line-pay-gateway.conf.example
+          ! grep -R -Eqi \
+            '(BEGIN [A-Z ]*PRIVATE KEY|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,})' \
+            deploy \
+            README.md
+
+      - name: Verify Caddy systemd fixture
+        run: |
+          set -euo pipefail
+          if ! command -v systemd-analyze >/dev/null 2>&1; then
+            echo "systemd-analyze is unavailable on this runner; strict parser checks already passed."
+            exit 0
+          fi
+
+          unit_dir="$(mktemp -d)"
+          created_caddy_stub=0
+          cleanup() {
+            if [[ "$created_caddy_stub" -eq 1 ]]; then
+              sudo unlink /usr/bin/caddy
+            fi
+            find "$unit_dir" -depth -delete
+          }
+          trap cleanup EXIT
+
+          cp deploy/tests/fixtures/caddy.service "$unit_dir/caddy.service"
+          mkdir "$unit_dir/caddy.service.d"
+          cp \
+            deploy/caddy.service.d/line-pay-gateway.conf.example \
+            "$unit_dir/caddy.service.d/line-pay-gateway.conf"
+          if [[ ! -x /usr/bin/caddy ]]; then
+            sudo install -m 0755 /bin/true /usr/bin/caddy
+            created_caddy_stub=1
+          fi
+          SYSTEMD_UNIT_PATH="$unit_dir" systemd-analyze verify caddy.service
 
       - name: Validate Caddyfile syntax
         run: |
