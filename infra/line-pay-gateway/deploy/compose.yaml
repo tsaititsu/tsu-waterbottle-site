@@ -2,7 +2,7 @@ name: line-pay-gateway-sandbox
 
 services:
   gateway:
-    image: line-pay-fixed-ip-gateway:${GATEWAY_IMAGE_TAG:?set GATEWAY_IMAGE_TAG to an audited commit SHA}
+    image: line-pay-fixed-ip-gateway:${GATEWAY_IMAGE_TAG_VALIDATED:?run deploy/scripts/compose.sh with a full audited commit SHA}
     build:
       context: ..
       dockerfile: Dockerfile

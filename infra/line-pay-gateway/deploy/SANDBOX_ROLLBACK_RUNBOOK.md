@@ -19,7 +19,7 @@
 
 - 網站 LINE Pay 入口仍關閉。
 - 沒有進行中的 Sandbox 付款。
-- 已知道目前 image tag 與上一個已審核 tag。
+- 已知道目前與上一個已審核的 40 字元小寫完整 commit SHA；短 SHA、branch、`latest` 或任意 release 名稱都不接受。
 - 上一個 image 已存在本機。
 - env file 仍是 root owner、mode 600、Sandbox。
 - localhost port、固定出口與 Caddy 狀態已記錄。
@@ -28,10 +28,19 @@
 
 ```bash
 cd /opt/line-pay-gateway/repository/infra/line-pay-gateway
-sudo docker compose -f deploy/compose.yaml ps
+export CURRENT_DEPLOY_SHA="$(cat /opt/line-pay-gateway/DEPLOYED_IMAGE_TAG)"
+deploy/scripts/validators.sh \
+  release \
+  line-pay-fixed-ip-gateway \
+  "$CURRENT_DEPLOY_SHA"
+sudo \
+  GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
+  GATEWAY_IMAGE_TAG="$CURRENT_DEPLOY_SHA" \
+  LINE_PAY_GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  GATEWAY_BIND_PORT=3000 \
+  deploy/scripts/compose.sh ps
 sudo docker image ls line-pay-fixed-ip-gateway
 sudo stat -c '%U:%G %a %n' /etc/line-pay-gateway/gateway.env
-cat /opt/line-pay-gateway/DEPLOYED_IMAGE_TAG
 ```
 
 不要顯示 env file 內容。
@@ -48,6 +57,8 @@ cat /opt/line-pay-gateway/DEPLOYED_IMAGE_TAG
 ```bash
 deploy/scripts/rollback.sh --previous-tag <PREVIOUS_AUDITED_TAG>
 ```
+
+`<PREVIOUS_AUDITED_TAG>` 必須符合 `^[0-9a-f]{40}$`。Script 以共用 validator 分別驗證固定 image name `line-pay-fixed-ip-gateway` 與完整 SHA，任何短 SHA、branch、`latest`、大寫或額外字尾都會在 Docker 操作前被拒絕。
 
 成功標準：
 
@@ -69,7 +80,9 @@ deploy/scripts/rollback.sh --previous-tag <PREVIOUS_AUDITED_TAG>
 
 人工確認：
 
-- 目錄只有 root 可寫。
+- `/var/log/line-pay-gateway` 不是 symlink，owner／group 是 `root:root`，mode 是 `0750` 或更嚴格的 `0700`。
+- 目錄不存在時，script 只會以 `install -d -o root -g root -m 0750` 安全建立；parent 不存在、是 symlink 或不是目錄時 fail closed。
+- 每一份 `pre-rollback-*.log` 都由 root 建立，owner／group 是 `root:root`，mode 固定為 `0600`。
 - log 內容沒有 secret、完整簽章、authorization headers、payload 或個資。
 
 若發現敏感資訊：
@@ -92,9 +105,9 @@ sudo \
 
 script 會要求人工輸入完整 previous tag。確認後只會：
 
-1. 保存目前 Gateway logs。
-2. `docker compose stop gateway`。
-3. 使用本機既有 previous image 執行 `up -d --no-build --no-deps gateway`。
+1. 驗證或安全建立 root-owned rollback log directory，以 mode `0600` 保存目前 Gateway logs。
+2. 經 `deploy/scripts/compose.sh` 執行 `stop gateway`。
+3. 使用同一個受保護 wrapper 與本機既有 previous image 執行 `up -d --no-build --no-deps gateway`。
 4. 驗證 localhost health。
 5. health 成功後更新 `DEPLOYED_IMAGE_TAG`。
 
@@ -124,9 +137,19 @@ script 不會：
 ```bash
 deploy/scripts/verify-health.sh http://127.0.0.1:3000/health
 deploy/scripts/verify-egress.sh 165.245.144.110
-deploy/scripts/verify-tls.sh <GATEWAY_DOMAIN>
-sudo docker compose -f deploy/compose.yaml ps
-sudo docker compose -f deploy/compose.yaml logs --no-color gateway
+deploy/scripts/verify-tls.sh linepay-gateway.tsu-waterbottle.com
+sudo \
+  GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
+  GATEWAY_IMAGE_TAG="<PREVIOUS_AUDITED_TAG>" \
+  LINE_PAY_GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  GATEWAY_BIND_PORT=3000 \
+  deploy/scripts/compose.sh ps
+sudo \
+  GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
+  GATEWAY_IMAGE_TAG="<PREVIOUS_AUDITED_TAG>" \
+  LINE_PAY_GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  GATEWAY_BIND_PORT=3000 \
+  deploy/scripts/compose.sh logs --no-color gateway
 ```
 
 成功標準：
@@ -146,7 +169,7 @@ sudo docker compose -f deploy/compose.yaml logs --no-color gateway
 
 停止自動操作並收集：
 
-- `docker compose ps`
+- `deploy/scripts/compose.sh ps`（提供目前完整 commit SHA）
 - container health 狀態。
 - 遮蔽後的 Gateway allowlist logs。
 - `ss -ltn`

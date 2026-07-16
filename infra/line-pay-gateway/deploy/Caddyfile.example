@@ -1,5 +1,5 @@
-# Replace this placeholder only after the Sandbox subdomain and DNS record are approved.
-linepay-gateway.example.com {
+# Approved Sandbox hostname. This file does not create DNS or request a certificate by itself.
+linepay-gateway.tsu-waterbottle.com {
 	header {
 		-Server
 		Cache-Control "no-store"

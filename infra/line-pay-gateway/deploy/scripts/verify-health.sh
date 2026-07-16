@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 health_url="${1:-http://127.0.0.1:3000/health}"
 
-case "$health_url" in
-  http://127.0.0.1:*/* | http://localhost:*/*)
-    ;;
-  *)
-    echo "Health verification is restricted to an explicit localhost HTTP URL." >&2
-    exit 2
-    ;;
-esac
+# shellcheck source=validators.sh
+source "$script_dir/validators.sh"
+
+validate_local_health_url "$health_url"
 
 response="$(
   curl \

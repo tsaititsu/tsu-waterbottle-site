@@ -46,7 +46,7 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Check deployment script syntax
-        run: bash -n deploy/scripts/*.sh
+        run: bash -n deploy/scripts/*.sh deploy/tests/*.sh
 
       - name: Check deployment script guards
         run: |
@@ -67,13 +67,35 @@ jobs:
           ! grep -Eq '(^|[[:space:]])(sudo|apt|apt-get|systemctl|chmod|chown|mkdir|install|tee)([[:space:]]|$)' \
             deploy/scripts/preflight.sh
 
+      - name: Test deployment security hardening
+        run: |
+          set -euo pipefail
+          deploy/tests/security-hardening.test.sh
+
+          secure_log_dir="$(mktemp -d)"
+          rmdir "$secure_log_dir"
+          sudo deploy/scripts/secure-log-directory.sh prepare "$secure_log_dir"
+          test "$(stat -c '%U:%G %a' "$secure_log_dir")" = "root:root 750"
+          sudo rmdir "$secure_log_dir"
+
       - name: Validate deployment examples
         run: |
           set -euo pipefail
           grep -Fx 'LINE_PAY_GATEWAY_ENV=sandbox' deploy/gateway.env.example
           grep -Fx 'LINE_PAY_GATEWAY_KEY_ID=replace-with-a-sandbox-key-id' deploy/gateway.env.example
           grep -Fx 'LINE_PAY_GATEWAY_SECRET=replace-with-a-random-sandbox-shared-secret' deploy/gateway.env.example
-          grep -Fq 'linepay-gateway.example.com' deploy/Caddyfile.example
+          grep -Fq 'linepay-gateway.tsu-waterbottle.com' deploy/Caddyfile.example
+          grep -Fq 'linepay-gateway.tsu-waterbottle.com' deploy/SANDBOX_DEPLOY_RUNBOOK.md
+          grep -Fq 'linepay-gateway.tsu-waterbottle.com' README.md
+          grep -Fq 'linepay-gateway.tsu-waterbottle.com' ../../docs/line-pay-gateway-sandbox-deploy-plan.md
+          grep -Fq '165.245.144.110' deploy/SANDBOX_DEPLOY_RUNBOOK.md
+          grep -Fq '165.245.144.110' README.md
+          grep -Fq '165.245.144.110' ../../docs/line-pay-gateway-sandbox-deploy-plan.md
+          grep -Fq '165.245.144.110/32' deploy/SANDBOX_DEPLOY_RUNBOOK.md
+          grep -Fq '165.245.144.110/32' README.md
+          grep -Fq '165.245.144.110/32' ../../docs/line-pay-gateway-sandbox-deploy-plan.md
+          grep -Fq '入站用途' deploy/SANDBOX_DEPLOY_RUNBOOK.md
+          grep -Fq '出站用途' deploy/SANDBOX_DEPLOY_RUNBOOK.md
           ! grep -Eqi '(BEGIN [A-Z ]*PRIVATE KEY|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,})' \
             deploy/Caddyfile.example \
             deploy/gateway.env.example \
@@ -91,7 +113,15 @@ jobs:
           GATEWAY_IMAGE_TAG: ${{ github.sha }}
           LINE_PAY_GATEWAY_ENV_FILE: ./gateway.env.example
           GATEWAY_BIND_PORT: "3000"
-        run: docker compose -f deploy/compose.yaml config --quiet
+        run: |
+          set -euo pipefail
+          deploy/scripts/compose.sh config --quiet
+          if GATEWAY_IMAGE_TAG="${GATEWAY_IMAGE_TAG}" \
+            docker compose -f deploy/compose.yaml config --quiet >/dev/null 2>&1
+          then
+            echo "Direct Compose execution bypassed release input validation." >&2
+            exit 1
+          fi
 
       - name: Typecheck
         run: npm run typecheck
@@ -103,7 +133,13 @@ jobs:
         run: npm run build
 
       - name: Build Docker image
-        run: docker build --tag line-pay-fixed-ip-gateway:${{ github.sha }} .
+        run: |
+          set -euo pipefail
+          deploy/scripts/validators.sh \
+            release \
+            line-pay-fixed-ip-gateway \
+            "${{ github.sha }}"
+          docker build --tag "line-pay-fixed-ip-gateway:${{ github.sha }}" .
 
   website-line-pay:
     name: Website LINE Pay tests

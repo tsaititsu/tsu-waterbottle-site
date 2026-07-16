@@ -9,16 +9,27 @@
 - Droplet：`linepay-gateway-sgp1`
 - 原始 Public IPv4：`168.144.142.127`
 - Reserved／固定出口 IPv4：`165.245.144.110`
+- Sandbox Gateway domain：`linepay-gateway.tsu-waterbottle.com`
+- 入站 URL：`https://linepay-gateway.tsu-waterbottle.com`
+- DNS A record：`linepay-gateway.tsu-waterbottle.com → 165.245.144.110`
+- LINE Pay Sandbox 白名單來源：`165.245.144.110/32`
 - Ubuntu：預期 `24.04`
 - Gateway container port：`3000`
 - Host bind：只允許 `127.0.0.1:3000`
 
+入站用途與出站用途必須分開理解：
+
+- 入站用途：Vercel／瀏覽器透過 `https://linepay-gateway.tsu-waterbottle.com` 連入 Gateway；DNS A record 讓外部找到 Reserved IP。
+- 出站用途：Gateway 呼叫 LINE Pay Sandbox API 時，LINE Pay 看到的來源 IPv4 是 `165.245.144.110`；LINE Pay 白名單使用 `165.245.144.110/32`。
+
+兩者目前使用同一個 Reserved IP，但 DNS 不等於 LINE Pay 白名單。原始 Droplet IP `168.144.142.127` 不得填入 LINE Pay 白名單。網域與公開 IP 不是秘密，可以記錄在 Git；本 runbook 不會建立 DNS 或修改 LINE Pay 後台。
+
 立即停止的情況：
 
 - 主機、Ubuntu 版本或固定出口 IP 不符。
-- 取得的 commit 不是已人工審核的完整 SHA。
+- 取得的 commit 不是已人工審核的 40 字元小寫完整 SHA。
 - env file 是 symlink、owner 不是 root、mode 不是 600、缺欄位或環境不是 `sandbox`。
-- Caddyfile 仍是 `linepay-gateway.example.com`。
+- Caddyfile 不是已核准的 `linepay-gateway.tsu-waterbottle.com`。
 - 需要把秘密貼到聊天室、Git、command line、log 或 Docker image。
 - Compose 顯示 Gateway port 綁到 `0.0.0.0`、host network、privileged、Docker socket 或 Production。
 - 任一 health、TLS、egress、CI 或 log 檢查失敗。
@@ -30,7 +41,7 @@
 部署前必須由使用者提供或確認：
 
 - 已審核的完整 commit SHA。
-- Sandbox Gateway 子網域；例如未採用的候選格式可以是 `linepay-gateway.tsu-waterbottle.com`，但本文件不代為決定。
+- Sandbox Gateway domain 已決定為 `linepay-gateway.tsu-waterbottle.com`；不得替換為 Production hostname。
 - DNS record 何時由誰建立。
 - 有權限保管 Gateway secret 的人。
 - 維護時段、負責人、rollback 前一個 image tag。
@@ -309,13 +320,18 @@ sudo -u linepaygw git clone <REPOSITORY_URL> /opt/line-pay-gateway/repository
 cd /opt/line-pay-gateway/repository
 sudo -u linepaygw git fetch --tags origin
 sudo -u linepaygw git checkout --detach <APPROVED_COMMIT_SHA>
-git rev-parse HEAD
-git status --short
+export DEPLOY_SHA="$(sudo -u linepaygw git rev-parse HEAD)"
+infra/line-pay-gateway/deploy/scripts/validators.sh \
+  release \
+  line-pay-fixed-ip-gateway \
+  "$DEPLOY_SHA"
+sudo -u linepaygw git status --short
 ```
 
 成功標準：
 
 - HEAD 完全等於使用者核准的完整 SHA。
+- `DEPLOY_SHA` 符合 `^[0-9a-f]{40}$`，image name 精確等於 `line-pay-fixed-ip-gateway`。
 - `git status --short` 為空。
 - commit 已通過 Draft PR 人工審核與必要 checks。
 
@@ -323,24 +339,23 @@ git status --short
 
 回復方式：保留 checkout 供盤點，不執行 build；由使用者重新指定 SHA。
 
-## 10. 準備非 placeholder Caddyfile，但不改 DNS
+## 10. 準備已核准 Sandbox domain 的 Caddyfile，但不改 DNS
 
-先由使用者決定 Sandbox 子網域。把待審核版本放在 application 目錄；此時尚未安裝或啟動 Caddy：
+把 repository 內已核准 domain 的版本放在 application 目錄；此時尚未安裝或啟動 Caddy：
 
 ```bash
 sudo install -o root -g root -m 0644 \
   infra/line-pay-gateway/deploy/Caddyfile.example \
   /opt/line-pay-gateway/Caddyfile.sandbox
-sudoedit /opt/line-pay-gateway/Caddyfile.sandbox
 ```
 
-只替換 `linepay-gateway.example.com`。不要放 Gateway secret、完整簽章、LINE Pay authorization header 或 access log。
+不得替換成其他 Sandbox 或 Production hostname。不要放 Gateway secret、完整簽章、LINE Pay authorization header 或 access log。
 
 此步驟不建立 DNS、不啟動 Caddy、不申請憑證。
 
 成功標準：
 
-- `/opt/line-pay-gateway/Caddyfile.sandbox` 不含 `example.com`。
+- `/opt/line-pay-gateway/Caddyfile.sandbox` 使用且只使用 `linepay-gateway.tsu-waterbottle.com`。
 - upstream 仍是 `127.0.0.1:3000`。
 - 只允許 `GET /health` 與 `POST /v1/line-pay/proxy`。
 
@@ -355,6 +370,8 @@ sudoedit /opt/line-pay-gateway/Caddyfile.sandbox
 ```bash
 cd /opt/line-pay-gateway/repository
 sudo \
+  GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
+  GATEWAY_IMAGE_TAG="$DEPLOY_SHA" \
   GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
   CADDYFILE=/opt/line-pay-gateway/Caddyfile.sandbox \
   EXPECTED_EGRESS_IP=165.245.144.110 \
@@ -372,15 +389,15 @@ preflight 只做檢查，不安裝套件、不改檔案、不啟停服務。
 
 ## 12. Build Gateway image
 
-使用完整核准 commit SHA 作 image tag：
+使用完整核准 commit SHA 作 image tag。所有 Compose 命令必須透過 `deploy/scripts/compose.sh`；直接執行 `docker compose` 會因缺少 wrapper 產生的已驗證變數而 fail closed：
 
 ```bash
 cd /opt/line-pay-gateway/repository/infra/line-pay-gateway
-export DEPLOY_SHA="<APPROVED_COMMIT_SHA>"
 sudo \
+  GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
   GATEWAY_IMAGE_TAG="$DEPLOY_SHA" \
   LINE_PAY_GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
-  docker compose -f deploy/compose.yaml build --pull gateway
+  deploy/scripts/compose.sh build --pull gateway
 sudo docker image inspect "line-pay-fixed-ip-gateway:$DEPLOY_SHA"
 ```
 
@@ -400,10 +417,11 @@ sudo docker image inspect "line-pay-fixed-ip-gateway:$DEPLOY_SHA"
 
 ```bash
 sudo \
+  GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
   GATEWAY_IMAGE_TAG="$DEPLOY_SHA" \
   LINE_PAY_GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
   GATEWAY_BIND_PORT=3000 \
-  docker compose -f deploy/compose.yaml config --quiet
+  deploy/scripts/compose.sh config --quiet
 ```
 
 `config --quiet` 只驗證，不輸出可能解析到的 env 值。再直接審查 repository 內不含秘密的 `deploy/compose.yaml`，確認：
@@ -419,10 +437,11 @@ sudo \
 
 ```bash
 sudo \
+  GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
   GATEWAY_IMAGE_TAG="$DEPLOY_SHA" \
   LINE_PAY_GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
   GATEWAY_BIND_PORT=3000 \
-  docker compose -f deploy/compose.yaml up -d --no-build gateway
+  deploy/scripts/compose.sh up -d --no-build gateway
 deploy/scripts/verify-health.sh http://127.0.0.1:3000/health
 ```
 
@@ -435,12 +454,23 @@ deploy/scripts/verify-health.sh http://127.0.0.1:3000/health
 失敗時：停止，不設定 DNS 或 Caddy。保留 logs：
 
 ```bash
-sudo docker compose -f deploy/compose.yaml logs --no-color gateway
+sudo \
+  GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
+  GATEWAY_IMAGE_TAG="$DEPLOY_SHA" \
+  LINE_PAY_GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  GATEWAY_BIND_PORT=3000 \
+  deploy/scripts/compose.sh logs --no-color gateway
 ```
 
 回復方式：依 `SANDBOX_ROLLBACK_RUNBOOK.md` 回到已存在的上一個 image；不要執行 `docker compose down -v`。
 
 ## 14. 安裝並設定 Caddy
+
+先確認沒有其他服務占用 80／443。若有任何 listener，停止並確認用途；不得為了 Caddy 任意停止未知服務：
+
+```bash
+sudo ss -ltnp | grep -E ':(80|443)[[:space:]]' || true
+```
 
 使用 Caddy 官方 stable Debian／Ubuntu package repository，不使用不明 binary 或 `curl | sh`。逐段執行：
 
@@ -476,7 +506,18 @@ sudo install -o root -g root -m 0644 \
 sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 ```
 
-只有 config validation 成功且 DNS 已由使用者確認生效後，才啟用：
+在啟用 Caddy 前，必須先由有權限人員確認 Reserved IP `165.245.144.110` 仍綁定 `linepay-gateway-sgp1`，再人工建立：
+
+```text
+Type: A
+Name: linepay-gateway.tsu-waterbottle.com
+Value: 165.245.144.110
+TTL: 300
+```
+
+本 runbook 不執行上述 DNS 修改。DNS 生效前不得啟動 Caddy 自動申請正式憑證。從 Droplet 與另一個外部 resolver 查詢，結果都必須只包含 `165.245.144.110`；若仍指向原始 Droplet IP `168.144.142.127` 或其他 IP，立即停止。
+
+只有 config validation 成功、80／443 沒有未知服務占用，且 DNS 已由使用者確認生效後，才啟用：
 
 ```bash
 sudo systemctl enable --now caddy
@@ -486,11 +527,12 @@ sudo systemctl status caddy --no-pager
 架構必須保持：
 
 ```text
-Internet :80/:443
+Vercel / browser
+→ https://linepay-gateway.tsu-waterbottle.com :80/:443
 → host Caddy
 → 127.0.0.1:3000
 → Gateway container
-→ LINE Pay Sandbox
+→ LINE Pay Sandbox（來源 IPv4：165.245.144.110）
 ```
 
 Caddy 預設保留 request method、URI、headers 與 body；本設定不重寫 HMAC request body。`request_body max_size 64KB` 在 reverse proxy 前再次限制 body。
@@ -507,19 +549,19 @@ Caddy 預設保留 request method、URI、headers 與 body；本設定不重寫 
 
 回復方式：恢復上一份已驗證 Caddyfile 並 reload；Gateway localhost service 可保持，網站流量仍不可切入。
 
-## 15. DNS 生效後驗證 TLS
+## 15. DNS A record 生效後驗證 TLS
 
-本 runbook 不修改 DNS。由使用者確認 DNS A record 已指向允許的公開入口後，執行：
+本 runbook 不修改 DNS。由使用者確認 `linepay-gateway.tsu-waterbottle.com` 的 A record 已指向入站 IP `165.245.144.110` 後，執行：
 
 ```bash
-deploy/scripts/verify-tls.sh <GATEWAY_DOMAIN>
+deploy/scripts/verify-tls.sh linepay-gateway.tsu-waterbottle.com
 ```
 
 成功標準：
 
 - 憑證有效且 hostname 符合。
-- `https://<GATEWAY_DOMAIN>/health` 回 HTTP 200。
-- `http://<GATEWAY_DOMAIN>/health` 自動轉到 HTTPS。
+- `https://linepay-gateway.tsu-waterbottle.com/health` 回 HTTP 200。
+- `http://linepay-gateway.tsu-waterbottle.com/health` 自動轉到 HTTPS。
 
 失敗時：停止，不把網站 Gateway URL 指向該 domain。
 
@@ -530,7 +572,7 @@ deploy/scripts/verify-tls.sh <GATEWAY_DOMAIN>
 從不在 Droplet 上的受控終端執行：
 
 ```bash
-curl --fail --silent --show-error "https://<GATEWAY_DOMAIN>/health"
+curl --fail --silent --show-error "https://linepay-gateway.tsu-waterbottle.com/health"
 ```
 
 成功標準：只回 `{"ok":true,"status":"healthy"}`，不暴露版本、env、IP 或 secret。
@@ -545,7 +587,7 @@ curl --fail --silent --show-error "https://<GATEWAY_DOMAIN>/health"
 
 - `LINE_PAY_TRANSPORT=gateway`
 - `LINE_PAY_ENV=sandbox`
-- `LINE_PAY_GATEWAY_URL=https://<GATEWAY_DOMAIN>`
+- `LINE_PAY_GATEWAY_URL=https://linepay-gateway.tsu-waterbottle.com`
 - `LINE_PAY_GATEWAY_KEY_ID`
 - `LINE_PAY_GATEWAY_SECRET`
 - `LINE_PAY_GATEWAY_TIMEOUT_MS`
@@ -583,7 +625,12 @@ sudo docker inspect line-pay-gateway-sandbox-gateway-1 \
 
 ```bash
 deploy/scripts/verify-egress.sh 165.245.144.110
-sudo docker compose -f deploy/compose.yaml logs --no-color gateway
+sudo \
+  GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
+  GATEWAY_IMAGE_TAG="$DEPLOY_SHA" \
+  LINE_PAY_GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  GATEWAY_BIND_PORT=3000 \
+  deploy/scripts/compose.sh logs --no-color gateway
 sudo docker inspect line-pay-gateway-sandbox-gateway-1 \
   --format '{{json .HostConfig.LogConfig}}'
 df -h
@@ -639,6 +686,9 @@ sudo chmod 0644 /opt/line-pay-gateway/DEPLOYED_IMAGE_TAG
 - [ ] Gateway container 使用非 root `node` user。
 - [ ] 對外只需要 22、80、443；Phase 2A 不修改 UFW 或 DigitalOcean Firewall。
 - [ ] Gateway port 3000 只綁 `127.0.0.1`。
+- [ ] Firewall／網路規則調整另行審核，且不得誤封鎖既有 SSH 22 連線。
+- [ ] DNS A record 是 `linepay-gateway.tsu-waterbottle.com → 165.245.144.110`，部署初期 TTL 為 `300`。
+- [ ] LINE Pay 白名單是出站來源 `165.245.144.110/32`，不是原始 Droplet IP `168.144.142.127`。
 - [ ] 已啟用 DigitalOcean 免費監控與告警。
 - [ ] Docker logs 有 rotation。
 - [ ] 定期執行 `df -h` 與 `journalctl --disk-usage`。

@@ -6,7 +6,7 @@ LINE Pay Fixed IP Gateway Phase 2A：Sandbox 部署準備。
 
 ## 目標
 
-在不連線 DigitalOcean、不修改 DNS、不注入秘密、不執行付款的前提下，建立可人工審核的 Sandbox Compose、Caddy、主機檢查腳本、驗證腳本、rollback 流程與 CI。
+在不連線 DigitalOcean、不修改 DNS、不注入秘密、不執行付款的前提下，建立可人工審核的 Sandbox Compose、Caddy、主機檢查腳本、驗證腳本、rollback 流程與 CI，並修正完整 SHA、localhost URL、rollback log 權限與 DNS／固定 IP 文件邊界。
 
 ## 不包含的範圍
 
@@ -22,12 +22,18 @@ LINE Pay Fixed IP Gateway Phase 2A：Sandbox 部署準備。
 ## 現況
 
 - Phase 1 Gateway 已存在 `infra/line-pay-gateway/`。
+- Sandbox Gateway domain 已決定為 `linepay-gateway.tsu-waterbottle.com`。
+- 入站 DNS 與出站 LINE Pay 白名單目前都使用 Reserved IPv4 `165.245.144.110`，但用途必須分開審核。
+- 入站用途是 `https://linepay-gateway.tsu-waterbottle.com`；A record 必須是 `linepay-gateway.tsu-waterbottle.com → 165.245.144.110`。
+- 出站用途是 Gateway 呼叫 LINE Pay Sandbox 時的來源 IP；LINE Pay 白名單固定使用 `165.245.144.110/32`，不得使用原始 Droplet IP `168.144.142.127`。
+- 建立 A record 前必須先確認 Reserved IP 仍綁定正確 Droplet；部署初期建議 TTL `300`，DNS 生效前不得啟動 Caddy 自動申請正式憑證。
+- 網域與公開 IP 不是秘密，但本任務不修改 DNS、Reserved IP 或 LINE Pay 後台。
 - Gateway 使用 Node.js 24、TypeScript 與多階段 Dockerfile。
 - Application port 是 `3000`，health endpoint 是 `GET /health`。
 - Sandbox／Production upstream 由 `LINE_PAY_GATEWAY_ENV` 明確選擇。
 - Gateway 已有 HMAC、replay、rate limit、body limit 與安全日誌。
 - 現有 README 與安全規範已有停機／退場提醒。
-- 尚無 Compose、Caddy、主機 preflight、TLS／egress 驗證與 image rollback 工具。
+- PR #24 已新增 Compose、Caddy、主機 preflight、TLS／egress 驗證與 image rollback 工具；合併後安全審查發現四項需在部署前修正的 guard。
 
 ## SOL 模式與 Codex 任務等級
 
@@ -47,21 +53,21 @@ Codex 任務等級：極高
 
 ### 第 1 階段
 
-- 修改：新增 Compose、Caddyfile 與假值 env example。
-- 驗證：Compose 可解析、Sandbox 環境被固定、Gateway port 只綁 localhost。
-- 完成條件：設定中沒有秘密、Production 預設或公開 application port。
+- 修改：以共用 validator 強制 image name 與完整 40 字元小寫 SHA，並要求所有 Compose 命令經受保護 wrapper。
+- 驗證：合法完整 SHA 接受；短 SHA、任意 tag、大寫、額外字尾及 image name 注入全部拒絕。
+- 完成條件：不能以直接 Compose、短 SHA 或任意 tag 繞過 release input 驗證。
 
 ### 第 2 階段
 
-- 修改：新增 deploy、rollback runbook 與 preflight／egress／health／TLS／rollback scripts。
-- 驗證：所有 shell scripts 通過 `bash -n`，preflight 不安裝或修改系統。
-- 完成條件：高風險步驟有執行前檢查、成功標準、停止條件與回復方式。
+- 修改：嚴格解析 localhost health URL，並為 rollback log directory／file 強制 root ownership、限制權限與 symlink 拒絕。
+- 驗證：userinfo、外部 hostname、query、fragment、額外 path、不合法 port 與不安全 log 路徑全部拒絕。
+- 完成條件：health 驗證不可能連到外部主機；rollback 不會寫入不安全 log 路徑。
 
 ### 第 3 階段
 
-- 修改：擴充 GitHub Actions。
-- 驗證：Gateway tests、網站 LINE Pay tests、Docker build、Compose config 與部署範例檢查通過。
-- 完成條件：本機完整測試與 GitHub checks 通過，建立高風險 Draft PR。
+- 修改：明確記錄 `linepay-gateway.tsu-waterbottle.com → 165.245.144.110` 的入站 DNS 與 `165.245.144.110/32` 的出站 LINE Pay 白名單用途，並擴充 GitHub Actions。
+- 驗證：文件關鍵值、負向安全測試、Gateway／網站測試、Docker build、Compose config 與 Caddy syntax 全部通過。
+- 完成條件：文件不混淆入站網址與出站來源 IP，且本次不實際修改 DNS 或外部服務。
 
 ## 資料庫影響
 
@@ -81,11 +87,11 @@ Codex 任務等級：極高
 
 ## 測試計畫
 
-- 靜態檢查：`bash -n`、Compose config、placeholder／秘密檢查、`git diff --check`。
+- 靜態檢查：`bash -n`、完整 SHA／health URL／log directory 負向測試、Compose config、公開網域／IP 文件與秘密檢查、`git diff --check`。
 - 單元測試：Gateway 既有測試與網站 transport／LINE Pay 測試。
 - 整合測試：Docker image build 由 CI 驗證。
 - 手動測試：本階段不連線主機、不執行付款。
-- 失敗情況：Production env、placeholder domain、錯誤 egress、env 權限不符與 health/TLS 失敗均停止。
+- 失敗情況：Production env、非核准 Sandbox domain、非完整 SHA、錯誤 egress、env／log 權限不符與 health/TLS 失敗均停止。
 - 重複請求：沿用 Phase 1 replay tests。
 
 ## 回復方式
