@@ -108,8 +108,8 @@ interface GoogleAnalyticsPageViewCandidate {
 type SendGoogleAnalyticsPageView = (payload: GoogleAnalyticsPageViewPayload) => void
 
 export function createGoogleAnalyticsPageViewTracker() {
-  const trackedPaths = new Set<string>()
-  let pendingPageView: GoogleAnalyticsPageViewCandidate | null = null
+  const pendingPageViews: GoogleAnalyticsPageViewCandidate[] = []
+  let lastSentPathname: string | null = null
 
   return {
     processPageView(
@@ -117,26 +117,27 @@ export function createGoogleAnalyticsPageViewTracker() {
       isScriptReady: boolean,
       sendPageView: SendGoogleAnalyticsPageView,
     ): number {
-      if (!trackedPaths.has(candidate.pathname) && pendingPageView === null) {
-        pendingPageView = candidate
+      const lastPendingPageView = pendingPageViews.at(-1)
+
+      if (
+        lastPendingPageView?.pathname !== candidate.pathname &&
+        (pendingPageViews.length > 0 || lastSentPathname !== candidate.pathname)
+      ) {
+        pendingPageViews.push(candidate)
       }
 
       if (!isScriptReady) return 0
 
       let sentPageViews = 0
 
-      if (pendingPageView && !trackedPaths.has(pendingPageView.pathname)) {
-        sendPageView(pendingPageView.payload)
-        trackedPaths.add(pendingPageView.pathname)
-        sentPageViews += 1
-      }
-      pendingPageView = null
+      for (const pendingPageView of pendingPageViews) {
+        if (pendingPageView.pathname === lastSentPathname) continue
 
-      if (!trackedPaths.has(candidate.pathname)) {
-        sendPageView(candidate.payload)
-        trackedPaths.add(candidate.pathname)
+        sendPageView(pendingPageView.payload)
+        lastSentPathname = pendingPageView.pathname
         sentPageViews += 1
       }
+      pendingPageViews.length = 0
 
       return sentPageViews
     },

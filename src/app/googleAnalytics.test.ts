@@ -164,6 +164,15 @@ assert.equal(
 assert.deepEqual(sentPageViews, [])
 assert.equal(
   pageViewTracker.processPageView(
+    { pathname: '/', payload: homePageView },
+    false,
+    recordPageView,
+  ),
+  0,
+)
+assert.deepEqual(sentPageViews, [])
+assert.equal(
+  pageViewTracker.processPageView(
     { pathname: '/ai-chart', payload: aiChartPageView },
     false,
     recordPageView,
@@ -189,6 +198,15 @@ assert.equal(
   0,
 )
 assert.deepEqual(sentPageViews, [homePageView, aiChartPageView])
+assert.equal(
+  pageViewTracker.processPageView(
+    { pathname: '/', payload: homePageView },
+    true,
+    recordPageView,
+  ),
+  1,
+)
+assert.deepEqual(sentPageViews, [homePageView, aiChartPageView, homePageView])
 
 assert.ok(componentSource.startsWith("'use client'"))
 assert.ok(componentSource.includes("import Script from 'next/script'"))
@@ -205,6 +223,9 @@ assert.ok(componentSource.includes('pageViewTracker.processPageView'))
 assert.ok(componentSource.includes('onReady={() => setIsScriptReady(true)}'))
 assert.ok(helperSource.includes('dataLayer.push(arguments)'))
 assert.equal(helperSource.includes('dataLayer.push(command)'), false)
+assert.ok(helperSource.includes('pendingPageViews'))
+assert.ok(helperSource.includes('lastSentPathname'))
+assert.equal(helperSource.includes('trackedPaths'), false)
 assert.equal(componentSource.includes('useSearchParams'), false)
 assert.equal(componentSource.includes('window.location.href'), false)
 
