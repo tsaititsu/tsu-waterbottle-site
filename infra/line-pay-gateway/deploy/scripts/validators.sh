@@ -30,6 +30,13 @@ validate_release_inputs() {
   validate_full_commit_sha "$commit_sha"
 }
 
+validate_proxy_token() {
+  local proxy_token="${1:-}"
+
+  [[ "$proxy_token" =~ ^[0-9a-f]{64}$ ]] \
+    || validation_error "Proxy Token must be exactly 64 lowercase hexadecimal characters"
+}
+
 validate_local_health_url() {
   local health_url="${1:-}"
   local port
@@ -49,6 +56,7 @@ usage() {
   printf '%s\n' \
     'Usage:' \
     '  validators.sh release <image-name> <full-commit-sha>' \
+    '  validators.sh proxy-token <64-lowercase-hex-token>' \
     '  validators.sh health-url <localhost-health-url>'
 }
 
@@ -69,6 +77,13 @@ main() {
         exit 2
       }
       validate_local_health_url "$2"
+      ;;
+    proxy-token)
+      [[ $# -eq 2 ]] || {
+        usage >&2
+        exit 2
+      }
+      validate_proxy_token "$2"
       ;;
     *)
       usage >&2

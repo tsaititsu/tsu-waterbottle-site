@@ -33,6 +33,8 @@ linepay-gateway.tsu-waterbottle.com {
 			max_size 64KB
 		}
 		reverse_proxy 127.0.0.1:3000 {
+			header_up X-Gateway-Proxy-Token {$LINE_PAY_GATEWAY_PROXY_TOKEN}
+			header_up X-Gateway-Client-IP {remote_host}
 			transport http {
 				dial_timeout 3s
 				response_header_timeout 10s

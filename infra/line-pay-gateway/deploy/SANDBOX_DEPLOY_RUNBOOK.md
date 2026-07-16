@@ -12,6 +12,7 @@
 - Sandbox Gateway domain：`linepay-gateway.tsu-waterbottle.com`
 - 入站 URL：`https://linepay-gateway.tsu-waterbottle.com`
 - DNS A record：`linepay-gateway.tsu-waterbottle.com → 165.245.144.110`
+- Cloudflare DNS mode：只允許 `DNS only`／灰雲
 - LINE Pay Sandbox 白名單來源：`165.245.144.110/32`
 - Ubuntu：預期 `24.04`
 - Gateway container port：`3000`
@@ -19,7 +20,7 @@
 
 入站用途與出站用途必須分開理解：
 
-- 入站用途：Vercel／瀏覽器透過 `https://linepay-gateway.tsu-waterbottle.com` 連入 Gateway；DNS A record 讓外部找到 Reserved IP。
+- 入站用途：Vercel server（付款 proxy）或受控 health check client 透過 `https://linepay-gateway.tsu-waterbottle.com` 連入 Gateway；DNS A record 讓外部找到 Reserved IP。
 - 出站用途：Gateway 呼叫 LINE Pay Sandbox API 時，LINE Pay 看到的來源 IPv4 是 `165.245.144.110`；LINE Pay 白名單使用 `165.245.144.110/32`。
 
 兩者目前使用同一個 Reserved IP，但 DNS 不等於 LINE Pay 白名單。原始 Droplet IP `168.144.142.127` 不得填入 LINE Pay 白名單。網域與公開 IP 不是秘密，可以記錄在 Git；本 runbook 不會建立 DNS 或修改 LINE Pay 後台。
@@ -28,8 +29,9 @@
 
 - 主機、Ubuntu 版本或固定出口 IP 不符。
 - 取得的 commit 不是已人工審核的 40 字元小寫完整 SHA。
-- env file 是 symlink、owner 不是 root、mode 不是 600、缺欄位或環境不是 `sandbox`。
+- `gateway.env` 或 `proxy.env` 是 symlink、owner 不是 root、mode 不是 600、缺欄位，或兩者其實是同一檔案。
 - Caddyfile 不是已核准的 `linepay-gateway.tsu-waterbottle.com`。
+- Cloudflare record 準備啟用 Proxy／橘雲，或無法確認仍為 DNS only／灰雲。
 - 需要把秘密貼到聊天室、Git、command line、log 或 Docker image。
 - Compose 顯示 Gateway port 綁到 `0.0.0.0`、host network、privileged、Docker socket 或 Production。
 - 任一 health、TLS、egress、CI 或 log 檢查失敗。
@@ -43,7 +45,8 @@
 - 已審核的完整 commit SHA。
 - Sandbox Gateway domain 已決定為 `linepay-gateway.tsu-waterbottle.com`；不得替換為 Production hostname。
 - DNS record 何時由誰建立。
-- 有權限保管 Gateway secret 的人。
+- Cloudflare DNS record 明確設定為 DNS only／灰雲；本架構不支援直接開啟 Proxy／橘雲。
+- 有權限分別保管 Gateway HMAC secret 與獨立 Proxy Token 的人。
 - 維護時段、負責人、rollback 前一個 image tag。
 - DigitalOcean 免費監控、告警接收者與預計退場日期。
 
@@ -265,7 +268,7 @@ sudo stat -c '%U:%G %a %n' \
 
 回復方式：修正 owner／mode，不刪除未知內容。
 
-## 8. 建立 root-only Sandbox env file
+## 8. 建立兩個相互隔離的 root-only Sandbox env file
 
 從 repository 的 `deploy/gateway.env.example` 人工建立：
 
@@ -292,20 +295,41 @@ sudoedit /etc/line-pay-gateway/gateway.env
 - `GATEWAY_RATE_LIMIT_WINDOW_MS`
 - `GATEWAY_RATE_LIMIT_MAX`
 
-Secret 規則：
+Gateway HMAC Secret 規則：
 
 - 由有權限的人在主機的私人終端產生，例如 `openssl rand -base64 48`。
 - 不把輸出貼到聊天室、ticket、Git、PR 或一般 shell script。
 - Gateway secret 不得與 LINE Pay Channel Secret 共用。
 - 不使用 DigitalOcean metadata 儲存秘密。
 
+再從 `deploy/proxy.env.example` 人工建立只供 Caddy 與 Gateway 共用的獨立檔案：
+
+```text
+/etc/line-pay-gateway/proxy.env
+```
+
+```bash
+sudo install -o root -g root -m 0600 /dev/null /etc/line-pay-gateway/proxy.env
+sudoedit /etc/line-pay-gateway/proxy.env
+```
+
+正式檔案只能有一行：
+
+```text
+LINE_PAY_GATEWAY_PROXY_TOKEN=<64 個小寫十六進位字元>
+```
+
+由有權限的人在主機私人終端產生，例如 `openssl rand -hex 32`；本文件不記錄輸出。Proxy Token 必須與 `LINE_PAY_GATEWAY_SECRET`、LINE Pay Channel Secret 完全不同，不得合併回 `gateway.env`。
+
 成功標準：
 
 ```bash
-sudo stat -c '%U:%G %a %n' /etc/line-pay-gateway/gateway.env
+sudo stat -c '%U:%G %a %n' \
+  /etc/line-pay-gateway/gateway.env \
+  /etc/line-pay-gateway/proxy.env
 ```
 
-結果必須是 root owner 且 mode `600`。不要用 `cat`、`grep` 或 log 顯示真值。
+兩個檔案都必須是不同的 regular file、不是 symlink、owner／group 為 `root:root`、mode `600`。`proxy.env` 只能包含 Proxy Token；不要用 `cat`、`grep` 或 log 顯示真值。
 
 失敗時：停止，不啟動 Compose。
 
@@ -358,6 +382,8 @@ sudo install -o root -g root -m 0644 \
 - `/opt/line-pay-gateway/Caddyfile.sandbox` 使用且只使用 `linepay-gateway.tsu-waterbottle.com`。
 - upstream 仍是 `127.0.0.1:3000`。
 - 只允許 `GET /health` 與 `POST /v1/line-pay/proxy`。
+- proxy route 以 `header_up X-Gateway-Client-IP {remote_host}` 強制覆寫呼叫端可能送來的同名 header。
+- proxy route 以 `header_up X-Gateway-Proxy-Token {$LINE_PAY_GATEWAY_PROXY_TOKEN}` 強制覆寫同名 header，不得硬編碼 token 或從 client request header 複製。
 
 失敗時：停止，不猜測正式網域。
 
@@ -373,7 +399,9 @@ sudo \
   GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
   GATEWAY_IMAGE_TAG="$DEPLOY_SHA" \
   GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  GATEWAY_PROXY_ENV_FILE=/etc/line-pay-gateway/proxy.env \
   CADDYFILE=/opt/line-pay-gateway/Caddyfile.sandbox \
+  CLOUDFLARE_DNS_MODE=dns-only \
   EXPECTED_EGRESS_IP=165.245.144.110 \
   GATEWAY_BIND_PORT=3000 \
   infra/line-pay-gateway/deploy/scripts/preflight.sh
@@ -397,6 +425,7 @@ sudo \
   GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
   GATEWAY_IMAGE_TAG="$DEPLOY_SHA" \
   LINE_PAY_GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  LINE_PAY_GATEWAY_PROXY_ENV_FILE=/etc/line-pay-gateway/proxy.env \
   deploy/scripts/compose.sh build --pull gateway
 sudo docker image inspect "line-pay-fixed-ip-gateway:$DEPLOY_SHA"
 ```
@@ -420,6 +449,7 @@ sudo \
   GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
   GATEWAY_IMAGE_TAG="$DEPLOY_SHA" \
   LINE_PAY_GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  LINE_PAY_GATEWAY_PROXY_ENV_FILE=/etc/line-pay-gateway/proxy.env \
   GATEWAY_BIND_PORT=3000 \
   deploy/scripts/compose.sh config --quiet
 ```
@@ -427,6 +457,7 @@ sudo \
 `config --quiet` 只驗證，不輸出可能解析到的 env 值。再直接審查 repository 內不含秘密的 `deploy/compose.yaml`，確認：
 
 - `LINE_PAY_GATEWAY_ENV: sandbox`
+- `env_file` 分別引用 `gateway.env` 與 `proxy.env`。
 - port 是 `127.0.0.1:3000:3000`
 - `read_only: true`
 - `cap_drop: ALL`
@@ -440,6 +471,7 @@ sudo \
   GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
   GATEWAY_IMAGE_TAG="$DEPLOY_SHA" \
   LINE_PAY_GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  LINE_PAY_GATEWAY_PROXY_ENV_FILE=/etc/line-pay-gateway/proxy.env \
   GATEWAY_BIND_PORT=3000 \
   deploy/scripts/compose.sh up -d --no-build gateway
 deploy/scripts/verify-health.sh http://127.0.0.1:3000/health
@@ -458,6 +490,7 @@ sudo \
   GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
   GATEWAY_IMAGE_TAG="$DEPLOY_SHA" \
   LINE_PAY_GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  LINE_PAY_GATEWAY_PROXY_ENV_FILE=/etc/line-pay-gateway/proxy.env \
   GATEWAY_BIND_PORT=3000 \
   deploy/scripts/compose.sh logs --no-color gateway
 ```
@@ -496,15 +529,36 @@ sudo apt-get install caddy
 sudo systemctl stop caddy
 ```
 
-再把已審核的 candidate 放到正式位置並驗證：
+再把已審核的 candidate 放到正式位置，並建立只讀取 Proxy Token 的 systemd override。Caddy 不得讀取 `gateway.env`：
 
 ```bash
 caddy version
 sudo install -o root -g root -m 0644 \
   /opt/line-pay-gateway/Caddyfile.sandbox \
   /etc/caddy/Caddyfile
-sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+sudo systemctl edit caddy
 ```
+
+在 editor 中只加入：
+
+```ini
+[Service]
+EnvironmentFile=/etc/line-pay-gateway/proxy.env
+```
+
+儲存後：
+
+```bash
+sudo systemctl daemon-reload
+sudo sh -c '
+  set -a
+  . /etc/line-pay-gateway/proxy.env
+  set +a
+  exec caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+'
+```
+
+上述驗證只在 `validate-proxy-env.sh` 與完整 preflight 已成功後執行，不輸出 token，也不把 token 放在 command line。systemd manager 只從 root-owned `proxy.env` 注入 Caddy 所需變數。
 
 在啟用 Caddy 前，必須先由有權限人員確認 Reserved IP `165.245.144.110` 仍綁定 `linepay-gateway-sgp1`，再人工建立：
 
@@ -513,9 +567,10 @@ Type: A
 Name: linepay-gateway.tsu-waterbottle.com
 Value: 165.245.144.110
 TTL: 300
+Proxy status: DNS only（灰雲）
 ```
 
-本 runbook 不執行上述 DNS 修改。DNS 生效前不得啟動 Caddy 自動申請正式憑證。從 Droplet 與另一個外部 resolver 查詢，結果都必須只包含 `165.245.144.110`；若仍指向原始 Droplet IP `168.144.142.127` 或其他 IP，立即停止。
+本 runbook 不執行上述 DNS 修改。Sandbox 初期禁止開啟 Cloudflare Proxy／橘雲；DNS only 時 Caddy 的 `{remote_host}` 才是直接 TCP 來源。若日後需要橘雲，必須先另行設計與測試 Cloudflare trusted proxy 邊界，不得直接沿用現有 client IP 信任規則。DNS 生效前不得啟動 Caddy 自動申請正式憑證。從 Droplet 與另一個外部 resolver 查詢，結果都必須只包含 `165.245.144.110`；若仍指向原始 Droplet IP `168.144.142.127` 或其他 IP，立即停止。
 
 只有 config validation 成功、80／443 沒有未知服務占用，且 DNS 已由使用者確認生效後，才啟用：
 
@@ -527,7 +582,7 @@ sudo systemctl status caddy --no-pager
 架構必須保持：
 
 ```text
-Vercel / browser
+Vercel / Next.js server（付款 proxy）或受控 health check client
 → https://linepay-gateway.tsu-waterbottle.com :80/:443
 → host Caddy
 → 127.0.0.1:3000
@@ -537,12 +592,17 @@ Vercel / browser
 
 Caddy 預設保留 request method、URI、headers 與 body；本設定不重寫 HMAC request body。`request_body max_size 64KB` 在 reverse proxy 前再次限制 body。
 
+付款 proxy route 同時以 `header_up X-Gateway-Proxy-Token {$LINE_PAY_GATEWAY_PROXY_TOKEN}` 與 `header_up X-Gateway-Client-IP {remote_host}` 強制覆寫任何呼叫端提供的同名 headers。Gateway 先 timing-safe 驗證 Proxy Token，再使用直接連入 Caddy 的網路來源 IP 作 per-source rate limit；不依賴 Docker NAT 後的 socket peer、Docker bridge IP、`X-Forwarded-For` 或任意 proxy CIDR。網站正常付款流程由 Vercel server 呼叫 Gateway，因此此來源通常是 Vercel 出口 IP，不是最終消費者的瀏覽器或裝置 IP。
+
+Proxy Token 不參與網站 HMAC canonical string、LINE Pay 官方簽章或付款授權；Proxy Token 與 Client IP 都不轉送到 LINE Pay，也不進入一般付款 log。
+
 為避免記錄 `x-gateway-signature` 與 LINE Pay authorization headers，example 預設不啟用 Caddy access log。若未來需要 access log，必須先另行設計 header redaction。
 
 成功標準：
 
 - Caddy config validation 通過。
 - Caddy service 正常。
+- systemd override 只引用 `/etc/line-pay-gateway/proxy.env`，沒有引用 `gateway.env`。
 - 只有 80／443 對外，Gateway 3000 仍只在 localhost。
 
 失敗時：停止，不反覆申請憑證、不改成固定 IP 純 HTTP URL。
@@ -629,6 +689,7 @@ sudo \
   GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
   GATEWAY_IMAGE_TAG="$DEPLOY_SHA" \
   LINE_PAY_GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  LINE_PAY_GATEWAY_PROXY_ENV_FILE=/etc/line-pay-gateway/proxy.env \
   GATEWAY_BIND_PORT=3000 \
   deploy/scripts/compose.sh logs --no-color gateway
 sudo docker inspect line-pay-gateway-sandbox-gateway-1 \
@@ -686,8 +747,10 @@ sudo chmod 0644 /opt/line-pay-gateway/DEPLOYED_IMAGE_TAG
 - [ ] Gateway container 使用非 root `node` user。
 - [ ] 對外只需要 22、80、443；Phase 2A 不修改 UFW 或 DigitalOcean Firewall。
 - [ ] Gateway port 3000 只綁 `127.0.0.1`。
+- [ ] `gateway.env` 與 `proxy.env` 是不同的 root-owned `0600` 非 symlink 檔案；Caddy systemd override 只讀取 `proxy.env`。
 - [ ] Firewall／網路規則調整另行審核，且不得誤封鎖既有 SSH 22 連線。
 - [ ] DNS A record 是 `linepay-gateway.tsu-waterbottle.com → 165.245.144.110`，部署初期 TTL 為 `300`。
+- [ ] Cloudflare DNS record 是 DNS only／灰雲；不得開啟 Cloudflare Proxy／橘雲，除非已另行完成 trusted proxy 安全設計與測試。
 - [ ] LINE Pay 白名單是出站來源 `165.245.144.110/32`，不是原始 Droplet IP `168.144.142.127`。
 - [ ] 已啟用 DigitalOcean 免費監控與告警。
 - [ ] Docker logs 有 rotation。

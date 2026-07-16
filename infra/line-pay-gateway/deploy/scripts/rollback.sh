@@ -6,6 +6,7 @@ gateway_root="$(cd -- "$script_dir/../.." && pwd)"
 compose_file="${COMPOSE_FILE:-$gateway_root/deploy/compose.yaml}"
 compose_wrapper="$script_dir/compose.sh"
 gateway_env_file="${GATEWAY_ENV_FILE:-/etc/line-pay-gateway/gateway.env}"
+proxy_env_file="${GATEWAY_PROXY_ENV_FILE:-/etc/line-pay-gateway/proxy.env}"
 log_dir="${ROLLBACK_LOG_DIR:-/var/log/line-pay-gateway}"
 deployment_record="${DEPLOYMENT_RECORD_FILE:-/opt/line-pay-gateway/DEPLOYED_IMAGE_TAG}"
 gateway_bind_port="${GATEWAY_BIND_PORT:-3000}"
@@ -17,6 +18,8 @@ execute=false
 source "$script_dir/validators.sh"
 # shellcheck source=secure-log-directory.sh
 source "$script_dir/secure-log-directory.sh"
+# shellcheck source=validate-proxy-env.sh
+source "$script_dir/validate-proxy-env.sh"
 
 usage() {
   printf '%s\n' \
@@ -62,6 +65,7 @@ validate_release_inputs "$gateway_image_name" "$previous_tag"
   echo "Gateway env file is missing: $gateway_env_file" >&2
   exit 1
 }
+check_proxy_env_file "$proxy_env_file"
 
 if [[ -L "$log_dir" ]]; then
   echo "Rollback log directory must not be a symbolic link: $log_dir" >&2
@@ -122,6 +126,7 @@ install -o root -g root -m 0600 /dev/null -- "$log_file"
 GATEWAY_IMAGE_TAG="$previous_tag" \
 GATEWAY_IMAGE_NAME="$gateway_image_name" \
 LINE_PAY_GATEWAY_ENV_FILE="$gateway_env_file" \
+LINE_PAY_GATEWAY_PROXY_ENV_FILE="$proxy_env_file" \
 GATEWAY_BIND_PORT="$gateway_bind_port" \
 COMPOSE_FILE="$compose_file" \
   "$compose_wrapper" logs --no-color gateway >"$log_file" 2>&1 || true
@@ -140,6 +145,7 @@ echo "Current Gateway logs preserved at $log_file"
 GATEWAY_IMAGE_TAG="$previous_tag" \
 GATEWAY_IMAGE_NAME="$gateway_image_name" \
 LINE_PAY_GATEWAY_ENV_FILE="$gateway_env_file" \
+LINE_PAY_GATEWAY_PROXY_ENV_FILE="$proxy_env_file" \
 GATEWAY_BIND_PORT="$gateway_bind_port" \
 COMPOSE_FILE="$compose_file" \
   "$compose_wrapper" stop gateway
@@ -147,6 +153,7 @@ COMPOSE_FILE="$compose_file" \
 GATEWAY_IMAGE_TAG="$previous_tag" \
 GATEWAY_IMAGE_NAME="$gateway_image_name" \
 LINE_PAY_GATEWAY_ENV_FILE="$gateway_env_file" \
+LINE_PAY_GATEWAY_PROXY_ENV_FILE="$proxy_env_file" \
 GATEWAY_BIND_PORT="$gateway_bind_port" \
 COMPOSE_FILE="$compose_file" \
   "$compose_wrapper" up -d --no-build --no-deps gateway

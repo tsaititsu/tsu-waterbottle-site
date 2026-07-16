@@ -72,6 +72,15 @@ jobs:
           set -euo pipefail
           deploy/tests/security-hardening.test.sh
 
+          proxy_env_file="$(mktemp)"
+          printf '%s\n' \
+            'LINE_PAY_GATEWAY_PROXY_TOKEN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+            >"$proxy_env_file"
+          chmod 0600 "$proxy_env_file"
+          sudo chown root:root "$proxy_env_file"
+          sudo deploy/scripts/validate-proxy-env.sh "$proxy_env_file"
+          sudo unlink "$proxy_env_file"
+
           secure_log_dir="$(mktemp -d)"
           rmdir "$secure_log_dir"
           sudo deploy/scripts/secure-log-directory.sh prepare "$secure_log_dir"
@@ -84,6 +93,10 @@ jobs:
           grep -Fx 'LINE_PAY_GATEWAY_ENV=sandbox' deploy/gateway.env.example
           grep -Fx 'LINE_PAY_GATEWAY_KEY_ID=replace-with-a-sandbox-key-id' deploy/gateway.env.example
           grep -Fx 'LINE_PAY_GATEWAY_SECRET=replace-with-a-random-sandbox-shared-secret' deploy/gateway.env.example
+          grep -Fx 'LINE_PAY_GATEWAY_PROXY_TOKEN=replace-with-64-lowercase-hex-characters' \
+            deploy/proxy.env.example
+          test "$(grep -Ec '^[A-Z0-9_]+=' deploy/proxy.env.example)" -eq 1
+          ! grep -Eq 'LINE_PAY_GATEWAY_SECRET|LINE_PAY_CHANNEL_SECRET' deploy/proxy.env.example
           grep -Fq 'linepay-gateway.tsu-waterbottle.com' deploy/Caddyfile.example
           grep -Fq 'linepay-gateway.tsu-waterbottle.com' deploy/SANDBOX_DEPLOY_RUNBOOK.md
           grep -Fq 'linepay-gateway.tsu-waterbottle.com' README.md
@@ -96,14 +109,24 @@ jobs:
           grep -Fq '165.245.144.110/32' ../../docs/line-pay-gateway-sandbox-deploy-plan.md
           grep -Fq '入站用途' deploy/SANDBOX_DEPLOY_RUNBOOK.md
           grep -Fq '出站用途' deploy/SANDBOX_DEPLOY_RUNBOOK.md
+          test "$(grep -Fc 'header_up X-Gateway-Proxy-Token {$LINE_PAY_GATEWAY_PROXY_TOKEN}' deploy/Caddyfile.example)" -eq 1
+          test "$(grep -Eic '^[[:space:]]*header_up[[:space:]]+X-Gateway-Proxy-Token([[:space:]]|$)' deploy/Caddyfile.example)" -eq 1
+          ! grep -Eq 'header_up X-Gateway-Proxy-Token \{http\.request\.header\.' deploy/Caddyfile.example
+          test "$(grep -Fc 'header_up X-Gateway-Client-IP {remote_host}' deploy/Caddyfile.example)" -eq 1
+          test "$(grep -Eic '^[[:space:]]*header_up[[:space:]]+X-Gateway-Client-IP([[:space:]]|$)' deploy/Caddyfile.example)" -eq 1
+          ! grep -Eq 'header_up X-Gateway-Client-IP \{http\.request\.header\.' deploy/Caddyfile.example
+          grep -Fq 'DNS only／灰雲' deploy/SANDBOX_DEPLOY_RUNBOOK.md
+          grep -Fq '禁止開啟 Cloudflare Proxy／橘雲' deploy/SANDBOX_DEPLOY_RUNBOOK.md
           ! grep -Eqi '(BEGIN [A-Z ]*PRIVATE KEY|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,})' \
             deploy/Caddyfile.example \
             deploy/gateway.env.example \
+            deploy/proxy.env.example \
             deploy/compose.yaml
 
       - name: Validate Caddyfile syntax
         run: |
           docker run --rm \
+            --env LINE_PAY_GATEWAY_PROXY_TOKEN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
             --volume "$PWD/deploy/Caddyfile.example:/etc/caddy/Caddyfile:ro" \
             caddy:2-alpine \
             caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
@@ -112,6 +135,7 @@ jobs:
         env:
           GATEWAY_IMAGE_TAG: ${{ github.sha }}
           LINE_PAY_GATEWAY_ENV_FILE: ./gateway.env.example
+          LINE_PAY_GATEWAY_PROXY_ENV_FILE: ./proxy.env.example
           GATEWAY_BIND_PORT: "3000"
         run: |
           set -euo pipefail
@@ -140,6 +164,11 @@ jobs:
             line-pay-fixed-ip-gateway \
             "${{ github.sha }}"
           docker build --tag "line-pay-fixed-ip-gateway:${{ github.sha }}" .
+
+      - name: Test Docker runtime Proxy Token boundary
+        env:
+          GATEWAY_IMAGE_TAG: ${{ github.sha }}
+        run: deploy/tests/docker-runtime.test.sh
 
   website-line-pay:
     name: Website LINE Pay tests

@@ -22,6 +22,7 @@
 - 已知道目前與上一個已審核的 40 字元小寫完整 commit SHA；短 SHA、branch、`latest` 或任意 release 名稱都不接受。
 - 上一個 image 已存在本機。
 - env file 仍是 root owner、mode 600、Sandbox。
+- 獨立 `proxy.env` 仍是 root:root、mode 600、非 symlink，且只含 Proxy Token。
 - localhost port、固定出口與 Caddy 狀態已記錄。
 
 唯讀指令：
@@ -37,10 +38,13 @@ sudo \
   GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
   GATEWAY_IMAGE_TAG="$CURRENT_DEPLOY_SHA" \
   LINE_PAY_GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  LINE_PAY_GATEWAY_PROXY_ENV_FILE=/etc/line-pay-gateway/proxy.env \
   GATEWAY_BIND_PORT=3000 \
   deploy/scripts/compose.sh ps
 sudo docker image ls line-pay-fixed-ip-gateway
-sudo stat -c '%U:%G %a %n' /etc/line-pay-gateway/gateway.env
+sudo stat -c '%U:%G %a %n' \
+  /etc/line-pay-gateway/gateway.env \
+  /etc/line-pay-gateway/proxy.env
 ```
 
 不要顯示 env file 內容。
@@ -97,6 +101,7 @@ deploy/scripts/rollback.sh --previous-tag <PREVIOUS_AUDITED_TAG>
 ```bash
 sudo \
   GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  GATEWAY_PROXY_ENV_FILE=/etc/line-pay-gateway/proxy.env \
   GATEWAY_BIND_PORT=3000 \
   deploy/scripts/rollback.sh \
     --previous-tag <PREVIOUS_AUDITED_TAG> \
@@ -142,12 +147,14 @@ sudo \
   GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
   GATEWAY_IMAGE_TAG="<PREVIOUS_AUDITED_TAG>" \
   LINE_PAY_GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  LINE_PAY_GATEWAY_PROXY_ENV_FILE=/etc/line-pay-gateway/proxy.env \
   GATEWAY_BIND_PORT=3000 \
   deploy/scripts/compose.sh ps
 sudo \
   GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
   GATEWAY_IMAGE_TAG="<PREVIOUS_AUDITED_TAG>" \
   LINE_PAY_GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  LINE_PAY_GATEWAY_PROXY_ENV_FILE=/etc/line-pay-gateway/proxy.env \
   GATEWAY_BIND_PORT=3000 \
   deploy/scripts/compose.sh logs --no-color gateway
 ```

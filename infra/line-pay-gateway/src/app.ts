@@ -1,5 +1,7 @@
 import { GatewayHttpError } from './errors.js'
+import { readProxyClientIp } from './client-address.js'
 import { buildLinePayTarget, parseGatewayPayload, type GatewayProxyPayload } from './operations.js'
+import { authenticateProxyRequest } from './proxy-auth.js'
 import {
   authenticateGatewayRequest,
   FixedWindowRateLimiter,
@@ -132,14 +134,15 @@ export function createGatewayHandler(config: GatewayConfig, dependencies: Gatewa
         throw new GatewayHttpError(415, 'unsupported_media_type')
       }
 
+      authenticateProxyRequest(request.headers, config.proxyToken)
+      const effectiveClientAddress = readProxyClientIp(request.headers)
+      if (!rateLimiter.take(effectiveClientAddress, startedAt, config.rateLimitWindowMs, config.rateLimitMax)) {
+        throw new GatewayHttpError(429, 'rate_limited')
+      }
+
       const rawBody = request.rawBody ?? Buffer.from(request.bodyText, 'utf8')
       if (!Buffer.from(rawBody).equals(Buffer.from(request.bodyText, 'utf8'))) {
         throw new GatewayHttpError(400, 'invalid_json_encoding')
-      }
-
-      const rateLimitKey = request.remoteAddress ?? 'unknown'
-      if (!rateLimiter.take(rateLimitKey, startedAt, config.rateLimitWindowMs, config.rateLimitMax)) {
-        throw new GatewayHttpError(429, 'rate_limited')
       }
 
       const auth = authenticateGatewayRequest({

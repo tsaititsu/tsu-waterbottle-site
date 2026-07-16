@@ -1,5 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { GatewayHttpError } from './errors.js'
+import { PROXY_TOKEN_PATTERN } from './proxy-auth.js'
 
 export const GATEWAY_PROXY_PATH = '/v1/line-pay/proxy'
 export const MAX_GATEWAY_BODY_BYTES = 64 * 1024
@@ -11,6 +12,7 @@ export type GatewayConfig = {
   environment: GatewayEnvironment
   keyId: string
   secret: string
+  proxyToken: string
   upstreamTimeoutMs: number
   timestampToleranceSeconds: number
   replayTtlSeconds: number
@@ -39,13 +41,18 @@ function readInteger(env: StringEnv, name: string, defaultValue: number, minimum
 
 export function loadGatewayConfig(env: StringEnv): GatewayConfig {
   const environment = readRequired(env, 'LINE_PAY_GATEWAY_ENV')
+  const secret = readRequired(env, 'LINE_PAY_GATEWAY_SECRET')
+  const proxyToken = readRequired(env, 'LINE_PAY_GATEWAY_PROXY_TOKEN')
   if (environment !== 'sandbox' && environment !== 'production') throw new Error('invalid_line_pay_gateway_env')
+  if (!PROXY_TOKEN_PATTERN.test(proxyToken)) throw new Error('invalid_line_pay_gateway_proxy_token')
+  if (proxyToken === secret) throw new Error('proxy_token_must_differ_from_gateway_secret')
 
   return {
     port: readInteger(env, 'PORT', 3000, 1, 65_535),
     environment,
     keyId: readRequired(env, 'LINE_PAY_GATEWAY_KEY_ID'),
-    secret: readRequired(env, 'LINE_PAY_GATEWAY_SECRET'),
+    secret,
+    proxyToken,
     upstreamTimeoutMs: readInteger(env, 'LINE_PAY_UPSTREAM_TIMEOUT_MS', 5_000, 100, 30_000),
     timestampToleranceSeconds: readInteger(env, 'GATEWAY_TIMESTAMP_TOLERANCE_SECONDS', 60, 1, 300),
     replayTtlSeconds: readInteger(env, 'GATEWAY_REPLAY_TTL_SECONDS', 120, 60, 600),
