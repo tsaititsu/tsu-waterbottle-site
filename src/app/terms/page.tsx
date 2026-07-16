@@ -1,5 +1,6 @@
 import { PageHero } from '@/components/PageHero'
 import { LineSupportText } from '@/components/LineSupportText'
+import { PUBLIC_BUSINESS_INFO } from '@/lib/publicBusinessInfo'
 
 const sections = [
   {
@@ -17,6 +18,10 @@ const sections = [
   {
     title: '服務交付方式',
     body: '線上課程以會員中心權限或網站標示方式提供；AI 服務於付款後在網站產生結果；真人論命依預約時段進行線上諮詢。實際交付細節以各服務頁說明為準。',
+  },
+  {
+    title: '實體預約服務',
+    body: `實體預約服務地點位於${PUBLIC_BUSINESS_INFO.serviceAddressLabel}。${PUBLIC_BUSINESS_INFO.appointmentOnlyLabel}實體預約時段為${PUBLIC_BUSINESS_INFO.appointmentHoursLabel}。`,
   },
   {
     title: 'AI 占卜與 AI 分析使用規範',
@@ -40,15 +45,15 @@ const sections = [
   },
   {
     title: '爭議處理',
-    body: '若對訂單、付款、服務交付或退款有疑問，請提供訂單資料與問題內容，透過客服信箱 water.bottle.fortune.teller@gmail.com 或客服 LINE https://lin.ee/6Tpje1P 聯繫我們。客服時間：09:00–18:00。',
+    body: `若對訂單、付款、服務交付或退款有疑問，請提供訂單資料與問題內容，透過客服信箱 ${PUBLIC_BUSINESS_INFO.email} 或客服 LINE ${PUBLIC_BUSINESS_INFO.lineUrl} 聯繫我們。客服時間：${PUBLIC_BUSINESS_INFO.customerServiceHoursLabel}。`,
   },
   {
     title: '聯絡方式',
-    body: '客服信箱：water.bottle.fortune.teller@gmail.com。客服 LINE：https://lin.ee/6Tpje1P。客服時間：09:00–18:00。',
+    body: `客服信箱：${PUBLIC_BUSINESS_INFO.email}。客服 LINE：${PUBLIC_BUSINESS_INFO.lineUrl}。客服時間：${PUBLIC_BUSINESS_INFO.customerServiceHoursLabel}。`,
   },
   {
     title: '營業人資訊',
-    body: '營業人名稱：水瓶先生工作室。統一編號：61010005。商業登記地址：彰化縣田尾鄉饒平村東平巷167號1樓。',
+    body: `營業人名稱：${PUBLIC_BUSINESS_INFO.legalName}。統一編號：${PUBLIC_BUSINESS_INFO.taxId}。商業登記地址（非實體服務地點）：${PUBLIC_BUSINESS_INFO.registrationAddress}。${PUBLIC_BUSINESS_INFO.registrationAddressNote}`,
   },
 ]
 

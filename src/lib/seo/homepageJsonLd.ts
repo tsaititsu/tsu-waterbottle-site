@@ -1,3 +1,4 @@
+import { ALL_WEEKDAYS, PUBLIC_BUSINESS_INFO } from '../publicBusinessInfo'
 import { PUBLIC_PAGE_METADATA } from './publicMetadata'
 
 const HOMEPAGE_URL = 'https://tsu-waterbottle.com/'
@@ -8,9 +9,16 @@ export const HOMEPAGE_JSON_LD = {
   '@context': 'https://schema.org',
   '@graph': [
     {
-      '@type': 'Organization',
+      '@type': ['Organization', 'LocalBusiness'],
       '@id': ORGANIZATION_ID,
       name: PUBLIC_PAGE_METADATA.home.title,
+      alternateName: [
+        PUBLIC_BUSINESS_INFO.brandName,
+        PUBLIC_BUSINESS_INFO.legalName,
+        PUBLIC_BUSINESS_INFO.mapsBusinessName,
+      ],
+      legalName: PUBLIC_BUSINESS_INFO.legalName,
+      taxID: PUBLIC_BUSINESS_INFO.taxId,
       url: HOMEPAGE_URL,
       description: PUBLIC_PAGE_METADATA.home.description,
       logo: {
@@ -18,6 +26,35 @@ export const HOMEPAGE_JSON_LD = {
         url: 'https://tsu-waterbottle.com/brand/waterbottle-logo-web.png',
         width: 512,
         height: 512,
+      },
+      email: PUBLIC_BUSINESS_INFO.email,
+      address: {
+        '@type': 'PostalAddress',
+        ...PUBLIC_BUSINESS_INFO.serviceAddress,
+      },
+      geo: {
+        '@type': 'GeoCoordinates',
+        latitude: PUBLIC_BUSINESS_INFO.latitude,
+        longitude: PUBLIC_BUSINESS_INFO.longitude,
+      },
+      hasMap: PUBLIC_BUSINESS_INFO.mapsUrl,
+      openingHoursSpecification: {
+        '@type': 'OpeningHoursSpecification',
+        dayOfWeek: ALL_WEEKDAYS,
+        opens: '09:00',
+        closes: '22:00',
+      },
+      contactPoint: {
+        '@type': 'ContactPoint',
+        contactType: 'customer service',
+        email: PUBLIC_BUSINESS_INFO.email,
+        availableLanguage: ['zh-TW'],
+        hoursAvailable: {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: ALL_WEEKDAYS,
+          opens: '09:00',
+          closes: '18:00',
+        },
       },
     },
     {
