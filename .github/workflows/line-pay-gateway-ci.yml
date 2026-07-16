@@ -178,7 +178,8 @@ jobs:
             sudo install -m 0755 /bin/true /usr/bin/caddy
             created_caddy_stub=1
           fi
-          SYSTEMD_UNIT_PATH="$unit_dir" systemd-analyze verify caddy.service
+          SYSTEMD_UNIT_PATH="$unit_dir:/usr/lib/systemd/system:/lib/systemd/system" \
+            systemd-analyze verify caddy.service
 
       - name: Validate Caddyfile syntax
         run: |
