@@ -1,4 +1,4 @@
-import { getLinePayBaseUrl, normalizeLinePayEnvironment, stringifyLinePayJsonBody } from './config'
+import { normalizeLinePayEnvironment, stringifyLinePayJsonBody } from './config'
 import {
   buildLinePayConfirmPayload,
   validateLinePayTransactionId,
@@ -6,21 +6,17 @@ import {
 } from './confirmPayload'
 import { parseLinePayConfirmResponse, type ParsedLinePayConfirmResponse } from './responseParser'
 import { buildLinePayRequestHeaders } from './signature'
+import {
+  sendLinePayRequest,
+  type LinePayTransportEnv,
+  type LinePayTransportFetch,
+  type LinePayTransportFetchInit,
+  type LinePayTransportResponse,
+} from './transport'
 
-export type LinePayConfirmPaymentFetchInit = {
-  method: 'POST'
-  headers: Record<string, string>
-  body: string
-}
-
-export type LinePayConfirmPaymentFetchResponse = {
-  json: () => Promise<unknown>
-}
-
-export type LinePayConfirmPaymentFetch = (
-  url: string,
-  init: LinePayConfirmPaymentFetchInit,
-) => Promise<LinePayConfirmPaymentFetchResponse>
+export type LinePayConfirmPaymentFetchInit = LinePayTransportFetchInit
+export type LinePayConfirmPaymentFetchResponse = LinePayTransportResponse
+export type LinePayConfirmPaymentFetch = LinePayTransportFetch
 
 export type ConfirmLinePayPaymentInput = {
   environment?: string | null
@@ -28,6 +24,7 @@ export type ConfirmLinePayPaymentInput = {
   channelSecret: string
   nonce: string
   fetchFn?: LinePayConfirmPaymentFetch | null
+  transportEnv?: LinePayTransportEnv
   transactionId: unknown
   payloadInput: LinePayConfirmPayloadInput
 }
@@ -44,7 +41,8 @@ export async function confirmLinePayPayment(
   }
 
   const environment = normalizeLinePayEnvironment(input.environment)
-  const apiPath = buildLinePayConfirmPath(input.transactionId)
+  const transactionId = validateLinePayTransactionId(input.transactionId)
+  const apiPath = buildLinePayConfirmPath(transactionId)
   const payload = buildLinePayConfirmPayload(input.payloadInput)
   const bodyText = stringifyLinePayJsonBody(payload)
   const headers = buildLinePayRequestHeaders({
@@ -56,10 +54,16 @@ export async function confirmLinePayPayment(
     nonce: input.nonce,
   })
 
-  const response = await input.fetchFn(`${getLinePayBaseUrl(environment)}${apiPath}`, {
+  const response = await sendLinePayRequest({
+    operation: 'confirm',
+    environment,
     method: 'POST',
-    headers,
-    body: bodyText,
+    apiPath,
+    bodyText,
+    linePayHeaders: headers,
+    transactionId,
+    fetchFn: input.fetchFn,
+    transportEnv: input.transportEnv,
   })
 
   if (!response || typeof response.json !== 'function') {

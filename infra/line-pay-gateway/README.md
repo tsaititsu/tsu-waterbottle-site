@@ -1,0 +1,179 @@
+# LINE Pay Fixed IP Gateway
+
+這是 LINE Pay 官方直串固定出口的第一階段 Gateway。網站仍建立 LINE Pay 官方簽章；Gateway 僅驗證網站的內部 HMAC，然後從固定出口轉送到預先定義的 LINE Pay API。它不是一般用途 proxy，也不接受 URL、hostname、protocol、port、path 或 HTTP method。
+
+## 架構
+
+```text
+使用者瀏覽器
+    │
+    ▼
+Vercel / Next.js server
+  1. 建立 LINE Pay payload 與官方簽章
+  2. 建立 Gateway canonical string 與 HMAC-SHA256
+    │ HTTPS + x-gateway-* headers
+    ▼
+Fixed IP Gateway (DigitalOcean Droplet)
+  1. 64 KB／JSON／rate limit
+  2. timestamp／HMAC／replay 驗證
+  3. operation 白名單推導固定 host + path
+    │ HTTPS，redirect=error，無重試
+    ▼
+LINE Pay Sandbox 或 Production API
+```
+
+第一階段的 LINE Pay Channel ID、Channel Secret 與官方簽章責任仍在網站 server。Gateway 收到的只有已簽章 LINE Pay headers 與必要 payload；程式邊界已把內部 Gateway HMAC 與 LINE Pay 官方簽章分開，後續可另行設計把 Channel Secret 移至 Gateway，但本階段沒有這樣做。
+
+## HTTP endpoints
+
+- `GET /health`：回傳 `{"ok":true,"status":"healthy"}`。
+- `POST /v1/line-pay/proxy`：只接受 `application/json` 與受 HMAC 保護的固定 operation。
+
+成功轉送時回傳：
+
+```json
+{
+  "ok": true,
+  "upstreamStatus": 200,
+  "body": { "returnCode": "0000" }
+}
+```
+
+`upstreamStatus` 保留 LINE Pay HTTP status，`body` 保留 LINE Pay JSON。無效 JSON、timeout 或 Gateway 內部錯誤只回傳固定錯誤碼，不回傳上游 HTML 或內部例外內容。
+
+## Operation 白名單
+
+| operation | method | 固定 path | 必要欄位 |
+| --- | --- | --- | --- |
+| `request` | POST | `/v3/payments/request` | `bodyText` |
+| `confirm` | POST | `/v3/payments/{transactionId}/confirm` | `transactionId`, `bodyText` |
+| `status` | GET | `/v3/payments/requests/{transactionId}/check` | `transactionId` |
+| `paymentDetails` | GET | `/v3/payments?transactionId=...&orderId=...` | 至少一個查詢鍵 |
+
+`refund` 與 `void` 不在白名單；目前網站沒有完整正式基礎，本階段只列為後續評估項目。Payload 若出現 `url` 等任何未定義欄位會被拒絕。
+
+## HMAC canonical string
+
+網站送出以下 headers：
+
+- `x-gateway-key-id`
+- `x-gateway-timestamp`：Unix epoch seconds
+- `x-gateway-nonce`
+- `x-gateway-request-id`
+- `x-gateway-signature`：小寫 hex HMAC-SHA256
+
+canonical string 必須逐行且完全一致，結尾不加換行：
+
+```text
+POST
+/v1/line-pay/proxy
+TIMESTAMP
+NONCE
+SHA256_BODY
+```
+
+`SHA256_BODY` 是 HTTP adapter 收到、尚未 parse JSON 的原始 UTF-8 request body bytes 的小寫 hex SHA-256，不會先 parse 再重新 stringify。簽章是 `HMAC-SHA256(LINE_PAY_GATEWAY_SECRET, canonicalString)`。`requestId` 同時存在 header 與 JSON body，Gateway 驗證兩者一致；因 body hash 被簽署，requestId 也受到完整性保護。
+
+預設 timestamp 容許誤差為 60 秒。nonce 與 requestId 使用單機 TTL cache 防重播；多 instance 部署前必須改成共享且具原子 claim 的儲存。
+
+## 環境變數
+
+Gateway：
+
+| 名稱 | 必要 | 預設 | 說明 |
+| --- | --- | --- | --- |
+| `PORT` | 否 | `3000` | HTTP listen port |
+| `LINE_PAY_GATEWAY_ENV` | 是 | 無 | 僅 `sandbox` 或 `production` |
+| `LINE_PAY_GATEWAY_KEY_ID` | 是 | 無 | 內部金鑰識別，不是秘密 |
+| `LINE_PAY_GATEWAY_SECRET` | 是 | 無 | Vercel 與 Gateway 的獨立共享秘密 |
+| `LINE_PAY_UPSTREAM_TIMEOUT_MS` | 否 | `5000` | Gateway 到 LINE Pay timeout，100–30000 ms |
+| `GATEWAY_TIMESTAMP_TOLERANCE_SECONDS` | 否 | `60` | HMAC timestamp 容許誤差，1–300 秒 |
+| `GATEWAY_REPLAY_TTL_SECONDS` | 否 | `120` | nonce/requestId 單機 TTL，60–600 秒 |
+| `GATEWAY_RATE_LIMIT_WINDOW_MS` | 否 | `60000` | 單機來源 IP rate limit 視窗 |
+| `GATEWAY_RATE_LIMIT_MAX` | 否 | `120` | 每個視窗最多請求數 |
+
+網站：
+
+| 名稱 | 說明 |
+| --- | --- |
+| `LINE_PAY_TRANSPORT` | `direct` 或 `gateway`；未設定維持既有 `direct` |
+| `LINE_PAY_GATEWAY_URL` | Gateway origin，不得含 path、query、fragment 或帳密 |
+| `LINE_PAY_GATEWAY_KEY_ID` | 必須與 Gateway 相同 |
+| `LINE_PAY_GATEWAY_SECRET` | 必須與 Gateway 相同，不得與 LINE Pay Channel Secret 共用 |
+| `LINE_PAY_GATEWAY_TIMEOUT_MS` | 網站到 Gateway timeout，預設 5000 ms |
+
+gateway 模式少任何必要設定都 fail closed，不會 fallback 到 direct。Production gateway URL 必須為 HTTPS。所有範例值只是假值；不要提交真實秘密或把秘密寫入映像檔。
+
+## Sandbox／Production 切換
+
+Gateway 每次啟動只允許一個環境：
+
+- `sandbox` 固定連線 `https://sandbox-api-pay.line.me`
+- `production` 固定連線 `https://api-pay.line.me`
+
+網站 payload 宣告的環境必須與 Gateway 設定一致，否則回 400。切換環境必須明確改設定並重新啟動，不能由單一 request 指定其他 host。
+
+## 本機啟動
+
+需要 Node.js 24。先複製 `.env.example` 為未追蹤的本機設定，填入測試用假 secret，再執行：
+
+```bash
+npm ci
+npm run typecheck
+npm test
+npm run build
+npm start
+curl --fail http://127.0.0.1:3000/health
+```
+
+不要把 `.env` 加入 Git。health endpoint 不檢查 LINE Pay 或洩漏設定，只代表程序可服務。
+
+## Docker
+
+```bash
+docker build -t line-pay-fixed-ip-gateway:phase1 .
+docker run --rm --env-file .env -p 127.0.0.1:3000:3000 line-pay-fixed-ip-gateway:phase1
+curl --fail http://127.0.0.1:3000/health
+```
+
+映像使用 Node 24、多階段 build、非 root `node` 使用者，且有 Docker health check。TLS 應在受控 reverse proxy 終止；Production 不應直接公開純 HTTP endpoint。
+
+## 安全限制與日誌
+
+- HTTP body 上限 64 KB，只接受 JSON。
+- HMAC 使用 timing-safe comparison；錯誤簽章與過期 timestamp 回 401，重播回 409。
+- 單機來源 IP fixed-window rate limit，只使用 socket remote address，不信任可由呼叫端偽造的 forwarded headers。
+- 只轉送四個 LINE Pay headers；額外 headers 與 `Host`、`Connection`、`Content-Length`、`Transfer-Encoding`、`Keep-Alive`、`Upgrade` 等 hop-by-hop headers 都會被拒絕。
+- 上游只用 HTTPS，送出前再次檢查固定 hostname 且禁止自訂 port。
+- `redirect: error`、AbortController timeout、所有 operation 都不自動重試，尤其 Request API 不可重送。
+- request log 只含 `requestId`、`operation`、`orderId`、`transactionId`、狀態碼與耗時。
+- 不記錄 shared secret、Channel Secret、payload、完整簽章、LINE Pay authorization header 或上游原始 HTML。
+- replay cache 與 rate limit 都是單機記憶體實作；擴成多 instance 前不可把它視為跨機防護。
+
+## DigitalOcean 部署前檢查表
+
+- [ ] 本分支經人工 review，Gateway 與網站測試、typecheck、lint、build 全數通過。
+- [ ] 使用獨立隨機 Gateway secret；不重用 Channel Secret，且只透過受控 secret 管理提供。
+- [ ] Droplet 使用 Node 24 container、非 root runtime、restart policy 與最小權限。
+- [ ] Reserved IP 對外出口與 LINE Pay 後台白名單值由人工再次核對。
+- [ ] DNS、TLS 憑證與 HTTPS reverse proxy 完成；外部不能連到未加密的 application port。
+- [ ] 僅允許 Vercel 所需流量的網路政策、rate limit、監控與告警已另行審核。
+- [ ] Gateway 與網站 clock 同步，timestamp 容許窗維持最小合理值。
+- [ ] 先使用 Sandbox 做 request／confirm／status／details 完整驗收。
+- [ ] Production 設定缺失時確認 fail closed，且確認沒有 direct fallback。
+- [ ] 備妥關閉入口、撤銷 secret 與回復網站設定的 runbook。
+
+本文件不授權部署、修改 DigitalOcean、防火牆、LINE Pay 後台或 Vercel Production 環境變數。
+
+## 停機／退場 SOP
+
+依序由有權限的人員執行並保留稽核紀錄：
+
+1. 先關閉網站 LINE Pay 入口，阻止新交易進入。
+2. 停止相關背景任務，確認沒有進行中的付款狀態同步。
+3. 從 Vercel 與 Gateway secret store 移除／撤銷 Gateway secret、key ID 與 LINE Pay credentials。
+4. 在 LINE Pay 後台停用對應 Channel／IP 白名單；確認未完成交易的人工處理方式。
+5. 停止並刪除 Droplet。
+6. 刪除 Reserved IP；不可只解除綁定，避免繼續計費或留下可重新指派資源。
+7. 移除 Gateway DNS、TLS 憑證／設定、監控、告警與 log drain。
+8. 驗證 endpoint 已不可達、網站沒有 fallback 到 direct，並完成秘密撤銷與資源帳單複核。

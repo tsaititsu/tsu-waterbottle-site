@@ -1,7 +1,14 @@
-import { getLinePayBaseUrl, normalizeLinePayEnvironment } from './config'
+import { normalizeLinePayEnvironment } from './config'
 import { validateLinePayTransactionId } from './confirmPayload'
 import { normalizeLinePayOrderId } from './orderId'
 import { buildLinePayRequestHeaders } from './signature'
+import {
+  sendLinePayRequest,
+  type LinePayTransportEnv,
+  type LinePayTransportFetch,
+  type LinePayTransportFetchInit,
+  type LinePayTransportResponse,
+} from './transport'
 
 export const LINE_PAY_PAYMENT_REQUEST_STATUS_PATH_PREFIX = '/v3/payments/requests'
 export const LINE_PAY_PAYMENT_DETAILS_PATH = '/v3/payments'
@@ -14,19 +21,9 @@ export type LinePayPaymentRequestStatus =
   | 'payment_completed'
   | 'unknown'
 
-export type LinePayStatusFetchInit = {
-  method: 'GET'
-  headers: Record<string, string>
-}
-
-export type LinePayStatusFetchResponse = {
-  json: () => Promise<unknown>
-}
-
-export type LinePayStatusFetch = (
-  url: string,
-  init: LinePayStatusFetchInit,
-) => Promise<LinePayStatusFetchResponse>
+export type LinePayStatusFetchInit = LinePayTransportFetchInit
+export type LinePayStatusFetchResponse = LinePayTransportResponse
+export type LinePayStatusFetch = LinePayTransportFetch
 
 export type CheckLinePayPaymentRequestStatusInput = {
   environment?: string | null
@@ -34,6 +31,7 @@ export type CheckLinePayPaymentRequestStatusInput = {
   channelSecret: string
   nonce: string
   fetchFn?: LinePayStatusFetch | null
+  transportEnv?: LinePayTransportEnv
   transactionId: unknown
 }
 
@@ -50,6 +48,7 @@ export type GetLinePayPaymentDetailsInput = {
   channelSecret: string
   nonce: string
   fetchFn?: LinePayStatusFetch | null
+  transportEnv?: LinePayTransportEnv
   transactionId?: unknown
   orderId?: unknown
 }
@@ -196,9 +195,15 @@ export async function checkLinePayPaymentRequestStatus(
     apiPath,
     nonce: input.nonce,
   })
-  const response = await input.fetchFn(`${getLinePayBaseUrl(environment)}${apiPath}`, {
+  const response = await sendLinePayRequest({
+    operation: 'status',
+    environment,
     method: 'GET',
-    headers,
+    apiPath,
+    linePayHeaders: headers,
+    transactionId,
+    fetchFn: input.fetchFn,
+    transportEnv: input.transportEnv,
   })
   const responseJson = await readJsonResponse(response, 'invalid_line_pay_status_client_response')
 
@@ -242,9 +247,17 @@ export async function getLinePayPaymentDetails(
     queryString,
     nonce: input.nonce,
   })
-  const response = await input.fetchFn(`${getLinePayBaseUrl(environment)}${LINE_PAY_PAYMENT_DETAILS_PATH}?${queryString}`, {
+  const response = await sendLinePayRequest({
+    operation: 'paymentDetails',
+    environment,
     method: 'GET',
-    headers,
+    apiPath: LINE_PAY_PAYMENT_DETAILS_PATH,
+    queryString,
+    linePayHeaders: headers,
+    transactionId,
+    orderId,
+    fetchFn: input.fetchFn,
+    transportEnv: input.transportEnv,
   })
   const responseJson = await readJsonResponse(response, 'invalid_line_pay_payment_details_response')
 
