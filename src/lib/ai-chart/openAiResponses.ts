@@ -413,8 +413,20 @@ export function parseAiChartOpenAiStructuredResponse<T>(
     let outputText: string | undefined
 
     for (const outputItem of value.output) {
+      if (!isPlainObject(outputItem)) responseInvalid()
+
+      if (outputItem.type === 'reasoning') {
+        if (
+          outputItem.status !== undefined &&
+          outputItem.status !== 'completed'
+        ) {
+          responseInvalid()
+        }
+
+        continue
+      }
+
       if (
-        !isPlainObject(outputItem) ||
         outputItem.type !== 'message' ||
         (outputItem.status !== undefined &&
           outputItem.status !== 'completed') ||

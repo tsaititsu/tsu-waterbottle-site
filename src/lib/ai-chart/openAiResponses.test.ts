@@ -29,6 +29,9 @@ type MutableRecord = Record<string, unknown>
 const SYNTHETIC_API_KEY = 'synthetic-api-key-value'
 const SYNTHETIC_PROMPT = 'synthetic-private-prompt-value'
 const SYNTHETIC_RESPONSE_BODY = 'synthetic-raw-response-body-value'
+const SYNTHETIC_REASONING_SUMMARY = 'synthetic-private-reasoning-summary'
+const SYNTHETIC_ENCRYPTED_REASONING =
+  'synthetic-private-encrypted-reasoning-content'
 
 let testCount = 0
 
@@ -132,6 +135,37 @@ function responseFixture(overrides: MutableRecord = {}): MutableRecord {
       total_tokens: 30,
     },
     ...overrides,
+  }
+}
+
+function reasoningOutputFixture(overrides: MutableRecord = {}): MutableRecord {
+  return {
+    id: 'synthetic-reasoning-id',
+    type: 'reasoning',
+    status: 'completed',
+    summary: [],
+    encrypted_content: SYNTHETIC_ENCRYPTED_REASONING,
+    ...overrides,
+  }
+}
+
+function messageOutputFixture(): MutableRecord {
+  return {
+    id: 'synthetic-message-id',
+    type: 'message',
+    status: 'completed',
+    role: 'assistant',
+    content: [
+      {
+        type: 'output_text',
+        text: JSON.stringify({
+          answer: 'synthetic-answer',
+          nested: {
+            score: 7,
+          },
+        }),
+      },
+    ],
   }
 }
 
@@ -495,6 +529,198 @@ test('raw output array JSON is parsed successfully', () => {
   })
 })
 
+test('completed reasoning item before message is safely ignored', () => {
+  const result = parseAiChartOpenAiStructuredResponse(
+    responseFixture({
+      output: [reasoningOutputFixture(), messageOutputFixture()],
+    }),
+    parseResult,
+  )
+
+  assert.equal(result.data.answer, 'synthetic-answer')
+  assert.equal(JSON.stringify(result).includes(SYNTHETIC_REASONING_SUMMARY), false)
+  assert.equal(
+    JSON.stringify(result).includes(SYNTHETIC_ENCRYPTED_REASONING),
+    false,
+  )
+})
+
+test('completed reasoning item after message is safely ignored', () => {
+  const result = parseAiChartOpenAiStructuredResponse(
+    responseFixture({
+      output: [messageOutputFixture(), reasoningOutputFixture()],
+    }),
+    parseResult,
+  )
+
+  assert.equal(result.data.answer, 'synthetic-answer')
+})
+
+test('multiple completed reasoning items and one message are accepted', () => {
+  const result = parseAiChartOpenAiStructuredResponse(
+    responseFixture({
+      output: [
+        reasoningOutputFixture({ id: 'synthetic-reasoning-id-1' }),
+        reasoningOutputFixture({ id: 'synthetic-reasoning-id-2' }),
+        messageOutputFixture(),
+      ],
+    }),
+    parseResult,
+  )
+
+  assert.equal(result.data.nested.score, 7)
+})
+
+test('reasoning item without status is accepted', () => {
+  const reasoningItem = reasoningOutputFixture()
+  delete reasoningItem.status
+
+  const result = parseAiChartOpenAiStructuredResponse(
+    responseFixture({
+      output: [reasoningItem, messageOutputFixture()],
+    }),
+    parseResult,
+  )
+
+  assert.equal(result.data.answer, 'synthetic-answer')
+})
+
+test('reasoning summary is not returned', () => {
+  const result = parseAiChartOpenAiStructuredResponse(
+    responseFixture({
+      output: [
+        reasoningOutputFixture({
+          summary: [
+            {
+              type: 'summary_text',
+              text: SYNTHETIC_REASONING_SUMMARY,
+            },
+          ],
+        }),
+        messageOutputFixture(),
+      ],
+    }),
+    parseResult,
+  )
+
+  assert.equal(JSON.stringify(result).includes(SYNTHETIC_REASONING_SUMMARY), false)
+})
+
+test('encrypted reasoning content is not returned', () => {
+  const result = parseAiChartOpenAiStructuredResponse(
+    responseFixture({
+      output: [
+        reasoningOutputFixture({
+          encrypted_content: SYNTHETIC_ENCRYPTED_REASONING,
+        }),
+        messageOutputFixture(),
+      ],
+    }),
+    parseResult,
+  )
+
+  assert.equal(
+    JSON.stringify(result).includes(SYNTHETIC_ENCRYPTED_REASONING),
+    false,
+  )
+})
+
+test('reasoning item with in_progress status is rejected', () => {
+  expectResponseInvalid(() =>
+    parseAiChartOpenAiStructuredResponse(
+      responseFixture({
+        output: [
+          reasoningOutputFixture({ status: 'in_progress' }),
+          messageOutputFixture(),
+        ],
+      }),
+      parseResult,
+    ),
+  )
+})
+
+test('reasoning item with incomplete status is rejected', () => {
+  expectResponseInvalid(() =>
+    parseAiChartOpenAiStructuredResponse(
+      responseFixture({
+        output: [
+          reasoningOutputFixture({ status: 'incomplete' }),
+          messageOutputFixture(),
+        ],
+      }),
+      parseResult,
+    ),
+  )
+})
+
+test('reasoning-only output without output_text is rejected', () => {
+  expectResponseInvalid(() =>
+    parseAiChartOpenAiStructuredResponse(
+      responseFixture({
+        output: [reasoningOutputFixture()],
+      }),
+      parseResult,
+    ),
+  )
+})
+
+test('reasoning item does not affect usage parsing', () => {
+  const result = parseAiChartOpenAiStructuredResponse(
+    responseFixture({
+      output: [reasoningOutputFixture(), messageOutputFixture()],
+    }),
+    parseResult,
+  )
+
+  assert.deepEqual(result.usage, {
+    inputTokens: 10,
+    outputTokens: 20,
+    reasoningTokens: 5,
+    totalTokens: 30,
+  })
+})
+
+test('invalid reasoning error does not leak summary', () => {
+  expectResponseInvalid(
+    () =>
+      parseAiChartOpenAiStructuredResponse(
+        responseFixture({
+          output: [
+            reasoningOutputFixture({
+              status: 'incomplete',
+              summary: [
+                {
+                  type: 'summary_text',
+                  text: SYNTHETIC_REASONING_SUMMARY,
+                },
+              ],
+            }),
+          ],
+        }),
+        parseResult,
+      ),
+    [SYNTHETIC_REASONING_SUMMARY],
+  )
+})
+
+test('invalid reasoning error does not leak encrypted content', () => {
+  expectResponseInvalid(
+    () =>
+      parseAiChartOpenAiStructuredResponse(
+        responseFixture({
+          output: [
+            reasoningOutputFixture({
+              status: 'in_progress',
+              encrypted_content: SYNTHETIC_ENCRYPTED_REASONING,
+            }),
+          ],
+        }),
+        parseResult,
+      ),
+    [SYNTHETIC_ENCRYPTED_REASONING],
+  )
+})
+
 test('top-level SDK-only output_text is rejected', () => {
   expectResponseInvalid(() =>
     parseAiChartOpenAiStructuredResponse(
@@ -587,8 +813,7 @@ test('unknown output item type is rejected', () => {
       responseFixture({
         output: [
           {
-            type: 'reasoning',
-            content: [],
+            type: 'synthetic_unknown_output_item',
           },
         ],
       }),
@@ -730,5 +955,5 @@ test('safe errors expose only fixed enumerable fields', () => {
   assert.equal(error.message.includes(SYNTHETIC_RESPONSE_BODY), false)
 })
 
-assert.equal(testCount >= 37, true)
+assert.equal(testCount >= 54, true)
 console.log(`AI chart OpenAI Responses contract tests passed: ${testCount}`)

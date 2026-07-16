@@ -34,6 +34,7 @@ type MutableRecord = Record<string, unknown>
 const SYNTHETIC_API_KEY = 'synthetic-api-key-value'
 const SYNTHETIC_PROMPT = 'synthetic-private-prompt-value'
 const SYNTHETIC_RESPONSE_BODY = 'synthetic-raw-api-error-body-value'
+const SYNTHETIC_REASONING_MARKER = 'synthetic-private-reasoning-marker'
 
 const moduleInternals = Module as unknown as NodeModuleInternals
 const originalResolveFilename = moduleInternals._resolveFilename
@@ -160,6 +161,40 @@ function rawResponseFixture(overrides: MutableRecord = {}): MutableRecord {
     },
     ...overrides,
   }
+}
+
+function reasoningAndMessageOutputFixture(
+  reasoningOverrides: MutableRecord = {},
+): MutableRecord[] {
+  return [
+    {
+      id: 'synthetic-reasoning-id',
+      type: 'reasoning',
+      status: 'completed',
+      summary: [
+        {
+          type: 'summary_text',
+          text: SYNTHETIC_REASONING_MARKER,
+        },
+      ],
+      encrypted_content: SYNTHETIC_REASONING_MARKER,
+      ...reasoningOverrides,
+    },
+    {
+      id: 'synthetic-message-id',
+      type: 'message',
+      status: 'completed',
+      role: 'assistant',
+      content: [
+        {
+          type: 'output_text',
+          text: JSON.stringify({
+            answer: 'synthetic-reasoning-server-answer',
+          }),
+        },
+      ],
+    },
+  ]
 }
 
 function syntheticEnv(
@@ -332,6 +367,72 @@ async function run() {
 
   test('successful fetch executes exactly once with no retry', () => {
     assert.equal(successfulFetchCount, 1)
+  })
+
+  let reasoningFetchCount = 0
+  const reasoningResult = await requestAiChartOpenAiStructuredResponse(
+    requestFixture(),
+    {
+      env: syntheticEnv(),
+      fetchImpl: mockFetch(async () => {
+        reasoningFetchCount += 1
+        return new Response(
+          JSON.stringify(
+            rawResponseFixture({
+              output: reasoningAndMessageOutputFixture(),
+            }),
+          ),
+          { status: 200 },
+        )
+      }),
+    },
+  )
+
+  test('reasoning plus message REST fixture is parsed successfully', () => {
+    assert.deepEqual(reasoningResult.data, {
+      answer: 'synthetic-reasoning-server-answer',
+    })
+  })
+
+  test('reasoning private marker is not returned', () => {
+    assert.equal(
+      JSON.stringify(reasoningResult).includes(SYNTHETIC_REASONING_MARKER),
+      false,
+    )
+  })
+
+  test('reasoning plus message fetch executes exactly once', () => {
+    assert.equal(reasoningFetchCount, 1)
+  })
+
+  await asyncTest('incomplete reasoning returns fixed safe response invalid', async () => {
+    const error = await captureSafeError(
+      () =>
+        requestAiChartOpenAiStructuredResponse(requestFixture(), {
+          env: syntheticEnv(),
+          fetchImpl: mockFetch(
+            async () =>
+              new Response(
+                JSON.stringify(
+                  rawResponseFixture({
+                    output: reasoningAndMessageOutputFixture({
+                      status: 'incomplete',
+                    }),
+                  }),
+                ),
+                { status: 200 },
+              ),
+          ),
+        }),
+      AI_CHART_OPENAI_RESPONSE_INVALID,
+      false,
+      [SYNTHETIC_REASONING_MARKER],
+    )
+
+    assert.equal(
+      JSON.stringify(error).includes(SYNTHETIC_REASONING_MARKER),
+      false,
+    )
   })
 
   await asyncTest('missing API key fails before fetch', async () => {
@@ -695,7 +796,7 @@ async function run() {
     assert.equal(SYNTHETIC_API_KEY.startsWith('synthetic-'), true)
   })
 
-  assert.equal(testCount >= 30, true)
+  assert.equal(testCount >= 34, true)
   console.log(`AI chart OpenAI Responses server mock tests passed: ${testCount}`)
 }
 
