@@ -1,0 +1,44 @@
+name: line-pay-gateway-sandbox
+
+services:
+  gateway:
+    image: line-pay-fixed-ip-gateway:${GATEWAY_IMAGE_TAG:?set GATEWAY_IMAGE_TAG to an audited commit SHA}
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    user: node
+    env_file:
+      - ${LINE_PAY_GATEWAY_ENV_FILE:-/etc/line-pay-gateway/gateway.env}
+    environment:
+      PORT: "3000"
+      LINE_PAY_GATEWAY_ENV: sandbox
+    ports:
+      - "127.0.0.1:${GATEWAY_BIND_PORT:-3000}:3000"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    cpus: "0.50"
+    mem_limit: 256m
+    stop_grace_period: 20s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"

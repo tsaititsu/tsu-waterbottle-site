@@ -138,6 +138,31 @@ curl --fail http://127.0.0.1:3000/health
 
 映像使用 Node 24、多階段 build、非 root `node` 使用者，且有 Docker health check。TLS 應在受控 reverse proxy 終止；Production 不應直接公開純 HTTP endpoint。
 
+## Sandbox 部署準備
+
+Phase 2A 的可審核部署資料位於 `deploy/`：
+
+- `compose.yaml`：只啟動 Sandbox Gateway，application port 只綁 host localhost。
+- `Caddyfile.example`：使用 placeholder domain 的 HTTPS reverse proxy 範例。
+- `gateway.env.example`：只含假值與欄位格式。
+- `SANDBOX_DEPLOY_RUNBOOK.md`：分階段主機部署、檢查與停止條件。
+- `SANDBOX_ROLLBACK_RUNBOOK.md`：只回復既有 image tag，不刪除資料或雲端資源。
+- `scripts/`：preflight、egress、localhost health、TLS 與 guarded rollback。
+
+部署架構固定為：
+
+```text
+Internet :80/:443
+→ host Caddy
+→ 127.0.0.1:3000
+→ Gateway container
+→ LINE Pay Sandbox
+```
+
+Compose 不包含 Caddy container；Caddy 以 host systemd service 執行，才能直接 reverse proxy 到只綁 localhost 的 Gateway port。部署前必須由使用者決定 Sandbox 子網域並人工建立 DNS，本 repository 不猜測或修改 DNS。
+
+本階段不部署、不產生 secret、不修改 DigitalOcean、防火牆、LINE Pay 後台或 Vercel 環境變數。詳細步驟請從 `deploy/SANDBOX_DEPLOY_RUNBOOK.md` 開始，不要把 runbook 合併成無停頓的一鍵腳本。
+
 ## 安全限制與日誌
 
 - HTTP body 上限 64 KB，只接受 JSON。

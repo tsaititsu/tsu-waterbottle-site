@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   gateway:
-    name: Typecheck, test, build, and Docker
+    name: Gateway, deploy config, and Docker
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -45,6 +45,54 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      - name: Check deployment script syntax
+        run: bash -n deploy/scripts/*.sh
+
+      - name: Check deployment script guards
+        run: |
+          set -euo pipefail
+          expect_exit() {
+            local expected="$1"
+            shift
+            set +e
+            "$@" >/dev/null 2>&1
+            local actual="$?"
+            set -e
+            test "$actual" -eq "$expected"
+          }
+          expect_exit 2 deploy/scripts/verify-egress.sh
+          expect_exit 2 deploy/scripts/verify-health.sh https://linepay-gateway.example.com/health
+          expect_exit 2 deploy/scripts/verify-tls.sh linepay-gateway.example.com
+          deploy/scripts/rollback.sh --help >/dev/null
+          ! grep -Eq '(^|[[:space:]])(sudo|apt|apt-get|systemctl|chmod|chown|mkdir|install|tee)([[:space:]]|$)' \
+            deploy/scripts/preflight.sh
+
+      - name: Validate deployment examples
+        run: |
+          set -euo pipefail
+          grep -Fx 'LINE_PAY_GATEWAY_ENV=sandbox' deploy/gateway.env.example
+          grep -Fx 'LINE_PAY_GATEWAY_KEY_ID=replace-with-a-sandbox-key-id' deploy/gateway.env.example
+          grep -Fx 'LINE_PAY_GATEWAY_SECRET=replace-with-a-random-sandbox-shared-secret' deploy/gateway.env.example
+          grep -Fq 'linepay-gateway.example.com' deploy/Caddyfile.example
+          ! grep -Eqi '(BEGIN [A-Z ]*PRIVATE KEY|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,})' \
+            deploy/Caddyfile.example \
+            deploy/gateway.env.example \
+            deploy/compose.yaml
+
+      - name: Validate Caddyfile syntax
+        run: |
+          docker run --rm \
+            --volume "$PWD/deploy/Caddyfile.example:/etc/caddy/Caddyfile:ro" \
+            caddy:2-alpine \
+            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+      - name: Validate Docker Compose config
+        env:
+          GATEWAY_IMAGE_TAG: ${{ github.sha }}
+          LINE_PAY_GATEWAY_ENV_FILE: ./gateway.env.example
+          GATEWAY_BIND_PORT: "3000"
+        run: docker compose -f deploy/compose.yaml config --quiet
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -56,3 +104,36 @@ jobs:
 
       - name: Build Docker image
         run: docker build --tag line-pay-fixed-ip-gateway:${{ github.sha }} .
+
+  website-line-pay:
+    name: Website LINE Pay tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run LINE Pay tests
+        run: |
+          set -euo pipefail
+          for test_file in \
+            src/lib/linePay/*.test.ts \
+            src/app/cart/linePayCheckout.test.ts \
+            src/app/api/product-orders/line-pay/redirect.test.ts \
+            src/app/api/product-orders/line-pay/request/handler.test.ts \
+            src/app/api/product-orders/line-pay/cancel/handler.test.ts \
+            src/app/api/product-orders/line-pay/confirm/handler.test.ts
+          do
+            node_modules/.bin/jiti "$test_file"
+          done

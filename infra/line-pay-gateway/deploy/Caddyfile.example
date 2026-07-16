@@ -1,0 +1,44 @@
+# Replace this placeholder only after the Sandbox subdomain and DNS record are approved.
+linepay-gateway.example.com {
+	header {
+		-Server
+		Cache-Control "no-store"
+		Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
+		Permissions-Policy "camera=(), geolocation=(), microphone=()"
+		Referrer-Policy "no-referrer"
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+	}
+
+	@health {
+		method GET
+		path /health
+	}
+	handle @health {
+		reverse_proxy 127.0.0.1:3000 {
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 10s
+			}
+		}
+	}
+
+	@proxy {
+		method POST
+		path /v1/line-pay/proxy
+	}
+	handle @proxy {
+		request_body {
+			max_size 64KB
+		}
+		reverse_proxy 127.0.0.1:3000 {
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 10s
+			}
+		}
+	}
+
+	respond 404
+}
