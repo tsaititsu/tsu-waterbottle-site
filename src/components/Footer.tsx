@@ -1,9 +1,7 @@
 import Link from 'next/link'
 import { LogoMark } from './LogoMark'
+import { PUBLIC_BUSINESS_INFO } from '@/lib/publicBusinessInfo'
 import { shouldHideConsultationServices, shouldHideCoursesServices } from '@/lib/siteVisibility'
-
-const lineSupportUrl = 'https://lin.ee/6Tpje1P'
-const supportEmail = 'water.bottle.fortune.teller@gmail.com'
 
 const serviceLinks = [
   { href: '/ai-chart', label: '紫微命盤分析' },
@@ -47,22 +45,26 @@ export function Footer() {
             </p>
 
             <div className="mt-6 grid gap-2 text-sm leading-6 text-textMuted">
-              <p>營業人名稱：水瓶先生工作室</p>
-              <p>統一編號：61010005</p>
-              <p>商業登記地址：彰化縣田尾鄉饒平村東平巷167號1樓</p>
+              <p>實體服務地點：{PUBLIC_BUSINESS_INFO.serviceAddressLabel}</p>
+              <p>實體服務：採預約制，不接受未預約來訪</p>
+              <p>實體預約時段：{PUBLIC_BUSINESS_INFO.appointmentHoursLabel}</p>
+              <p>客服時間：{PUBLIC_BUSINESS_INFO.customerServiceHoursLabel}</p>
               <p>
                 客服信箱：
-                <a className="font-semibold text-deepPurple underline decoration-deepPurple/25 underline-offset-4 transition hover:text-darkGold hover:decoration-darkGold" href="mailto:water.bottle.fortune.teller@gmail.com">
-                  {supportEmail}
+                <a className="break-all font-semibold text-deepPurple underline decoration-deepPurple/25 underline-offset-4 transition hover:text-darkGold hover:decoration-darkGold" href={`mailto:${PUBLIC_BUSINESS_INFO.email}`}>
+                  {PUBLIC_BUSINESS_INFO.email}
                 </a>
               </p>
               <p>
                 客服 LINE：
-                <a className="font-semibold text-deepPurple underline decoration-deepPurple/25 underline-offset-4 transition hover:text-[#06c755] hover:decoration-[#06c755]" href={lineSupportUrl} rel="noopener noreferrer" target="_blank">
+                <a className="font-semibold text-deepPurple underline decoration-deepPurple/25 underline-offset-4 transition hover:text-[#06c755] hover:decoration-[#06c755]" href={PUBLIC_BUSINESS_INFO.lineUrl} rel="noopener noreferrer" target="_blank">
                   加入 LINE 官方帳號
                 </a>
               </p>
-              <p>客服時間：09:00–18:00</p>
+              <p>營業人名稱：{PUBLIC_BUSINESS_INFO.legalName}</p>
+              <p>統一編號：{PUBLIC_BUSINESS_INFO.taxId}</p>
+              <p>商業登記地址（非實體服務地點）：{PUBLIC_BUSINESS_INFO.registrationAddress}</p>
+              <p>{PUBLIC_BUSINESS_INFO.registrationAddressNote}</p>
             </div>
           </section>
 

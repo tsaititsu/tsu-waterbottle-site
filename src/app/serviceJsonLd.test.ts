@@ -194,7 +194,7 @@ assert.equal(homepage.includes('service-structured-data'), false)
 assert.equal(HOMEPAGE_JSON_LD['@graph'].length, 2)
 assert.deepEqual(
   HOMEPAGE_JSON_LD['@graph'].map((entry) => entry['@type']),
-  ['Organization', 'WebSite'],
+  [['Organization', 'LocalBusiness'], 'WebSite'],
 )
 
 console.log('service JSON-LD tests passed')
