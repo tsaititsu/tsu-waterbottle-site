@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Image from 'next/image'
 import { ShoppingCart, Sparkles } from 'lucide-react'
 import { useCart } from '@/components/CartContext'
 import { spiritualProducts, type SpiritualProduct } from '@/lib/spiritualProducts'
@@ -19,19 +20,23 @@ function ProductImage({ product }: { product: SpiritualProduct }) {
 
   if (hasError) {
     return (
-      <div className="grid aspect-[4/3] place-items-center rounded-xl border border-dashed border-[#d9cce8] bg-softPurple text-sm font-semibold text-textMuted">
+      <div className="grid aspect-[3/4] place-items-center rounded-xl border border-dashed border-[#d9cce8] bg-softPurple text-sm font-semibold text-textMuted">
         圖片準備中
       </div>
     )
   }
 
   return (
-    <img
-      src={product.image}
-      alt={product.name}
-      className="aspect-[4/3] w-full rounded-xl object-cover"
-      onError={() => setHasError(true)}
-    />
+    <div className="relative aspect-[3/4] w-full overflow-hidden rounded-xl bg-white">
+      <Image
+        src={product.image}
+        alt={product.name}
+        fill
+        sizes="(min-width: 1280px) 355px, (min-width: 1024px) calc(33vw - 59px), (min-width: 640px) calc(50vw - 60px), calc(100vw - 60px)"
+        className="object-contain"
+        onError={() => setHasError(true)}
+      />
+    </div>
   )
 }
 
