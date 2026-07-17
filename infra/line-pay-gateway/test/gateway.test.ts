@@ -227,16 +227,22 @@ test('arbitrary hostname field is rejected before upstream', async () => {
   assert.equal(calls.length, 0)
 })
 
-test('operation outside the request/confirm/status/paymentDetails whitelist is rejected', async () => {
-  const handler = createGatewayHandler(config, { fetchFn: successFetch(), now: () => nowMs })
-  const response = await handler(
-    buildSignedRequest(
-      { ...requestPayload(), operation: 'refund' },
-      { nonce: 'nonce-id-0003', requestId: 'request-id-0003' },
-    ),
+test('valid HMAC with the fixed smoke operation is rejected post-auth without upstream and claims replay keys', async () => {
+  const calls: Array<{ url: string }> = []
+  const handler = createGatewayHandler(config, { fetchFn: successFetch(calls), now: () => nowMs })
+  const request = buildSignedRequest(
+    { ...requestPayload(), operation: 'gatewayAuthenticationSmoke' },
+    { nonce: 'nonce-id-0003', requestId: 'request-id-0003' },
   )
+  const response = await handler(request)
   assert.equal(response.statusCode, 400)
   assert.equal(response.body.error, 'invalid_operation')
+  assert.equal(calls.length, 0)
+
+  const replayResponse = await handler(request)
+  assert.equal(replayResponse.statusCode, 409)
+  assert.equal(replayResponse.body.error, 'replay_detected')
+  assert.equal(calls.length, 0)
 })
 
 test('request body over 64 KB returns 413 before authentication', async () => {

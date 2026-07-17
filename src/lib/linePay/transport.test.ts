@@ -7,8 +7,10 @@ import { requestLinePayPayment } from './requestClient'
 import { checkLinePayPaymentRequestStatus, getLinePayPaymentDetails } from './statusClient'
 import {
   buildGatewayCanonicalString,
+  getLinePayTransportConfig,
   LINE_PAY_GATEWAY_PROXY_PATH,
   LinePayTransportError,
+  probeLinePayGatewayAuthentication,
   sendLinePayRequest,
   type LinePayTransportEnv,
   type LinePayTransportFetch,
@@ -26,6 +28,11 @@ const gatewayEnv = {
   LINE_PAY_GATEWAY_KEY_ID: 'gateway-key-1',
   LINE_PAY_GATEWAY_SECRET: gatewaySecret,
   LINE_PAY_GATEWAY_TIMEOUT_MS: '100',
+}
+const smokeGatewayEnv = {
+  ...gatewayEnv,
+  VERCEL_ENV: 'preview',
+  LINE_PAY_GATEWAY_SMOKE_ENABLED: 'true',
 }
 const tests: Array<{ name: string; fn: () => void | Promise<void> }> = []
 
@@ -81,6 +88,21 @@ function requestInput(fetchFn: LinePayTransportFetch, transportEnv: LinePayTrans
   }
 }
 
+function assertGatewayUrlRejectedInEveryRuntime(gatewayUrl: string, label = gatewayUrl) {
+  for (const vercelEnv of ['preview', 'production', 'development']) {
+    assert.throws(
+      () =>
+        getLinePayTransportConfig(
+          { ...gatewayEnv, VERCEL_ENV: vercelEnv, LINE_PAY_GATEWAY_URL: gatewayUrl },
+          vercelEnv === 'production' ? 'production' : 'sandbox',
+        ),
+      (error: unknown) =>
+        error instanceof LinePayTransportError && error.code === 'invalid_line_pay_gateway_url',
+      `${label} must be rejected in ${vercelEnv}`,
+    )
+  }
+}
+
 test('direct mode preserves the original LINE Pay URL, method, body and headers', async () => {
   const calls: Array<{ url: string; init: LinePayTransportFetchInit }> = []
   const fetchFn: LinePayTransportFetch = async (url, init) => {
@@ -92,6 +114,299 @@ test('direct mode preserves the original LINE Pay URL, method, body and headers'
   assert.equal(calls[0]?.init.method, 'POST')
   assert.equal(calls[0]?.init.headers['X-LINE-ChannelId'], channelId)
   assert.equal(typeof calls[0]?.init.body, 'string')
+})
+
+test('Preview accepts only an explicitly configured gateway transport', () => {
+  assert.equal(
+    getLinePayTransportConfig({ ...gatewayEnv, VERCEL_ENV: 'preview' }, 'sandbox').mode,
+    'gateway',
+  )
+
+  for (const configuredTransport of [undefined, '', 'direct']) {
+    assert.throws(
+      () =>
+        getLinePayTransportConfig(
+          { ...gatewayEnv, VERCEL_ENV: 'preview', LINE_PAY_TRANSPORT: configuredTransport },
+          'sandbox',
+        ),
+      (error: unknown) =>
+        error instanceof LinePayTransportError && error.code === 'line_pay_preview_requires_gateway',
+    )
+  }
+})
+
+test('unknown transport values never fall back to direct', () => {
+  for (const vercelEnv of ['preview', 'production', 'development', undefined]) {
+    assert.throws(
+      () =>
+        getLinePayTransportConfig(
+          { VERCEL_ENV: vercelEnv, LINE_PAY_TRANSPORT: 'automatic' },
+          vercelEnv === 'production' ? 'production' : 'sandbox',
+        ),
+      (error: unknown) =>
+        error instanceof LinePayTransportError &&
+        error.code === (vercelEnv === 'preview' ? 'line_pay_preview_requires_gateway' : 'invalid_line_pay_transport'),
+    )
+  }
+})
+
+test('Production direct and development missing transport preserve their existing behavior', () => {
+  assert.deepEqual(
+    getLinePayTransportConfig({ VERCEL_ENV: 'production', LINE_PAY_TRANSPORT: 'direct' }, 'production'),
+    { mode: 'direct' },
+  )
+  assert.deepEqual(getLinePayTransportConfig({ VERCEL_ENV: 'development' }, 'sandbox'), { mode: 'direct' })
+  assert.deepEqual(getLinePayTransportConfig({}, 'sandbox'), { mode: 'direct' })
+})
+
+test('Gateway URL accepts canonical public HTTPS origins with explicit case and IDNA normalization', () => {
+  for (const [gatewayUrl, expectedUrl] of [
+    [
+      'https://linepay-gateway.tsu-waterbottle.com',
+      'https://linepay-gateway.tsu-waterbottle.com/v1/line-pay/proxy',
+    ],
+    ['HTTPS://EXAMPLE.COM', 'https://example.com/v1/line-pay/proxy'],
+    ['https://xn--bcher-kva.de', 'https://xn--bcher-kva.de/v1/line-pay/proxy'],
+    ['https://bücher.de', 'https://xn--bcher-kva.de/v1/line-pay/proxy'],
+  ]) {
+    const accepted = getLinePayTransportConfig(
+      { ...gatewayEnv, VERCEL_ENV: 'preview', LINE_PAY_GATEWAY_URL: gatewayUrl },
+      'sandbox',
+    )
+    assert.equal(accepted.mode === 'gateway' ? accepted.gatewayUrl : null, expectedUrl)
+  }
+})
+
+test('Gateway URL raw validation rejects non-HTTPS schemes, empty authority, userinfo and every explicit port', () => {
+  for (const gatewayUrl of [
+    'http://linepay-gateway.tsu-waterbottle.com',
+    'ftp://linepay-gateway.tsu-waterbottle.com',
+    'ws://linepay-gateway.tsu-waterbottle.com',
+    'https://',
+    'https://example.com:443',
+    'https://example.com:0443',
+    'https://example.com:444',
+    'https://[::1]:443',
+    'https://user@example.com',
+    'https://user:pass@example.com',
+    'https://user%3Apass@example.com',
+  ]) {
+    assertGatewayUrlRejectedInEveryRuntime(gatewayUrl)
+  }
+})
+
+test('Gateway URL raw validation rejects root, literal, encoded and multi-slash paths before URL normalization', () => {
+  for (const gatewayUrl of [
+    'https://example.com/',
+    'https://example.com/path',
+    'https://example.com//',
+    'https://example.com/.',
+    'https://example.com/..',
+    'https://example.com/a/..',
+    'https://example.com/%2e/',
+    'https://example.com/%2e%2e/',
+    'https://example.com/%2E%2E/',
+    'https://example.com/%2e%2e',
+    'https://example.com/%2e%2e%2f',
+    'https://example.com/%2f',
+  ]) {
+    assertGatewayUrlRejectedInEveryRuntime(gatewayUrl)
+  }
+})
+
+test('Gateway URL raw validation rejects every percent-encoded authority form before URL normalization', () => {
+  for (const gatewayUrl of [
+    'https://%65xample.com',
+    'https://e%78ample.com',
+    'https://exam%70le.com',
+    'https://example.%63om',
+    'https://%45XAMPLE.COM',
+    'https://example%2ecom',
+    'https://example%2Ecom',
+    'https://www%2eexample.com',
+    'https://%2eexample.com',
+    'https://example.com%2e',
+    'https://linepay%2dgateway.example.com',
+    'https://example%2dtest.com',
+    'https://%78%6e--example.com',
+    'https://example.com%3a443',
+    'https://user%40example.com',
+    'https://example.com%2fpath',
+    'https://example.com%5cpath',
+    'https://example.com%3fquery',
+    'https://example.com%23fragment',
+    'https://example%.com',
+    'https://example%2.com',
+    'https://example%GG.com',
+    'https://%com',
+    'https://example.com%',
+    'https://example%252ecom',
+    'https://%2565xample.com',
+    'https://example%252fpath.com',
+    'https://example%25.com',
+    'https://example%FF.com',
+    'https://example%00.com',
+    'https://example%09.com',
+    'https://example%0a.com',
+    'https://example%0d.com',
+    'https://example%20.com',
+  ]) {
+    assertGatewayUrlRejectedInEveryRuntime(gatewayUrl)
+  }
+})
+
+test('Gateway URL raw validation rejects query, fragment, backslash, whitespace and control characters', () => {
+  for (const gatewayUrl of [
+    'https://example.com?x=1',
+    'https://example.com#x',
+    String.raw`https://example.com\path`,
+    String.raw`https://example.com\@localhost`,
+    ' https://example.com',
+    'https://example.com ',
+    'https://exa mple.com',
+  ]) {
+    assertGatewayUrlRejectedInEveryRuntime(gatewayUrl)
+  }
+
+  for (const characterCode of [9, 10, 13, 0]) {
+    assertGatewayUrlRejectedInEveryRuntime(
+      `https://example.com${String.fromCharCode(characterCode)}`,
+      `control character U+${characterCode.toString(16).padStart(4, '0')}`,
+    )
+  }
+})
+
+test('Gateway URL semantic validation rejects trailing-dot, localhost and special IP hostnames', () => {
+  for (const gatewayUrl of [
+    'https://localhost.',
+    'https://foo.localhost.',
+    'https://example.com.',
+    'https://linepay-gateway.tsu-waterbottle.com.',
+    'https://localhost。',
+    'https://localhost．',
+    'https://localhost｡',
+    'https://localhost',
+    'https://foo.localhost',
+    'https://127.0.0.1',
+    'https://127.1',
+    'https://2130706433',
+    'https://0x7f000001',
+    'https://017700000001',
+    'https://[::1]',
+    'https://[0:0:0:0:0:0:0:1]',
+  ]) {
+    assertGatewayUrlRejectedInEveryRuntime(gatewayUrl)
+  }
+})
+
+test('Gateway config errors expose neither secret values nor the unsafe URL', () => {
+  const secretMarker = 'gateway-secret-must-stay-redacted'
+  const unsafeUrl = 'https://user:password@example.com/private?token=hidden'
+  assert.throws(
+    () =>
+      getLinePayTransportConfig(
+        {
+          ...gatewayEnv,
+          VERCEL_ENV: 'preview',
+          LINE_PAY_GATEWAY_SECRET: secretMarker,
+          LINE_PAY_GATEWAY_URL: unsafeUrl,
+        },
+        'sandbox',
+      ),
+    (error: unknown) =>
+      error instanceof LinePayTransportError &&
+      error.code === 'invalid_line_pay_gateway_url' &&
+      !error.message.includes(secretMarker) &&
+      !error.message.includes(unsafeUrl),
+  )
+})
+
+test('authenticated smoke signs a fixed unsupported operation and accepts only the post-auth rejection', async () => {
+  const calls: Array<{ url: string; init: LinePayTransportFetchInit }> = []
+  const now = 1_800_000_000_000
+  const fetchFn: LinePayTransportFetch = async (url, init) => {
+    calls.push({ url, init })
+    return {
+      status: 400,
+      json: async () => ({ ok: false, error: 'invalid_operation' }),
+    }
+  }
+  const result = await probeLinePayGatewayAuthentication({
+    fetchFn,
+    transportEnv: smokeGatewayEnv,
+    now: () => now,
+    createNonce: () => 'smoke-nonce-fixed',
+    createRequestId: () => 'smoke-request-fixed',
+  })
+  const call = calls[0]
+  const bodyText = call?.init.body ?? ''
+  const body = JSON.parse(bodyText) as Record<string, unknown>
+
+  assert.deepEqual(result, { ok: true, authenticated: true, upstreamCalled: false })
+  assert.equal(calls.length, 1)
+  assert.equal(call?.url, 'https://gateway.example.com/v1/line-pay/proxy')
+  assert.deepEqual(body, {
+    operation: 'gatewayAuthenticationSmoke',
+    environment: 'sandbox',
+    requestId: 'smoke-request-fixed',
+    linePayHeaders: {},
+  })
+  const canonical = buildGatewayCanonicalString({
+    method: 'POST',
+    requestPath: LINE_PAY_GATEWAY_PROXY_PATH,
+    timestamp: String(Math.floor(now / 1_000)),
+    nonce: 'smoke-nonce-fixed',
+    bodyText,
+  })
+  assert.equal(
+    call?.init.headers['x-gateway-signature'],
+    createHmac('sha256', gatewaySecret).update(canonical).digest('hex'),
+  )
+  assert.equal(call?.init.headers['x-gateway-proxy-token'], undefined)
+  assert.equal(call?.init.headers['X-LINE-Authorization'], undefined)
+})
+
+test('smoke probe itself is unavailable outside an explicitly enabled Preview', async () => {
+  for (const transportEnv of [
+    { ...smokeGatewayEnv, VERCEL_ENV: 'production' },
+    { ...smokeGatewayEnv, VERCEL_ENV: 'development' },
+    { ...smokeGatewayEnv, VERCEL_ENV: undefined },
+    { ...smokeGatewayEnv, LINE_PAY_GATEWAY_SMOKE_ENABLED: 'false' },
+    { ...smokeGatewayEnv, LINE_PAY_GATEWAY_SMOKE_ENABLED: undefined },
+  ]) {
+    let calls = 0
+    await assert.rejects(
+      () =>
+        probeLinePayGatewayAuthentication({
+          fetchFn: async () => {
+            calls += 1
+            return { status: 400, json: async () => ({ ok: false, error: 'invalid_operation' }) }
+          },
+          transportEnv,
+        }),
+      (error: unknown) =>
+        error instanceof LinePayTransportError && error.code === 'line_pay_gateway_smoke_unavailable',
+    )
+    assert.equal(calls, 0)
+  }
+})
+
+test('smoke refuses unauthenticated or ambiguous Gateway responses', async () => {
+  for (const response of [
+    { status: 401, body: { ok: false, error: 'unauthorized' } },
+    { status: 400, body: { ok: false, error: 'invalid_request' } },
+    { status: 200, body: { ok: true, authenticated: true } },
+  ]) {
+    await assert.rejects(
+      () =>
+        probeLinePayGatewayAuthentication({
+          fetchFn: async () => ({ status: response.status, json: async () => response.body }),
+          transportEnv: smokeGatewayEnv,
+        }),
+      (error: unknown) =>
+        error instanceof LinePayTransportError && error.code === 'line_pay_gateway_smoke_failed',
+    )
+  }
 })
 
 test('gateway canonical signature covers method, path, timestamp, nonce and exact body hash', async () => {
