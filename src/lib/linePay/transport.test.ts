@@ -167,6 +167,7 @@ test('Gateway URL accepts canonical public HTTPS origins with explicit case and 
     ],
     ['HTTPS://EXAMPLE.COM', 'https://example.com/v1/line-pay/proxy'],
     ['https://xn--bcher-kva.de', 'https://xn--bcher-kva.de/v1/line-pay/proxy'],
+    ['https://bücher.de', 'https://xn--bcher-kva.de/v1/line-pay/proxy'],
   ]) {
     const accepted = getLinePayTransportConfig(
       { ...gatewayEnv, VERCEL_ENV: 'preview', LINE_PAY_GATEWAY_URL: gatewayUrl },
@@ -213,6 +214,47 @@ test('Gateway URL raw validation rejects root, literal, encoded and multi-slash 
   }
 })
 
+test('Gateway URL raw validation rejects every percent-encoded authority form before URL normalization', () => {
+  for (const gatewayUrl of [
+    'https://%65xample.com',
+    'https://e%78ample.com',
+    'https://exam%70le.com',
+    'https://example.%63om',
+    'https://%45XAMPLE.COM',
+    'https://example%2ecom',
+    'https://example%2Ecom',
+    'https://www%2eexample.com',
+    'https://%2eexample.com',
+    'https://example.com%2e',
+    'https://linepay%2dgateway.example.com',
+    'https://example%2dtest.com',
+    'https://%78%6e--example.com',
+    'https://example.com%3a443',
+    'https://user%40example.com',
+    'https://example.com%2fpath',
+    'https://example.com%5cpath',
+    'https://example.com%3fquery',
+    'https://example.com%23fragment',
+    'https://example%.com',
+    'https://example%2.com',
+    'https://example%GG.com',
+    'https://%com',
+    'https://example.com%',
+    'https://example%252ecom',
+    'https://%2565xample.com',
+    'https://example%252fpath.com',
+    'https://example%25.com',
+    'https://example%FF.com',
+    'https://example%00.com',
+    'https://example%09.com',
+    'https://example%0a.com',
+    'https://example%0d.com',
+    'https://example%20.com',
+  ]) {
+    assertGatewayUrlRejectedInEveryRuntime(gatewayUrl)
+  }
+})
+
 test('Gateway URL raw validation rejects query, fragment, backslash, whitespace and control characters', () => {
   for (const gatewayUrl of [
     'https://example.com?x=1',
@@ -240,6 +282,9 @@ test('Gateway URL semantic validation rejects trailing-dot, localhost and specia
     'https://foo.localhost.',
     'https://example.com.',
     'https://linepay-gateway.tsu-waterbottle.com.',
+    'https://localhost。',
+    'https://localhost．',
+    'https://localhost｡',
     'https://localhost',
     'https://foo.localhost',
     'https://127.0.0.1',

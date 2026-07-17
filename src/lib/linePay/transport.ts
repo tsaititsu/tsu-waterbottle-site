@@ -115,6 +115,7 @@ function parseRawHttpsOrigin(value: string) {
     !/^https:\/\//i.test(value) ||
     /[\u0000-\u001f\u007f]/u.test(value) ||
     /\s/u.test(value) ||
+    value.includes('%') ||
     value.includes('\\') ||
     value.includes('?') ||
     value.includes('#')
