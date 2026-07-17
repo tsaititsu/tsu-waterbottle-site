@@ -358,17 +358,27 @@ function buildOneBundle(
       const emptyRuleIds: string[] = []
       if (view.palace.borrowStatus === 'blocked_by_local_star') {
         emptyRuleIds.push('rule:structure:empty-palace-blockers')
-      } else {
+      } else if (view.palace.borrowStatus === 'eligible_and_borrowed') {
         emptyRuleIds.push('rule:structure:empty-palace-borrow')
-      }
-      if (view.palace.borrowStatus === 'eligible_and_borrowed') {
         emptyRuleIds.push('rule:structure:empty-palace-opposite-only')
-      }
-      if (view.palace.borrowStatus === 'opposite_empty') {
-        emptyRuleIds.push('rule:structure:opposite-empty')
-      }
-      if (view.palace.modeledSupportingStars.some((star) => star.name === '祿存')) {
-        emptyRuleIds.push('rule:structure:empty-palace-lucun')
+        if (
+          view.palace.modeledSupportingStars.some(
+            (star) => star.name === '祿存',
+          )
+        ) {
+          emptyRuleIds.push('rule:structure:empty-palace-lucun')
+        }
+      } else if (view.palace.borrowStatus === 'opposite_empty') {
+        addMissing({
+          requirementId: `missing:${view.role}:empty:opposite-empty`,
+          kind: 'empty_palace',
+          role: view.role,
+          palaceId: view.palace.palaceId,
+          starName: null,
+          mutagenType: null,
+          pairKey: null,
+          reasonCode: 'missing_empty_palace_rule',
+        })
       }
       for (const ruleId of emptyRuleIds) {
         if (!addRule(ruleId, {

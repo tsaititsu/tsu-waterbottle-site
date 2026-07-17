@@ -114,6 +114,8 @@ export type AiChartD1K0SourceLocator = Readonly<{
   extractionMode:
     | 'exact_section'
     | 'exact_bullet'
+    | 'exact_bullet_block'
+    | 'exact_labeled_bullet_block'
     | 'exact_labeled_bullets'
     | 'exact_line'
   itemIndex: number | null
@@ -178,6 +180,7 @@ export type AiChartD1K0CoverageCount = Readonly<{
 export type AiChartD1K0Coverage = Readonly<{
   palaceMeaningCoverage: AiChartD1K0CoverageCount
   singleStarCoverage: AiChartD1K0CoverageCount
+  singleStarTeacherSupplementCoverage: AiChartD1K0CoverageCount
   doubleStarSpecificCoverage: AiChartD1K0CoverageCount
   mutagenSpecificCoverage: AiChartD1K0CoverageCount
   supportingStarCoverage: AiChartD1K0CoverageCount
@@ -415,6 +418,8 @@ function parseLocator(
   const extractionMode = parseAiChartD1Enum(record.extractionMode, [
     'exact_section',
     'exact_bullet',
+    'exact_bullet_block',
+    'exact_labeled_bullet_block',
     'exact_labeled_bullets',
     'exact_line',
   ] as const)
@@ -676,6 +681,7 @@ const COUNT_FIELDS = Object.freeze(['covered', 'total'] as const)
 const COVERAGE_FIELDS = Object.freeze([
   'palaceMeaningCoverage',
   'singleStarCoverage',
+  'singleStarTeacherSupplementCoverage',
   'doubleStarSpecificCoverage',
   'mutagenSpecificCoverage',
   'supportingStarCoverage',
@@ -704,6 +710,10 @@ function parseCoverage(
       invalid,
     ),
     singleStarCoverage: parseCoverageCount(record.singleStarCoverage, invalid),
+    singleStarTeacherSupplementCoverage: parseCoverageCount(
+      record.singleStarTeacherSupplementCoverage,
+      invalid,
+    ),
     doubleStarSpecificCoverage: parseCoverageCount(
       record.doubleStarSpecificCoverage,
       invalid,
@@ -1203,7 +1213,14 @@ const locatorSchema = strictObject({
   occurrenceIndex: { type: 'integer', minimum: 0, maximum: 127 },
   extractionMode: {
     type: 'string',
-    enum: ['exact_section', 'exact_bullet', 'exact_labeled_bullets', 'exact_line'],
+    enum: [
+      'exact_section',
+      'exact_bullet',
+      'exact_bullet_block',
+      'exact_labeled_bullet_block',
+      'exact_labeled_bullets',
+      'exact_line',
+    ],
   },
   itemIndex: { anyOf: [{ type: 'integer', minimum: 0, maximum: 127 }, { type: 'null' }] },
   exactLabel: nullableShortTextSchema,
@@ -1354,6 +1371,7 @@ export const AI_CHART_D1_K0_CATALOG_INTERNAL_JSON_SCHEMA: AiChartD1JsonSchema =
     coverage: strictObject({
       palaceMeaningCoverage: countSchema,
       singleStarCoverage: countSchema,
+      singleStarTeacherSupplementCoverage: countSchema,
       doubleStarSpecificCoverage: countSchema,
       mutagenSpecificCoverage: countSchema,
       supportingStarCoverage: countSchema,

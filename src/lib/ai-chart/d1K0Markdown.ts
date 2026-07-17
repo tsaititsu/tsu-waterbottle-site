@@ -93,6 +93,26 @@ function extractBulletText(lines: readonly string[]): readonly string[] {
   )
 }
 
+function extractConsecutiveBulletBlock(
+  lines: readonly string[],
+  startIndex: number,
+): readonly string[] {
+  const bullets: string[] = []
+  let index = startIndex
+  while (index < lines.length && lines[index].trim().length === 0) index += 1
+  for (; index < lines.length; index += 1) {
+    const match = /^\s*-\s+(.+?)\r?$/.exec(lines[index])
+    if (!match) break
+    bullets.push(match[1])
+  }
+  if (bullets.length === 0) invalid()
+  return Object.freeze(bullets)
+}
+
+function structuredBulletBlock(bullets: readonly string[]): string {
+  return JSON.stringify({ bullets })
+}
+
 export function hasAiChartD1K0ExactMarkdownHeading(
   text: string,
   headingLevel: 1 | 2 | 3 | 4,
@@ -102,6 +122,17 @@ export function hasAiChartD1K0ExactMarkdownHeading(
     (heading) =>
       heading.level === headingLevel && heading.title === exactHeading,
   )
+}
+
+export function countAiChartD1K0ExactMarkdownHeadings(
+  text: string,
+  headingLevel: 1 | 2 | 3 | 4,
+  exactHeading: string,
+): number {
+  return parseHeadings(text).filter(
+    (heading) =>
+      heading.level === headingLevel && heading.title === exactHeading,
+  ).length
 }
 
 export function extractAiChartD1K0Markdown(
@@ -132,6 +163,30 @@ export function extractAiChartD1K0Markdown(
       const bullets = extractBulletText(sectionLines)
       result = bullets[locator.itemIndex] ?? ''
       if (result !== locator.exactText) invalid()
+    } else if (locator.extractionMode === 'exact_bullet_block') {
+      if (
+        locator.itemIndex !== null ||
+        locator.exactLabel !== null ||
+        locator.exactText !== null
+      ) {
+        invalid()
+      }
+      result = structuredBulletBlock(extractConsecutiveBulletBlock(sectionLines, 0))
+    } else if (locator.extractionMode === 'exact_labeled_bullet_block') {
+      if (
+        locator.itemIndex !== null ||
+        locator.exactLabel === null ||
+        locator.exactText !== null
+      ) {
+        invalid()
+      }
+      const labelIndexes = sectionLines.flatMap((line, index) =>
+        stripBold(line.trim()) === `${locator.exactLabel}：` ? [index] : [],
+      )
+      if (labelIndexes.length !== 1) invalid()
+      result = structuredBulletBlock(
+        extractConsecutiveBulletBlock(sectionLines, labelIndexes[0] + 1),
+      )
     } else if (locator.extractionMode === 'exact_labeled_bullets') {
       if (
         locator.itemIndex !== null ||

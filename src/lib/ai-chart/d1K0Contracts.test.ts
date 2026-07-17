@@ -146,6 +146,7 @@ function catalogFixture(): AiChartD1K0Catalog {
     coverage: {
       palaceMeaningCoverage: { covered: 1, total: 12 },
       singleStarCoverage: { covered: 1, total: 14 },
+      singleStarTeacherSupplementCoverage: { covered: 0, total: 14 },
       doubleStarSpecificCoverage: { covered: 0, total: 24 },
       mutagenSpecificCoverage: { covered: 0, total: 0 },
       supportingStarCoverage: { covered: 0, total: 11 },

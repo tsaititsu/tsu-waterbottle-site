@@ -124,6 +124,8 @@ export type AiChartD1K0MarkdownLocatorDefinition = Readonly<{
   extractionMode:
     | 'exact_section'
     | 'exact_bullet'
+    | 'exact_bullet_block'
+    | 'exact_labeled_bullet_block'
     | 'exact_labeled_bullets'
     | 'exact_line'
   itemIndex: number | null
@@ -179,6 +181,41 @@ function labeled(
     exactHeading,
     occurrenceIndex: 0,
     extractionMode: 'exact_labeled_bullets',
+    itemIndex: null,
+    exactLabel,
+    exactText: null,
+  })
+}
+
+function bulletBlock(
+  headingPath: readonly string[],
+  headingLevel: 1 | 2 | 3 | 4,
+  exactHeading: string,
+): AiChartD1K0MarkdownLocatorDefinition {
+  return Object.freeze({
+    headingPath: Object.freeze([...headingPath]),
+    headingLevel,
+    exactHeading,
+    occurrenceIndex: 0,
+    extractionMode: 'exact_bullet_block',
+    itemIndex: null,
+    exactLabel: null,
+    exactText: null,
+  })
+}
+
+function labeledBulletBlock(
+  headingPath: readonly string[],
+  headingLevel: 1 | 2 | 3 | 4,
+  exactHeading: string,
+  exactLabel: string,
+): AiChartD1K0MarkdownLocatorDefinition {
+  return Object.freeze({
+    headingPath: Object.freeze([...headingPath]),
+    headingLevel,
+    exactHeading,
+    occurrenceIndex: 0,
+    extractionMode: 'exact_labeled_bullet_block',
     itemIndex: null,
     exactLabel,
     exactText: null,
@@ -248,36 +285,178 @@ type SupportingDefinition = Readonly<{
   headingPath: readonly string[]
   level: 2 | 3
   heading: string
-  exactText: string
+  exactLabel: string | null
+  expectedBullets: readonly string[]
 }>
 
-export const AI_CHART_D1_K0_SUPPORTING_RULE_DEFINITIONS = Object.freeze([
-  ['文昌', [], 2, '一、文昌', '理性、邏輯、條理、規則、文字、說明。'],
-  ['文曲', [], 2, '二、文曲', '感性、感受、表達、美感、創作、表演。'],
-  ['擎羊', ['四、四煞'], 3, '擎羊', '知道有衝突仍正面處理。'],
-  ['陀羅', ['四、四煞'], 3, '陀羅', '反覆、糾結、拖延、繞圈。'],
-  ['火星', ['四、四煞'], 3, '火星', '情緒來得快、當下立即反應。'],
-  ['鈴星', ['四、四煞'], 3, '鈴星', '冷靜計算、衡量利弊、策略與自保。'],
-  ['左輔', ['五、左輔右弼'], 3, '左輔', '一起喊話、表態支持、增加聲量。'],
-  ['右弼', ['五、左輔右弼'], 3, '右弼', '細膩說話、安慰、提醒、圓場與協調。'],
-  ['天魁', ['六、天魁天鉞天梁'], 3, '天魁', '檯面上的有能力貴人。'],
-  ['天鉞', ['六、天魁天鉞天梁'], 3, '天鉞', '檯面下的有能力貴人。'],
-  ['祿存', [], 2, '八、祿存', '與化祿相似，是存在的助力。'],
-].map(([starName, headingPath, level, heading, exactText]) =>
-  Object.freeze({ starName, headingPath, level, heading, exactText }),
-) as readonly SupportingDefinition[])
+export const AI_CHART_D1_K0_SUPPORTING_RULE_DEFINITIONS = Object.freeze(([
+  ['文昌', [], 2, '一、文昌', '核心', ['理性、邏輯、條理、規則、文字、說明。', '讀書、考試、正途功名、制度認可。', '命宮／官祿宮通常讀書理解能力不差。']],
+  ['文曲', [], 2, '二、文曲', '核心', ['感性、感受、表達、美感、創作、表演。', '異途功名與非傳統成就。']],
+  ['擎羊', ['四、四煞'], 3, '擎羊', null, ['知道有衝突仍正面處理。', '單顆可成敢面對、敢承擔。', '煞忌集中時硬碰硬、不願退讓。']],
+  ['陀羅', ['四、四煞'], 3, '陀羅', null, ['反覆、糾結、拖延、繞圈。', '想很久仍可能選錯。', '沒有單顆正向轉換。']],
+  ['火星', ['四、四煞'], 3, '火星', null, ['情緒來得快、當下立即反應。', '單顆可成行動快、敢把握機會。', '問題是情緒過去後，當下反應已造成影響。']],
+  ['鈴星', ['四、四煞'], 3, '鈴星', null, ['冷靜計算、衡量利弊、策略與自保。', '必須配合主星判斷在計算什麼。', '煞忌集中時太會算計，容易讓人反感。']],
+  ['左輔', ['五、左輔右弼'], 3, '左輔', null, ['一起喊話、表態支持、增加聲量。', '偏口頭與態度支持。', '好壞都可能幫。']],
+  ['右弼', ['五、左輔右弼'], 3, '右弼', null, ['細膩說話、安慰、提醒、圓場與協調。', '偏口頭與人情支持。', '好壞都可能幫。']],
+  ['天魁', ['六、天魁天鉞天梁'], 3, '天魁', null, ['檯面上的有能力貴人。', '正式給意見、能力與資源。']],
+  ['天鉞', ['六、天魁天鉞天梁'], 3, '天鉞', null, ['檯面下的有能力貴人。', '私下提醒、幕後安排與暗中協助。']],
+  ['祿存', [], 2, '八、祿存', null, ['與化祿相似，是存在的助力。', '有主星時，幫助主星核心產生更多效果。', '財帛宮可理解為幫助主星產生更多賺錢機會。', '獨坐時，只代表該宮位較有不安全感。', '祿存可納入祿隨忌走，補償其他宮位化忌空缺。']],
+] as const).map(([starName, headingPath, level, heading, exactLabel, expectedBullets]) =>
+  Object.freeze({
+    starName,
+    headingPath: Object.freeze([...headingPath]),
+    level,
+    heading,
+    exactLabel,
+    expectedBullets: Object.freeze([...expectedBullets]),
+  }),
+)) as readonly SupportingDefinition[]
 
 export function createAiChartD1K0SupportingLocator(
   definition: SupportingDefinition,
 ): AiChartD1K0MarkdownLocatorDefinition {
-  return bullet(
-    definition.headingPath,
-    definition.level,
-    definition.heading,
-    0,
-    definition.exactText,
-  )
+  return definition.exactLabel === null
+    ? bulletBlock(definition.headingPath, definition.level, definition.heading)
+    : labeledBulletBlock(
+        definition.headingPath,
+        definition.level,
+        definition.heading,
+        definition.exactLabel,
+      )
 }
+
+export const AI_CHART_D1_K0_EVENT_BOUNDARY = Object.freeze({
+  allowed: Object.freeze([
+    '哪個領域容易有壓力、空缺、反覆或失衡。',
+    '命主可能形成哪些長期行為與價值觀。',
+  ]),
+  prohibited: Object.freeze([
+    '何時發生。',
+    '具體事件形式。',
+    '一定成功或失敗。',
+    '一定破財、車禍、官非或疾病。',
+  ]),
+})
+
+export const AI_CHART_D1_K0_MUTAGEN_EXPECTED_BULLET_COUNTS = Object.freeze({
+  '太陽化忌': 3, '太陰化忌': 3, '廉貞化忌': 2, '巨門化忌': 2,
+  '天機化忌': 3, '文曲化忌': 3, '天相化忌': 3, '文昌化忌': 3,
+  '武曲化忌': 5, '貪狼化忌': 3,
+  '天機化祿': 1, '太陽化祿': 2, '廉貞化祿': 2, '天同化祿': 2,
+  '太陰化祿': 3, '貪狼化祿': 2, '破軍化祿': 3, '天梁化祿': 4,
+  '武曲化祿': 3, '巨門化祿': 1,
+  '破軍化權': 4, '天梁化權': 4, '天機化權': 3, '天同化權': 4,
+  '太陰化權': 3, '貪狼化權': 3, '武曲化權': 4, '太陽化權': 4,
+  '紫微化權': 4, '巨門化權': 4,
+  '武曲化科': 4, '紫微化科': 4, '文昌化科': 4, '天機化科': 3,
+  '右弼化科': 4, '天梁化科': 4, '天同化科': 4, '文曲化科': 3,
+  '左輔化科': 4, '太陰化科': 3,
+} as const)
+
+function teacherSupplementSegment(
+  starName: AiChartD1MajorStarName,
+  segmentId: string,
+  text: string,
+) {
+  return Object.freeze({ starName, segmentId, text })
+}
+
+export const AI_CHART_D1_K0_TEACHER_SUPPLEMENT_SEGMENTS = Object.freeze({
+  紫微: Object.freeze([
+    teacherSupplementSegment(
+      '紫微',
+      'teacher:ziwei:team',
+      '紫微的班底可看左輔、右弼、天魁、天鉞、天府、天相。團隊完整時，紫微的領導、資源與名聲較容易做出來；若輔佐不足，容易只剩面子和孤單感。',
+    ),
+    teacherSupplementSegment(
+      '紫微',
+      'teacher:ziwei:career-lord',
+      '保留「官祿主」。',
+    ),
+    teacherSupplementSegment(
+      '紫微',
+      'teacher:ziwei:team-scope',
+      '紫微團隊以三方四正為主要範圍，鄰宮也可納入。',
+    ),
+  ]),
+  天機: Object.freeze([
+    teacherSupplementSegment(
+      '天機',
+      'teacher:tianji:change',
+      '天機的「善」不能只寫善良，也要保留善變、轉機與調整。',
+    ),
+  ]),
+  太陽: Object.freeze([
+    teacherSupplementSegment(
+      '太陽',
+      'teacher:taiyang:illuminate',
+      '太陽「喜照不喜坐」：它適合照亮、帶動，而不是把所有事情都壓在自己身上。跟太陽溝通時，讓它參與制定規則或做決定，它會更願意努力完成自己說出口的承諾。',
+    ),
+  ]),
+  武曲: Object.freeze([
+    teacherSupplementSegment(
+      '武曲',
+      'teacher:wuqu:earned-reward',
+      '武曲的正財不是法律或行業分類，而是「花時間、持續投入、運用能力換來相對報酬」。武曲的務實偏向金錢與實際利益；天府的務實則偏向掌握與對自己有利。',
+    ),
+  ]),
+  天同: Object.freeze([
+    teacherSupplementSegment(
+      '天同',
+      'teacher:tiantong:malefic-response',
+      '天同「不怕四煞」不是煞星不存在，而是它比較能用寬容與隨遇而安去消化。天同也不是完全沒脾氣；很多不滿會先記在心裡，久了才用孩子氣的方式表達。',
+    ),
+  ]),
+  廉貞: Object.freeze([
+    teacherSupplementSegment(
+      '廉貞',
+      'teacher:lianzhen:self-restraint',
+      '廉貞化祿或與祿存同宮，講義稱為廉貞清白格，重點是因自我約束、做事有分寸而得到好處。',
+    ),
+  ]),
+  天府: Object.freeze([
+    teacherSupplementSegment(
+      '天府',
+      'teacher:tianfu:treasury',
+      '天府是庫星，但財庫要有祿才比較成立。天府可化煞為用，仍須看煞星數量與祿的落點。',
+    ),
+  ]),
+  太陰: Object.freeze([
+    teacherSupplementSegment(
+      '太陰',
+      'teacher:taiyin:care-and-saving',
+      '老師歷次修正強調「生活上的照顧多屬太陰」。太陰的財不是快速放大，而是節流、慢慢存、積沙成塔。',
+    ),
+  ]),
+  貪狼: Object.freeze([
+    teacherSupplementSegment(
+      '貪狼',
+      'teacher:tanlang:resourcefulness',
+      '貪狼的人際手腕不是單純虛偽，而是為了滿足需求，能示好、示弱、撒嬌、關懷、找話題。它之所以是解厄星，也與博學、會找資源、較懂得處理問題有關。',
+    ),
+  ]),
+  巨門: Object.freeze([
+    teacherSupplementSegment(
+      '巨門',
+      'teacher:jumen:insecurity-first',
+      '巨門的口舌不是第一層，而是不安衍生的結果。',
+    ),
+  ]),
+  天梁: Object.freeze([
+    teacherSupplementSegment(
+      '天梁',
+      'teacher:tianliang:mitigation',
+      '天梁確實有制煞與逢凶化吉的力量，但不是保證沒事。',
+    ),
+  ]),
+  破軍: Object.freeze([
+    teacherSupplementSegment(
+      '破軍',
+      'teacher:pojun:dream-resources',
+      '破軍的夢想如何呈現，要看對宮天相；能不能大立，要看能力和資源。它看似不計後果，內在常有「我辦得到」的天相式信念。',
+    ),
+  ]),
+} as const)
 
 type StructureDefinition = Readonly<{
   ruleId: string
@@ -292,7 +471,7 @@ export const AI_CHART_D1_K0_STRUCTURE_RULE_DEFINITIONS = Object.freeze([
   ['rule:common:possibility-first', 'common', '可能性優先', AI_CHART_D1_K0_SOURCE_FILES.scanning, Object.freeze({ headingPath: Object.freeze([]), headingLevel: 2, exactHeading: '二、可能性優先', occurrenceIndex: 0, extractionMode: 'exact_line', itemIndex: 1, exactLabel: null, exactText: '2. 所有命理上成立、生活上合理的可能先保留。' }), 'common:possibility-first'],
   ['rule:common:malefic-preserve-all', 'common', '多顆煞星反應全部保留', AI_CHART_D1_K0_SOURCE_FILES.scanning, section([], 2, '五、多顆煞星同時存在'), 'common:malefic-preserve-all'],
   ['rule:common:natal-scan-completeness', 'common', '本命結構掃描範圍', AI_CHART_D1_K0_SOURCE_FILES.scanning, section([], 2, '三、掃描順序'), 'common:natal-scan-completeness'],
-  ['rule:common:d1-event-boundary', 'd2_boundary', 'D1 只保留長期可能', AI_CHART_D1_K0_SOURCE_FILES.scanning, bullet([], 2, '六、本命與事件邊界', 1, '命主可能形成哪些長期行為與價值觀。'), 'common:d1-event-boundary'],
+  ['rule:common:d1-event-boundary', 'd2_boundary', 'D1 本命與事件邊界', AI_CHART_D1_K0_SOURCE_FILES.scanning, section([], 2, '六、本命與事件邊界'), 'common:d1-event-boundary'],
   ['rule:structure:opposite', 'relationship', '對宮', AI_CHART_D1_K0_SOURCE_FILES.relationships, section([], 2, '二、對宮'), 'relationship:opposite'],
   ['rule:structure:hidden-combination', 'relationship', '暗合', AI_CHART_D1_K0_SOURCE_FILES.relationships, section([], 2, '四、暗合'), 'relationship:hidden-combination'],
   ['rule:structure:trine', 'relationship', '三方四正', AI_CHART_D1_K0_SOURCE_FILES.relationships, section([], 2, '五、三方四正'), 'relationship:trine'],
@@ -301,7 +480,6 @@ export const AI_CHART_D1_K0_STRUCTURE_RULE_DEFINITIONS = Object.freeze([
   ['rule:structure:empty-palace-borrow', 'empty_palace', '空宮可借星', AI_CHART_D1_K0_SOURCE_FILES.emptyPalaces, section([], 2, '二、空宮可借星'), 'empty:eligible-borrow'],
   ['rule:structure:empty-palace-opposite-only', 'empty_palace', '只借對宮主星與其生年四化', AI_CHART_D1_K0_SOURCE_FILES.emptyPalaces, section([], 2, '二、空宮可借星'), 'empty:opposite-major-only'],
   ['rule:structure:empty-palace-lucun', 'empty_palace', '祿存不阻擋借星', AI_CHART_D1_K0_SOURCE_FILES.emptyPalaces, section([], 2, '四、空宮有祿存'), 'empty:lucun-does-not-block'],
-  ['rule:structure:opposite-empty', 'empty_palace', '對宮無主星時沒有可借入主星', AI_CHART_D1_K0_SOURCE_FILES.emptyPalaces, section([], 2, '二、空宮可借星'), 'empty:opposite-empty'],
   ['rule:structure:four-horse', 'four_horse', '四馬地結構背景', AI_CHART_D1_K0_SOURCE_FILES.fourHorse, section([], 2, '二、底層原則'), 'four-horse:background'],
   ['rule:structure:four-horse-d1-boundary', 'd2_boundary', '四馬地不得直接下事件結論', AI_CHART_D1_K0_SOURCE_FILES.fourHorse, bullet([], 2, '七、禁止誤用', 3, '不可在本命階段把「變動傾向」直接寫成已發生事件。'), 'four-horse:d1-boundary'],
 ].map(([ruleId, kind, title, sourceFile, locator, selectionTag]) =>
@@ -331,4 +509,4 @@ export const AI_CHART_D1_K0_SOURCE_AUTHORITY_PRIORITIES = Object.freeze({
   working_inference: 100,
 } as const)
 
-export { bullet, labeled, section }
+export { bullet, bulletBlock, labeled, labeledBulletBlock, section }

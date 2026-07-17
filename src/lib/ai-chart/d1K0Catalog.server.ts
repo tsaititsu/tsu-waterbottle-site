@@ -6,7 +6,7 @@ import {
   AI_CHART_D1_LOCKED_MANIFEST_SHA256,
 } from './d1Assets'
 import {
-  readVerifiedAiChartD1CompilationAssets,
+  readVerifiedAiChartD1K0CompilationAssets,
   type AiChartD1VerifiedCompilationAsset,
 } from './d1Assets.server'
 import {
@@ -22,8 +22,8 @@ import {
   type AiChartD1K0SourceLocator,
 } from './d1K0Contracts'
 import {
+  countAiChartD1K0ExactMarkdownHeadings,
   extractAiChartD1K0Markdown,
-  hasAiChartD1K0ExactMarkdownHeading,
 } from './d1K0Markdown'
 import {
   AI_CHART_D1_K0_CATALOG_ID,
@@ -31,7 +31,9 @@ import {
   AI_CHART_D1_K0_COMPILED_AT_POLICY,
   AI_CHART_D1_K0_DOUBLE_RULE_DEFINITIONS,
   AI_CHART_D1_K0_DOUBLE_STAR_INVENTORY,
+  AI_CHART_D1_K0_EVENT_BOUNDARY,
   AI_CHART_D1_K0_MAJOR_STAR_NAMES,
+  AI_CHART_D1_K0_MUTAGEN_EXPECTED_BULLET_COUNTS,
   AI_CHART_D1_K0_MUTAGEN_SLUGS,
   AI_CHART_D1_K0_PALACE_MEANING_DEFINITIONS,
   AI_CHART_D1_K0_SOURCE_AUTHORITY_PRIORITIES,
@@ -42,9 +44,11 @@ import {
   AI_CHART_D1_K0_STRUCTURE_RULE_DEFINITIONS,
   AI_CHART_D1_K0_SUPPORTING_RULE_DEFINITIONS,
   AI_CHART_D1_K0_SUPPORTING_STAR_NAMES,
+  AI_CHART_D1_K0_TEACHER_SUPPLEMENT_SEGMENTS,
   createAiChartD1K0DoubleLocator,
   createAiChartD1K0SupportingLocator,
   getAiChartD1K0StarSlug,
+  labeledBulletBlock,
   type AiChartD1K0MarkdownLocatorDefinition,
 } from './d1K0Registry'
 import type {
@@ -157,6 +161,64 @@ function exactObject(
   return record
 }
 
+function parseBulletBlock(content: string): readonly string[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(content)
+  } catch {
+    invalid()
+  }
+  const record = exactObject(parsed, ['bullets'])
+  if (
+    !Array.isArray(record.bullets) ||
+    record.bullets.length === 0 ||
+    record.bullets.some(
+      (entry) => typeof entry !== 'string' || entry.length === 0,
+    )
+  ) {
+    invalid()
+  }
+  return Object.freeze([...(record.bullets as string[])])
+}
+
+function sameStrings(
+  actual: readonly string[],
+  expected: readonly string[],
+): boolean {
+  return (
+    actual.length === expected.length &&
+    actual.every((value, index) => value === expected[index])
+  )
+}
+
+function uniqueApprovedSegments(
+  source: string,
+  starName: AiChartD1MajorStarName,
+  segments: readonly Readonly<{
+    starName: AiChartD1MajorStarName
+    segmentId: string
+    text: string
+  }>[],
+): readonly Readonly<{
+  starName: AiChartD1MajorStarName
+  segmentId: string
+  text: string
+}>[] {
+  const seen = new Set<string>()
+  for (const segment of segments) {
+    if (
+      seen.has(segment.segmentId) ||
+      segment.starName !== starName ||
+      segment.text.length === 0 ||
+      source.split(segment.text).length !== 2
+    ) {
+      invalid()
+    }
+    seen.add(segment.segmentId)
+  }
+  return Object.freeze(segments.map((segment) => Object.freeze({ ...segment })))
+}
+
 function assetMap(
   assets: readonly AiChartD1VerifiedCompilationAsset[],
 ): ReadonlyMap<string, AiChartD1VerifiedCompilationAsset> {
@@ -238,7 +300,10 @@ function createRule(input: Readonly<{
 
 function compileSingleStarRules(
   asset: AiChartD1VerifiedCompilationAsset,
-): readonly AiChartD1K0Rule[] {
+): Readonly<{
+  rules: readonly AiChartD1K0Rule[]
+  teacherSupplementCovered: number
+}> {
   const parsed = JSON.parse(asset.text) as unknown
   const root = exactObject(parsed, [
     'schema_version', 'version', 'updated_at', 'status', 'scope',
@@ -256,6 +321,7 @@ function compileSingleStarRules(
     invalid()
   }
   const seen = new Set<string>()
+  let teacherSupplementCovered = 0
   const rules = root.stars.map((value) => {
     const star = exactObject(value, SOURCE_STAR_FIELDS)
     if (
@@ -270,7 +336,8 @@ function compileSingleStarRules(
       invalid()
     }
     seen.add(star.name)
-    const content: Record<string, string> = {}
+    if (typeof star.老師補充 !== 'string') invalid()
+    const content: Record<string, unknown> = {}
     for (const field of SELECTED_STAR_FIELDS) {
       if (typeof star[field] !== 'string' || star[field].length === 0) invalid()
       const fieldValue = star[field] as string
@@ -279,6 +346,22 @@ function compileSingleStarRules(
       ) {
         content[field] = fieldValue
       }
+    }
+    const approvedSegments = Object.prototype.hasOwnProperty.call(
+      AI_CHART_D1_K0_TEACHER_SUPPLEMENT_SEGMENTS,
+      star.name,
+    )
+      ? AI_CHART_D1_K0_TEACHER_SUPPLEMENT_SEGMENTS[
+          star.name as keyof typeof AI_CHART_D1_K0_TEACHER_SUPPLEMENT_SEGMENTS
+        ]
+      : Object.freeze([])
+    if (approvedSegments.length > 0) {
+      content.老師補充D1 = uniqueApprovedSegments(
+        star.老師補充,
+        star.name as AiChartD1MajorStarName,
+        approvedSegments,
+      )
+      teacherSupplementCovered += 1
     }
     const slug = getAiChartD1K0StarSlug(star.name)
     if (!slug) invalid()
@@ -297,7 +380,10 @@ function compileSingleStarRules(
     })
   })
   if (seen.size !== AI_CHART_D1_K0_MAJOR_STAR_NAMES.length) invalid()
-  return Object.freeze(rules)
+  return Object.freeze({
+    rules: Object.freeze(rules),
+    teacherSupplementCovered,
+  })
 }
 
 function compilePalaces(asset: AiChartD1VerifiedCompilationAsset): Readonly<{
@@ -404,21 +490,22 @@ function mutagenLocator(
   mutagenType: AiChartD1MutagenType,
 ): AiChartD1K0MarkdownLocatorDefinition {
   const exactHeading = `${starName}${mutagenType}`
-  if (mutagenType === '化忌') {
-    return Object.freeze({ headingPath: Object.freeze(['二、化忌專屬規則（已確認）']), headingLevel: 3, exactHeading, occurrenceIndex: 0, extractionMode: 'exact_labeled_bullets', itemIndex: null, exactLabel: '專屬表現', exactText: null })
-  }
-  if (mutagenType === '化祿') {
-    return Object.freeze({ headingPath: Object.freeze(['三、化祿專屬規則（已確認工作版）']), headingLevel: 3, exactHeading, occurrenceIndex: 0, extractionMode: 'exact_section', itemIndex: null, exactLabel: null, exactText: null })
-  }
-  const parent = mutagenType === '化權'
-    ? '四、化權專屬規則（講義核心回填工作版）'
-    : '五、化科專屬規則（講義核心回填工作版）'
-  const exactLabel =
-    (starName === '天機' && mutagenType === '化權') ||
-    (starName === '文昌' && mutagenType === '化科')
-      ? '已確認推導'
-      : '工作版推導'
-  return Object.freeze({ headingPath: Object.freeze([parent]), headingLevel: 3, exactHeading, occurrenceIndex: 0, extractionMode: 'exact_labeled_bullets', itemIndex: null, exactLabel, exactText: null })
+  const parent = {
+    化忌: '二、化忌專屬規則（已確認）',
+    化祿: '三、化祿專屬規則（已確認工作版）',
+    化權: '四、化權專屬規則（講義核心回填工作版）',
+    化科: '五、化科專屬規則（講義核心回填工作版）',
+  }[mutagenType]
+  return Object.freeze({
+    headingPath: Object.freeze([parent]),
+    headingLevel: 3,
+    exactHeading,
+    occurrenceIndex: 0,
+    extractionMode: 'exact_bullet_block',
+    itemIndex: null,
+    exactLabel: null,
+    exactText: null,
+  })
 }
 
 function compileMutagens(asset: AiChartD1VerifiedCompilationAsset): Readonly<{
@@ -472,7 +559,13 @@ function compileMutagens(asset: AiChartD1VerifiedCompilationAsset): Readonly<{
     })
     .map(({ starName, mutagenType }) => {
       const locator = mutagenLocator(starName, mutagenType)
-      if (!hasAiChartD1K0ExactMarkdownHeading(asset.text, 3, locator.exactHeading)) {
+      if (
+        countAiChartD1K0ExactMarkdownHeadings(
+          asset.text,
+          3,
+          locator.exactHeading,
+        ) !== 1
+      ) {
         return Object.freeze({
           starName, mutagenType, specificRuleId: null,
           sourceAuthority: null, missingReason: 'missing_specific_mutagen_rule' as const,
@@ -489,9 +582,17 @@ function compileMutagens(asset: AiChartD1VerifiedCompilationAsset): Readonly<{
         (starName === '文昌' && mutagenType === '化科')
           ? 'reasoning_confirmed'
           : 'lecture_backfill'
+      const content = extractAiChartD1K0Markdown(asset.text, locator)
+      const expectedCount =
+        AI_CHART_D1_K0_MUTAGEN_EXPECTED_BULLET_COUNTS[
+          `${starName}${mutagenType}` as keyof typeof AI_CHART_D1_K0_MUTAGEN_EXPECTED_BULLET_COUNTS
+        ]
+      if (!expectedCount || parseBulletBlock(content).length !== expectedCount) {
+        invalid()
+      }
       rules.push(createRule({
         ruleId, kind: 'natal_mutagen', title: `${starName}${mutagenType}`,
-        content: extractAiChartD1K0Markdown(asset.text, locator),
+        content,
         ruleStatus: sourceAuthority === 'lecture_backfill' ? 'lecture_backfill' : 'teacher_confirmed',
         sourceAuthority, sourceFile: asset.path, sourceFileSha256: asset.sha256,
         sourceLocator: markdownLocator(locator),
@@ -510,10 +611,14 @@ function compileSupporting(asset: AiChartD1VerifiedCompilationAsset): readonly A
   return Object.freeze(AI_CHART_D1_K0_SUPPORTING_RULE_DEFINITIONS.map((definition) => {
     const locator = createAiChartD1K0SupportingLocator(definition)
     const slug = AI_CHART_D1_K0_STAR_SLUGS[definition.starName]
+    const content = extractAiChartD1K0Markdown(asset.text, locator)
+    if (!sameStrings(parseBulletBlock(content), definition.expectedBullets)) {
+      invalid()
+    }
     return createRule({
       ruleId: `rule:supporting:${slug}:core`, kind: 'supporting_star',
       title: `${definition.starName}核心`,
-      content: extractAiChartD1K0Markdown(asset.text, locator),
+      content,
       ruleStatus: 'teacher_confirmed',
       sourceAuthority: 'reasoning_confirmed', sourceFile: asset.path,
       sourceFileSha256: asset.sha256, sourceLocator: markdownLocator(locator),
@@ -528,9 +633,31 @@ function compileStructure(
   return Object.freeze(AI_CHART_D1_K0_STRUCTURE_RULE_DEFINITIONS.map((definition) => {
     const asset = assets.get(definition.sourceFile)
     if (!asset) invalid()
+    let content = extractAiChartD1K0Markdown(asset.text, definition.locator)
+    if (definition.ruleId === 'rule:common:d1-event-boundary') {
+      const allowed = parseBulletBlock(
+        extractAiChartD1K0Markdown(
+          asset.text,
+          labeledBulletBlock([], 2, '六、本命與事件邊界', 'D1 只標記'),
+        ),
+      )
+      const prohibited = parseBulletBlock(
+        extractAiChartD1K0Markdown(
+          asset.text,
+          labeledBulletBlock([], 2, '六、本命與事件邊界', 'D1 不直接判斷'),
+        ),
+      )
+      if (
+        !sameStrings(allowed, AI_CHART_D1_K0_EVENT_BOUNDARY.allowed) ||
+        !sameStrings(prohibited, AI_CHART_D1_K0_EVENT_BOUNDARY.prohibited)
+      ) {
+        invalid()
+      }
+      content = JSON.stringify({ allowed, prohibited })
+    }
     return createRule({
       ruleId: definition.ruleId, kind: definition.kind, title: definition.title,
-      content: extractAiChartD1K0Markdown(asset.text, definition.locator),
+      content,
       ruleStatus: 'teacher_confirmed', sourceAuthority: 'reasoning_confirmed',
       sourceFile: asset.path, sourceFileSha256: asset.sha256,
       sourceLocator: markdownLocator(definition.locator),
@@ -542,7 +669,23 @@ function compileStructure(
 function assertSafeSelectedContent(rules: readonly AiChartD1K0Rule[]): void {
   if (
     rules.some((rule) =>
-      FORBIDDEN_SELECTED_CONTENT.some((term) => rule.content.includes(term)),
+      FORBIDDEN_SELECTED_CONTENT.some((term) => {
+        if (!rule.content.includes(term)) return false
+        if (
+          rule.ruleId === 'rule:common:d1-event-boundary' &&
+          rule.content === JSON.stringify(AI_CHART_D1_K0_EVENT_BOUNDARY)
+        ) {
+          return false
+        }
+        if (
+          term === '官非' &&
+          rule.ruleId === 'rule:mutagen:tianxiang:ji' &&
+          rule.content.includes('具體官非事件留待大限、流年。')
+        ) {
+          return false
+        }
+        return true
+      }),
     )
   ) {
     invalid()
@@ -552,10 +695,9 @@ function assertSafeSelectedContent(rules: readonly AiChartD1K0Rule[]): void {
 async function compileCatalog(
   options: CompileAiChartD1K0CatalogOptions,
 ): Promise<AiChartD1K0Catalog> {
-  const verifiedAssets = await readVerifiedAiChartD1CompilationAssets(
-    AI_CHART_D1_K0_SOURCE_WHITELIST,
-    { projectRoot: options.projectRoot, allowedPaths: AI_CHART_D1_K0_SOURCE_WHITELIST },
-  )
+  const verifiedAssets = await readVerifiedAiChartD1K0CompilationAssets({
+    projectRoot: options.projectRoot,
+  })
   const assets = assetMap(verifiedAssets)
   const starsAsset = assets.get(AI_CHART_D1_K0_SOURCE_FILES.stars)
   const palacesAsset = assets.get(AI_CHART_D1_K0_SOURCE_FILES.palaces)
@@ -571,7 +713,7 @@ async function compileCatalog(
   const supporting = compileSupporting(supportingAsset)
   const structure = compileStructure(assets)
   const rules = Object.freeze([
-    ...stars, ...palaces.rules, ...doubles.rules, ...mutagens.rules,
+    ...stars.rules, ...palaces.rules, ...doubles.rules, ...mutagens.rules,
     ...supporting, ...structure,
   ].sort(compareAiChartD1K0Rules))
   if (new Set(rules.map((rule) => rule.ruleId)).size !== rules.length) invalid()
@@ -579,7 +721,11 @@ async function compileCatalog(
 
   const coverage = Object.freeze({
     palaceMeaningCoverage: Object.freeze({ covered: 12, total: 12 }),
-    singleStarCoverage: Object.freeze({ covered: stars.length, total: 14 }),
+    singleStarCoverage: Object.freeze({ covered: stars.rules.length, total: 14 }),
+    singleStarTeacherSupplementCoverage: Object.freeze({
+      covered: stars.teacherSupplementCovered,
+      total: 14,
+    }),
     doubleStarSpecificCoverage: Object.freeze({ covered: doubles.rules.length, total: 24 }),
     mutagenSpecificCoverage: Object.freeze({
       covered: mutagens.inventory.filter((entry) => entry.specificRuleId !== null).length,
@@ -588,11 +734,11 @@ async function compileCatalog(
     supportingStarCoverage: Object.freeze({ covered: supporting.length, total: 11 }),
     structureRuleCoverage: Object.freeze({
       covered: structure.length,
-      total: AI_CHART_D1_K0_STRUCTURE_RULE_DEFINITIONS.length,
+      total: 15,
     }),
   })
   if (
-    stars.length !== 14 ||
+    stars.rules.length !== 14 ||
     supporting.length !== AI_CHART_D1_K0_SUPPORTING_STAR_NAMES.length ||
     palaces.rules.length !== 12 ||
     doubles.inventory.length !== 24
@@ -600,14 +746,24 @@ async function compileCatalog(
     invalid()
   }
   const partial =
+    coverage.singleStarTeacherSupplementCoverage.covered <
+      coverage.singleStarTeacherSupplementCoverage.total ||
     coverage.doubleStarSpecificCoverage.covered < coverage.doubleStarSpecificCoverage.total ||
-    coverage.mutagenSpecificCoverage.covered < coverage.mutagenSpecificCoverage.total
+    coverage.mutagenSpecificCoverage.covered < coverage.mutagenSpecificCoverage.total ||
+    coverage.structureRuleCoverage.covered < coverage.structureRuleCoverage.total
   const warnings = Object.freeze([
+    ...(coverage.singleStarTeacherSupplementCoverage.covered <
+      coverage.singleStarTeacherSupplementCoverage.total
+      ? ['warning:k0:missing-single-star-teacher-supplement']
+      : []),
     ...(coverage.doubleStarSpecificCoverage.covered < coverage.doubleStarSpecificCoverage.total
       ? ['warning:k0:missing-double-star-specific']
       : []),
     ...(coverage.mutagenSpecificCoverage.covered < coverage.mutagenSpecificCoverage.total
       ? ['warning:k0:missing-mutagen-specific']
+      : []),
+    ...(coverage.structureRuleCoverage.covered < coverage.structureRuleCoverage.total
+      ? ['warning:k0:missing-opposite-empty-rule']
       : []),
   ])
   const withoutFingerprint: Omit<AiChartD1K0Catalog, 'catalogFingerprint'> = {

@@ -14,6 +14,7 @@ import {
   type AiChartD1AssetManifest,
   type AiChartD1AssetStatus,
 } from './d1Assets'
+import { AI_CHART_D1_K0_SOURCE_WHITELIST } from './d1K0Registry'
 
 export type AiChartD1VerifiedAssetFile = {
   path: string
@@ -39,9 +40,8 @@ export type AiChartD1VerifiedCompilationAsset = Readonly<{
   text: string
 }>
 
-type ReadAiChartD1CompilationAssetsOptions = Readonly<{
+type ReadAiChartD1K0CompilationAssetsOptions = Readonly<{
   projectRoot?: string
-  allowedPaths: readonly string[]
 }>
 
 type VerifyAiChartD1AssetBundleOptions = {
@@ -151,27 +151,22 @@ export async function verifyAiChartD1AssetBundle(
   }
 }
 
-async function readCompilationAssets(
-  paths: readonly string[],
-  options: ReadAiChartD1CompilationAssetsOptions,
+async function readK0CompilationAssets(
+  options: ReadAiChartD1K0CompilationAssetsOptions,
 ): Promise<readonly AiChartD1VerifiedCompilationAsset[]> {
   if (
-    !Array.isArray(paths) ||
-    !Array.isArray(options.allowedPaths) ||
-    paths.length === 0 ||
-    new Set(paths).size !== paths.length ||
-    new Set(options.allowedPaths).size !== options.allowedPaths.length ||
-    paths.some((path) => typeof path !== 'string') ||
-    options.allowedPaths.some((path) => typeof path !== 'string')
+    typeof options !== 'object' ||
+    options === null ||
+    Array.isArray(options) ||
+    Object.keys(options).some((key) => key !== 'projectRoot') ||
+    (options.projectRoot !== undefined && typeof options.projectRoot !== 'string')
   ) {
     integrityFailed()
   }
 
-  const allowedPaths = new Set(options.allowedPaths)
   if (
-    paths.some(
-      (path) =>
-        !isSafeRepositoryRelativePath(path) || !allowedPaths.has(path),
+    AI_CHART_D1_K0_SOURCE_WHITELIST.some(
+      (path) => !isSafeRepositoryRelativePath(path),
     )
   ) {
     integrityFailed()
@@ -193,7 +188,7 @@ async function readCompilationAssets(
   )
   const assets: AiChartD1VerifiedCompilationAsset[] = []
 
-  for (const path of paths) {
+  for (const path of AI_CHART_D1_K0_SOURCE_WHITELIST) {
     const manifestFile = manifestFiles.get(path)
     if (
       !manifestFile ||
@@ -220,12 +215,11 @@ async function readCompilationAssets(
   return Object.freeze(assets)
 }
 
-export async function readVerifiedAiChartD1CompilationAssets(
-  paths: readonly string[],
-  options: ReadAiChartD1CompilationAssetsOptions,
+export async function readVerifiedAiChartD1K0CompilationAssets(
+  options: ReadAiChartD1K0CompilationAssetsOptions = {},
 ): Promise<readonly AiChartD1VerifiedCompilationAsset[]> {
   try {
-    return await readCompilationAssets(paths, options)
+    return await readK0CompilationAssets(options)
   } catch {
     integrityFailed()
   }

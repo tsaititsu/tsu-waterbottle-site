@@ -49,7 +49,8 @@ Manifest 與 23 份素材會在 Server 端驗證原始位元組 SHA-256。
 已建立；K0 Catalog 與 deterministic knowledge selection 已完成，完整
 P1 Model Input 與 Prompt builder 仍未完成，也沒有產生任何 OpenAI request。
 
-K0 compiler 只在 Server 端讀取九份明確白名單素材，逐檔驗證 Manifest、
+K0 compiler 只在 Server 端讀取內部固定的九份白名單素材，呼叫端不能傳入
+路徑或自訂 allowlist；逐檔驗證 Manifest、
 Repository-relative path、regular-file／non-symlink、SHA-256 與 strict UTF-8。
 它不會讀取 Prompt，也不會把原始完整素材回傳給任何 Route。
 
@@ -98,8 +99,11 @@ K0 Catalog 使用固定 `catalog:d1:k0:p1:v1` ID、來源 Manifest SHA 與
 canonical metadata fingerprint。Catalog 只編譯九份明確白名單素材；宮位
 meaning、十四主星、合法雙星 inventory、生年四化 assignment inventory、
 十一顆 modeled supporting stars 與必要結構規則都使用封閉 source locator。
-缺少已確認的雙星或專屬四化規則時，只記錄 coverage 與 missing reason，
-不生成 working inference。
+輔星與四化專屬規則會保留來源區段的完整 bullet block、原始順序與固定
+數量；十四主星只納入來源註冊表明確核准的 D1 老師補充片段。缺少已確認
+的雙星、老師補充或結構規則時，只記錄 coverage、warning 與 missing reason，
+不生成 working inference。目前對宮空宮沒有來源規則，Structure coverage
+明確維持 14/15；遇到該狀態時 bundle 會標記 `partial`。
 
 每份已驗證的 P1 Structural Input 只會產生一份最小 knowledge bundle。
 固定 selection 依五個 palace roles、實際主星／借星／輔星／生年四化、

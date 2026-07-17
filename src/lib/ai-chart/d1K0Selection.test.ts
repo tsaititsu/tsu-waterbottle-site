@@ -509,12 +509,112 @@ async function run() {
       ),
       true,
     )
+    assert.equal(
+      borrowBundles[0].selectedRules.some(
+        (rule) => rule.ruleId === 'rule:structure:empty-palace-lucun',
+      ),
+      false,
+    )
+  })
+
+  const blockedSnapshot = completeSnapshot()
+  const blockedPalaces = blockedSnapshot.palaces as MutableRecord[]
+  blockedPalaces[0].majorStars = []
+  blockedPalaces[0].minorStars = [star('文昌', 'soft')]
+  const blockedInputs = createInputs(blockedSnapshot, 'blocked')
+  const blockedBundles = buildAiChartD1K0P1KnowledgeBundles(
+    catalog,
+    blockedInputs,
+    { bundleIds: bundleIds('blocked') },
+  )
+  check('blocked empty palace selects blocker rule only', () => {
+    assert.equal(blockedInputs[0].targetPalace.borrowStatus, 'blocked_by_local_star')
+    const emptyRules = blockedBundles[0].selectedRules.filter(
+      (rule) => rule.kind === 'empty_palace',
+    )
+    assert.deepEqual(
+      emptyRules.map((rule) => rule.ruleId),
+      ['rule:structure:empty-palace-blockers'],
+    )
+  })
+
+  const lucunSnapshot = completeSnapshot()
+  const lucunPalaces = lucunSnapshot.palaces as MutableRecord[]
+  lucunPalaces[0].majorStars = []
+  lucunPalaces[0].minorStars = [star('祿存', 'lucun')]
+  const lucunInputs = createInputs(lucunSnapshot, 'lucun')
+  const lucunBundles = buildAiChartD1K0P1KnowledgeBundles(
+    catalog,
+    lucunInputs,
+    { bundleIds: bundleIds('lucun') },
+  )
+  check('eligible empty palace selects lucun rule only when lucun is present', () => {
+    assert.equal(lucunInputs[0].targetPalace.borrowStatus, 'eligible_and_borrowed')
+    assert.equal(
+      lucunBundles[0].selectedRules.some(
+        (rule) => rule.ruleId === 'rule:structure:empty-palace-lucun',
+      ),
+      true,
+    )
+  })
+
+  const oppositeEmptySnapshot = completeSnapshot()
+  const oppositeEmptyPalaces = oppositeEmptySnapshot.palaces as MutableRecord[]
+  oppositeEmptyPalaces[0].majorStars = []
+  oppositeEmptyPalaces[0].minorStars = []
+  oppositeEmptyPalaces[6].majorStars = []
+  const oppositeEmptyInputs = createInputs(oppositeEmptySnapshot, 'opposite-empty')
+  const oppositeEmptyBundles = buildAiChartD1K0P1KnowledgeBundles(
+    catalog,
+    oppositeEmptyInputs,
+    { bundleIds: bundleIds('opposite-empty') },
+  )
+  check('opposite-empty is a missing requirement without fabricated rules', () => {
+    assert.equal(oppositeEmptyInputs[0].targetPalace.borrowStatus, 'opposite_empty')
+    assert.equal(
+      oppositeEmptyBundles[0].selectedRules.some(
+        (rule) =>
+          rule.ruleId === 'rule:structure:opposite-empty' ||
+          rule.ruleId === 'rule:structure:empty-palace-borrow' ||
+          rule.ruleId === 'rule:structure:empty-palace-opposite-only',
+      ),
+      false,
+    )
+    assert.deepEqual(
+      oppositeEmptyBundles[0].missingRequirements.filter(
+        (entry) => entry.requirementId === 'missing:target:empty:opposite-empty',
+      ),
+      [
+        {
+          requirementId: 'missing:target:empty:opposite-empty',
+          kind: 'empty_palace',
+          palaceRole: 'target',
+          palaceId: oppositeEmptyInputs[0].targetPalace.palaceId,
+          starName: null,
+          mutagenType: null,
+          pairKey: null,
+          reasonCode: 'missing_empty_palace_rule',
+        },
+      ],
+    )
+    assert.equal(oppositeEmptyBundles[0].knowledgeStatus, 'partial')
+  })
+
+  check('non-empty palaces never select empty-palace rules', () => {
+    assert.equal(inputs[0].targetPalace.borrowStatus, 'not_empty')
+    assert.equal(
+      bundles[0].selectedRules.some((rule) => rule.kind === 'empty_palace'),
+      false,
+    )
   })
   check('no F1 or flying rule is selected', () => {
     const serialized = JSON.stringify([
       ...bundles,
       ...partialBundles,
       ...borrowBundles,
+      ...blockedBundles,
+      ...lucunBundles,
+      ...oppositeEmptyBundles,
     ])
     assert.doesNotMatch(serialized, /flying|飛化|F1_KNOWLEDGE/iu)
   })
