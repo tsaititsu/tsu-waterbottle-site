@@ -106,13 +106,33 @@ Gateway：
 
 | 名稱 | 說明 |
 | --- | --- |
-| `LINE_PAY_TRANSPORT` | `direct` 或 `gateway`；未設定維持既有 `direct` |
-| `LINE_PAY_GATEWAY_URL` | Gateway origin，不得含 path、query、fragment 或帳密 |
+| `LINE_PAY_TRANSPORT` | `direct` 或 `gateway`；Vercel Preview 必須明確設為 `gateway`，缺少、`direct` 或未知值都 fail closed；其他環境未設定才維持既有 `direct` |
+| `LINE_PAY_GATEWAY_URL` | 公開 HTTPS Gateway origin；拒絕 HTTP、IP、localhost、非預設 port、path、query、fragment 或帳密 |
 | `LINE_PAY_GATEWAY_KEY_ID` | 必須與 Gateway 相同 |
 | `LINE_PAY_GATEWAY_SECRET` | 必須與 Gateway 相同，不得與 LINE Pay Channel Secret 共用 |
 | `LINE_PAY_GATEWAY_TIMEOUT_MS` | 網站到 Gateway timeout，預設 5000 ms |
+| `LINE_PAY_GATEWAY_SMOKE_ENABLED` | 僅 Preview 的 authenticated smoke 開關，預設停用；Production 不需要也不會自動啟用 |
 
-gateway 模式少任何必要設定都 fail closed，不會 fallback 到 direct。Production gateway URL 必須為 HTTPS。所有範例值只是假值；不要提交真實秘密或把秘密寫入映像檔。
+gateway 模式少任何必要設定都 fail closed，不會 fallback 到 direct。Gateway URL 在 Sandbox、Preview、Development 與 Production runtime 一律必須是公開 HTTPS origin。所有範例值只是假值；不要提交真實秘密或把秘密寫入映像檔。
+
+`LINE_PAY_GATEWAY_PROXY_TOKEN` 明確禁止放入 Vercel，也不得由網站程式讀取或送出。Proxy Token 只存在 Droplet 的 `/etc/line-pay-gateway/proxy.env`，由 Caddy 覆寫注入 Gateway request；它不屬於網站 HMAC contract。
+
+### Preview authenticated non-payment smoke
+
+`POST /api/internal/line-pay/gateway-smoke` 是預設停用的 Preview-only 診斷路徑，必須同時符合：
+
+- `VERCEL_ENV=preview`
+- `LINE_PAY_TRANSPORT=gateway`
+- `LINE_PAY_GATEWAY_SMOKE_ENABLED=true`
+- 通過網站既有 `requireAdminUser` bearer 管理員授權
+
+任一環境條件不符、未登入或非管理員都回相同 404。此路徑不接受 client 自訂 operation、URL、Gateway headers 或 signed body，只由 server 送出固定 `gatewayAuthenticationSmoke` synthetic payload。現行 Gateway 會依既有順序先驗證 Caddy Proxy Token、Gateway HMAC、timestamp 與 replay key，再以 `400 invalid_operation` 拒絕固定非白名單 operation；網站只在 status 與 error code 都精確符合時回：
+
+```json
+{"ok":true,"authenticated":true,"upstreamCalled":false}
+```
+
+因此 smoke 不會呼叫 Request、Confirm、Status、Payment Details 或任何 LINE Pay upstream，也不建立訂單、不寫入 Supabase 或其他業務資料；管理員身份只沿用既有 Supabase Auth 驗證。回應不會包含 key ID、簽章、nonce、timestamp、secret、Gateway headers、URL 或 stack。Production、Development 與未設定 `VERCEL_ENV` 時路徑均不可用。Sandbox 付款、Production 設定與 Production 付款仍各自需要獨立人工授權。
 
 ## Sandbox／Production 切換
 

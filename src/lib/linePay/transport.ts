@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomUUID } from 'node:crypto'
+import { isIP } from 'node:net'
 import { getLinePayBaseUrl, normalizeLinePayEnvironment, type LinePayEnvironment } from './config'
 import type { LinePayHttpMethod } from './signature'
 
@@ -62,6 +63,19 @@ type GatewaySuccessResponse = {
   body: unknown
 }
 
+type GatewayConfig = Extract<LinePayTransportConfig, { mode: 'gateway' }>
+
+type SignedGatewayResponse = {
+  status?: number
+  payload: unknown
+}
+
+export type LinePayGatewaySmokeResult = {
+  ok: true
+  authenticated: true
+  upstreamCalled: false
+}
+
 export class LinePayTransportError extends Error {
   readonly code: string
 
@@ -96,7 +110,7 @@ function parseGatewayTimeout(value: string) {
   return timeoutMs
 }
 
-function normalizeGatewayUrl(value: string, environment: LinePayEnvironment) {
+function normalizeGatewayUrl(value: string) {
   let url: URL
 
   try {
@@ -106,17 +120,20 @@ function normalizeGatewayUrl(value: string, environment: LinePayEnvironment) {
   }
 
   if (
-    (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+    url.protocol !== 'https:' ||
+    !url.hostname ||
     url.username ||
     url.password ||
     url.search ||
     url.hash ||
+    url.port ||
     (url.pathname !== '/' && url.pathname !== '')
   ) {
     throw transportError('invalid_line_pay_gateway_url')
   }
 
-  if (environment === 'production' && url.protocol !== 'https:') {
+  const hostname = url.hostname.replace(/^\[|\]$/g, '').toLowerCase()
+  if (isIP(hostname) !== 0 || hostname === 'localhost' || hostname.endsWith('.localhost')) {
     throw transportError('invalid_line_pay_gateway_url')
   }
 
@@ -128,6 +145,12 @@ export function getLinePayTransportConfig(
   environmentValue?: string | null,
 ): LinePayTransportConfig {
   const modeValue = getEnvValue(env, 'LINE_PAY_TRANSPORT').toLowerCase()
+  const isPreview = getEnvValue(env, 'VERCEL_ENV').toLowerCase() === 'preview'
+
+  if (isPreview && modeValue !== 'gateway') {
+    throw transportError('line_pay_preview_requires_gateway')
+  }
+
   const mode = modeValue || 'direct'
 
   if (mode === 'direct') {
@@ -138,7 +161,7 @@ export function getLinePayTransportConfig(
     throw transportError('invalid_line_pay_transport')
   }
 
-  const environment = normalizeLinePayEnvironment(environmentValue)
+  normalizeLinePayEnvironment(environmentValue)
   const gatewayUrlValue = getEnvValue(env, 'LINE_PAY_GATEWAY_URL')
   const keyId = getEnvValue(env, 'LINE_PAY_GATEWAY_KEY_ID')
   const secret = getEnvValue(env, 'LINE_PAY_GATEWAY_SECRET')
@@ -149,7 +172,7 @@ export function getLinePayTransportConfig(
 
   return {
     mode: 'gateway',
-    gatewayUrl: normalizeGatewayUrl(gatewayUrlValue, environment),
+    gatewayUrl: normalizeGatewayUrl(gatewayUrlValue),
     keyId,
     secret,
     timeoutMs: parseGatewayTimeout(getEnvValue(env, 'LINE_PAY_GATEWAY_TIMEOUT_MS')),
@@ -281,6 +304,114 @@ function normalizeGatewayError(payload: unknown) {
   return 'line_pay_gateway_request_failed'
 }
 
+async function sendSignedGatewayBody(input: {
+  config: GatewayConfig
+  bodyText: string
+  requestId: string
+  fetchFn: LinePayTransportFetch
+  now?: () => number
+  createNonce?: () => string
+}): Promise<SignedGatewayResponse> {
+  const nonce = (input.createNonce ?? randomUUID)()
+  const timestamp = String(Math.floor((input.now ?? Date.now)() / 1_000))
+  const canonicalString = buildGatewayCanonicalString({
+    method: 'POST',
+    requestPath: LINE_PAY_GATEWAY_PROXY_PATH,
+    timestamp,
+    nonce,
+    bodyText: input.bodyText,
+  })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), input.config.timeoutMs)
+  let response: LinePayTransportResponse
+  let payload: unknown
+
+  try {
+    try {
+      response = await input.fetchFn(input.config.gatewayUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-gateway-key-id': input.config.keyId,
+          'x-gateway-timestamp': timestamp,
+          'x-gateway-nonce': nonce,
+          'x-gateway-request-id': input.requestId,
+          'x-gateway-signature': signGatewayRequest(input.config.secret, canonicalString),
+        },
+        body: input.bodyText,
+        signal: controller.signal,
+        redirect: 'error',
+      })
+    } catch {
+      if (controller.signal.aborted) throw transportError('line_pay_gateway_timeout')
+      throw transportError('line_pay_gateway_unavailable')
+    }
+
+    try {
+      payload = await response.json()
+    } catch {
+      if (controller.signal.aborted) throw transportError('line_pay_gateway_timeout')
+      throw transportError('invalid_line_pay_gateway_response')
+    }
+  } finally {
+    clearTimeout(timeout)
+  }
+
+  return { status: response.status, payload }
+}
+
+export async function probeLinePayGatewayAuthentication(input: {
+  fetchFn?: LinePayTransportFetch | null
+  transportEnv?: LinePayTransportEnv
+  now?: () => number
+  createNonce?: () => string
+  createRequestId?: () => string
+}): Promise<LinePayGatewaySmokeResult> {
+  if (typeof input.fetchFn !== 'function') {
+    throw transportError('missing_line_pay_fetch')
+  }
+
+  const transportEnv = input.transportEnv ?? process.env
+  if (
+    getEnvValue(transportEnv, 'VERCEL_ENV').toLowerCase() !== 'preview' ||
+    getEnvValue(transportEnv, 'LINE_PAY_GATEWAY_SMOKE_ENABLED').toLowerCase() !== 'true'
+  ) {
+    throw transportError('line_pay_gateway_smoke_unavailable')
+  }
+
+  const config = getLinePayTransportConfig(transportEnv, 'sandbox')
+  if (config.mode !== 'gateway') {
+    throw transportError('line_pay_gateway_smoke_requires_gateway')
+  }
+
+  const requestId = (input.createRequestId ?? randomUUID)()
+  const bodyText = JSON.stringify({
+    operation: 'gatewayAuthenticationSmoke',
+    environment: 'sandbox',
+    requestId,
+    linePayHeaders: {},
+  })
+  const { status, payload } = await sendSignedGatewayBody({
+    config,
+    bodyText,
+    requestId,
+    fetchFn: input.fetchFn,
+    now: input.now,
+    createNonce: input.createNonce,
+  })
+
+  if (
+    status !== 400 ||
+    !isRecord(payload) ||
+    payload.ok !== false ||
+    payload.error !== 'invalid_operation'
+  ) {
+    throw transportError('line_pay_gateway_smoke_failed')
+  }
+
+  return { ok: true, authenticated: true, upstreamCalled: false }
+}
+
 export async function sendLinePayRequest(input: SendLinePayRequestInput): Promise<LinePayTransportResponse> {
   if (typeof input.fetchFn !== 'function') {
     throw transportError('missing_line_pay_fetch')
@@ -300,8 +431,6 @@ export async function sendLinePayRequest(input: SendLinePayRequestInput): Promis
   }
 
   const requestId = (input.createRequestId ?? randomUUID)()
-  const nonce = (input.createNonce ?? randomUUID)()
-  const timestamp = String(Math.floor((input.now ?? Date.now)() / 1_000))
   const gatewayBody = JSON.stringify({
     operation: input.operation,
     environment,
@@ -311,48 +440,14 @@ export async function sendLinePayRequest(input: SendLinePayRequestInput): Promis
     ...(input.bodyText !== undefined ? { bodyText: input.bodyText } : {}),
     linePayHeaders: input.linePayHeaders,
   })
-  const canonicalString = buildGatewayCanonicalString({
-    method: 'POST',
-    requestPath: LINE_PAY_GATEWAY_PROXY_PATH,
-    timestamp,
-    nonce,
+  const { payload } = await sendSignedGatewayBody({
+    config,
     bodyText: gatewayBody,
+    requestId,
+    fetchFn: input.fetchFn,
+    now: input.now,
+    createNonce: input.createNonce,
   })
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), config.timeoutMs)
-  let response: LinePayTransportResponse
-  let payload: unknown
-
-  try {
-    try {
-      response = await input.fetchFn(config.gatewayUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-gateway-key-id': config.keyId,
-          'x-gateway-timestamp': timestamp,
-          'x-gateway-nonce': nonce,
-          'x-gateway-request-id': requestId,
-          'x-gateway-signature': signGatewayRequest(config.secret, canonicalString),
-        },
-        body: gatewayBody,
-        signal: controller.signal,
-        redirect: 'error',
-      })
-    } catch {
-      if (controller.signal.aborted) throw transportError('line_pay_gateway_timeout')
-      throw transportError('line_pay_gateway_unavailable')
-    }
-
-    try {
-      payload = await response.json()
-    } catch {
-      if (controller.signal.aborted) throw transportError('line_pay_gateway_timeout')
-      throw transportError('invalid_line_pay_gateway_response')
-    }
-  } finally {
-    clearTimeout(timeout)
-  }
 
   if (!isRecord(payload) || payload.ok !== true || typeof payload.upstreamStatus !== 'number' || !('body' in payload)) {
     throw transportError(normalizeGatewayError(payload))

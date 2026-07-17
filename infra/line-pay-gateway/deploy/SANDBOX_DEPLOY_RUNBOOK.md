@@ -771,12 +771,17 @@ curl --fail --silent --show-error "https://linepay-gateway.tsu-waterbottle.com/h
 - `LINE_PAY_GATEWAY_KEY_ID`
 - `LINE_PAY_GATEWAY_SECRET`
 - `LINE_PAY_GATEWAY_TIMEOUT_MS`
+- `LINE_PAY_GATEWAY_SMOKE_ENABLED=true`
 
-只測 HMAC 與受控 Gateway request；網站購物車 LINE Pay 入口仍保持關閉，不執行付款。
+Vercel 自動提供的 `VERCEL_ENV` 必須為 `preview`。不得在 Vercel 建立 `LINE_PAY_GATEWAY_PROXY_TOKEN`；該 token 只存在 Droplet 的 `/etc/line-pay-gateway/proxy.env` 並由 Caddy 注入。
+
+使用既有管理員登入 bearer 授權，以 `POST /api/internal/line-pay/gateway-smoke` 測試固定 non-payment synthetic operation。route 不接受自訂 operation、URL、Gateway headers 或 signed body；Production、Development、未登入、非管理員、開關未啟用或 transport 不是 gateway 都不可用。
+
+此步驟只測 Caddy Proxy Token 邊界、Gateway HMAC、timestamp、replay 與 operation 白名單，不呼叫 LINE Pay upstream、不建立訂單、不寫入 Supabase 或其他業務資料；管理員身份只沿用既有 Supabase Auth 驗證。網站購物車 LINE Pay 入口仍保持關閉，不執行付款。Sandbox 付款需要另一份明確授權；Production 設定及 Production 付款也分別需要獨立授權。
 
 成功標準：
 
-- 正確 HMAC 可到 Gateway。
+- 正確 HMAC 可到 Gateway，並取得 sanitized `authenticated=true`、`upstreamCalled=false` 結果。
 - 錯誤／過期／重播請求被拒絕。
 - 不會 fallback 到 direct。
 

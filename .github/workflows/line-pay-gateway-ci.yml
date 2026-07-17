@@ -6,12 +6,14 @@ on:
       - ".env.example"
       - ".github/workflows/line-pay-gateway-ci.yml"
       - "infra/line-pay-gateway/**"
+      - "src/app/api/internal/line-pay/gateway-smoke/**"
       - "src/lib/linePay/**"
   pull_request:
     paths:
       - ".env.example"
       - ".github/workflows/line-pay-gateway-ci.yml"
       - "infra/line-pay-gateway/**"
+      - "src/app/api/internal/line-pay/gateway-smoke/**"
       - "src/lib/linePay/**"
   workflow_dispatch:
 
@@ -265,6 +267,7 @@ jobs:
           set -euo pipefail
           for test_file in \
             src/lib/linePay/*.test.ts \
+            src/app/api/internal/line-pay/gateway-smoke/handler.test.ts \
             src/app/cart/linePayCheckout.test.ts \
             src/app/api/product-orders/line-pay/redirect.test.ts \
             src/app/api/product-orders/line-pay/request/handler.test.ts \
