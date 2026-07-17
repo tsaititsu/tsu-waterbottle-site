@@ -14,9 +14,18 @@
 - `store: false`：強制
 - Timeout：已建立
 - 固定安全錯誤碼：已建立
+- P1 Output Contract：已建立
+- P1 Strict JSON Schema：已建立
+- P1 runtime parser：已建立
+- F1 Output Contract：已建立
+- F1 Strict JSON Schema：已建立
+- F1 runtime parser：已建立
+- P1／F1 Input Contract：未建立
+- B1／S1／A1／R1／A2／O1 Contract：未建立
+- N0／K0：未建立
+- P1／F1 Prompt builder：未建立
+- Orchestrator：未建立
 - Runtime 接線：未建立
-- D1 正式 Schema：未建立
-- Prompt 組裝：未建立
 - Background job：未建立
 - Production：未啟用
 
@@ -31,8 +40,25 @@ Responses adapter 尚未被 Route、Report、付款或 Supabase 流程引用。
 傳送本目錄的 D1 素材。所有 `runtimeEnabled` 仍為 `false`。
 
 Adapter 使用原生 REST fetch 解析原始 `output` array，不依賴 SDK-only
-的頂層 `output_text`。後續必須先建立 D1 階段 Schema 與 Prompt 組裝，
-才能進行受控 Preview 測試。
+的頂層 `output_text`。目前只正式化 P1／F1 的輸出 Contract；後續仍須
+建立輸入 Contract 與 Prompt 組裝，才能進行受控 Preview 測試。
+
+## P1／F1 輸出 Contract 邊界
+
+P1 與 F1 的輸出 Contract、Strict JSON Schema 與 runtime parser
+使用獨立版本 `ai-chart-d1-p1-f1/v1`。Structured Outputs 中所有
+nullable 欄位仍是 required，並以 `string | null` 表示。
+
+Parser 會拒絕未知欄位、重複 ID 與錯誤候選引用。F1 parser 目前只驗證
+輸出內的 matrix pair、狀態組合與 candidate reference；完整的出發宮
+MeaningItem × 落入宮 MeaningItem 覆蓋率，留待未來 F1 Input Contract
+與 Audit 層對照驗證。
+
+`22_D1_各呼叫輸入輸出Schema_工作版.md` 仍只是 draft/reference，
+本階段沒有把它宣稱為正式 Runtime Schema，也沒有修改其內容。
+
+本階段沒有讀取或傳送正式素材全文，沒有 Prompt 組裝、OpenAI 呼叫、
+Route、Report 或付款接線；所有 `runtimeEnabled` 仍為 `false`。
 
 ## 功能邊界
 
