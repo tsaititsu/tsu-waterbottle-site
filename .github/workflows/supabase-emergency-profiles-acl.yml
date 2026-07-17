@@ -1,0 +1,264 @@
+name: Supabase Emergency Profiles ACL
+run-name: Profiles ACL emergency by ${{ github.actor }} at ${{ github.sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_main_sha:
+        description: Exact main commit SHA to deploy
+        required: true
+        type: string
+      confirmation:
+        description: Type the required deployment confirmation
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-production-migrations
+  cancel-in-progress: false
+
+jobs:
+  source-preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Reject unsafe source context
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          DEPLOY_CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" == "tsaititsu/tsu-waterbottle-site" ]] ||
+            { echo "source context validation failed" >&2; exit 1; }
+          [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]] ||
+            { echo "source context validation failed" >&2; exit 1; }
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] ||
+            { echo "source context validation failed" >&2; exit 1; }
+          [[ "$EXPECTED_MAIN_SHA" =~ ^[0-9a-f]{40}$ ]] ||
+            { echo "source context validation failed" >&2; exit 1; }
+          [[ "$GITHUB_SHA" == "$EXPECTED_MAIN_SHA" ]] ||
+            { echo "source context validation failed" >&2; exit 1; }
+          [[ "$DEPLOY_CONFIRMATION" == "DEPLOY_PROFILES_ADMIN_ESCALATION_FIX" ]] ||
+            { echo "source context validation failed" >&2; exit 1; }
+
+      - name: Check out exact source commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+
+      - name: Install locked dependencies
+        env:
+          NPM_CONFIG_USERCONFIG: /dev/null
+          NPM_CONFIG_AUDIT: 'false'
+          NPM_CONFIG_FUND: 'false'
+          NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Validate fixed source, CLI, and SQL guard
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          DEPLOY_CONFIRMATION: ${{ inputs.confirmation }}
+          MIGRATION_FILE: supabase/migrations/20260716084928_profiles_admin_escalation_fix.sql
+          EXPECTED_SHA256: f7f2207135ffaf1dd3476108a38ffb95184410ad0fad962f4d0e71e9e9613e7d
+        run: |
+          set -euo pipefail
+          node scripts/supabase/validate-profiles-admin-deployment.mjs source
+
+      - name: Test existing Profiles security contract
+        env:
+          JITI_CACHE: 'false'
+          JITI_REQUIRE_CACHE: 'false'
+        run: |
+          set -euo pipefail
+          node_modules/.bin/jiti supabase/profiles_admin_escalation_fix.test.ts
+
+      - name: Test emergency deployment pipeline contract
+        env:
+          JITI_CACHE: 'false'
+          JITI_REQUIRE_CACHE: 'false'
+        run: |
+          set -euo pipefail
+          node_modules/.bin/jiti supabase/profiles_admin_deployment_workflow.test.ts
+
+  deploy-production:
+    needs:
+      - source-preflight
+    environment:
+      name: supabase-production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Recheck approved deployment context
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          DEPLOY_CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" == "tsaititsu/tsu-waterbottle-site" ]] ||
+            { echo "deployment context validation failed" >&2; exit 1; }
+          [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]] ||
+            { echo "deployment context validation failed" >&2; exit 1; }
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] ||
+            { echo "deployment context validation failed" >&2; exit 1; }
+          [[ "$EXPECTED_MAIN_SHA" =~ ^[0-9a-f]{40}$ ]] ||
+            { echo "deployment context validation failed" >&2; exit 1; }
+          [[ "$GITHUB_SHA" == "$EXPECTED_MAIN_SHA" ]] ||
+            { echo "deployment context validation failed" >&2; exit 1; }
+          [[ "$DEPLOY_CONFIRMATION" == "DEPLOY_PROFILES_ADMIN_ESCALATION_FIX" ]] ||
+            { echo "deployment context validation failed" >&2; exit 1; }
+
+      - name: Check out exact approved commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+
+      - name: Install locked dependencies
+        env:
+          NPM_CONFIG_USERCONFIG: /dev/null
+          NPM_CONFIG_AUDIT: 'false'
+          NPM_CONFIG_FUND: 'false'
+          NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Revalidate fixed source, CLI, and SQL guard
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          DEPLOY_CONFIRMATION: ${{ inputs.confirmation }}
+          MIGRATION_FILE: supabase/migrations/20260716084928_profiles_admin_escalation_fix.sql
+          EXPECTED_SHA256: f7f2207135ffaf1dd3476108a38ffb95184410ad0fad962f4d0e71e9e9613e7d
+        run: |
+          set -euo pipefail
+          node scripts/supabase/validate-profiles-admin-deployment.mjs source
+
+      - name: Validate production database target
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          [[ -n "${SUPABASE_DB_URL:-}" && -n "${SUPABASE_PROJECT_ID:-}" ]] ||
+            { echo "required deployment secret is missing" >&2; exit 1; }
+          node scripts/supabase/validate-profiles-admin-deployment.mjs target
+
+      - name: Run fail-closed metadata preflight
+        id: metadata-preflight
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          umask 077
+          preflight_stdout="$RUNNER_TEMP/profiles-admin-preflight.stdout"
+          preflight_stderr="$RUNNER_TEMP/profiles-admin-preflight.stderr"
+          if ! SUPABASE_TELEMETRY_DISABLED=1 \
+            node_modules/.bin/supabase db query \
+              --db-url "$SUPABASE_DB_URL" \
+              --file "supabase/deployment/profiles_admin_escalation_preflight.sql" \
+              --output-format json \
+              --log-level error \
+              >"$preflight_stdout" 2>"$preflight_stderr"
+          then
+            echo "metadata query failed" >&2
+            exit 1
+          fi
+          if ! preflight_state="$(
+            node scripts/supabase/validate-profiles-admin-deployment.mjs \
+              preflight "$preflight_stdout"
+          )"
+          then
+            echo "metadata validation failed" >&2
+            exit 1
+          fi
+          echo "state=$preflight_state" >> "$GITHUB_OUTPUT"
+
+      - name: Apply the fixed emergency Migration
+        if: steps.metadata-preflight.outputs.state == 'VULNERABLE_EXPECTED'
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          umask 077
+          migration_stdout="$RUNNER_TEMP/profiles-admin-migration.stdout"
+          migration_stderr="$RUNNER_TEMP/profiles-admin-migration.stderr"
+          if ! SUPABASE_TELEMETRY_DISABLED=1 \
+            node_modules/.bin/supabase db query \
+              --db-url "$SUPABASE_DB_URL" \
+              --file "supabase/migrations/20260716084928_profiles_admin_escalation_fix.sql" \
+              --log-level error \
+              >"$migration_stdout" 2>"$migration_stderr"
+          then
+            echo "migration execution failed" >&2
+            exit 1
+          fi
+
+      - name: Run fail-closed metadata postflight
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          umask 077
+          postflight_stdout="$RUNNER_TEMP/profiles-admin-postflight.stdout"
+          postflight_stderr="$RUNNER_TEMP/profiles-admin-postflight.stderr"
+          if ! SUPABASE_TELEMETRY_DISABLED=1 \
+            node_modules/.bin/supabase db query \
+              --db-url "$SUPABASE_DB_URL" \
+              --file "supabase/deployment/profiles_admin_escalation_postflight.sql" \
+              --output-format json \
+              --log-level error \
+              >"$postflight_stdout" 2>"$postflight_stderr"
+          then
+            echo "metadata query failed" >&2
+            exit 1
+          fi
+          if ! node scripts/supabase/validate-profiles-admin-deployment.mjs \
+            postflight "$postflight_stdout" >/dev/null
+          then
+            echo "metadata validation failed" >&2
+            exit 1
+          fi
+
+      - name: Write non-sensitive deployment summary
+        env:
+          PREFLIGHT_STATE: ${{ steps.metadata-preflight.outputs.state }}
+        run: |
+          set -euo pipefail
+          migration_executed="否"
+          if [[ "$PREFLIGHT_STATE" == "VULNERABLE_EXPECTED" ]]; then
+            migration_executed="是"
+          fi
+          {
+            echo "## Supabase Emergency Profiles ACL"
+            echo "- Workflow run ID: $GITHUB_RUN_ID"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Migration: supabase/migrations/20260716084928_profiles_admin_escalation_fix.sql"
+            echo "- Migration SHA-256: f7f2207135ffaf1dd3476108a38ffb95184410ad0fad962f4d0e71e9e9613e7d"
+            echo "- 執行者: $GITHUB_ACTOR"
+            echo "- Preflight分類: $PREFLIGHT_STATE"
+            echo "- 是否執行Migration: $migration_executed"
+            echo "- Postflight結果: POSTFLIGHT_OK"
+            echo "- RLS是否符合: 是"
+            echo "- ACL是否符合: 是"
+            echo "- Policy是否符合: 是"
+            echo "- 是否讀取會員資料: 否"
+            echo "- 是否寫入Migration history: 否"
+          } >> "$GITHUB_STEP_SUMMARY"
