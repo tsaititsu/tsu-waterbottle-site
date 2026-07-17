@@ -3,6 +3,10 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 gateway_root="$(cd -- "$script_dir/../.." && pwd)"
+network_preflight="$script_dir/preflight-network.sh"
+caddy_systemd_validator="$script_dir/validate-caddy-systemd.sh"
+caddy_drop_in_example="$gateway_root/deploy/caddy.service.d/line-pay-gateway.conf.example"
+caddy_installed_drop_in="${CADDY_SYSTEMD_DROP_IN:-/etc/systemd/system/caddy.service.d/line-pay-gateway.conf}"
 env_file="${GATEWAY_ENV_FILE:-/etc/line-pay-gateway/gateway.env}"
 proxy_env_file="${GATEWAY_PROXY_ENV_FILE:-/etc/line-pay-gateway/proxy.env}"
 caddyfile="${CADDYFILE:-/etc/caddy/Caddyfile}"
@@ -15,6 +19,36 @@ gateway_image_tag="${GATEWAY_IMAGE_TAG:-}"
 gateway_domain="linepay-gateway.tsu-waterbottle.com"
 minimum_memory_kib="${MINIMUM_MEMORY_KIB:-524288}"
 minimum_disk_kib="${MINIMUM_DISK_KIB:-2097152}"
+
+usage() {
+  printf '%s\n' \
+    'Usage:' \
+    '  preflight.sh prepare' \
+    '  preflight.sh gateway-running' \
+    '  preflight.sh public-caddy pre-start' \
+    '  preflight.sh public-caddy post-start'
+}
+
+preflight_mode="${1:-}"
+public_caddy_phase="${2:-}"
+case "$preflight_mode" in
+  prepare|gateway-running)
+    [[ $# -eq 1 ]] || {
+      usage >&2
+      exit 2
+    }
+    ;;
+  public-caddy)
+    [[ $# -eq 2 && ("$public_caddy_phase" == "pre-start" || "$public_caddy_phase" == "post-start") ]] || {
+      usage >&2
+      exit 2
+    }
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
 
 # shellcheck source=validators.sh
 source "$script_dir/validators.sh"
@@ -54,14 +88,6 @@ read_env_value() {
       print value
     }
   ' "$env_file"
-}
-
-check_port_free() {
-  local port="$1"
-  if ss -H -ltn | awk -v port="$port" '$4 ~ (":" port "$") { found = 1 } END { exit found ? 0 : 1 }'; then
-    fail "TCP port $port is already listening; identify the owner before continuing"
-  fi
-  pass "TCP port $port is available"
 }
 
 [[ "$(uname -s)" == "Linux" ]] || fail "host is not Linux"
@@ -158,43 +184,56 @@ if grep -Eq '^[[:space:]]*(network_mode:[[:space:]]*host|privileged:[[:space:]]*
 fi
 pass "Compose provides Proxy env and retains the localhost-only application port"
 
-[[ -f "$caddyfile" ]] || fail "Caddyfile is missing: $caddyfile"
-grep -Eq "^${gateway_domain//./\\.}[[:space:]]*\\{" "$caddyfile" \
-  || fail "Caddyfile must use the approved Sandbox domain: $gateway_domain"
-if grep -Eqi 'LINE_PAY_GATEWAY_SECRET|X-Gateway-Signature|X-LINE-Authorization' "$caddyfile"; then
-  fail "Caddyfile must not contain secrets or sensitive authorization headers"
-fi
-client_ip_override_count="$(
-  grep -Ec '^[[:space:]]*header_up X-Gateway-Client-IP \{remote_host\}[[:space:]]*$' "$caddyfile" || true
-)"
-client_ip_header_up_count="$(
-  grep -Eic '^[[:space:]]*header_up[[:space:]]+X-Gateway-Client-IP([[:space:]]|$)' "$caddyfile" || true
-)"
-[[ "$client_ip_override_count" == "1" && "$client_ip_header_up_count" == "1" ]] \
-  || fail "Caddyfile proxy route must override X-Gateway-Client-IP exactly once with {remote_host}"
-proxy_token_override_count="$(
-  grep -Ec '^[[:space:]]*header_up X-Gateway-Proxy-Token \{\$LINE_PAY_GATEWAY_PROXY_TOKEN\}[[:space:]]*$' \
-    "$caddyfile" || true
-)"
-proxy_token_header_up_count="$(
-  grep -Eic '^[[:space:]]*header_up[[:space:]]+X-Gateway-Proxy-Token([[:space:]]|$)' "$caddyfile" || true
-)"
-[[ "$proxy_token_override_count" == "1" && "$proxy_token_header_up_count" == "1" ]] \
-  || fail "Caddyfile proxy route must override X-Gateway-Proxy-Token exactly once from the Caddy environment"
-if grep -Eq 'header_up X-Gateway-Proxy-Token \{http\.request\.header\.' "$caddyfile"; then
-  fail "Caddyfile must not copy Proxy Token from a client-controlled request header"
-fi
-pass "Caddyfile uses one environment-backed Proxy Token override and one remote_host Client IP override"
+if [[ "$preflight_mode" == "public-caddy" ]]; then
+  [[ -f "$caddyfile" ]] || fail "Caddyfile is missing: $caddyfile"
+  grep -Eq "^${gateway_domain//./\\.}[[:space:]]*\\{" "$caddyfile" \
+    || fail "Caddyfile must use the approved Sandbox domain: $gateway_domain"
+  if grep -Eqi 'LINE_PAY_GATEWAY_SECRET|X-Gateway-Signature|X-LINE-Authorization' "$caddyfile"; then
+    fail "Caddyfile must not contain secrets or sensitive authorization headers"
+  fi
+  client_ip_override_count="$(
+    grep -Ec '^[[:space:]]*header_up X-Gateway-Client-IP \{remote_host\}[[:space:]]*$' "$caddyfile" || true
+  )"
+  client_ip_header_up_count="$(
+    grep -Eic '^[[:space:]]*header_up[[:space:]]+X-Gateway-Client-IP([[:space:]]|$)' "$caddyfile" || true
+  )"
+  [[ "$client_ip_override_count" == "1" && "$client_ip_header_up_count" == "1" ]] \
+    || fail "Caddyfile proxy route must override X-Gateway-Client-IP exactly once with {remote_host}"
+  proxy_token_override_count="$(
+    grep -Ec '^[[:space:]]*header_up X-Gateway-Proxy-Token \{\$LINE_PAY_GATEWAY_PROXY_TOKEN\}[[:space:]]*$' \
+      "$caddyfile" || true
+  )"
+  proxy_token_header_up_count="$(
+    grep -Eic '^[[:space:]]*header_up[[:space:]]+X-Gateway-Proxy-Token([[:space:]]|$)' "$caddyfile" || true
+  )"
+  [[ "$proxy_token_override_count" == "1" && "$proxy_token_header_up_count" == "1" ]] \
+    || fail "Caddyfile proxy route must override X-Gateway-Proxy-Token exactly once from the Caddy environment"
+  if grep -Eq 'header_up X-Gateway-Proxy-Token \{http\.request\.header\.' "$caddyfile"; then
+    fail "Caddyfile must not copy Proxy Token from a client-controlled request header"
+  fi
+  pass "Caddyfile uses one environment-backed Proxy Token override and one remote_host Client IP override"
 
-[[ "$cloudflare_dns_mode" == "dns-only" ]] \
-  || fail "CLOUDFLARE_DNS_MODE=dns-only must be explicitly confirmed before deployment"
-pass "Cloudflare DNS-only mode explicitly confirmed"
+  "$caddy_systemd_validator" drop-in "$caddy_drop_in_example" \
+    || fail "committed Caddy systemd drop-in failed validation"
+  "$caddy_systemd_validator" installed "$caddy_installed_drop_in" \
+    || fail "installed Caddy systemd drop-in content or metadata failed validation"
+  require_command systemctl
+  systemctl cat caddy | "$caddy_systemd_validator" effective - \
+    || fail "effective Caddy systemd service failed validation"
+  pass "effective Caddy systemd service has one safe ExecStart and the dedicated Proxy env file"
 
-check_port_free 80
-check_port_free 443
-check_port_free "$gateway_bind_port"
+  [[ "$cloudflare_dns_mode" == "dns-only" ]] \
+    || fail "CLOUDFLARE_DNS_MODE=dns-only must be explicitly confirmed before deployment"
+  pass "Cloudflare DNS-only mode explicitly confirmed"
+fi
+
+if [[ "$preflight_mode" == "public-caddy" ]]; then
+  "$network_preflight" "$preflight_mode" "$public_caddy_phase"
+else
+  "$network_preflight" "$preflight_mode"
+fi
 
 [[ -n "$expected_egress_ip" ]] || fail "EXPECTED_EGRESS_IP must be provided explicitly"
 "$script_dir/verify-egress.sh" "$expected_egress_ip"
 
-echo "Preflight checks passed. No system changes were made."
+echo "Preflight mode '$preflight_mode' passed. No system changes were made."

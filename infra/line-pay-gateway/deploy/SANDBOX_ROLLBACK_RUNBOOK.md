@@ -172,7 +172,42 @@ sudo \
 - 不嘗試 Production。
 - 由人工比較 Caddy、host network、env 權限與 image digest。
 
-## 6. 若上一個 image 也失敗
+## 6. Caddy systemd 或 journal guard 失敗時
+
+若有效 ExecStart 驗證失敗、80／443 owner 不符、2019 對外監聽，或新 journal 範圍偵測到 Proxy Token，先保留 localhost Gateway，再回復 Caddyfile 與 systemd drop-in：
+
+```bash
+sudo systemctl stop caddy
+sudo systemctl disable caddy
+sudo cp --archive \
+  "$CADDY_BACKUP_DIR/Caddyfile.before" \
+  /etc/caddy/Caddyfile
+if sudo test -f "$CADDY_BACKUP_DIR/line-pay-gateway.conf.before"; then
+  sudo install -o root -g root -m 0644 \
+    "$CADDY_BACKUP_DIR/line-pay-gateway.conf.before" \
+    /etc/systemd/system/caddy.service.d/line-pay-gateway.conf
+elif sudo test -f "$CADDY_BACKUP_DIR/drop-in-was-absent"; then
+  sudo unlink /etc/systemd/system/caddy.service.d/line-pay-gateway.conf
+else
+  echo "無法確認先前 drop-in 狀態；停止並人工確認。"
+  exit 1
+fi
+sudo systemctl daemon-reload
+sudo systemctl cat caddy
+sudo systemctl is-active caddy
+sudo systemctl is-enabled caddy
+```
+
+成功標準：
+
+- Caddy 保持 inactive／disabled。
+- 80／443／2019 沒有 Caddy listener。
+- `127.0.0.1:3000` Gateway 仍 healthy。
+- 備份與 journal 保留供安全事件盤點，不顯示任何 env 內容。
+
+若 Proxy Token 曾出現在 journal，這是秘密事件：維持 Caddy 停止、限制 journal 與備份存取，並由有權限人員另行輪替 Proxy Token。不要只重啟 Caddy，也不要把 journal 上傳到未授權服務。
+
+## 7. 若上一個 image 也失敗
 
 停止自動操作並收集：
 
@@ -193,7 +228,7 @@ sudo \
 - 修改 Vercel Production。
 - 把 transport 改為 direct 當作無審核 fallback。
 
-## 7. 回復新版本前
+## 8. 回復新版本前
 
 修正必須回到 Git：
 
@@ -205,7 +240,7 @@ sudo \
 
 不得在主機 checkout 中直接修改 TypeScript、Compose 或 Caddy example 後當成正式修正。
 
-## 8. Rollback 紀錄
+## 9. Rollback 紀錄
 
 記錄但不包含 secret：
 
@@ -215,9 +250,10 @@ sudo \
 - 觸發原因。
 - logs 保存路徑。
 - health／egress／TLS 結果。
+- Caddyfile 與 systemd drop-in 備份路徑、有效 ExecStart 驗證與 journal guard 結果。
 - 後續修正 PR。
 
-## 9. 永久退場不是 rollback
+## 10. 永久退場不是 rollback
 
 永久停止 LINE Pay 必須另外人工執行：
 
