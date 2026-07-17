@@ -32,6 +32,18 @@ export type AiChartD1VerifiedAssetBundle = {
   runtimeEnabled: boolean
 }
 
+export type AiChartD1VerifiedCompilationAsset = Readonly<{
+  path: string
+  sha256: string
+  byteLength: number
+  text: string
+}>
+
+type ReadAiChartD1CompilationAssetsOptions = Readonly<{
+  projectRoot?: string
+  allowedPaths: readonly string[]
+}>
+
 type VerifyAiChartD1AssetBundleOptions = {
   projectRoot?: string
 }
@@ -42,6 +54,14 @@ function integrityFailed(): never {
 
 function sha256(value: Buffer): string {
   return createHash('sha256').update(value).digest('hex')
+}
+
+function isSafeRepositoryRelativePath(value: string): boolean {
+  return (
+    value.length > 0 &&
+    !isAbsolute(value) &&
+    !value.split('/').some((segment) => segment === '..' || segment === '')
+  )
 }
 
 function isPathInside(root: string, candidate: string): boolean {
@@ -126,6 +146,86 @@ export async function verifyAiChartD1AssetBundle(
 ): Promise<AiChartD1VerifiedAssetBundle> {
   try {
     return await verifyAssetBundle(options)
+  } catch {
+    integrityFailed()
+  }
+}
+
+async function readCompilationAssets(
+  paths: readonly string[],
+  options: ReadAiChartD1CompilationAssetsOptions,
+): Promise<readonly AiChartD1VerifiedCompilationAsset[]> {
+  if (
+    !Array.isArray(paths) ||
+    !Array.isArray(options.allowedPaths) ||
+    paths.length === 0 ||
+    new Set(paths).size !== paths.length ||
+    new Set(options.allowedPaths).size !== options.allowedPaths.length ||
+    paths.some((path) => typeof path !== 'string') ||
+    options.allowedPaths.some((path) => typeof path !== 'string')
+  ) {
+    integrityFailed()
+  }
+
+  const allowedPaths = new Set(options.allowedPaths)
+  if (
+    paths.some(
+      (path) =>
+        !isSafeRepositoryRelativePath(path) || !allowedPaths.has(path),
+    )
+  ) {
+    integrityFailed()
+  }
+
+  const projectRoot = await realpath(resolve(options.projectRoot ?? process.cwd()))
+  const manifestBuffer = await readVerifiedRegularFile(
+    projectRoot,
+    AI_CHART_D1_MANIFEST_PATH,
+  )
+  if (sha256(manifestBuffer) !== AI_CHART_D1_LOCKED_MANIFEST_SHA256) {
+    integrityFailed()
+  }
+  const manifest = validateAiChartD1AssetManifest(
+    JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(manifestBuffer)) as unknown,
+  )
+  const manifestFiles = new Map(
+    manifest.files.map((file) => [file.path, file] as const),
+  )
+  const assets: AiChartD1VerifiedCompilationAsset[] = []
+
+  for (const path of paths) {
+    const manifestFile = manifestFiles.get(path)
+    if (
+      !manifestFile ||
+      !manifestFile.runtimeEligible ||
+      manifestFile.status === 'draft' ||
+      manifestFile.status === 'reference_only'
+    ) {
+      integrityFailed()
+    }
+    const fileBuffer = await readVerifiedRegularFile(projectRoot, path)
+    const fileSha256 = sha256(fileBuffer)
+    if (fileSha256 !== manifestFile.sha256) integrityFailed()
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(fileBuffer)
+    assets.push(
+      Object.freeze({
+        path,
+        sha256: fileSha256,
+        byteLength: fileBuffer.byteLength,
+        text,
+      }),
+    )
+  }
+
+  return Object.freeze(assets)
+}
+
+export async function readVerifiedAiChartD1CompilationAssets(
+  paths: readonly string[],
+  options: ReadAiChartD1CompilationAssetsOptions,
+): Promise<readonly AiChartD1VerifiedCompilationAsset[]> {
+  try {
+    return await readCompilationAssets(paths, options)
   } catch {
     integrityFailed()
   }

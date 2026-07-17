@@ -27,7 +27,11 @@
 - F1 Input Contract：未建立，狀態為
   `F1_BLOCKED_BY_MISSING_FLYING_TRANSFORM_SOURCE`
 - B1／S1／A1／R1／A2／O1 Contract：未建立
-- K0：尚未完成
+- K0 Catalog Contract：已完成（`ai-chart-d1-k0-catalog/v1`）
+- K0 P1 Knowledge Bundle Contract：已完成
+  （`ai-chart-d1-k0-p1-bundle/v1`）
+- K0 Server-only verified compiler：已完成
+- P1 deterministic knowledge selection：已完成，固定建立 12 份 bundle
 - P1／F1 Prompt builder：尚未完成
 - P1 OpenAI call：0
 - Orchestrator：未建立
@@ -42,10 +46,12 @@ Manifest 與 23 份素材會在 Server 端驗證原始位元組 SHA-256。
 本版本新增 7 份由 `20_D1_本命人格推理總控流程.md` 明確引用的
 `reasoning_source_candidate`。納管只確認來源位元組、Manifest 與引用
 一致性，不代表素材內容已由老師逐句核准。N0 與 P1 Structural Input
-已建立；K0、完整 P1 Model Input 與 Prompt builder 仍未完成，也沒有
-產生任何 OpenAI request。
+已建立；K0 Catalog 與 deterministic knowledge selection 已完成，完整
+P1 Model Input 與 Prompt builder 仍未完成，也沒有產生任何 OpenAI request。
 
-本階段不會讀取或回傳 Prompt 全文給任何 Route。
+K0 compiler 只在 Server 端讀取九份明確白名單素材，逐檔驗證 Manifest、
+Repository-relative path、regular-file／non-symlink、SHA-256 與 strict UTF-8。
+它不會讀取 Prompt，也不會把原始完整素材回傳給任何 Route。
 
 Responses adapter 尚未被 Route、Report、付款或 Supabase 流程引用。
 測試只使用 mock fetch，沒有測試會呼叫 OpenAI；目前也不會讀取或
@@ -53,7 +59,7 @@ Responses adapter 尚未被 Route、Report、付款或 Supabase 流程引用。
 
 Adapter 使用原生 REST fetch 解析原始 `output` array，不依賴 SDK-only
 的頂層 `output_text`。既有 Adapter 只正式處理 P1／F1 Output Contract；
-本次另建立的 P1 Structural Input 尚不是完整模型輸入。後續仍須完成 K0、
+本次另建立的 P1 Structural Input 尚不是完整模型輸入。後續仍須完成
 完整 P1 Model Input 與 Prompt 組裝，才能進行受控 Preview 測試。本階段的
 P1 Structural Input 明確標記 `openAiCallable: false`，不得直接送入 Adapter。
 
@@ -86,6 +92,23 @@ call ID 對應均固定依宮位 index 0～11 排列。P1 internal JSON Schema �
 輔星、source index 與 scan count 邊界與 runtime parser 保持一致；該 Schema
 仍只供內部 Contract 描述與測試，不會送入 OpenAI Adapter。
 
+## K0 Catalog 與 P1 Knowledge Bundle 邊界
+
+K0 Catalog 使用固定 `catalog:d1:k0:p1:v1` ID、來源 Manifest SHA 與
+canonical metadata fingerprint。Catalog 只編譯九份明確白名單素材；宮位
+meaning、十四主星、合法雙星 inventory、生年四化 assignment inventory、
+十一顆 modeled supporting stars 與必要結構規則都使用封閉 source locator。
+缺少已確認的雙星或專屬四化規則時，只記錄 coverage 與 missing reason，
+不生成 working inference。
+
+每份已驗證的 P1 Structural Input 只會產生一份最小 knowledge bundle。
+固定 selection 依五個 palace roles、實際主星／借星／輔星／生年四化、
+空宮狀態與 target 四馬地選取規則；去重後依 priority descending 與 ruleId
+ASCII ascending 排列。每條 selected rule 都有 deterministic selection trace，
+必要專屬規則缺失時 bundle 標記 `partial`。Bundle 不含完整 N0、完整 P1、
+完整 Catalog、Prompt、出生個資或 OpenAI request；`promptStatus` 固定為
+`prompt_builder_required`，`openAiCallable` 固定為 `false`。
+
 ## P1／F1 輸出 Contract 邊界
 
 P1 與 F1 的輸出 Contract、Strict JSON Schema 與 runtime parser
@@ -100,8 +123,9 @@ MeaningItem × 落入宮 MeaningItem 覆蓋率，留待未來 F1 Input Contract
 `22_D1_各呼叫輸入輸出Schema_工作版.md` 仍只是 draft/reference，
 本階段沒有把它宣稱為正式 Runtime Schema，也沒有修改其內容。
 
-本階段沒有讀取或傳送正式素材全文，沒有 Prompt 組裝、OpenAI 呼叫、
-Route、Report 或付款接線；所有 `runtimeEnabled` 仍為 `false`。
+本階段只由 Server-only K0 compiler 讀取並驗證九份白名單素材；沒有傳送
+正式素材全文，沒有 Prompt 組裝、OpenAI 呼叫、Route、Report 或付款接線；
+所有 `runtimeEnabled` 仍為 `false`。
 
 ## 功能邊界
 

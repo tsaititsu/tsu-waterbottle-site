@@ -8,6 +8,7 @@ import {
   rm,
   symlink,
   unlink,
+  writeFile,
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -19,6 +20,7 @@ import {
   AI_CHART_D1_MANIFEST_PATH,
   AI_CHART_D1_RUNTIME_DISABLED,
 } from './d1Assets'
+import { AI_CHART_D1_K0_SOURCE_WHITELIST } from './d1K0Registry'
 
 type NodeModuleInternals = {
   _resolveFilename: (
@@ -33,7 +35,7 @@ type NodeModuleInternals = {
 const moduleInternals = Module as unknown as NodeModuleInternals
 const originalResolveFilename = moduleInternals._resolveFilename
 const originalLoad = moduleInternals._load
-const testRequire = createRequire(import.meta.url)
+const testRequire = createRequire(__filename)
 const serverOnlyStubPath = testRequire.resolve('./d1Assets')
 
 moduleInternals._resolveFilename = function resolveFilenameForTest(
@@ -59,6 +61,7 @@ moduleInternals._load = function loadForTest(
 
 const {
   loadAiChartD1RuntimeAssetBundle,
+  readVerifiedAiChartD1CompilationAssets,
   verifyAiChartD1AssetBundle,
 } = testRequire('./d1Assets.server') as typeof import('./d1Assets.server')
 
@@ -122,6 +125,51 @@ async function run() {
       assert.equal(Object.isFrozen(verified.files[index]), true)
     }
 
+    const compilationAssets = await readVerifiedAiChartD1CompilationAssets(
+      AI_CHART_D1_K0_SOURCE_WHITELIST,
+      { allowedPaths: AI_CHART_D1_K0_SOURCE_WHITELIST },
+    )
+    assert.equal(compilationAssets.length, 9)
+    assert.equal(Object.isFrozen(compilationAssets), true)
+    assert.equal(compilationAssets.every((asset) => Object.isFrozen(asset)), true)
+    assert.equal(compilationAssets.every((asset) => asset.text.length > 0), true)
+
+    await expectIntegrityFailure(() =>
+      readVerifiedAiChartD1CompilationAssets(
+        ['content/ai-chart/d1-v1/knowledge/not-in-manifest.md'],
+        {
+          allowedPaths: [
+            'content/ai-chart/d1-v1/knowledge/not-in-manifest.md',
+          ],
+        },
+      ),
+    )
+    await expectIntegrityFailure(() =>
+      readVerifiedAiChartD1CompilationAssets(
+        ['content/ai-chart/d1-v1/prompt/0_主控.md'],
+        { allowedPaths: AI_CHART_D1_K0_SOURCE_WHITELIST },
+      ),
+    )
+    const nonRuntimeSource = verified.manifest.files.find(
+      (file) => file.status === 'draft' || file.status === 'reference_only',
+    )
+    assert.ok(nonRuntimeSource)
+    await expectIntegrityFailure(() =>
+      readVerifiedAiChartD1CompilationAssets([nonRuntimeSource.path], {
+        allowedPaths: [nonRuntimeSource.path],
+      }),
+    )
+    await expectIntegrityFailure(() =>
+      readVerifiedAiChartD1CompilationAssets(['../outside.md'], {
+        allowedPaths: ['../outside.md'],
+      }),
+    )
+    await expectIntegrityFailure(() =>
+      readVerifiedAiChartD1CompilationAssets(['/tmp/outside.md'], {
+        allowedPaths: ['/tmp/outside.md'],
+      }),
+    )
+
     await assert.rejects(
       () => loadAiChartD1RuntimeAssetBundle(),
       { message: AI_CHART_D1_RUNTIME_DISABLED },
@@ -134,6 +182,34 @@ async function run() {
     )
     await expectIntegrityFailure(() =>
       verifyAiChartD1AssetBundle({ projectRoot: tamperedProject }),
+    )
+    await appendFile(
+      join(tamperedProject, AI_CHART_D1_K0_SOURCE_WHITELIST[0]),
+      '\ntampered-k0-content',
+    )
+    await expectIntegrityFailure(() =>
+      readVerifiedAiChartD1CompilationAssets(
+        [AI_CHART_D1_K0_SOURCE_WHITELIST[0]],
+        {
+          projectRoot: tamperedProject,
+          allowedPaths: AI_CHART_D1_K0_SOURCE_WHITELIST,
+        },
+      ),
+    )
+
+    const invalidUtf8Project = await copyProjectAssets()
+    await writeFile(
+      join(invalidUtf8Project, AI_CHART_D1_K0_SOURCE_WHITELIST[0]),
+      Buffer.from([0xc3, 0x28]),
+    )
+    await expectIntegrityFailure(() =>
+      readVerifiedAiChartD1CompilationAssets(
+        [AI_CHART_D1_K0_SOURCE_WHITELIST[0]],
+        {
+          projectRoot: invalidUtf8Project,
+          allowedPaths: AI_CHART_D1_K0_SOURCE_WHITELIST,
+        },
+      ),
     )
 
     const missingProject = await copyProjectAssets()
@@ -149,8 +225,14 @@ async function run() {
     )
 
     const symlinkProject = await copyProjectAssets()
-    const symlinkPath = join(symlinkProject, verified.manifest.files[0].path)
-    const symlinkTarget = join(symlinkProject, verified.manifest.files[1].path)
+    const symlinkPath = join(
+      symlinkProject,
+      AI_CHART_D1_K0_SOURCE_WHITELIST[0],
+    )
+    const symlinkTarget = join(
+      symlinkProject,
+      AI_CHART_D1_K0_SOURCE_WHITELIST[1],
+    )
     let symlinkCreated = false
 
     try {
@@ -170,6 +252,15 @@ async function run() {
       await expectIntegrityFailure(() =>
         verifyAiChartD1AssetBundle({ projectRoot: symlinkProject }),
       )
+      await expectIntegrityFailure(() =>
+        readVerifiedAiChartD1CompilationAssets(
+          [AI_CHART_D1_K0_SOURCE_WHITELIST[0]],
+          {
+            projectRoot: symlinkProject,
+            allowedPaths: AI_CHART_D1_K0_SOURCE_WHITELIST,
+          },
+        ),
+      )
       console.log('✓ symlink asset rejected')
     }
 
@@ -178,6 +269,7 @@ async function run() {
     console.log('✓ missing asset rejected')
     console.log('✓ tampered manifest lock rejected')
     console.log('✓ runtime disabled guard rejected loading')
+    console.log('✓ server-only K0 compilation whitelist and UTF-8 guards')
   } finally {
     await safeCleanup(suiteRoot)
   }
