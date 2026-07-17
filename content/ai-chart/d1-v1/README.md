@@ -6,6 +6,7 @@
 
 - Manifest validator：已建立
 - 素材完整性驗證：已建立
+- Primary spec 必要素材引用一致性驗證：已建立
 - Manifest SHA 版本鎖定：已建立
 - Runtime loader：只有 disabled guard，尚未啟用
 - OpenAI Responses adapter core：已建立
@@ -29,9 +30,14 @@
 - Background job：未建立
 - Production：未啟用
 
-Manifest 與 16 份素材會在 Server 端驗證原始位元組 SHA-256。
+Manifest 與 23 份素材會在 Server 端驗證原始位元組 SHA-256。
 `draft` 與 `reference_only` 素材不能被 Runtime 啟用，目前所有
 `runtimeEnabled` 仍為 `false`。
+
+本版本新增 7 份由 `20_D1_本命人格推理總控流程.md` 明確引用的
+`reasoning_source_candidate`。納管只確認來源位元組、Manifest 與引用
+一致性，不代表素材內容已由老師逐句核准。N0、K0 與 P1 Input 仍未建立，
+也沒有產生任何 OpenAI request。
 
 本階段不會讀取或回傳 Prompt 全文給任何 Route。
 

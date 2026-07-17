@@ -1,14 +1,19 @@
 import assert from 'node:assert/strict'
-import formalManifest from '../../../content/ai-chart/d1-v1/manifest.json'
+import { readFileSync } from 'node:fs'
 import {
   AI_CHART_D1_EXPECTED_FILE_COUNT,
   AI_CHART_D1_MANIFEST_INVALID,
+  AI_CHART_D1_MANIFEST_PATH,
   AI_CHART_D1_RUNTIME_DISABLED,
   assertAiChartD1RuntimeEnabled,
   validateAiChartD1AssetManifest,
 } from './d1Assets'
 
 type MutableRecord = Record<string, unknown>
+
+const formalManifest = JSON.parse(
+  readFileSync(AI_CHART_D1_MANIFEST_PATH, 'utf8'),
+) as unknown
 
 function test(name: string, run: () => void) {
   try {
@@ -104,9 +109,16 @@ test('top-level runtimeEnabled true is rejected', () => {
   })
 })
 
-test('manifest must contain exactly 16 files', () => {
+test('manifest rejects 22 files', () => {
   expectInvalidMutation((fixture) => {
     fixtureFiles(fixture).pop()
+  })
+})
+
+test('manifest rejects 24 files', () => {
+  expectInvalidMutation((fixture) => {
+    const files = fixtureFiles(fixture)
+    files.push(structuredClone(files[0]))
   })
 })
 
