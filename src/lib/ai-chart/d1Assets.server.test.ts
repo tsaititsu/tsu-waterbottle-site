@@ -173,7 +173,7 @@ async function run() {
       console.log('✓ symlink asset rejected')
     }
 
-    console.log('✓ repository manifest lock and 16 asset SHA checks')
+    console.log('✓ repository manifest lock and 23 asset SHA checks')
     console.log('✓ tampered asset rejected')
     console.log('✓ missing asset rejected')
     console.log('✓ tampered manifest lock rejected')

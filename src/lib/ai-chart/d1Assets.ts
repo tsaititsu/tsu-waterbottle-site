@@ -5,9 +5,9 @@ export const AI_CHART_D1_MODEL_ENVIRONMENT_VARIABLE = 'OPENAI_AI_CHART_MODEL' as
 export const AI_CHART_D1_ASSET_ROOT = 'content/ai-chart/d1-v1' as const
 export const AI_CHART_D1_MANIFEST_PATH =
   'content/ai-chart/d1-v1/manifest.json' as const
-export const AI_CHART_D1_EXPECTED_FILE_COUNT = 16 as const
+export const AI_CHART_D1_EXPECTED_FILE_COUNT = 23 as const
 export const AI_CHART_D1_LOCKED_MANIFEST_SHA256 =
-  '5c0b7efd85f3d2907a46ec8af9428c4d59037cf0e9a5c989edc1f8c32da7ddad' as const
+  '20e229901d617ebf4731b574e88b2308753d756f92a79cb4bd3ed4be260a4fe5' as const
 
 export const AI_CHART_D1_MANIFEST_INVALID = 'ai_chart_d1_manifest_invalid' as const
 export const AI_CHART_D1_ASSET_INTEGRITY_FAILED =

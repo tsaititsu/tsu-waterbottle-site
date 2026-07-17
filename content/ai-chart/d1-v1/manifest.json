@@ -53,6 +53,69 @@
       "runtimeEnabled": false
     },
     {
+      "path": "content/ai-chart/d1-v1/knowledge/reasoning/07_四化正式規格_工作版.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/紫微斗數_AI推理引擎_工作區 /07_四化正式規格_工作版.md",
+      "sha256": "5c67e03928e76f2da0a87c2f104aa65e17b2e183e1e0d1674af3119cc9f0b67a",
+      "classification": "reasoning_knowledge",
+      "status": "reasoning_source_candidate",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/knowledge/reasoning/08_固定雙主星整理骨架.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/紫微斗數_AI推理引擎_工作區 /08_固定雙主星整理骨架.md",
+      "sha256": "9127acd261dd1c879a374cd0d45432dbfe8b65050494e5d99adfa505a87955c4",
+      "classification": "reasoning_knowledge",
+      "status": "reasoning_source_candidate",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/knowledge/reasoning/10_D1_全盤掃描與煞忌權重.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/紫微斗數_AI推理引擎_工作區 /10_D1_全盤掃描與煞忌權重.md",
+      "sha256": "6b549caefc3066138d3083617ecf8a823a9a1c02d3792e534882402d90246135",
+      "classification": "reasoning_knowledge",
+      "status": "reasoning_source_candidate",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/knowledge/reasoning/12_D1_對宮暗合三方四正.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/紫微斗數_AI推理引擎_工作區 /12_D1_對宮暗合三方四正.md",
+      "sha256": "00a02ec0884a8555a10f1f16b554edcf2562acbdfd09fed9c8eee0515a8a34a0",
+      "classification": "reasoning_knowledge",
+      "status": "reasoning_source_candidate",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/knowledge/reasoning/13_D1_空宮借星與身宮.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/紫微斗數_AI推理引擎_工作區 /13_D1_空宮借星與身宮.md",
+      "sha256": "a2859483a99243d0e0fdcd0382d28e5ae9febfee7beffffcafae12a21e5f6eae",
+      "classification": "reasoning_knowledge",
+      "status": "reasoning_source_candidate",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/knowledge/reasoning/14_D1_輔星煞星貴人星祿存.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/紫微斗數_AI推理引擎_工作區 /14_D1_輔星煞星貴人星祿存.md",
+      "sha256": "275adec2af4998853f7b0b8bf50f1f510e237ae397cd91d8a3a17373e6a953c3",
+      "classification": "reasoning_knowledge",
+      "status": "reasoning_source_candidate",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    },
+    {
+      "path": "content/ai-chart/d1-v1/knowledge/reasoning/16_D1_地支四馬地規則.md",
+      "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/紫微斗數_AI推理引擎_工作區 /16_D1_地支四馬地規則.md",
+      "sha256": "f0c2f90c6c7ec2808be13cd005b8eaab982c9e9b57aa884642a7165e04a65866",
+      "classification": "reasoning_knowledge",
+      "status": "reasoning_source_candidate",
+      "runtimeEligible": true,
+      "runtimeEnabled": false
+    },
+    {
       "path": "content/ai-chart/d1-v1/spec/primary/20_D1_本命人格推理總控流程.md",
       "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/紫微斗數_AI推理引擎_工作區 /20_D1_本命人格推理總控流程.md",
       "sha256": "a9542911383120051026e242b61efed52aa26edda930a8fef2bb546581feee51",
