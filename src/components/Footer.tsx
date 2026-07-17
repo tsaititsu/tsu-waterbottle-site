@@ -1,14 +1,20 @@
 import Link from 'next/link'
 import { LogoMark } from './LogoMark'
+import type { GoogleAnalyticsCtaDestination } from '@/lib/analytics/googleAnalytics'
 import { PUBLIC_BUSINESS_INFO } from '@/lib/publicBusinessInfo'
 import { shouldHideConsultationServices, shouldHideCoursesServices } from '@/lib/siteVisibility'
+import { TrackedPublicCtaLink } from './analytics/TrackedPublicCtaLink'
 
 const serviceLinks = [
-  { href: '/ai-chart', label: '紫微命盤分析' },
-  { href: '/ai-divination', label: '紫微牌卡占卜' },
-  { href: '/booking', label: '水瓶先生論命預約' },
-  { href: '/courses', label: '紫微斗數課程' },
-]
+  { href: '/ai-chart', label: '紫微命盤分析', destination: 'ai_chart' },
+  { href: '/ai-divination', label: '紫微牌卡占卜', destination: 'ai_divination' },
+  { href: '/booking', label: '水瓶先生論命預約', destination: 'booking' },
+  { href: '/courses', label: '紫微斗數課程', destination: 'courses' },
+] as const satisfies readonly {
+  href: string
+  label: string
+  destination: GoogleAnalyticsCtaDestination
+}[]
 
 const consumerLinks = [
   { href: '/terms', label: '服務條款' },
@@ -57,9 +63,16 @@ export function Footer() {
               </p>
               <p>
                 客服 LINE：
-                <a className="font-semibold text-deepPurple underline decoration-deepPurple/25 underline-offset-4 transition hover:text-[#06c755] hover:decoration-[#06c755]" href={PUBLIC_BUSINESS_INFO.lineUrl} rel="noopener noreferrer" target="_blank">
+                <TrackedPublicCtaLink
+                  className="font-semibold text-deepPurple underline decoration-deepPurple/25 underline-offset-4 transition hover:text-[#06c755] hover:decoration-[#06c755]"
+                  destination="line_official_account"
+                  href={PUBLIC_BUSINESS_INFO.lineUrl}
+                  placement="footer_line"
+                  rel="noopener noreferrer"
+                  target="_blank"
+                >
                   加入 LINE 官方帳號
-                </a>
+                </TrackedPublicCtaLink>
               </p>
               <p>營業人名稱：{PUBLIC_BUSINESS_INFO.legalName}</p>
               <p>統一編號：{PUBLIC_BUSINESS_INFO.taxId}</p>
@@ -72,12 +85,18 @@ export function Footer() {
           <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-darkGold">服務</h3>
           <div className="mt-5 grid gap-3 text-sm text-textMuted">
             {visibleServiceLinks.map((link) => (
-                <Link className="transition hover:text-deepPurple" href={link.href} key={link.href}>
-                  {link.label}
-                </Link>
+              <TrackedPublicCtaLink
+                className="transition hover:text-deepPurple"
+                destination={link.destination}
+                href={link.href}
+                key={link.href}
+                placement="footer_service"
+              >
+                {link.label}
+              </TrackedPublicCtaLink>
             ))}
-            </div>
-          </nav>
+          </div>
+        </nav>
 
           <nav aria-label="消費資訊連結">
             <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-darkGold">消費資訊</h3>

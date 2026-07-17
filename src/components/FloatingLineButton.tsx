@@ -2,6 +2,7 @@
 
 import { usePathname } from 'next/navigation'
 import { type MouseEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { trackGoogleAnalyticsCtaClick } from '@/lib/analytics/googleAnalytics'
 
 const lineSupportUrl = 'https://lin.ee/6Tpje1P'
 const storageKey = 'waterbottle-floating-line-position'
@@ -174,8 +175,19 @@ export function FloatingLineButton() {
       event.preventDefault()
       event.stopPropagation()
       movedRef.current = false
+      return
     }
-  }, [])
+
+    trackGoogleAnalyticsCtaClick(
+      window,
+      window.location.hostname,
+      pathname,
+      {
+        destination: 'line_official_account',
+        placement: 'floating_line',
+      },
+    )
+  }, [pathname])
 
   return (
     <a

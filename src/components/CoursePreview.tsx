@@ -1,5 +1,5 @@
-import Link from 'next/link'
 import { shouldHideCoursesServices } from '@/lib/siteVisibility'
+import { TrackedPublicCtaLink } from './analytics/TrackedPublicCtaLink'
 
 export function CoursePreview() {
   if (shouldHideCoursesServices()) return null
@@ -13,9 +13,14 @@ export function CoursePreview() {
           <p className="mt-4 max-w-xl leading-8 text-textMuted">
             從小白入門到進階解盤，依照學習階段一步一步建立紫微斗數判讀能力。
           </p>
-          <Link className="focus-ring mt-7 inline-flex rounded-lg bg-deepPurple px-6 py-3 font-semibold text-white" href="/courses">
+          <TrackedPublicCtaLink
+            className="focus-ring mt-7 inline-flex rounded-lg bg-deepPurple px-6 py-3 font-semibold text-white"
+            destination="courses"
+            href="/courses"
+            placement="home_course_preview"
+          >
             查看課程
-          </Link>
+          </TrackedPublicCtaLink>
         </div>
         <div className="grid content-center gap-3">
           {['初級班｜小白專區', '進階班｜進階的解盤技巧', '高階班｜飛化與占卜技巧'].map((item) => (

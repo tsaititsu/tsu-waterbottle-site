@@ -3,8 +3,9 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { BookOpen, CalendarCheck, FileText, LogOut, Menu, ScrollText, ShoppingCart, Sparkles, UserRound, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import type { GoogleAnalyticsCtaDestination } from '@/lib/analytics/googleAnalytics'
 import {
   getMockUser,
   loginWithProvider,
@@ -19,6 +20,7 @@ import {
 } from '@/lib/siteVisibility'
 import { LogoMark } from './LogoMark'
 import { useCart } from './CartContext'
+import { TrackedPublicCtaLink } from './analytics/TrackedPublicCtaLink'
 
 const navItems = [
   { label: '首頁', href: '/' },
@@ -29,6 +31,14 @@ const navItems = [
   { label: '紫微課程', href: '/courses' },
   { label: '關於我們', href: '/#about-us' }
 ]
+
+const headerCtaDestinationByHref: Partial<Record<string, GoogleAnalyticsCtaDestination>> = {
+  '/ai-chart': 'ai_chart',
+  '/ai-divination': 'ai_divination',
+  '/spiritual-products': 'spiritual_products',
+  '/booking': 'booking',
+  '/courses': 'courses',
+}
 
 const visibleNavItems = navItems.filter((item) => {
   if (item.label === '紫微牌卡占卜' && shouldHideAiDivinationServices()) return false
@@ -240,20 +250,32 @@ export function Header() {
           </Link>
 
           <nav className="hidden flex-1 items-center justify-center gap-12 text-lg font-semibold text-textDark lg:flex">
-            {visibleNavItems.map((item) => (
-              <Link
-                key={item.href}
-                className={`relative py-2 ${pathname === item.href ? 'text-deepPurple' : 'hover:text-purpleMain'}`}
-                href={item.href}
-                onClick={(event) => {
-                  if (item.href !== '/ai-chart' && item.href !== '/booking' && item.href !== '/ai-divination') return
-                  event.preventDefault()
-                  router.push(`${item.href}?reset=${Date.now()}`)
-                }}
-              >
-                {item.label}
-              </Link>
-            ))}
+            {visibleNavItems.map((item) => {
+              const destination = headerCtaDestinationByHref[item.href]
+              const className = `relative py-2 ${pathname === item.href ? 'text-deepPurple' : 'hover:text-purpleMain'}`
+              const handleClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+                if (item.href !== '/ai-chart' && item.href !== '/booking' && item.href !== '/ai-divination') return
+                event.preventDefault()
+                router.push(`${item.href}?reset=${Date.now()}`)
+              }
+
+              return destination ? (
+                <TrackedPublicCtaLink
+                  key={item.href}
+                  className={className}
+                  destination={destination}
+                  href={item.href}
+                  onClick={handleClick}
+                  placement="header_desktop"
+                >
+                  {item.label}
+                </TrackedPublicCtaLink>
+              ) : (
+                <Link key={item.href} className={className} href={item.href} onClick={handleClick}>
+                  {item.label}
+                </Link>
+              )
+            })}
           </nav>
 
           <div ref={accountMenuRef} className="relative hidden items-center gap-3 lg:flex">
@@ -328,21 +350,37 @@ export function Header() {
                 className="mobile-menu-panel grid gap-2 border-t border-borderSoft bg-white px-4 pt-4 shadow-2xl"
                 onClick={(event) => event.stopPropagation()}
               >
-                {visibleNavItems.map((item) => (
-                  <Link
-                    key={item.href}
-                    className="rounded-lg px-3 py-3 text-sm font-medium hover:bg-softPurple"
-                    href={item.href}
-                    onClick={(event) => {
-                      setMenuOpen(false)
-                      if (item.href !== '/ai-chart' && item.href !== '/booking' && item.href !== '/ai-divination') return
-                      event.preventDefault()
-                      router.push(`${item.href}?reset=${Date.now()}`)
-                    }}
-                  >
-                    {item.label}
-                  </Link>
-                ))}
+                {visibleNavItems.map((item) => {
+                  const destination = headerCtaDestinationByHref[item.href]
+                  const handleClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+                    setMenuOpen(false)
+                    if (item.href !== '/ai-chart' && item.href !== '/booking' && item.href !== '/ai-divination') return
+                    event.preventDefault()
+                    router.push(`${item.href}?reset=${Date.now()}`)
+                  }
+
+                  return destination ? (
+                    <TrackedPublicCtaLink
+                      key={item.href}
+                      className="rounded-lg px-3 py-3 text-sm font-medium hover:bg-softPurple"
+                      destination={destination}
+                      href={item.href}
+                      onClick={handleClick}
+                      placement="header_mobile"
+                    >
+                      {item.label}
+                    </TrackedPublicCtaLink>
+                  ) : (
+                    <Link
+                      key={item.href}
+                      className="rounded-lg px-3 py-3 text-sm font-medium hover:bg-softPurple"
+                      href={item.href}
+                      onClick={handleClick}
+                    >
+                      {item.label}
+                    </Link>
+                  )
+                })}
                 {mobileAuthActions}
               </div>
             </div>,

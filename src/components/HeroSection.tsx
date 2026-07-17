@@ -1,5 +1,5 @@
-import Link from 'next/link'
 import { Sparkles } from 'lucide-react'
+import { TrackedPublicCtaLink } from './analytics/TrackedPublicCtaLink'
 import { ZiweiChartPreview } from './ZiweiChartPreview'
 import { shouldHideConsultationServices, shouldHideCoursesServices } from '@/lib/siteVisibility'
 
@@ -32,16 +32,23 @@ export function HeroSection() {
             用簡單直覺的方式，看懂自己的命盤、問題與未來方向。
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Link className="focus-ring rounded-lg bg-deepPurple px-8 py-3.5 text-center font-semibold text-white shadow-soft" href="/ai-chart">
+            <TrackedPublicCtaLink
+              className="focus-ring rounded-lg bg-deepPurple px-8 py-3.5 text-center font-semibold text-white shadow-soft"
+              destination="ai_chart"
+              href="/ai-chart"
+              placement="home_hero"
+            >
               立即開始分析
-            </Link>
+            </TrackedPublicCtaLink>
             {showBookingCta ? (
-              <Link
+              <TrackedPublicCtaLink
                 className="focus-ring rounded-lg border border-gold bg-white/85 px-8 py-3.5 text-center font-semibold text-darkGold backdrop-blur"
+                destination="booking"
                 href="/booking"
+                placement="home_hero"
               >
                 預約水瓶先生論命
-              </Link>
+              </TrackedPublicCtaLink>
             ) : null}
           </div>
         </div>

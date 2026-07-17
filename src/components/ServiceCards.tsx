@@ -1,6 +1,15 @@
 import Link from 'next/link'
 import { serviceCards } from '@/lib/mockData'
 import { shouldHideConsultationServices, shouldHideCoursesServices } from '@/lib/siteVisibility'
+import type { GoogleAnalyticsCtaDestination } from '@/lib/analytics/googleAnalytics'
+import { TrackedPublicCtaLink } from './analytics/TrackedPublicCtaLink'
+
+const serviceCtaDestinationByHref: Partial<Record<string, GoogleAnalyticsCtaDestination>> = {
+  '/ai-chart': 'ai_chart',
+  '/ai-divination': 'ai_divination',
+  '/booking': 'booking',
+  '/courses': 'courses',
+}
 
 function MiniChartIcon() {
   return (
@@ -33,6 +42,9 @@ export function ServiceCards() {
           {visibleCards.map((service) => {
             const Icon = service.icon
             const isChartService = service.title === '紫微命盤分析'
+            const destination = serviceCtaDestinationByHref[service.href]
+            const ctaClassName =
+              'focus-ring mt-5 inline-flex w-full justify-center rounded-lg bg-deepPurple px-4 py-3 font-semibold text-white shadow-[0_8px_18px_rgba(59,15,117,0.18)]'
             return (
               <article key={service.title} className="rounded-xl border border-borderSoft bg-white p-5 shadow-[0_10px_26px_rgba(31,27,46,0.07)]">
                 <div className="mb-5 flex items-start justify-between gap-3">
@@ -43,9 +55,20 @@ export function ServiceCards() {
                 </div>
                 <h3 className="font-serifTC text-xl font-semibold text-deepPurple">{service.title}</h3>
                 <p className="mt-3 min-h-12 leading-7 text-textMuted">{service.description}</p>
-                <Link className="focus-ring mt-5 inline-flex w-full justify-center rounded-lg bg-deepPurple px-4 py-3 font-semibold text-white shadow-[0_8px_18px_rgba(59,15,117,0.18)]" href={service.href}>
-                  {service.cta}
-                </Link>
+                {destination ? (
+                  <TrackedPublicCtaLink
+                    className={ctaClassName}
+                    destination={destination}
+                    href={service.href}
+                    placement="home_service_card"
+                  >
+                    {service.cta}
+                  </TrackedPublicCtaLink>
+                ) : (
+                  <Link className={ctaClassName} href={service.href}>
+                    {service.cta}
+                  </Link>
+                )}
               </article>
             )
           })}
