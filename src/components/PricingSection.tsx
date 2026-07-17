@@ -1,6 +1,14 @@
 import { shouldHideConsultationServices } from '@/lib/siteVisibility'
 import { pricingPlans } from '@/lib/mockData'
+import type { GoogleAnalyticsCtaClickInput } from '@/lib/analytics/googleAnalytics'
 import { ActionButton } from './ActionButton'
+
+const pricingCtaByItemType = {
+  'ai-chart': { destination: 'ai_chart', placement: 'home_pricing' },
+  'ai-divination': { destination: 'ai_divination', placement: 'home_pricing' },
+  booking: { destination: 'booking', placement: 'home_pricing' },
+  course: { destination: 'courses', placement: 'home_pricing' },
+} as const satisfies Record<string, GoogleAnalyticsCtaClickInput>
 
 export function PricingSection() {
   const visiblePlans = pricingPlans.filter((plan) => {
@@ -20,6 +28,7 @@ export function PricingSection() {
               <p className="mt-3 min-h-14 leading-7 text-textMuted">{plan.description}</p>
               <p className="mt-5 text-3xl font-semibold text-deepPurple">{plan.priceLabel}</p>
               <ActionButton
+                analytics={pricingCtaByItemType[plan.itemType]}
                 href={plan.href}
                 itemType={plan.itemType}
                 itemName={plan.title}

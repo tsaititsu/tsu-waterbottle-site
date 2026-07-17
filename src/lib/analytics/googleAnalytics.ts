@@ -4,6 +4,7 @@ export interface GoogleAnalyticsFunction {
   (command: 'js', date: Date): void
   (command: 'config', measurementId: string, options: { send_page_view: false }): void
   (command: 'event', eventName: 'page_view', payload: GoogleAnalyticsPageViewPayload): void
+  (command: 'event', eventName: 'cta_click', payload: GoogleAnalyticsCtaClickPayload): void
 }
 
 export interface GoogleAnalyticsWindowLike {
@@ -31,8 +32,51 @@ export const GOOGLE_ANALYTICS_PUBLIC_PATHS = [
   '/consumer-rights',
 ] as const
 
+export const GOOGLE_ANALYTICS_CTA_DESTINATIONS = [
+  'ai_chart',
+  'ai_divination',
+  'booking',
+  'courses',
+  'spiritual_products',
+  'line_official_account',
+] as const
+
+export const GOOGLE_ANALYTICS_CTA_PLACEMENTS = [
+  'home_hero',
+  'home_service_card',
+  'home_feedback',
+  'home_pricing',
+  'home_course_preview',
+  'header_desktop',
+  'header_mobile',
+  'mobile_bottom_nav',
+  'footer_service',
+  'footer_line',
+  'floating_line',
+] as const
+
+export type GoogleAnalyticsCtaDestination =
+  (typeof GOOGLE_ANALYTICS_CTA_DESTINATIONS)[number]
+
+export type GoogleAnalyticsCtaPlacement =
+  (typeof GOOGLE_ANALYTICS_CTA_PLACEMENTS)[number]
+
+export interface GoogleAnalyticsCtaClickInput {
+  destination: GoogleAnalyticsCtaDestination
+  placement: GoogleAnalyticsCtaPlacement
+}
+
+export interface GoogleAnalyticsCtaClickPayload {
+  cta_id: `${GoogleAnalyticsCtaPlacement}_${GoogleAnalyticsCtaDestination}`
+  cta_destination: GoogleAnalyticsCtaDestination
+  cta_placement: GoogleAnalyticsCtaPlacement
+  source_path: string
+}
+
 const productionHosts = new Set<string>(GOOGLE_ANALYTICS_PRODUCTION_HOSTS)
 const publicPaths = new Set<string>(GOOGLE_ANALYTICS_PUBLIC_PATHS)
+const ctaDestinations = new Set<string>(GOOGLE_ANALYTICS_CTA_DESTINATIONS)
+const ctaPlacements = new Set<string>(GOOGLE_ANALYTICS_CTA_PLACEMENTS)
 
 export function isGoogleAnalyticsProductionHost(hostname: string): boolean {
   return productionHosts.has(hostname)
@@ -54,6 +98,44 @@ export function sanitizeGoogleAnalyticsPath(pathname: string): string {
 
 export function shouldTrackGoogleAnalyticsPath(pathname: string): boolean {
   return publicPaths.has(sanitizeGoogleAnalyticsPath(pathname))
+}
+
+export function createGoogleAnalyticsCtaClickPayload(
+  pathname: string,
+  input: GoogleAnalyticsCtaClickInput,
+): GoogleAnalyticsCtaClickPayload | null {
+  if (!ctaDestinations.has(input.destination) || !ctaPlacements.has(input.placement)) {
+    return null
+  }
+
+  const sourcePath = sanitizeGoogleAnalyticsPath(pathname)
+  if (!shouldTrackGoogleAnalyticsPath(sourcePath)) return null
+
+  return {
+    cta_id: `${input.placement}_${input.destination}`,
+    cta_destination: input.destination,
+    cta_placement: input.placement,
+    source_path: sourcePath,
+  }
+}
+
+export function trackGoogleAnalyticsCtaClick(
+  target: GoogleAnalyticsWindowLike,
+  hostname: string,
+  pathname: string,
+  input: GoogleAnalyticsCtaClickInput,
+): boolean {
+  if (!isGoogleAnalyticsProductionHost(hostname) || !target.gtag) return false
+
+  const payload = createGoogleAnalyticsCtaClickPayload(pathname, input)
+  if (!payload) return false
+
+  try {
+    target.gtag('event', 'cta_click', payload)
+    return true
+  } catch {
+    return false
+  }
 }
 
 export function createGoogleAnalyticsPageViewPayload(

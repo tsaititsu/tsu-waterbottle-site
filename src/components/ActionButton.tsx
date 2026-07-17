@@ -2,6 +2,10 @@
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import {
+  trackGoogleAnalyticsCtaClick,
+  type GoogleAnalyticsCtaClickInput,
+} from '@/lib/analytics/googleAnalytics'
 import { getMockUser } from '@/lib/mockAuth'
 import { LoginModal } from './LoginModal'
 
@@ -23,9 +27,18 @@ type ActionButtonProps = {
   className?: string
   beforeStart?: () => boolean | Promise<boolean>
   loadingText?: string
+  analytics?: GoogleAnalyticsCtaClickInput
 }
 
-export function ActionButton({ children, itemType, href, className = '', beforeStart, loadingText = '準備中...' }: ActionButtonProps) {
+export function ActionButton({
+  children,
+  itemType,
+  href,
+  className = '',
+  beforeStart,
+  loadingText = '準備中...',
+  analytics,
+}: ActionButtonProps) {
   const router = useRouter()
   const [loginOpen, setLoginOpen] = useState(false)
   const [starting, setStarting] = useState(false)
@@ -42,6 +55,15 @@ export function ActionButton({ children, itemType, href, className = '', beforeS
   }
 
   const start = async () => {
+    if (analytics) {
+      trackGoogleAnalyticsCtaClick(
+        window,
+        window.location.hostname,
+        window.location.pathname,
+        analytics,
+      )
+    }
+
     if (!getMockUser()) {
       setLoginOpen(true)
       return

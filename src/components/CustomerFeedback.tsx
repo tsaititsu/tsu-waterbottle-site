@@ -1,4 +1,4 @@
-import Link from 'next/link'
+import { TrackedPublicCtaLink } from './analytics/TrackedPublicCtaLink'
 
 const featuredFeedback = {
   service: '論命預約',
@@ -101,18 +101,22 @@ export function CustomerFeedback() {
             想知道自己的狀態，也可以從一題占卜開始。
           </p>
           <div className="flex flex-col gap-3 sm:flex-row md:justify-end">
-            <Link
+            <TrackedPublicCtaLink
               className="focus-ring inline-flex justify-center rounded-lg bg-deepPurple px-5 py-3 font-semibold text-white shadow-[0_8px_18px_rgba(59,15,117,0.18)]"
+              destination="ai_divination"
               href="/ai-divination"
+              placement="home_feedback"
             >
               體驗牌卡占卜
-            </Link>
-            <Link
+            </TrackedPublicCtaLink>
+            <TrackedPublicCtaLink
               className="focus-ring inline-flex justify-center rounded-lg border border-deepPurple bg-white px-5 py-3 font-semibold text-deepPurple"
+              destination="booking"
               href="/booking"
+              placement="home_feedback"
             >
               預約論命
-            </Link>
+            </TrackedPublicCtaLink>
           </div>
         </div>
       </div>
