@@ -501,13 +501,11 @@ export function createAiChartD1ArraySchema(
   options: Readonly<{
     minimumItems?: number
     maximumItems?: number
-    uniqueItems?: boolean
   }> = {},
 ): AiChartD1JsonSchema {
   const {
     minimumItems = 0,
     maximumItems = AI_CHART_D1_MAX_LIST_ITEMS,
-    uniqueItems = false,
   } = options
 
   return freezeAiChartD1Value({
@@ -515,7 +513,6 @@ export function createAiChartD1ArraySchema(
     items,
     minItems: minimumItems,
     maxItems: maximumItems,
-    ...(uniqueItems ? { uniqueItems: true } : {}),
   })
 }
 
@@ -535,29 +532,25 @@ export const AI_CHART_D1_CANDIDATE_SCHEMA =
     lifeExamples: createAiChartD1ArraySchema(SHORT_TEXT_SCHEMA, {
       minimumItems: 1,
       maximumItems: AI_CHART_D1_MAX_LIFE_EXAMPLES,
-      uniqueItems: true,
     }),
     scopes: createAiChartD1ArraySchema(
       createAiChartD1StringSchema({ enumValues: AI_CHART_D1_SCOPES }),
-      { minimumItems: 1, uniqueItems: true },
+      { minimumItems: 1 },
     ),
     palaceIds: createAiChartD1ArraySchema(ID_SCHEMA, {
       minimumItems: 1,
-      uniqueItems: true,
     }),
     starBasis: createAiChartD1ArraySchema(SHORT_TEXT_SCHEMA, {
       minimumItems: 1,
-      uniqueItems: true,
     }),
     structureBasis: createAiChartD1ArraySchema(
       createAiChartD1StringSchema({
         enumValues: AI_CHART_D1_STRUCTURE_BASES,
       }),
-      { minimumItems: 1, uniqueItems: true },
+      { minimumItems: 1 },
     ),
     usedRuleIds: createAiChartD1ArraySchema(ID_SCHEMA, {
       minimumItems: 1,
-      uniqueItems: true,
     }),
     ruleStatus: createAiChartD1StringSchema({
       enumValues: AI_CHART_D1_RULE_STATUSES,
@@ -593,6 +586,5 @@ export const AI_CHART_D1_TRAIT_TENSION_SCHEMA =
     coexistenceExplanation: TEXT_SCHEMA,
     candidateIds: createAiChartD1ArraySchema(ID_SCHEMA, {
       minimumItems: 1,
-      uniqueItems: true,
     }),
   })

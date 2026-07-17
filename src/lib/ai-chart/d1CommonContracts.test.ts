@@ -92,6 +92,20 @@ function expectInvalid(run: () => unknown, markers: readonly string[] = []) {
   }
 }
 
+function assertSchemaKeyAbsent(
+  value: unknown,
+  forbiddenKey: string,
+  visited = new Set<object>(),
+) {
+  if (typeof value !== 'object' || value === null || visited.has(value)) return
+  visited.add(value)
+
+  assert.equal(Object.hasOwn(value, forbiddenKey), false)
+  for (const child of Object.values(value)) {
+    assertSchemaKeyAbsent(child, forbiddenKey, visited)
+  }
+}
+
 test('palace enum contains all twelve unique palaces', () => {
   assert.equal(AI_CHART_D1_PALACE_NAMES.length, 12)
   assert.equal(new Set(AI_CHART_D1_PALACE_NAMES).size, 12)
@@ -198,6 +212,33 @@ test('tension schema fields match the formal tension field list', () => {
   assert.deepEqual(AI_CHART_D1_TRAIT_TENSION_SCHEMA.required, [
     ...AI_CHART_D1_TRAIT_TENSION_FIELDS,
   ])
+})
+
+test('common exported schemas do not contain uniqueItems', () => {
+  for (const schema of [
+    AI_CHART_D1_CANDIDATE_SCHEMA,
+    AI_CHART_D1_D2_BOUNDARY_SCHEMA,
+    AI_CHART_D1_TRAIT_TENSION_SCHEMA,
+  ]) {
+    assertSchemaKeyAbsent(schema, 'uniqueItems')
+  }
+})
+
+test('runtime candidate parser still rejects every duplicate array field', () => {
+  const duplicateCases: ReadonlyArray<readonly [string, readonly string[]]> = [
+    ['lifeExamples', ['Repeated example', 'Repeated example']],
+    ['scopes', ['personality', 'personality']],
+    ['palaceIds', ['palace.synthetic.1', 'palace.synthetic.1']],
+    ['starBasis', ['Synthetic star basis', 'Synthetic star basis']],
+    ['structureBasis', ['本宮', '本宮']],
+    ['usedRuleIds', ['rule.synthetic.1', 'rule.synthetic.1']],
+  ]
+
+  for (const [field, duplicatedValues] of duplicateCases) {
+    const fixture = candidateFixture()
+    fixture[field] = [...duplicatedValues]
+    expectInvalid(() => parseAiChartD1Candidate(fixture))
+  }
 })
 
 test('legal candidate is accepted without rewriting text', () => {

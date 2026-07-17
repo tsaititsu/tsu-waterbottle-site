@@ -650,18 +650,14 @@ const TEXT_SCHEMA = createAiChartD1StringSchema()
 const STATUS_SCHEMA = createAiChartD1StringSchema({
   enumValues: AI_CHART_D1_RESULT_STATUSES,
 })
-const WARNING_ARRAY_SCHEMA = createAiChartD1ArraySchema(SHORT_TEXT_SCHEMA, {
-  uniqueItems: true,
-})
+const WARNING_ARRAY_SCHEMA = createAiChartD1ArraySchema(SHORT_TEXT_SCHEMA)
 const BOUNDARY_ARRAY_SCHEMA = createAiChartD1ArraySchema(
   AI_CHART_D1_D2_BOUNDARY_SCHEMA,
 )
 
 const P1_PRIMARY_AXIS_SCHEMA = createAiChartD1StrictObjectSchema({
   statement: TEXT_SCHEMA,
-  majorStarCore: createAiChartD1ArraySchema(SHORT_TEXT_SCHEMA, {
-    uniqueItems: true,
-  }),
+  majorStarCore: createAiChartD1ArraySchema(SHORT_TEXT_SCHEMA),
   doubleStarCore: createAiChartD1StringSchema({
     maximumLength: AI_CHART_D1_MAX_SHORT_TEXT_LENGTH,
     nullable: true,
@@ -669,7 +665,7 @@ const P1_PRIMARY_AXIS_SCHEMA = createAiChartD1StrictObjectSchema({
   borrowedStarMode: createAiChartD1StringSchema({
     enumValues: ['none', 'borrowed'],
   }),
-  usedRuleIds: createAiChartD1ArraySchema(ID_SCHEMA, { uniqueItems: true }),
+  usedRuleIds: createAiChartD1ArraySchema(ID_SCHEMA),
 })
 
 const OMITTED_ITEM_SCHEMA = createAiChartD1StrictObjectSchema({
@@ -678,24 +674,12 @@ const OMITTED_ITEM_SCHEMA = createAiChartD1StrictObjectSchema({
 })
 
 const P1_COVERAGE_SCHEMA = createAiChartD1StrictObjectSchema({
-  directMeaningsConsidered: createAiChartD1ArraySchema(SHORT_TEXT_SCHEMA, {
-    uniqueItems: true,
-  }),
-  majorStarsCovered: createAiChartD1ArraySchema(SHORT_TEXT_SCHEMA, {
-    uniqueItems: true,
-  }),
-  minorStarsCovered: createAiChartD1ArraySchema(SHORT_TEXT_SCHEMA, {
-    uniqueItems: true,
-  }),
-  mutagensCovered: createAiChartD1ArraySchema(SHORT_TEXT_SCHEMA, {
-    uniqueItems: true,
-  }),
-  maleficsCovered: createAiChartD1ArraySchema(SHORT_TEXT_SCHEMA, {
-    uniqueItems: true,
-  }),
-  noblesCovered: createAiChartD1ArraySchema(SHORT_TEXT_SCHEMA, {
-    uniqueItems: true,
-  }),
+  directMeaningsConsidered: createAiChartD1ArraySchema(SHORT_TEXT_SCHEMA),
+  majorStarsCovered: createAiChartD1ArraySchema(SHORT_TEXT_SCHEMA),
+  minorStarsCovered: createAiChartD1ArraySchema(SHORT_TEXT_SCHEMA),
+  mutagensCovered: createAiChartD1ArraySchema(SHORT_TEXT_SCHEMA),
+  maleficsCovered: createAiChartD1ArraySchema(SHORT_TEXT_SCHEMA),
+  noblesCovered: createAiChartD1ArraySchema(SHORT_TEXT_SCHEMA),
   oppositeProcessed: freezeAiChartD1Value({ type: 'boolean' }),
   hiddenCombinationProcessed: freezeAiChartD1Value({ type: 'boolean' }),
   trinesProcessed: freezeAiChartD1Value({ type: 'boolean' }),
@@ -714,7 +698,6 @@ const P1_TENSION_SCHEMA = createAiChartD1StrictObjectSchema({
   >),
   candidateIds: createAiChartD1ArraySchema(ID_SCHEMA, {
     minimumItems: 2,
-    uniqueItems: true,
   }),
 })
 
@@ -782,7 +765,6 @@ const F1_MERGED_GROUP_SCHEMA = createAiChartD1StrictObjectSchema({
   retainedCandidateId: ID_SCHEMA,
   mergedCandidateIds: createAiChartD1ArraySchema(ID_SCHEMA, {
     minimumItems: 1,
-    uniqueItems: true,
   }),
   reason: TEXT_SCHEMA,
 })

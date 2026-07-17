@@ -270,6 +270,15 @@ function assertRecursivelyStrict(schema: Record<string, unknown>) {
   assert.ok(objectCount > 1)
 }
 
+function assertSchemaKeyAbsent(
+  schema: Record<string, unknown>,
+  forbiddenKey: string,
+) {
+  visitSchema(schema, (node) => {
+    assert.equal(Object.hasOwn(node, forbiddenKey), false)
+  })
+}
+
 function assertDeeplyFrozen(value: unknown, visited = new Set<object>()) {
   if (typeof value !== 'object' || value === null || visited.has(value)) return
   visited.add(value)
@@ -295,6 +304,14 @@ test('P1 nested object schemas are recursively strict', () => {
 
 test('F1 nested object schemas are recursively strict', () => {
   assertRecursivelyStrict(AI_CHART_D1_F1_OUTPUT_SCHEMA)
+})
+
+test('P1 schema recursively excludes unsupported uniqueItems', () => {
+  assertSchemaKeyAbsent(AI_CHART_D1_P1_OUTPUT_SCHEMA, 'uniqueItems')
+})
+
+test('F1 schema recursively excludes unsupported uniqueItems', () => {
+  assertSchemaKeyAbsent(AI_CHART_D1_F1_OUTPUT_SCHEMA, 'uniqueItems')
 })
 
 test('P1 required fields match formal result fields', () => {
@@ -440,6 +457,24 @@ test('OpenAI Adapter body preserves strict true', () => {
   assert.equal(body.text.format.strict, true)
 })
 
+test('OpenAI Adapter P1 body excludes unsupported uniqueItems', () => {
+  const body = expectAdapterValid(
+    AI_CHART_D1_P1_SCHEMA_NAME,
+    AI_CHART_D1_P1_OUTPUT_SCHEMA,
+    parseAiChartD1P1Result,
+  )
+  assert.equal(JSON.stringify(body).includes('"uniqueItems"'), false)
+})
+
+test('OpenAI Adapter F1 body excludes unsupported uniqueItems', () => {
+  const body = expectAdapterValid(
+    AI_CHART_D1_F1_SCHEMA_NAME,
+    AI_CHART_D1_F1_OUTPUT_SCHEMA,
+    parseAiChartD1F1Result,
+  )
+  assert.equal(JSON.stringify(body).includes('"uniqueItems"'), false)
+})
+
 test('schema excludes forbidden descriptive and secret-bearing keywords', () => {
   const serialized = JSON.stringify([
     AI_CHART_D1_P1_OUTPUT_SCHEMA,
@@ -528,6 +563,15 @@ test('P1 rejects tension reference to missing candidate', () => {
 test('P1 rejects tension with fewer than two candidate IDs', () => {
   const fixture = p1Fixture()
   asRecord(asArray(fixture.tensions)[0]).candidateIds = [
+    'candidate.synthetic.p1.direct',
+  ]
+  expectContractInvalid(() => parseAiChartD1P1Result(fixture))
+})
+
+test('P1 rejects duplicate tension candidate IDs', () => {
+  const fixture = p1Fixture()
+  asRecord(asArray(fixture.tensions)[0]).candidateIds = [
+    'candidate.synthetic.p1.direct',
     'candidate.synthetic.p1.direct',
   ]
   expectContractInvalid(() => parseAiChartD1P1Result(fixture))
