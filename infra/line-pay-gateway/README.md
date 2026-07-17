@@ -107,13 +107,13 @@ Gateway：
 | 名稱 | 說明 |
 | --- | --- |
 | `LINE_PAY_TRANSPORT` | `direct` 或 `gateway`；Vercel Preview 必須明確設為 `gateway`，缺少、`direct` 或未知值都 fail closed；其他環境未設定才維持既有 `direct` |
-| `LINE_PAY_GATEWAY_URL` | 公開 HTTPS Gateway origin；拒絕 HTTP、IP、localhost、非預設 port、path、query、fragment 或帳密 |
+| `LINE_PAY_GATEWAY_URL` | Canonical 公開 HTTPS Gateway origin；不得有 hostname 尾點、任何顯式 port（含 `:443`）、尾端 `/`、path、query、fragment 或帳密，也拒絕 IP 與 localhost |
 | `LINE_PAY_GATEWAY_KEY_ID` | 必須與 Gateway 相同 |
 | `LINE_PAY_GATEWAY_SECRET` | 必須與 Gateway 相同，不得與 LINE Pay Channel Secret 共用 |
 | `LINE_PAY_GATEWAY_TIMEOUT_MS` | 網站到 Gateway timeout，預設 5000 ms |
 | `LINE_PAY_GATEWAY_SMOKE_ENABLED` | 僅 Preview 的 authenticated smoke 開關，預設停用；Production 不需要也不會自動啟用 |
 
-gateway 模式少任何必要設定都 fail closed，不會 fallback 到 direct。Gateway URL 在 Sandbox、Preview、Development 與 Production runtime 一律必須是公開 HTTPS origin。所有範例值只是假值；不要提交真實秘密或把秘密寫入映像檔。
+gateway 模式少任何必要設定都 fail closed，不會 fallback 到 direct。Gateway URL 在 Sandbox、Preview、Development 與 Production runtime 一律必須是 canonical 公開 HTTPS origin。Validator 會先檢查未經 URL parser normalization 的原始字串，再檢查解析後的 URL，因此顯式預設 port、literal／encoded dot-segment、backslash、控制字元與任何 path 都不能被 parser 折疊後接受。Scheme 與 hostname 大小寫可正規化，公開 IDNA／Punycode hostname 維持允許；固定 hostname allowlist 尚未實作。所有範例值只是假值；不要提交真實秘密或把秘密寫入映像檔。
 
 `LINE_PAY_GATEWAY_PROXY_TOKEN` 明確禁止放入 Vercel，也不得由網站程式讀取或送出。Proxy Token 只存在 Droplet 的 `/etc/line-pay-gateway/proxy.env`，由 Caddy 覆寫注入 Gateway request；它不屬於網站 HMAC contract。
 

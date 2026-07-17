@@ -88,6 +88,21 @@ function requestInput(fetchFn: LinePayTransportFetch, transportEnv: LinePayTrans
   }
 }
 
+function assertGatewayUrlRejectedInEveryRuntime(gatewayUrl: string, label = gatewayUrl) {
+  for (const vercelEnv of ['preview', 'production', 'development']) {
+    assert.throws(
+      () =>
+        getLinePayTransportConfig(
+          { ...gatewayEnv, VERCEL_ENV: vercelEnv, LINE_PAY_GATEWAY_URL: gatewayUrl },
+          vercelEnv === 'production' ? 'production' : 'sandbox',
+        ),
+      (error: unknown) =>
+        error instanceof LinePayTransportError && error.code === 'invalid_line_pay_gateway_url',
+      `${label} must be rejected in ${vercelEnv}`,
+    )
+  }
+}
+
 test('direct mode preserves the original LINE Pay URL, method, body and headers', async () => {
   const calls: Array<{ url: string; init: LinePayTransportFetchInit }> = []
   const fetchFn: LinePayTransportFetch = async (url, init) => {
@@ -144,47 +159,98 @@ test('Production direct and development missing transport preserve their existin
   assert.deepEqual(getLinePayTransportConfig({}, 'sandbox'), { mode: 'direct' })
 })
 
-test('Gateway URL accepts a public HTTPS origin and rejects unsafe endpoint forms in every runtime', () => {
-  const accepted = getLinePayTransportConfig(
-    {
-      ...gatewayEnv,
-      VERCEL_ENV: 'preview',
-      LINE_PAY_GATEWAY_URL: 'https://linepay-gateway.tsu-waterbottle.com',
-    },
-    'sandbox',
-  )
-  assert.equal(
-    accepted.mode === 'gateway' ? accepted.gatewayUrl : null,
-    'https://linepay-gateway.tsu-waterbottle.com/v1/line-pay/proxy',
-  )
+test('Gateway URL accepts canonical public HTTPS origins with explicit case and IDNA normalization', () => {
+  for (const [gatewayUrl, expectedUrl] of [
+    [
+      'https://linepay-gateway.tsu-waterbottle.com',
+      'https://linepay-gateway.tsu-waterbottle.com/v1/line-pay/proxy',
+    ],
+    ['HTTPS://EXAMPLE.COM', 'https://example.com/v1/line-pay/proxy'],
+    ['https://xn--bcher-kva.de', 'https://xn--bcher-kva.de/v1/line-pay/proxy'],
+  ]) {
+    const accepted = getLinePayTransportConfig(
+      { ...gatewayEnv, VERCEL_ENV: 'preview', LINE_PAY_GATEWAY_URL: gatewayUrl },
+      'sandbox',
+    )
+    assert.equal(accepted.mode === 'gateway' ? accepted.gatewayUrl : null, expectedUrl)
+  }
+})
 
+test('Gateway URL raw validation rejects non-HTTPS schemes, empty authority, userinfo and every explicit port', () => {
   for (const gatewayUrl of [
     'http://linepay-gateway.tsu-waterbottle.com',
     'ftp://linepay-gateway.tsu-waterbottle.com',
     'ws://linepay-gateway.tsu-waterbottle.com',
-    'https://165.245.144.110',
-    'https://127.0.0.1',
-    'https://[::1]',
-    'https://localhost',
-    'https://gateway.localhost',
-    'https://user:pass@example.com',
-    'https://example.com/path',
-    'https://example.com?x=1',
-    'https://example.com#fragment',
+    'https://',
+    'https://example.com:443',
+    'https://example.com:0443',
     'https://example.com:444',
+    'https://[::1]:443',
+    'https://user@example.com',
+    'https://user:pass@example.com',
+    'https://user%3Apass@example.com',
   ]) {
-    for (const vercelEnv of ['preview', 'production', 'development']) {
-      assert.throws(
-        () =>
-          getLinePayTransportConfig(
-            { ...gatewayEnv, VERCEL_ENV: vercelEnv, LINE_PAY_GATEWAY_URL: gatewayUrl },
-            vercelEnv === 'production' ? 'production' : 'sandbox',
-          ),
-        (error: unknown) =>
-          error instanceof LinePayTransportError && error.code === 'invalid_line_pay_gateway_url',
-        `${gatewayUrl} must be rejected in ${vercelEnv}`,
-      )
-    }
+    assertGatewayUrlRejectedInEveryRuntime(gatewayUrl)
+  }
+})
+
+test('Gateway URL raw validation rejects root, literal, encoded and multi-slash paths before URL normalization', () => {
+  for (const gatewayUrl of [
+    'https://example.com/',
+    'https://example.com/path',
+    'https://example.com//',
+    'https://example.com/.',
+    'https://example.com/..',
+    'https://example.com/a/..',
+    'https://example.com/%2e/',
+    'https://example.com/%2e%2e/',
+    'https://example.com/%2E%2E/',
+    'https://example.com/%2e%2e',
+    'https://example.com/%2e%2e%2f',
+    'https://example.com/%2f',
+  ]) {
+    assertGatewayUrlRejectedInEveryRuntime(gatewayUrl)
+  }
+})
+
+test('Gateway URL raw validation rejects query, fragment, backslash, whitespace and control characters', () => {
+  for (const gatewayUrl of [
+    'https://example.com?x=1',
+    'https://example.com#x',
+    String.raw`https://example.com\path`,
+    String.raw`https://example.com\@localhost`,
+    ' https://example.com',
+    'https://example.com ',
+    'https://exa mple.com',
+  ]) {
+    assertGatewayUrlRejectedInEveryRuntime(gatewayUrl)
+  }
+
+  for (const characterCode of [9, 10, 13, 0]) {
+    assertGatewayUrlRejectedInEveryRuntime(
+      `https://example.com${String.fromCharCode(characterCode)}`,
+      `control character U+${characterCode.toString(16).padStart(4, '0')}`,
+    )
+  }
+})
+
+test('Gateway URL semantic validation rejects trailing-dot, localhost and special IP hostnames', () => {
+  for (const gatewayUrl of [
+    'https://localhost.',
+    'https://foo.localhost.',
+    'https://example.com.',
+    'https://linepay-gateway.tsu-waterbottle.com.',
+    'https://localhost',
+    'https://foo.localhost',
+    'https://127.0.0.1',
+    'https://127.1',
+    'https://2130706433',
+    'https://0x7f000001',
+    'https://017700000001',
+    'https://[::1]',
+    'https://[0:0:0:0:0:0:0:1]',
+  ]) {
+    assertGatewayUrlRejectedInEveryRuntime(gatewayUrl)
   }
 })
 

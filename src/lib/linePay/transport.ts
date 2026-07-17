@@ -110,11 +110,40 @@ function parseGatewayTimeout(value: string) {
   return timeoutMs
 }
 
+function parseRawHttpsOrigin(value: string) {
+  if (
+    !/^https:\/\//i.test(value) ||
+    /[\u0000-\u001f\u007f]/u.test(value) ||
+    /\s/u.test(value) ||
+    value.includes('\\') ||
+    value.includes('?') ||
+    value.includes('#')
+  ) {
+    throw transportError('invalid_line_pay_gateway_url')
+  }
+
+  const authority = value.slice('https://'.length)
+  if (!authority || authority.includes('/') || authority.includes('@')) {
+    throw transportError('invalid_line_pay_gateway_url')
+  }
+
+  if (authority.startsWith('[')) {
+    const closingBracket = authority.indexOf(']')
+    if (closingBracket <= 1 || closingBracket !== authority.length - 1) {
+      throw transportError('invalid_line_pay_gateway_url')
+    }
+  } else if (authority.includes(':') || authority.includes('[') || authority.includes(']')) {
+    throw transportError('invalid_line_pay_gateway_url')
+  }
+
+  return value
+}
+
 function normalizeGatewayUrl(value: string) {
   let url: URL
 
   try {
-    url = new URL(value)
+    url = new URL(parseRawHttpsOrigin(value))
   } catch {
     throw transportError('invalid_line_pay_gateway_url')
   }
@@ -127,13 +156,18 @@ function normalizeGatewayUrl(value: string) {
     url.search ||
     url.hash ||
     url.port ||
-    (url.pathname !== '/' && url.pathname !== '')
+    url.pathname !== '/'
   ) {
     throw transportError('invalid_line_pay_gateway_url')
   }
 
   const hostname = url.hostname.replace(/^\[|\]$/g, '').toLowerCase()
-  if (isIP(hostname) !== 0 || hostname === 'localhost' || hostname.endsWith('.localhost')) {
+  if (
+    hostname.endsWith('.') ||
+    isIP(hostname) !== 0 ||
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost')
+  ) {
     throw transportError('invalid_line_pay_gateway_url')
   }
 
@@ -162,11 +196,11 @@ export function getLinePayTransportConfig(
   }
 
   normalizeLinePayEnvironment(environmentValue)
-  const gatewayUrlValue = getEnvValue(env, 'LINE_PAY_GATEWAY_URL')
+  const gatewayUrlValue = env.LINE_PAY_GATEWAY_URL ?? ''
   const keyId = getEnvValue(env, 'LINE_PAY_GATEWAY_KEY_ID')
   const secret = getEnvValue(env, 'LINE_PAY_GATEWAY_SECRET')
 
-  if (!gatewayUrlValue || !keyId || !secret) {
+  if (!gatewayUrlValue.trim() || !keyId || !secret) {
     throw transportError('missing_line_pay_gateway_config')
   }
 

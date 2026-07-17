@@ -773,6 +773,8 @@ curl --fail --silent --show-error "https://linepay-gateway.tsu-waterbottle.com/h
 - `LINE_PAY_GATEWAY_TIMEOUT_MS`
 - `LINE_PAY_GATEWAY_SMOKE_ENABLED=true`
 
+`LINE_PAY_GATEWAY_URL` 必須使用不含尾端 `/` 的 canonical 公開 HTTPS origin。不得加入 hostname 尾點、任何顯式 port（包括 `:443`）、path、dot-segment、query、fragment、userinfo 或 backslash；不得使用 IP 或 localhost。Scheme 與 hostname 大小寫可由 runtime 正規化，公開 IDNA／Punycode hostname 維持允許，但本階段仍應使用上方已核准的 Sandbox domain。
+
 Vercel 自動提供的 `VERCEL_ENV` 必須為 `preview`。不得在 Vercel 建立 `LINE_PAY_GATEWAY_PROXY_TOKEN`；該 token 只存在 Droplet 的 `/etc/line-pay-gateway/proxy.env` 並由 Caddy 注入。
 
 使用既有管理員登入 bearer 授權，以 `POST /api/internal/line-pay/gateway-smoke` 測試固定 non-payment synthetic operation。route 不接受自訂 operation、URL、Gateway headers 或 signed body；Production、Development、未登入、非管理員、開關未啟用或 transport 不是 gateway 都不可用。
