@@ -30,9 +30,12 @@ import {
   AI_CHART_D1_N0_CONTRACT_VERSION,
   AI_CHART_D1_N0_INVALID,
   AI_CHART_D1_PALACE_IDENTITIES,
+  createAiChartD1BorrowedMajorPlacementId,
   createAiChartD1NatalMutagenId,
   createAiChartD1SignalId,
+  createAiChartD1StarPlacementId,
   getAiChartD1CanonicalDoubleMajorStarPair,
+  getAiChartD1NatalMutagenTableCompatibility,
   type AiChartD1MajorStarName,
   type AiChartD1ModeledSupportingStarName,
   type AiChartD1MutagenType,
@@ -55,7 +58,7 @@ export type AiChartD1N0WarningCode =
   (typeof AI_CHART_D1_N0_WARNING_CODES)[number]
 export type AiChartD1N0StructuralStatus = 'ready' | 'partial'
 export type AiChartD1N0NatalMutagenStatus =
-  | 'snapshot_origin_mutagen_trusted'
+  | 'snapshot_origin_mutagen_table_validated'
   | 'snapshot_origin_mutagen_partial'
 export type AiChartD1N0BorrowStatus =
   | 'not_empty'
@@ -674,7 +677,7 @@ function parseReadiness(value: unknown): AiChartD1N0Readiness {
       'partial',
     ] as const),
     natalMutagenStatus: parseAiChartD1Enum(record.natalMutagenStatus, [
-      'snapshot_origin_mutagen_trusted',
+      'snapshot_origin_mutagen_table_validated',
       'snapshot_origin_mutagen_partial',
     ] as const),
     knowledgeStatus: 'k0_required',
@@ -772,6 +775,14 @@ function validatePalaceSemantics(
   ) {
     invalid()
   }
+  if (
+    palaces.some((palace, index) => palace.index !== index) ||
+    relations.some(
+      (relation, index) => relation.palaceId !== palaces[index]?.palaceId,
+    )
+  ) {
+    invalid()
+  }
 
   const expectedRelations = buildAiChartD1N0PalaceRelations(palaces)
   if (!sameJson(relations, expectedRelations)) invalid()
@@ -819,6 +830,12 @@ function validatePalaceSemantics(
           star.sourceCollection !== 'majorStars' ||
           star.sourceIndex !== index ||
           star.sourceOrder !== index ||
+          star.placementId !==
+            createAiChartD1StarPlacementId(
+              palace.palaceId,
+              'majorStars',
+              index,
+            ) ||
           !AI_CHART_D1_MAJOR_STAR_NAMES.includes(star.name as AiChartD1MajorStarName),
       )
     ) {
@@ -843,6 +860,9 @@ function validatePalaceSemantics(
           !source ||
           star.name !== expectedCanonicalNames[index] ||
           star.canonicalOrder !== index ||
+          star.type !== source.type ||
+          star.sourceCollection !== source.sourceCollection ||
+          star.sourceIndex !== source.sourceIndex ||
           star.sourceOrder !== source.sourceOrder ||
           star.natalMutagen !== source.natalMutagen
         )
@@ -861,7 +881,26 @@ function validatePalaceSemantics(
         star.type !== expectedType ||
         star.sourceCollection !== 'minorStars' ||
         star.sourceIndex !== star.sourceOrder ||
+        star.placementId !==
+          createAiChartD1StarPlacementId(
+            palace.palaceId,
+            'minorStars',
+            star.sourceIndex,
+          ) ||
         star.canonicalOrder !== null
+      ) {
+        invalid()
+      }
+    }
+
+    for (const star of palace.excludedStarSummary) {
+      if (
+        star.placementId !==
+        createAiChartD1StarPlacementId(
+          palace.palaceId,
+          star.sourceCollection,
+          star.sourceIndex,
+        )
       ) {
         invalid()
       }
@@ -900,7 +939,10 @@ function validatePalaceSemantics(
     const expectedCanBorrow = expectedStatus === 'eligible_and_borrowed'
     const expectedBorrowed = expectedCanBorrow
       ? opposite.canonicalMajorStars.map((star, index) => ({
-          borrowedPlacementId: `${palace.palaceId}:borrowed:major:${index}`,
+          borrowedPlacementId: createAiChartD1BorrowedMajorPlacementId(
+            palace.palaceId,
+            index,
+          ),
           sourcePlacementId: star.placementId,
           borrowedFromPalaceId: opposite.palaceId,
           name: star.name,
@@ -921,6 +963,13 @@ function validatePalaceSemantics(
 
 function validateN0Semantics(value: AiChartD1N0): void {
   const placements = validatePalaceSemantics(value.palaces, value.relationships)
+  if (
+    value.globalScan.palaceScans.some(
+      (scan, index) => scan.palaceId !== value.palaces[index]?.palaceId,
+    )
+  ) {
+    invalid()
+  }
   const ming = value.palaces.find((palace) => palace.isMingPalace)
   const body = value.palaces.find((palace) => palace.isBodyPalace)
   if (
@@ -958,6 +1007,10 @@ function validateN0Semantics(value: AiChartD1N0): void {
   ) {
     invalid()
   }
+  const mutagenCompatibility = getAiChartD1NatalMutagenTableCompatibility(
+    value.natalMutagens.map(({ type, starName }) => ({ type, starName })),
+  )
+  if (mutagenCompatibility === null) invalid()
 
   const expectedSignals = new Map<string, AiChartD1N0Signal>()
   for (const palace of value.palaces) {
@@ -1061,16 +1114,13 @@ function validateN0Semantics(value: AiChartD1N0): void {
   ) {
     invalid()
   }
-  const quartetComplete = AI_CHART_D1_MUTAGEN_TYPES.every(
-    (type) => value.natalMutagens.filter((item) => item.type === type).length === 1,
-  )
   const structuralPartial =
-    !quartetComplete ||
+    mutagenCompatibility !== 'complete_table_validated' ||
     value.palaces.some((palace) => palace.borrowStatus === 'opposite_empty')
   if (
     value.readiness.natalMutagenStatus !==
-      (quartetComplete
-        ? 'snapshot_origin_mutagen_trusted'
+      (mutagenCompatibility === 'complete_table_validated'
+        ? 'snapshot_origin_mutagen_table_validated'
         : 'snapshot_origin_mutagen_partial') ||
     value.readiness.structuralStatus !==
       (structuralPartial ? 'partial' : 'ready')

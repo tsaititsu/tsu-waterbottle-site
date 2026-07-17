@@ -1,4 +1,5 @@
 import type { EarthlyBranch } from '@/features/ziwei-chart/types/ziwei'
+import { MUTAGEN_TABLE } from '../../features/ziwei-chart/lib/engine/constants'
 import type { AiChartD1PalaceName } from './d1CommonContracts'
 
 export const AI_CHART_D1_N0_CONTRACT_VERSION = 'ai-chart-d1-n0/v1' as const
@@ -244,6 +245,15 @@ const SIGNAL_ID_SUFFIX = Object.freeze({
 
 export type AiChartD1N0SignalType = keyof typeof SIGNAL_ID_SUFFIX
 
+export type AiChartD1NatalMutagenTableAssignment = Readonly<{
+  type: AiChartD1MutagenType
+  starName: string
+}>
+
+export type AiChartD1NatalMutagenTableCompatibility =
+  | 'complete_table_validated'
+  | 'partial_table_compatible'
+
 export function getAiChartD1PalaceIdentity(engineName: string) {
   return AI_CHART_D1_PALACE_IDENTITIES.find(
     (identity) => identity.engineName === engineName,
@@ -261,6 +271,65 @@ export function getAiChartD1CanonicalDoubleMajorStarPair(
         (left === names[1] && right === names[0]),
     ) ?? null
   )
+}
+
+export function createAiChartD1StarPlacementId(
+  palaceId: AiChartD1PalaceId,
+  sourceCollection: 'majorStars' | 'minorStars' | 'adjectiveStars',
+  sourceIndex: number,
+): string {
+  const collectionId =
+    sourceCollection === 'majorStars'
+      ? 'major'
+      : sourceCollection === 'minorStars'
+        ? 'minor'
+        : 'adjective'
+  return `${palaceId}:star:${collectionId}:${sourceIndex}`
+}
+
+export function createAiChartD1BorrowedMajorPlacementId(
+  palaceId: AiChartD1PalaceId,
+  canonicalIndex: number,
+): string {
+  return `${palaceId}:borrowed:major:${canonicalIndex}`
+}
+
+export function getAiChartD1NatalMutagenTableCompatibility(
+  assignments: readonly AiChartD1NatalMutagenTableAssignment[],
+): AiChartD1NatalMutagenTableCompatibility | null {
+  const byType = new Map<AiChartD1MutagenType, string[]>(
+    AI_CHART_D1_MUTAGEN_TYPES.map((type) => [type, []]),
+  )
+  for (const assignment of assignments) {
+    byType.get(assignment.type)?.push(assignment.starName)
+  }
+
+  const everyAssignmentIsCandidate = assignments.every((assignment) => {
+    const typeIndex = AI_CHART_D1_MUTAGEN_TYPES.indexOf(assignment.type)
+    return MUTAGEN_TABLE.some((row) => row[typeIndex] === assignment.starName)
+  })
+  if (!everyAssignmentIsCandidate) return null
+
+  const quartetComplete = AI_CHART_D1_MUTAGEN_TYPES.every(
+    (type) => byType.get(type)?.length === 1,
+  )
+  if (quartetComplete) {
+    return MUTAGEN_TABLE.some((row) =>
+      AI_CHART_D1_MUTAGEN_TYPES.every(
+        (type, index) => byType.get(type)?.[0] === row[index],
+      ),
+    )
+      ? 'complete_table_validated'
+      : null
+  }
+
+  const hasCompatibleRow = MUTAGEN_TABLE.some((row) =>
+    AI_CHART_D1_MUTAGEN_TYPES.every((type, index) => {
+      const candidates = byType.get(type) ?? []
+      return candidates.length === 0 || candidates.includes(row[index])
+    }),
+  )
+  return hasCompatibleRow ? 'partial_table_compatible' : null
 }
 
 export function createAiChartD1NatalMutagenId(

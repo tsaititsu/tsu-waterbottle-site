@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
+import { MUTAGEN_TABLE } from '../../features/ziwei-chart/lib/engine/constants'
 import {
   AI_CHART_D1_DOUBLE_MAJOR_STAR_PAIRS,
   AI_CHART_D1_F1_BLOCKED_STATUS,
+  AI_CHART_D1_MUTAGEN_TYPES,
   AI_CHART_D1_N0_CONTRACT_VERSION,
   AI_CHART_D1_N0_INVALID,
   AI_CHART_D1_PALACE_IDENTITIES,
@@ -102,13 +104,13 @@ function fixtureA(): MutableRecord {
   const snapshot = createBaseSnapshot(3)
   const items = palaces(snapshot)
   items[0].majorStars = [star('紫微', 'major', '化科'), star('七殺', 'major')]
-  items[1].majorStars = [star('武曲', 'major', '化祿')]
-  items[3].majorStars = [star('天同', 'major'), star('太陰', 'major')]
-  items[4].majorStars = [star('廉貞', 'major', '化忌'), star('天相', 'major')]
+  items[1].majorStars = [star('武曲', 'major')]
+  items[3].majorStars = [star('天同', 'major'), star('太陰', 'major', '化忌')]
+  items[4].majorStars = [star('廉貞', 'major'), star('天相', 'major')]
   items[6].majorStars = [star('天府', 'major')]
-  items[8].majorStars = [star('天機', 'major', '化權'), star('巨門', 'major')]
+  items[8].majorStars = [star('天機', 'major', '化祿'), star('巨門', 'major')]
   items[10].majorStars = [star('太陽', 'major')]
-  items[11].majorStars = [star('天梁', 'major')]
+  items[11].majorStars = [star('天梁', 'major', '化權')]
 
   items[0].minorStars = [star('文昌', 'soft'), star('擎羊', 'tough')]
   items[1].minorStars = [star('文曲', 'soft'), star('陀羅', 'tough')]
@@ -129,15 +131,59 @@ function fixtureA(): MutableRecord {
 function fixtureB(): MutableRecord {
   const snapshot = createBaseSnapshot(0)
   const items = palaces(snapshot)
-  items[0].majorStars = [star('天同', 'major', '化祿'), star('太陰', 'major')]
-  items[6].majorStars = [star('紫微', 'major', '化權'), star('七殺', 'major')]
-  items[7].majorStars = [star('武曲', 'major', '化科')]
-  items[8].majorStars = [star('太陽', 'major', '化忌')]
+  items[0].majorStars = [star('天同', 'major', '化科'), star('太陰', 'major')]
+  items[6].majorStars = [star('紫微', 'major'), star('天相', 'major', '化忌')]
+  items[7].majorStars = [star('武曲', 'major', '化權')]
+  items[8].majorStars = [star('太陽', 'major', '化祿')]
   items[9].majorStars = [star('天梁', 'major')]
   items[11].majorStars = [star('紫微', 'major'), star('天府', 'major')]
   items[2].minorStars = [star('擎羊', 'tough')]
   items[3].minorStars = [star('祿存', 'lucun')]
   return snapshot
+}
+
+const MUTAGEN_SUPPORTING_STAR_TYPES: Readonly<Record<string, string>> =
+  Object.freeze({
+    文昌: 'soft',
+    文曲: 'soft',
+    左輔: 'soft',
+    右弼: 'soft',
+  })
+
+function mutagenSnapshot(
+  assignments: readonly Readonly<{
+    starName: string
+    mutagen: (typeof AI_CHART_D1_MUTAGEN_TYPES)[number]
+  }>[],
+): MutableRecord {
+  const snapshot = createBaseSnapshot(0)
+  const items = palaces(snapshot)
+  assignments.forEach(({ starName, mutagen }, index) => {
+    const supportingType = MUTAGEN_SUPPORTING_STAR_TYPES[starName]
+    if (supportingType === undefined) {
+      items[index].majorStars = [star(starName, 'major', mutagen)]
+    } else {
+      items[index].minorStars = [star(starName, supportingType, mutagen)]
+    }
+  })
+  return snapshot
+}
+
+function replaceStringDeep(value: unknown, from: string, to: string): void {
+  if (value === null || typeof value !== 'object') return
+  for (const [key, child] of Object.entries(value)) {
+    if (typeof child === 'string') {
+      ;(value as MutableRecord)[key] = child.replaceAll(from, to)
+    } else {
+      replaceStringDeep(child, from, to)
+    }
+  }
+}
+
+function swapFirstTwo(value: unknown): void {
+  assert.equal(Array.isArray(value), true)
+  const items = value as unknown[]
+  ;[items[0], items[1]] = [items[1], items[0]]
 }
 
 function normalize(snapshot: unknown = fixtureA()) {
@@ -271,6 +317,34 @@ check('N0 contains all twelve deterministic palace IDs and indices', () => {
     result.palaces.map((palace) => palace.palaceId),
     AI_CHART_D1_PALACE_IDENTITIES.map((identity) => identity.palaceId),
   )
+})
+
+check('N0 parser rejects a reordered palace array', () => {
+  const result = structuredClone(normalize()) as MutableRecord
+  swapFirstTwo(result.palaces)
+  assert.throws(() => parseAiChartD1N0(result), {
+    message: AI_CHART_D1_N0_INVALID,
+  })
+})
+
+check('N0 parser rejects synchronized palace and relationship reordering', () => {
+  const result = structuredClone(normalize()) as MutableRecord
+  swapFirstTwo(result.palaces)
+  swapFirstTwo(result.relationships)
+  assert.throws(() => parseAiChartD1N0(result), {
+    message: AI_CHART_D1_N0_INVALID,
+  })
+})
+
+check('N0 parser rejects all three canonical arrays reordered together', () => {
+  const result = structuredClone(normalize()) as MutableRecord
+  swapFirstTwo(result.palaces)
+  swapFirstTwo(result.relationships)
+  const globalScan = result.globalScan as MutableRecord
+  swapFirstTwo(globalScan.palaceScans)
+  assert.throws(() => parseAiChartD1N0(result), {
+    message: AI_CHART_D1_N0_INVALID,
+  })
 })
 
 for (const [label, mutate] of [
@@ -437,6 +511,86 @@ for (const mutagen of ['化祿', '化權', '化科', '化忌'] as const) {
     )
   })
 }
+
+MUTAGEN_TABLE.forEach((row, rowIndex) => {
+  check(`MUTAGEN_TABLE row ${rowIndex} validates as one complete quartet`, () => {
+    const snapshot = mutagenSnapshot(
+      row.map((starName, index) => ({
+        starName,
+        mutagen: AI_CHART_D1_MUTAGEN_TYPES[index],
+      })),
+    )
+    assert.equal(
+      normalize(snapshot).readiness.natalMutagenStatus,
+      'snapshot_origin_mutagen_table_validated',
+    )
+  })
+})
+
+check('a mixed complete quartet from different table rows is rejected', () => {
+  expectInvalid(
+    mutagenSnapshot([
+      { starName: '天機', mutagen: '化祿' },
+      { starName: '破軍', mutagen: '化權' },
+      { starName: '武曲', mutagen: '化科' },
+      { starName: '太陽', mutagen: '化忌' },
+    ]),
+  )
+})
+
+check('a compatible partial mutagen set remains partial', () => {
+  const result = normalize(
+    mutagenSnapshot([
+      { starName: '天機', mutagen: '化祿' },
+      { starName: '天梁', mutagen: '化權' },
+      { starName: '紫微', mutagen: '化科' },
+    ]),
+  )
+  assert.equal(
+    result.readiness.natalMutagenStatus,
+    'snapshot_origin_mutagen_partial',
+  )
+  assert.equal(
+    result.dataWarnings.some(
+      (warning) => warning.code === 'natal_mutagen_missing',
+    ),
+    true,
+  )
+})
+
+check('individually legal but table-incompatible partial assignments are rejected', () => {
+  expectInvalid(
+    mutagenSnapshot([
+      { starName: '天機', mutagen: '化祿' },
+      { starName: '破軍', mutagen: '化權' },
+    ]),
+  )
+})
+
+check('an impossible star and mutagen assignment is rejected', () => {
+  expectInvalid(
+    mutagenSnapshot([{ starName: '紫微', mutagen: '化祿' }]),
+  )
+})
+
+check('duplicate mutagen types stay partial when every assignment is a legal candidate', () => {
+  const result = normalize(
+    mutagenSnapshot([
+      { starName: '廉貞', mutagen: '化祿' },
+      { starName: '天機', mutagen: '化祿' },
+    ]),
+  )
+  assert.equal(
+    result.readiness.natalMutagenStatus,
+    'snapshot_origin_mutagen_partial',
+  )
+  assert.equal(
+    result.dataWarnings.some(
+      (warning) => warning.code === 'natal_mutagen_duplicate_type',
+    ),
+    true,
+  )
+})
 
 check('duplicate mutagen IDs are rejected by N0 parser', () => {
   const result = structuredClone(normalize()) as MutableRecord
@@ -629,6 +783,54 @@ check('N0 parser rejects duplicate placement IDs', () => {
   const stars1 = items[1].sourceMajorStars as MutableRecord[]
   stars1[0].placementId = stars0[0].placementId
   assert.throws(() => parseAiChartD1N0(result), { message: AI_CHART_D1_N0_INVALID })
+})
+
+check('synchronized placement and mutagen reference replacement is rejected', () => {
+  const result = structuredClone(normalize()) as MutableRecord
+  replaceStringDeep(
+    result,
+    'palace:ming:star:major:0',
+    'palace:ming:star:major:99',
+  )
+  assert.throws(() => parseAiChartD1N0(result), {
+    message: AI_CHART_D1_N0_INVALID,
+  })
+})
+
+check('synchronized placement and signal reference replacement is rejected', () => {
+  const result = structuredClone(normalize()) as MutableRecord
+  replaceStringDeep(
+    result,
+    'palace:ming:star:minor:1',
+    'palace:ming:star:minor:99',
+  )
+  assert.throws(() => parseAiChartD1N0(result), {
+    message: AI_CHART_D1_N0_INVALID,
+  })
+})
+
+check('synchronized placement and borrowed source reference replacement is rejected', () => {
+  const result = structuredClone(normalize(fixtureB())) as MutableRecord
+  replaceStringDeep(
+    result,
+    'palace:parents:star:major:0',
+    'palace:parents:star:major:99',
+  )
+  assert.throws(() => parseAiChartD1N0(result), {
+    message: AI_CHART_D1_N0_INVALID,
+  })
+})
+
+check('a non-deterministic excluded-star placement ID is rejected', () => {
+  const result = structuredClone(normalize()) as MutableRecord
+  replaceStringDeep(
+    result,
+    'palace:travel:star:minor:0',
+    'palace:travel:star:minor:99',
+  )
+  assert.throws(() => parseAiChartD1N0(result), {
+    message: AI_CHART_D1_N0_INVALID,
+  })
 })
 
 check('invalid chart ID is rejected without echo', () => {

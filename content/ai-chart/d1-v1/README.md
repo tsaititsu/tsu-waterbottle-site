@@ -61,7 +61,12 @@ P1 Structural Input 明確標記 `openAiCallable: false`，不得直接送入 Ad
 
 N0 使用 immutable Canonical Snapshot 作為唯一命盤來源，deterministic
 建立宮位 ID、合法雙主星 canonical order、十二宮關係、生年四化 placement
-索引、空宮借星與全盤煞忌掃描。Snapshot 的 `lunarDate`、
+索引、空宮借星與全盤煞忌掃描。完整四化必須共同匹配正式排盤引擎
+`MUTAGEN_TABLE` 的同一列，才會標記
+`snapshot_origin_mutagen_table_validated`；缺項或重複類型只會標記
+`snapshot_origin_mutagen_partial`，且現有 assignment 仍須與正式表相容。
+這項檢查只驗證 Snapshot 已提供的 origin mutagen，不會從出生日期或年干
+重算。Snapshot 的 `lunarDate`、
 `fiveElementsClass`、`decadal` 與 `ages` 不會進入 N0。
 
 N0 保留宮干只供未來飛化來源接線，並明確標記
@@ -75,6 +80,11 @@ P1 Structural Input 使用獨立版本
 scan。它不含完整 N0、素材全文、Prompt 或 flying transformations；
 `knowledgeStatus` 固定為 `k0_required`、`promptStatus` 固定為
 `prompt_builder_required`，且 `openAiCallable` 固定為 `false`。
+N0 與 P1 parser 會依宮位、來源 collection 與 source index 重建 placement
+ID 並做 exact equality；N0 的 palaces、relationships、palace scans 及 P1 的
+call ID 對應均固定依宮位 index 0～11 排列。P1 internal JSON Schema 的主星、
+輔星、source index 與 scan count 邊界與 runtime parser 保持一致；該 Schema
+仍只供內部 Contract 描述與測試，不會送入 OpenAI Adapter。
 
 ## P1／F1 輸出 Contract 邊界
 

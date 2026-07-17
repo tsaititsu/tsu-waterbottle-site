@@ -81,10 +81,10 @@ function syntheticSnapshot(): MutableRecord {
     })),
   }
   const palaces = snapshot.palaces as MutableRecord[]
-  palaces[0].majorStars = [star('天同', 'major', '化祿'), star('太陰', 'major')]
-  palaces[6].majorStars = [star('紫微', 'major', '化權'), star('七殺', 'major')]
-  palaces[7].majorStars = [star('武曲', 'major', '化科')]
-  palaces[8].majorStars = [star('太陽', 'major', '化忌')]
+  palaces[0].majorStars = [star('天同', 'major', '化科'), star('太陰', 'major')]
+  palaces[6].majorStars = [star('紫微', 'major'), star('天相', 'major', '化忌')]
+  palaces[7].majorStars = [star('武曲', 'major', '化權')]
+  palaces[8].majorStars = [star('太陽', 'major', '化祿')]
   palaces[9].majorStars = [star('天梁', 'major')]
   palaces[11].majorStars = [star('紫微', 'major'), star('天府', 'major')]
   palaces[2].minorStars = [star('擎羊', 'tough')]
@@ -114,6 +114,26 @@ function expectP1Invalid(value: unknown, marker?: string) {
     assert.equal(error.message, AI_CHART_D1_P1_INPUT_INVALID)
     if (marker) assert.equal(error.message.includes(marker), false)
   }
+}
+
+function replaceStringDeep(value: unknown, from: string, to: string): void {
+  if (value === null || typeof value !== 'object') return
+  for (const [key, child] of Object.entries(value)) {
+    if (typeof child === 'string') {
+      ;(value as MutableRecord)[key] = child.replaceAll(from, to)
+    } else {
+      replaceStringDeep(child, from, to)
+    }
+  }
+}
+
+function schemaProperties(value: unknown): MutableRecord {
+  assert.equal(typeof value, 'object')
+  assert.notEqual(value, null)
+  const properties = (value as MutableRecord).properties
+  assert.equal(typeof properties, 'object')
+  assert.notEqual(properties, null)
+  return properties as MutableRecord
 }
 
 function recursivelyAssertForbiddenKeysAbsent(value: unknown) {
@@ -190,6 +210,13 @@ check('all twelve target palaces are covered once', () => {
   assert.equal(new Set(inputs.map((input) => input.targetPalace.palaceId)).size, 12)
 })
 
+check('P1 input order is fixed to target indices zero through eleven', () => {
+  assert.deepEqual(
+    createInputs().inputs.map((input) => input.targetPalace.index),
+    [...Array(12).keys()],
+  )
+})
+
 for (let index = 0; index < 12; index += 1) {
   check(`P1 input ${index} has correct target relations`, () => {
     const { inputs } = createInputs()
@@ -215,6 +242,18 @@ check('call IDs are unique and trusted IDs are consistent', () => {
   assert.equal(new Set(inputs.map((input) => input.runId)).size, 1)
   assert.equal(inputs[0].chartId, 'chart:synthetic-p1')
   assert.equal(inputs[0].runId, 'run:synthetic-p1')
+  assert.deepEqual(
+    inputs.map((input) => input.callId),
+    Array.from({ length: 12 }, (_, index) => `call:synthetic-p1:${index}`),
+  )
+  assert.equal(
+    inputs.every(
+      (input, index) =>
+        input.callId === `call:synthetic-p1:${input.targetPalace.index}` &&
+        input.targetPalace.index === index,
+    ),
+    true,
+  )
 })
 
 check('readiness is explicit and OpenAI cannot be called', () => {
@@ -313,6 +352,78 @@ check('unknown P1 field is rejected', () => {
   expectP1Invalid(input)
 })
 
+check('P1 standalone parser rejects a non-deterministic major placement ID', () => {
+  const input = structuredClone(createInputs().inputs[0]) as MutableRecord
+  replaceStringDeep(
+    input,
+    'palace:ming:star:major:1',
+    'palace:ming:star:major:99',
+  )
+  expectP1Invalid(input)
+})
+
+check('P1 standalone parser rejects a synchronized signal placement mutation', () => {
+  const input = structuredClone(createInputs().inputs[2]) as MutableRecord
+  replaceStringDeep(
+    input,
+    'palace:spouse:star:minor:0',
+    'palace:spouse:star:minor:99',
+  )
+  expectP1Invalid(input)
+})
+
+check('P1 standalone parser rejects a synchronized borrowed source mutation', () => {
+  const input = structuredClone(createInputs().inputs[1]) as MutableRecord
+  replaceStringDeep(
+    input,
+    'palace:friends:star:major:0',
+    'palace:friends:star:major:99',
+  )
+  expectP1Invalid(input)
+})
+
+check('sourceIndex 128 is rejected by the P1 runtime parser', () => {
+  const input = structuredClone(createInputs().inputs[0]) as MutableRecord
+  const target = input.targetPalace as MutableRecord
+  const stars = target.canonicalMajorStars as MutableRecord[]
+  stars[0].sourceIndex = 128
+  expectP1Invalid(input)
+})
+
+check('a major star with flower type is rejected', () => {
+  const input = structuredClone(createInputs().inputs[0]) as MutableRecord
+  const target = input.targetPalace as MutableRecord
+  const stars = target.canonicalMajorStars as MutableRecord[]
+  stars[0].type = 'flower'
+  expectP1Invalid(input)
+})
+
+check('a major star with adjectiveStars collection is rejected', () => {
+  const input = structuredClone(createInputs().inputs[0]) as MutableRecord
+  const target = input.targetPalace as MutableRecord
+  const stars = target.canonicalMajorStars as MutableRecord[]
+  stars[0].sourceCollection = 'adjectiveStars'
+  expectP1Invalid(input)
+})
+
+for (const type of ['adjective', 'helper', 'tianma']) {
+  check(`a supporting star with ${type} type is rejected`, () => {
+    const input = structuredClone(createInputs().inputs[2]) as MutableRecord
+    const target = input.targetPalace as MutableRecord
+    const stars = target.modeledSupportingStars as MutableRecord[]
+    stars[0].type = type
+    expectP1Invalid(input)
+  })
+}
+
+check('a supporting star with adjectiveStars collection is rejected', () => {
+  const input = structuredClone(createInputs().inputs[2]) as MutableRecord
+  const target = input.targetPalace as MutableRecord
+  const stars = target.modeledSupportingStars as MutableRecord[]
+  stars[0].sourceCollection = 'adjectiveStars'
+  expectP1Invalid(input)
+})
+
 check('duplicate call IDs are rejected before building inputs', () => {
   const { n0 } = createInputs()
   assert.throws(
@@ -390,6 +501,70 @@ check('fixed safe P1 error never leaks malformed content', () => {
   const input = structuredClone(createInputs().inputs[0]) as MutableRecord
   input.task = marker
   expectP1Invalid(input, marker)
+})
+
+check('internal star schemas match the runtime parser boundaries', () => {
+  const root = schemaProperties(AI_CHART_D1_P1_STRUCTURAL_INPUT_JSON_SCHEMA)
+  const palace = schemaProperties(root.targetPalace)
+  const majorArray = palace.canonicalMajorStars as MutableRecord
+  const supportingArray = palace.modeledSupportingStars as MutableRecord
+  const major = schemaProperties(majorArray.items)
+  const supporting = schemaProperties(supportingArray.items)
+
+  assert.equal((major.sourceIndex as MutableRecord).minimum, 0)
+  assert.equal((major.sourceIndex as MutableRecord).maximum, 127)
+  assert.deepEqual((major.name as MutableRecord).enum, [
+    '紫微',
+    '天機',
+    '太陽',
+    '武曲',
+    '天同',
+    '廉貞',
+    '天府',
+    '太陰',
+    '貪狼',
+    '巨門',
+    '天相',
+    '天梁',
+    '七殺',
+    '破軍',
+  ])
+  assert.deepEqual((major.type as MutableRecord).enum, ['major'])
+  assert.deepEqual((major.sourceCollection as MutableRecord).enum, [
+    'majorStars',
+  ])
+  assert.deepEqual((major.canonicalOrder as MutableRecord).type, [
+    'integer',
+    'null',
+  ])
+
+  assert.equal((supporting.sourceIndex as MutableRecord).minimum, 0)
+  assert.equal((supporting.sourceIndex as MutableRecord).maximum, 127)
+  assert.deepEqual((supporting.type as MutableRecord).enum, [
+    'soft',
+    'tough',
+    'lucun',
+  ])
+  assert.deepEqual((supporting.sourceCollection as MutableRecord).enum, [
+    'minorStars',
+  ])
+  assert.equal((supporting.canonicalOrder as MutableRecord).type, 'null')
+})
+
+check('internal count schemas match runtime maxima', () => {
+  const root = schemaProperties(AI_CHART_D1_P1_STRUCTURAL_INPUT_JSON_SCHEMA)
+  const scan = schemaProperties(root.targetGlobalScan)
+  for (const field of [
+    'directCount',
+    'oppositeCount',
+    'hiddenCombinationCount',
+    'trineCount',
+  ]) {
+    assert.equal((scan[field] as MutableRecord).minimum, 0)
+    assert.equal((scan[field] as MutableRecord).maximum, 128)
+  }
+  assert.equal((scan.totalRelevantCount as MutableRecord).minimum, 0)
+  assert.equal((scan.totalRelevantCount as MutableRecord).maximum, 512)
 })
 
 check('internal schema is strict, serializable, frozen, and has no uniqueItems', () => {

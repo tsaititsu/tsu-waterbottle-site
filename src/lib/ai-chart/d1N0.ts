@@ -27,9 +27,12 @@ import {
   AI_CHART_D1_MUTAGEN_TYPES,
   AI_CHART_D1_N0_CONTRACT_VERSION,
   AI_CHART_D1_PALACE_IDENTITIES,
+  createAiChartD1BorrowedMajorPlacementId,
   createAiChartD1NatalMutagenId,
   createAiChartD1SignalId,
+  createAiChartD1StarPlacementId,
   getAiChartD1CanonicalDoubleMajorStarPair,
+  getAiChartD1NatalMutagenTableCompatibility,
   getAiChartD1PalaceIdentity,
   type AiChartD1MajorStarName,
   type AiChartD1ModeledSupportingStarName,
@@ -47,7 +50,6 @@ import {
   type AiChartD1N0NatalMutagen,
   type AiChartD1N0Palace,
   type AiChartD1N0Signal,
-  type AiChartD1N0SourceCollection,
   type AiChartD1N0StarPlacement,
   type AiChartD1N0StarType,
   type AiChartD1N0Warning,
@@ -314,20 +316,6 @@ function parseSnapshot(value: unknown): ParsedSnapshot {
   return Object.freeze({ palaces })
 }
 
-function placementId(
-  palaceId: AiChartD1PalaceId,
-  collection: AiChartD1N0SourceCollection,
-  index: number,
-): string {
-  const collectionId =
-    collection === 'majorStars'
-      ? 'major'
-      : collection === 'minorStars'
-        ? 'minor'
-        : 'adjective'
-  return `${palaceId}:star:${collectionId}:${index}`
-}
-
 function buildMajorStars(
   palaceId: AiChartD1PalaceId,
   stars: readonly ParsedSnapshotStar[],
@@ -358,7 +346,11 @@ function buildMajorStars(
   const source = Object.freeze(
     stars.map((star, index) =>
       Object.freeze({
-        placementId: placementId(palaceId, 'majorStars', index),
+        placementId: createAiChartD1StarPlacementId(
+          palaceId,
+          'majorStars',
+          index,
+        ),
         name: star.name,
         type: 'major' as const,
         sourceCollection: 'majorStars' as const,
@@ -402,7 +394,7 @@ function buildOtherStars(
       AI_CHART_D1_MODELED_SUPPORTING_STARS[
         star.name as AiChartD1ModeledSupportingStarName
       ]
-    const id = placementId(palaceId, collection, index)
+    const id = createAiChartD1StarPlacementId(palaceId, collection, index)
     if (expectedType !== undefined) {
       if (collection !== 'minorStars' || star.type !== expectedType) invalid()
       modeled.push(
@@ -504,7 +496,10 @@ function buildPalaces(basePalaces: readonly BasePalace[]): readonly AiChartD1N0P
       const borrowed = canBorrow
         ? opposite.canonicalMajorStars.map((star, index) =>
             Object.freeze({
-              borrowedPlacementId: `${palace.palaceId}:borrowed:major:${index}`,
+              borrowedPlacementId: createAiChartD1BorrowedMajorPlacementId(
+                palace.palaceId,
+                index,
+              ),
               sourcePlacementId: star.placementId,
               borrowedFromPalaceId: opposite.palaceId,
               name: star.name as AiChartD1MajorStarName,
@@ -680,6 +675,10 @@ function buildRawN0(snapshot: ParsedSnapshot, chartId: string): AiChartD1N0 {
   const palaces = buildPalaces(basePalaces)
   const relationships = buildAiChartD1N0PalaceRelations(palaces)
   const natalMutagens = buildNatalMutagens(palaces)
+  const mutagenCompatibility = getAiChartD1NatalMutagenTableCompatibility(
+    natalMutagens.map(({ type, starName }) => ({ type, starName })),
+  )
+  if (mutagenCompatibility === null) invalid()
   const dataWarnings = buildWarnings(palaces, natalMutagens)
   const signals = buildSignals(palaces)
   const signalIdsFor = (palaceIds: readonly string[]) =>
@@ -758,9 +757,10 @@ function buildRawN0(snapshot: ParsedSnapshot, chartId: string): AiChartD1N0 {
     dataWarnings,
     readiness: Object.freeze({
       structuralStatus: structuralPartial ? 'partial' : 'ready',
-      natalMutagenStatus: quartetComplete
-        ? 'snapshot_origin_mutagen_trusted'
-        : 'snapshot_origin_mutagen_partial',
+      natalMutagenStatus:
+        mutagenCompatibility === 'complete_table_validated'
+          ? 'snapshot_origin_mutagen_table_validated'
+          : 'snapshot_origin_mutagen_partial',
       knowledgeStatus: 'k0_required',
       promptStatus: 'prompt_builder_required',
       openAiCallable: false,

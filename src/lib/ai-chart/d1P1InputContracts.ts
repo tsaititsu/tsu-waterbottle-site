@@ -31,7 +31,11 @@ import {
   AI_CHART_D1_P1_STRUCTURAL_INPUT_CONTRACT_VERSION,
   AI_CHART_D1_P1_INPUT_INVALID,
   AI_CHART_D1_TRINE_GROUPS,
+  createAiChartD1BorrowedMajorPlacementId,
+  createAiChartD1SignalId,
+  createAiChartD1StarPlacementId,
   getAiChartD1CanonicalDoubleMajorStarPair,
+  type AiChartD1ModeledSupportingStarName,
   type AiChartD1MutagenType,
   type AiChartD1PalaceId,
 } from './d1N0Constants'
@@ -132,20 +136,15 @@ export class AiChartD1P1InputError extends Error {
   }
 }
 
-const STAR_TYPES = Object.freeze([
-  'major',
+const P1_SUPPORTING_STAR_NAMES = Object.freeze(
+  Object.keys(
+    AI_CHART_D1_MODELED_SUPPORTING_STARS,
+  ) as AiChartD1ModeledSupportingStarName[],
+)
+const P1_SUPPORTING_STAR_TYPES = Object.freeze([
   'soft',
   'tough',
-  'adjective',
-  'flower',
-  'helper',
   'lucun',
-  'tianma',
-] as const)
-const SOURCE_COLLECTIONS = Object.freeze([
-  'majorStars',
-  'minorStars',
-  'adjectiveStars',
 ] as const)
 const BORROW_STATUSES = Object.freeze([
   'not_empty',
@@ -278,11 +277,14 @@ function parseStar(value: unknown): AiChartD1P1StructuralStar {
   return Object.freeze({
     placementId: parseAiChartD1Id(record.placementId),
     name: parseAiChartD1Text(record.name, AI_CHART_D1_MAX_SHORT_TEXT_LENGTH),
-    type: parseAiChartD1Enum(record.type, STAR_TYPES),
-    sourceCollection: parseAiChartD1Enum(
-      record.sourceCollection,
-      SOURCE_COLLECTIONS,
-    ),
+    type: parseAiChartD1Enum(record.type, [
+      'major',
+      ...P1_SUPPORTING_STAR_TYPES,
+    ] as const),
+    sourceCollection: parseAiChartD1Enum(record.sourceCollection, [
+      'majorStars',
+      'minorStars',
+    ] as const),
     sourceIndex: parseInteger(record.sourceIndex, 0, 127),
     canonicalOrder:
       record.canonicalOrder === null
@@ -290,6 +292,37 @@ function parseStar(value: unknown): AiChartD1P1StructuralStar {
         : parseInteger(record.canonicalOrder, 0, 1),
     natalMutagen: parseNullableMutagen(record.natalMutagen),
   })
+}
+
+function parseMajorStar(value: unknown): AiChartD1P1StructuralStar {
+  const star = parseStar(value)
+  if (
+    star.type !== 'major' ||
+    star.sourceCollection !== 'majorStars' ||
+    !AI_CHART_D1_MAJOR_STAR_NAMES.includes(
+      star.name as (typeof AI_CHART_D1_MAJOR_STAR_NAMES)[number],
+    )
+  ) {
+    invalid()
+  }
+  return star
+}
+
+function parseSupportingStar(value: unknown): AiChartD1P1StructuralStar {
+  const star = parseStar(value)
+  const expectedType =
+    AI_CHART_D1_MODELED_SUPPORTING_STARS[
+      star.name as AiChartD1ModeledSupportingStarName
+    ]
+  if (
+    expectedType === undefined ||
+    star.type !== expectedType ||
+    star.sourceCollection !== 'minorStars' ||
+    star.canonicalOrder !== null
+  ) {
+    invalid()
+  }
+  return star
 }
 
 function parseBorrowedStar(value: unknown): AiChartD1N0BorrowedMajorStar {
@@ -339,13 +372,13 @@ function parsePalace(value: unknown): AiChartD1P1StructuralPalace {
       record.canonicalMajorStars,
       0,
       2,
-      parseStar,
+      parseMajorStar,
     ),
     modeledSupportingStars: parseArray(
       record.modeledSupportingStars,
       0,
       32,
-      parseStar,
+      parseSupportingStar,
     ),
     isEmptyOfMajorStars: parseAiChartD1Boolean(record.isEmptyOfMajorStars),
     borrowStatus: parseAiChartD1Enum(record.borrowStatus, BORROW_STATUSES),
@@ -490,6 +523,12 @@ function validatePalaceSemantics(palace: AiChartD1P1StructuralPalace): void {
       (star, index) =>
         star.type !== 'major' ||
         star.sourceCollection !== 'majorStars' ||
+        star.placementId !==
+          createAiChartD1StarPlacementId(
+            palace.palaceId,
+            'majorStars',
+            star.sourceIndex,
+          ) ||
         star.canonicalOrder !== index ||
         !AI_CHART_D1_MAJOR_STAR_NAMES.includes(
           star.name as (typeof AI_CHART_D1_MAJOR_STAR_NAMES)[number],
@@ -509,6 +548,12 @@ function validatePalaceSemantics(palace: AiChartD1P1StructuralPalace): void {
         expectedType === undefined ||
         star.type !== expectedType ||
         star.sourceCollection !== 'minorStars' ||
+        star.placementId !==
+          createAiChartD1StarPlacementId(
+            palace.palaceId,
+            'minorStars',
+            star.sourceIndex,
+          ) ||
         star.canonicalOrder !== null
       )
     })
@@ -559,6 +604,20 @@ function validatePalaceSemantics(palace: AiChartD1P1StructuralPalace): void {
       palace.borrowedMajorStars.length === 0 ||
       palace.borrowedMajorStars.some(
         (star, index) =>
+          star.borrowedPlacementId !==
+            createAiChartD1BorrowedMajorPlacementId(
+              palace.palaceId,
+              index,
+            ) ||
+          ![0, 1].some(
+            (sourceIndex) =>
+              star.sourcePlacementId ===
+              createAiChartD1StarPlacementId(
+                star.borrowedFromPalaceId,
+                'majorStars',
+                sourceIndex,
+              ),
+          ) ||
           star.borrowedFromPalaceId !== palace.oppositePalaceId ||
           star.canonicalOrder !== index,
       )
@@ -622,7 +681,10 @@ function validateTargetRelations(
   const expectedBorrowed =
     expectedBorrowStatus === 'eligible_and_borrowed'
       ? opposite.canonicalMajorStars.map((star, index) => ({
-          borrowedPlacementId: `${target.palaceId}:borrowed:major:${index}`,
+          borrowedPlacementId: createAiChartD1BorrowedMajorPlacementId(
+            target.palaceId,
+            index,
+          ),
           sourcePlacementId: star.placementId,
           borrowedFromPalaceId: opposite.palaceId,
           name: star.name,
@@ -700,6 +762,44 @@ function parseInput(value: unknown): AiChartD1P1StructuralInput {
     hiddenCombinationPalace.palaceId,
     ...otherTrinePalaces.map((palace) => palace.palaceId),
   ])
+  const relevantPalaces = [
+    targetPalace,
+    oppositePalace,
+    hiddenCombinationPalace,
+    ...otherTrinePalaces,
+  ]
+  const placementOwners = new Map<
+    string,
+    Readonly<{
+      palaceId: AiChartD1PalaceId
+      star: AiChartD1P1StructuralStar
+    }>
+  >()
+  for (const palace of relevantPalaces) {
+    for (const star of [
+      ...palace.canonicalMajorStars,
+      ...palace.modeledSupportingStars,
+    ]) {
+      if (placementOwners.has(star.placementId)) invalid()
+      placementOwners.set(star.placementId, {
+        palaceId: palace.palaceId,
+        star,
+      })
+    }
+  }
+  const signalsAreDeterministic = allScanSignals.every((signal) => {
+    const source = placementOwners.get(signal.starPlacementId)
+    return (
+      source !== undefined &&
+      source.palaceId === signal.palaceId &&
+      source.star.name === signal.starName &&
+      signal.signalId ===
+        createAiChartD1SignalId(signal.starPlacementId, signal.signalType) &&
+      (signal.signalType === '生年化忌'
+        ? source.star.natalMutagen === '化忌'
+        : source.star.name === signal.signalType)
+    )
+  })
   const structuralStatus = parseAiChartD1Enum(record.structuralStatus, [
     'ready',
     'partial',
@@ -751,12 +851,7 @@ function parseInput(value: unknown): AiChartD1P1StructuralInput {
     ) ||
     new Set(allScanSignals.map((signal) => signal.signalId)).size !==
       allScanSignals.length ||
-    allScanSignals.some(
-      (signal) =>
-        (signal.signalType === '生年化忌'
-          ? false
-          : signal.signalType !== signal.starName),
-    ) ||
+    !signalsAreDeterministic ||
     structuralStatus !== (shouldBePartial ? 'partial' : 'ready')
   ) {
     invalid()
@@ -974,7 +1069,12 @@ export function buildAiChartD1P1StructuralInputs(
     if (
       inputs.length !== 12 ||
       new Set(inputs.map((input) => input.callId)).size !== 12 ||
-      new Set(inputs.map((input) => input.targetPalace.palaceId)).size !== 12
+      new Set(inputs.map((input) => input.targetPalace.palaceId)).size !== 12 ||
+      inputs.some(
+        (input, index) =>
+          input.targetPalace.index !== index ||
+          input.callId !== identity.callIds[index],
+      )
     ) {
       invalid()
     }
@@ -998,27 +1098,41 @@ const NULLABLE_MUTAGEN_SCHEMA = freezeAiChartD1Value({
   enum: [...AI_CHART_D1_MUTAGEN_TYPES, null],
 })
 const NULL_SCHEMA = freezeAiChartD1Value({ type: 'null' })
-const INTEGER_SCHEMA = freezeAiChartD1Value({
+const SOURCE_INDEX_SCHEMA = freezeAiChartD1Value({
   type: 'integer',
   minimum: 0,
-  maximum: 512,
+  maximum: 127,
 })
-
-const STAR_SCHEMA = createAiChartD1StrictObjectSchema({
+const MAJOR_STAR_SCHEMA = createAiChartD1StrictObjectSchema({
   placementId: ID_SCHEMA,
   name: createAiChartD1StringSchema({
-    maximumLength: AI_CHART_D1_MAX_SHORT_TEXT_LENGTH,
+    enumValues: AI_CHART_D1_MAJOR_STAR_NAMES,
   }),
-  type: createAiChartD1StringSchema({ enumValues: STAR_TYPES }),
+  type: createAiChartD1StringSchema({ enumValues: ['major'] }),
   sourceCollection: createAiChartD1StringSchema({
-    enumValues: SOURCE_COLLECTIONS,
+    enumValues: ['majorStars'],
   }),
-  sourceIndex: INTEGER_SCHEMA,
+  sourceIndex: SOURCE_INDEX_SCHEMA,
   canonicalOrder: freezeAiChartD1Value({
     type: ['integer', 'null'],
     minimum: 0,
     maximum: 1,
   }),
+  natalMutagen: NULLABLE_MUTAGEN_SCHEMA,
+})
+const SUPPORTING_STAR_SCHEMA = createAiChartD1StrictObjectSchema({
+  placementId: ID_SCHEMA,
+  name: createAiChartD1StringSchema({
+    enumValues: P1_SUPPORTING_STAR_NAMES,
+  }),
+  type: createAiChartD1StringSchema({
+    enumValues: P1_SUPPORTING_STAR_TYPES,
+  }),
+  sourceCollection: createAiChartD1StringSchema({
+    enumValues: ['minorStars'],
+  }),
+  sourceIndex: SOURCE_INDEX_SCHEMA,
+  canonicalOrder: NULL_SCHEMA,
   natalMutagen: NULLABLE_MUTAGEN_SCHEMA,
 })
 const BORROWED_STAR_SCHEMA = createAiChartD1StrictObjectSchema({
@@ -1044,12 +1158,15 @@ const PALACE_SCHEMA = createAiChartD1StrictObjectSchema({
   }),
   isMingPalace: freezeAiChartD1Value({ type: 'boolean' }),
   isBodyPalace: freezeAiChartD1Value({ type: 'boolean' }),
-  canonicalMajorStars: createAiChartD1ArraySchema(STAR_SCHEMA, {
+  canonicalMajorStars: createAiChartD1ArraySchema(MAJOR_STAR_SCHEMA, {
     maximumItems: 2,
   }),
-  modeledSupportingStars: createAiChartD1ArraySchema(STAR_SCHEMA, {
-    maximumItems: 32,
-  }),
+  modeledSupportingStars: createAiChartD1ArraySchema(
+    SUPPORTING_STAR_SCHEMA,
+    {
+      maximumItems: 32,
+    },
+  ),
   isEmptyOfMajorStars: freezeAiChartD1Value({ type: 'boolean' }),
   borrowStatus: createAiChartD1StringSchema({ enumValues: BORROW_STATUSES }),
   borrowBlockerPlacementIds: createAiChartD1ArraySchema(ID_SCHEMA),
@@ -1074,6 +1191,16 @@ const SIGNAL_SCHEMA = createAiChartD1StrictObjectSchema({
   }),
 })
 const SIGNAL_ARRAY_SCHEMA = createAiChartD1ArraySchema(SIGNAL_SCHEMA)
+const SIGNAL_COUNT_SCHEMA = freezeAiChartD1Value({
+  type: 'integer',
+  minimum: 0,
+  maximum: 128,
+})
+const TOTAL_RELEVANT_COUNT_SCHEMA = freezeAiChartD1Value({
+  type: 'integer',
+  minimum: 0,
+  maximum: 512,
+})
 const SCAN_SCHEMA = createAiChartD1StrictObjectSchema({
   palaceId: PALACE_ID_SCHEMA,
   completeness: createAiChartD1StringSchema({
@@ -1083,11 +1210,11 @@ const SCAN_SCHEMA = createAiChartD1StrictObjectSchema({
   oppositeSignals: SIGNAL_ARRAY_SCHEMA,
   hiddenCombinationSignals: SIGNAL_ARRAY_SCHEMA,
   trineSignals: SIGNAL_ARRAY_SCHEMA,
-  directCount: INTEGER_SCHEMA,
-  oppositeCount: INTEGER_SCHEMA,
-  hiddenCombinationCount: INTEGER_SCHEMA,
-  trineCount: INTEGER_SCHEMA,
-  totalRelevantCount: INTEGER_SCHEMA,
+  directCount: SIGNAL_COUNT_SCHEMA,
+  oppositeCount: SIGNAL_COUNT_SCHEMA,
+  hiddenCombinationCount: SIGNAL_COUNT_SCHEMA,
+  trineCount: SIGNAL_COUNT_SCHEMA,
+  totalRelevantCount: TOTAL_RELEVANT_COUNT_SCHEMA,
 })
 const WARNING_SCHEMA = createAiChartD1StrictObjectSchema({
   warningId: ID_SCHEMA,
