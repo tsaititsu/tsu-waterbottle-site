@@ -4,6 +4,7 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly expected_environment_file="/etc/line-pay-gateway/proxy.env"
 readonly expected_exec_start="/usr/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"
+readonly expected_exec_reload="/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force"
 
 # shellcheck source=secure-log-directory.sh
 source "$script_dir/secure-log-directory.sh"
@@ -55,10 +56,11 @@ validate_installed_drop_in() {
 validate_effective_unit() {
   local unit_source="$1"
   local current_section=""
-  local raw_line line value
+  local raw_line line directive value
   local user_name=""
   local group_name=""
   local -a exec_starts=()
+  local -a exec_reloads=()
   local -a environment_files=()
 
   if [[ "$unit_source" != "-" ]]; then
@@ -68,45 +70,66 @@ validate_effective_unit() {
   while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
     line="${raw_line%$'\r'}"
 
-    if [[ "$line" =~ ^\[[^]]+\]$ ]]; then
-      current_section="$line"
+    if [[ "$line" =~ ^[[:space:]]*(\[[^]]+\])[[:space:]]*$ ]]; then
+      current_section="${BASH_REMATCH[1]}"
       continue
     fi
     [[ "$current_section" == "[Service]" ]] || continue
     [[ -n "$line" && ! "$line" =~ ^[[:space:]]*[#\;] ]] || continue
 
-    case "$line" in
-      ExecStart=*)
-        value="${line#ExecStart=}"
+    if [[ "$line" == *\\ ]]; then
+      validation_error "line continuations in the effective Service section are not supported"
+      return
+    fi
+    if [[ ! "$line" =~ ^[[:space:]]*([A-Za-z][A-Za-z0-9]*)[[:space:]]*=(.*)$ ]]; then
+      validation_error "unable to parse an effective Service directive"
+      return
+    fi
+    directive="${BASH_REMATCH[1]}"
+    value="${BASH_REMATCH[2]}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+
+    case "$directive" in
+      ExecStart)
         if [[ -z "$value" ]]; then
           exec_starts=()
         else
           exec_starts+=("$value")
         fi
         ;;
-      ExecReload=*)
-        value="${line#ExecReload=}"
-        if [[ "$value" == *"--environ"* || "$value" =~ (^|[[:space:]])environ($|[[:space:]]) ]]; then
-          validation_error "effective ExecReload must not display the environment"
-          return
+      ExecReload)
+        if [[ -z "$value" ]]; then
+          exec_reloads=()
+        else
+          exec_reloads+=("$value")
         fi
         ;;
-      EnvironmentFile=*)
-        value="${line#EnvironmentFile=}"
-        environment_files+=("$value")
+      EnvironmentFile)
+        if [[ -z "$value" ]]; then
+          environment_files=()
+        else
+          environment_files+=("$value")
+        fi
         ;;
-      Environment=*)
-        value="${line#Environment=}"
+      Environment)
         if [[ "$value" == *"LINE_PAY_GATEWAY_"* || "$value" == *"LINE_PAY_CHANNEL_"* ]]; then
           validation_error "Gateway or LINE Pay values must not be embedded in the systemd unit"
           return
         fi
         ;;
-      User=*)
-        user_name="${line#User=}"
+      User)
+        user_name="$value"
         ;;
-      Group=*)
-        group_name="${line#Group=}"
+      Group)
+        group_name="$value"
+        ;;
+      Exec*)
+        validation_error "unexpected effective lifecycle command: $directive"
+        return
+        ;;
+      *)
+        # Other vendor hardening and lifecycle directives are intentionally retained.
         ;;
     esac
   done < <(
@@ -121,6 +144,10 @@ validate_effective_unit() {
     || validation_error "effective unit must contain exactly one ExecStart"
   [[ "${exec_starts[0]}" == "$expected_exec_start" ]] \
     || validation_error "effective ExecStart must be exactly: $expected_exec_start"
+  [[ "${#exec_reloads[@]}" -eq 1 ]] \
+    || validation_error "effective unit must contain exactly one ExecReload"
+  [[ "${exec_reloads[0]}" == "$expected_exec_reload" ]] \
+    || validation_error "effective ExecReload must be exactly: $expected_exec_reload"
   [[ "${#environment_files[@]}" -eq 1 ]] \
     || validation_error "effective unit must contain exactly one EnvironmentFile"
   [[ "${environment_files[0]}" == "$expected_environment_file" ]] \

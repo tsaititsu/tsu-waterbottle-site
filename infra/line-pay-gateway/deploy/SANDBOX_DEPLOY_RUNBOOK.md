@@ -507,11 +507,13 @@ sudo \
 
 ## 14. 安全設定 Caddy systemd 與公開入口
 
-本段假設 Caddy 已由有權限人員透過官方 stable Ubuntu repository 安裝。本 runbook 不把安裝與公開啟動合併成一鍵操作。先確認 Caddy 仍是 inactive／disabled，並唯讀檢查 package unit 與 80／443。若有未知 listener，停止並確認用途：
+本段假設 Caddy 已由有權限人員透過官方 stable Ubuntu repository 安裝。本 runbook 不把安裝與公開啟動合併成一鍵操作。先確認 Caddy 仍是 inactive／disabled，並唯讀檢查 package unit 與 80／443。若狀態不是精確的 inactive／disabled，或有未知 listener，停止並確認用途：
 
 ```bash
-sudo systemctl is-active caddy
-sudo systemctl is-enabled caddy
+export CADDY_ACTIVE_STATE="$(sudo systemctl is-active caddy || true)"
+export CADDY_ENABLED_STATE="$(sudo systemctl is-enabled caddy || true)"
+test "$CADDY_ACTIVE_STATE" = inactive
+test "$CADDY_ENABLED_STATE" = disabled
 sudo systemctl cat caddy
 sudo systemctl cat caddy | grep -F -- '--environ' || true
 sudo ss -ltnp | grep -E ':(80|443)[[:space:]]' || true
@@ -519,7 +521,20 @@ sudo ss -ltnp | grep -E ':(80|443)[[:space:]]' || true
 
 `systemctl cat caddy` 只顯示 unit 與 drop-in，不顯示 `EnvironmentFile` 的內容。官方 package unit 若含 `/usr/bin/caddy run --environ ...`，必須由 repository committed drop-in 清空後重設 ExecStart；不得修改 `/lib/systemd/system/caddy.service` 或 `/usr/lib/systemd/system/caddy.service`。
 
-先建立唯一的 root-only 備份目錄，保存 Caddyfile、既有 drop-in 狀態與不含環境值的 unit metadata：
+確認 inactive／disabled 後，先驗證 Gateway healthy、3000 只綁 localhost，且 80／443 仍空閒：
+
+```bash
+sudo \
+  GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
+  GATEWAY_IMAGE_TAG="$DEPLOY_SHA" \
+  GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
+  GATEWAY_PROXY_ENV_FILE=/etc/line-pay-gateway/proxy.env \
+  EXPECTED_EGRESS_IP=165.245.144.110 \
+  GATEWAY_BIND_PORT=3000 \
+  infra/line-pay-gateway/deploy/scripts/preflight.sh gateway-running
+```
+
+以上三項確認通過後，才建立唯一的 root-only 備份目錄，保存 Caddyfile、既有 drop-in 狀態與不含環境值的 unit metadata：
 
 ```bash
 export CADDY_BACKUP_DIR="/root/line-pay-gateway-caddy-backup-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -616,22 +631,9 @@ Proxy status: DNS only（灰雲）
 
 本 runbook 不執行上述 DNS 修改。Sandbox 初期禁止開啟 Cloudflare Proxy／橘雲；DNS only 時 Caddy 的 `{remote_host}` 才是直接 TCP 來源。若日後需要橘雲，必須先另行設計與測試 Cloudflare trusted proxy 邊界，不得直接沿用現有 client IP 信任規則。DNS 生效前不得啟動 Caddy 自動申請正式憑證。從 Droplet 與另一個外部 resolver 查詢，結果都必須只包含 `165.245.144.110`；若仍指向原始 Droplet IP `168.144.142.127` 或其他 IP，立即停止。
 
-只有 config validation 與有效 unit 驗證成功，且 DNS 已由使用者確認生效後，先記錄 journal 起始時間並執行明確的啟動前 preflight：
+只有 config validation 與有效 unit 驗證成功，且 DNS 已由使用者確認生效後，先執行明確的啟動前 preflight；通過後才記錄 journal 起始時間並啟動 Caddy：
 
 ```bash
-sudo install -d -o root -g root -m 0700 /run/line-pay-gateway
-export CADDY_JOURNAL_START="/run/line-pay-gateway/caddy-journal-start-$(date -u +%Y%m%dT%H%M%SZ)"
-sudo infra/line-pay-gateway/deploy/scripts/caddy-journal-guard.sh \
-  record \
-  "$CADDY_JOURNAL_START"
-sudo \
-  GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
-  GATEWAY_IMAGE_TAG="$DEPLOY_SHA" \
-  GATEWAY_ENV_FILE=/etc/line-pay-gateway/gateway.env \
-  GATEWAY_PROXY_ENV_FILE=/etc/line-pay-gateway/proxy.env \
-  EXPECTED_EGRESS_IP=165.245.144.110 \
-  GATEWAY_BIND_PORT=3000 \
-  infra/line-pay-gateway/deploy/scripts/preflight.sh gateway-running
 sudo \
   GATEWAY_IMAGE_NAME=line-pay-fixed-ip-gateway \
   GATEWAY_IMAGE_TAG="$DEPLOY_SHA" \
@@ -642,11 +644,16 @@ sudo \
   EXPECTED_EGRESS_IP=165.245.144.110 \
   GATEWAY_BIND_PORT=3000 \
   infra/line-pay-gateway/deploy/scripts/preflight.sh public-caddy pre-start
+sudo install -d -o root -g root -m 0700 /run/line-pay-gateway
+export CADDY_JOURNAL_START="/run/line-pay-gateway/caddy-journal-start-$(date -u +%Y%m%dT%H%M%SZ)"
+sudo infra/line-pay-gateway/deploy/scripts/caddy-journal-guard.sh \
+  record \
+  "$CADDY_JOURNAL_START"
 sudo systemctl enable --now caddy
 sudo systemctl status caddy --no-pager
 ```
 
-啟動後立即執行 post-start 與 journal guard。journal guard 只查記錄時間之後的 Caddy journal，透過 root-only 暫存 pattern file 比對實際 Proxy Token；token 不會出現在 grep command line 或輸出。若偵測到 token，script 會 stop、disable Caddy 並以非 0 結束：
+啟動後立即執行 post-start。這一步會確認 Caddy systemd service 是 active、80／443 由 Caddy 監聽、Gateway 仍 healthy，且 2019 未對外：
 
 ```bash
 sudo \
@@ -659,10 +666,6 @@ sudo \
   EXPECTED_EGRESS_IP=165.245.144.110 \
   GATEWAY_BIND_PORT=3000 \
   infra/line-pay-gateway/deploy/scripts/preflight.sh public-caddy post-start
-sudo infra/line-pay-gateway/deploy/scripts/caddy-journal-guard.sh \
-  scan \
-  /etc/line-pay-gateway/proxy.env \
-  "$CADDY_JOURNAL_START"
 ```
 
 架構必須保持：
@@ -704,6 +707,30 @@ Proxy Token 不參與網站 HMAC canonical string、LINE Pay 官方簽章或付�
 
 ```bash
 deploy/scripts/verify-tls.sh linepay-gateway.tsu-waterbottle.com
+export CADDY_HEADER_CHECK="$(mktemp)"
+curl \
+  --fail \
+  --silent \
+  --show-error \
+  --max-time 10 \
+  --dump-header "$CADDY_HEADER_CHECK" \
+  --output /dev/null \
+  https://linepay-gateway.tsu-waterbottle.com/health
+grep -Eiq '^Strict-Transport-Security:[[:space:]]*max-age=31536000' "$CADDY_HEADER_CHECK"
+grep -Eiq '^Cache-Control:[[:space:]]*no-store' "$CADDY_HEADER_CHECK"
+grep -Eiq "^Content-Security-Policy:[[:space:]]*default-src 'none'; frame-ancestors 'none'" "$CADDY_HEADER_CHECK"
+grep -Eiq '^X-Content-Type-Options:[[:space:]]*nosniff' "$CADDY_HEADER_CHECK"
+grep -Eiq '^X-Frame-Options:[[:space:]]*DENY' "$CADDY_HEADER_CHECK"
+if grep -Eiq '^Server:' "$CADDY_HEADER_CHECK"; then
+  echo "Server response header must be removed."
+  unlink "$CADDY_HEADER_CHECK"
+  exit 1
+fi
+unlink "$CADDY_HEADER_CHECK"
+sudo infra/line-pay-gateway/deploy/scripts/caddy-journal-guard.sh \
+  scan \
+  /etc/line-pay-gateway/proxy.env \
+  "$CADDY_JOURNAL_START"
 ```
 
 成功標準：
@@ -711,8 +738,12 @@ deploy/scripts/verify-tls.sh linepay-gateway.tsu-waterbottle.com
 - 憑證有效且 hostname 符合。
 - `https://linepay-gateway.tsu-waterbottle.com/health` 回 HTTP 200。
 - `http://linepay-gateway.tsu-waterbottle.com/health` 自動轉到 HTTPS。
+- HSTS、no-store、CSP、nosniff 與 DENY headers 精確存在，且沒有 `Server` header。
+- journal guard 只掃描記錄起點之後的 Caddy journal；不顯示 Token 或完整 journal，且沒有偵測到 Proxy Token 原值。
 
-失敗時：停止，不把網站 Gateway URL 指向該 domain。
+journal guard 透過 root-only 暫存 pattern file 比對實際 Proxy Token；token 不會出現在 grep command line 或輸出。若 journal 讀取／掃描失敗或偵測到 token，script 會 stop、disable Caddy 並以非 0 結束。
+
+本段或啟動後任何一步失敗時：立即 stop、disable Caddy，依 `SANDBOX_ROLLBACK_RUNBOOK.md` 回復原 Caddyfile 與 drop-in，再執行 `systemctl daemon-reload`；保持 localhost Gateway 運行，但不得把網站 Gateway URL 指向該 domain。
 
 回復方式：修正 DNS／Caddy 後重驗；不可改用 `http://165.245.144.110`。
 

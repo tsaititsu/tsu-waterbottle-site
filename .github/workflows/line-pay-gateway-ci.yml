@@ -34,6 +34,19 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check patch whitespace
+        env:
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$PULL_REQUEST_BASE_SHA" ]]; then
+            git -C "$GITHUB_WORKSPACE" diff --check "$PULL_REQUEST_BASE_SHA...HEAD"
+          else
+            git -C "$GITHUB_WORKSPACE" diff --check HEAD^
+          fi
 
       - name: Set up Node.js 24
         uses: actions/setup-node@v4

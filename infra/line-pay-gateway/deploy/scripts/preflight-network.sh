@@ -4,6 +4,7 @@ set -euo pipefail
 ss_command="${SS_COMMAND:-ss}"
 docker_command="${DOCKER_COMMAND:-docker}"
 curl_command="${CURL_COMMAND:-curl}"
+systemctl_command="${SYSTEMCTL_COMMAND:-systemctl}"
 gateway_bind_port="${GATEWAY_BIND_PORT:-3000}"
 gateway_container_name="${GATEWAY_CONTAINER_NAME:-line-pay-gateway-sandbox-gateway-1}"
 gateway_health_url="${GATEWAY_HEALTH_URL:-http://127.0.0.1:${gateway_bind_port}/health}"
@@ -84,6 +85,15 @@ require_caddy_listener() {
   pass "Caddy is listening on TCP port $port"
 }
 
+require_caddy_active() {
+  local active_state
+
+  active_state="$("$systemctl_command" is-active caddy)" \
+    || fail "Caddy systemd service is not active"
+  [[ "$active_state" == "active" ]] || fail "Caddy systemd service is not active"
+  pass "Caddy systemd service is active"
+}
+
 require_admin_loopback_only() {
   local listeners="$1"
   local port_lines address
@@ -156,6 +166,7 @@ main() {
         require_port_free "$listeners" 80
         require_port_free "$listeners" 443
       else
+        require_caddy_active
         require_caddy_listener "$listeners" 80
         require_caddy_listener "$listeners" 443
       fi

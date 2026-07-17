@@ -189,7 +189,7 @@ drop-in 不覆寫 `User=caddy`、`Group=caddy`、ExecReload 或其他 vendor har
 - `prepare`：Gateway 尚未啟動，80／443／3000 必須空閒。
 - `gateway-running`：3000 必須只在 `127.0.0.1`，Gateway container 與 localhost health 必須 healthy，80／443仍空閒。
 - `public-caddy pre-start`：Gateway healthy、80／443 空閒、2019 不得對外。
-- `public-caddy post-start`：80／443 必須由 Caddy 監聽，3000 仍只在 localhost，2019 缺席或只在 loopback。
+- `public-caddy post-start`：Caddy systemd service 必須是 active，80／443 必須由 Caddy 監聽，3000 仍只在 localhost，2019 缺席或只在 loopback。
 
 缺少或未知模式會 fail closed，不會依目前 listener 自動猜測部署階段。
 
@@ -214,7 +214,7 @@ Sandbox 初期的 Cloudflare DNS record 必須使用 **DNS only／灰雲**，不
 - 單機來源 IP fixed-window rate limit 只使用已通過 Proxy Token 邊界後解析的直接網路來源 IP；不信任 `X-Forwarded-For`、Docker bridge IP、任意 proxy CIDR 或 `request.socket.remoteAddress`。
 - `X-Gateway-Client-IP` 只作 rate-limit key，不參與 Gateway HMAC、LINE Pay 官方簽章或付款授權，不會轉送至 LINE Pay，也不加入一般付款 metadata log。
 - Proxy Token 不寫入 Caddy access log、Gateway log、錯誤回應或 LINE Pay upstream headers。
-- Caddy systemd 的唯一有效 ExecStart 不含 `--environ`；部署前記錄 journal 時間點，啟動後只掃描新範圍。掃描用 root-only 暫存 pattern file，不把 Proxy Token 放入 grep command line；若命中會立即 stop、disable Caddy 並停止部署。
+- Caddy systemd 的唯一有效 ExecStart 不含 `--environ`；pre-start 通過後記錄 journal 時間點，啟動並完成 post-start、TLS、redirect、health 與 security header 驗證後，只掃描該起點以後的新 journal 範圍。掃描用 root-only 暫存 pattern file，不把 Proxy Token 放入 grep command line；訊號或錯誤退出也會清理暫存檔，若命中或掃描失敗會立即 stop、disable Caddy 並停止部署。
 - 只轉送四個 LINE Pay headers；額外 headers 與 `Host`、`Connection`、`Content-Length`、`Transfer-Encoding`、`Keep-Alive`、`Upgrade` 等 hop-by-hop headers 都會被拒絕。
 - 上游只用 HTTPS，送出前再次檢查固定 hostname 且禁止自訂 port。
 - `redirect: error`、AbortController timeout、所有 operation 都不自動重試，尤其 Request API 不可重送。
@@ -228,7 +228,7 @@ Sandbox 初期的 Cloudflare DNS record 必須使用 **DNS only／灰雲**，不
 - [ ] 使用獨立隨機 Gateway secret；不重用 Channel Secret，且只透過受控 secret 管理提供。
 - [ ] 使用另一個獨立 Proxy Token；`gateway.env` 與 `proxy.env` 是不同 root-owned `0600` 非 symlink 檔案，Caddy 只能讀後者。
 - [ ] 已審查 `systemctl cat caddy`；committed drop-in 是 root:root `0644` regular file、非 symlink，有效 ExecStart 唯一且不含 `--environ`。
-- [ ] Caddy 啟動前已記錄 journal 起點；post-start journal guard 與 `public-caddy post-start` preflight 均通過。
+- [ ] `public-caddy pre-start` 通過後才記錄 journal 起點；啟動後 `public-caddy post-start`、TLS／redirect／health／security headers 與 journal guard 依序通過。
 - [ ] Droplet 使用 Node 24 container、非 root runtime、restart policy 與最小權限。
 - [ ] Reserved IP 對外出口與 LINE Pay 後台白名單值由人工再次核對。
 - [ ] Reserved IP `165.245.144.110` 仍綁定正確 Droplet；DNS A record 使用該入站 IP，LINE Pay 白名單使用 `165.245.144.110/32`。
