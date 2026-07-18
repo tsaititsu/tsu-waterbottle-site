@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
+import { Suspense } from 'react'
 import { DivinationEntryModule } from '@/components/DivinationEntryModule'
-import { DivinationLocalPreview } from '@/components/divination/DivinationLocalPreview'
+import { DivinationSearchParamsBridge } from '@/components/divination/DivinationSearchParamsBridge'
 import { PageHero } from '@/components/PageHero'
 import { shouldHideAiDivinationServices } from '@/lib/siteVisibility'
 import { redirect } from 'next/navigation'
@@ -9,23 +10,10 @@ import { AI_DIVINATION_SERVICE_JSON_LD, serializeJsonLd } from '@/lib/seo/servic
 
 export const metadata: Metadata = createPublicMetadata(PUBLIC_PAGE_METADATA.aiDivination)
 
-type AiDivinationPageProps = {
-  searchParams: Promise<Record<string, string | string[] | undefined>>
-}
-
-function getSingleParam(value: string | string[] | undefined) {
-  if (Array.isArray(value)) return value[0] ?? ''
-  return value ?? ''
-}
-
-export default async function AiDivinationPage({ searchParams }: AiDivinationPageProps) {
+export default function AiDivinationPage() {
   if (shouldHideAiDivinationServices()) {
     redirect('/')
   }
-
-  const resolvedSearchParams = await searchParams
-  const resetKey = getSingleParam(resolvedSearchParams.reset)
-  const followUpKey = getSingleParam(resolvedSearchParams.followUp)
 
   return (
     <>
@@ -42,7 +30,9 @@ export default async function AiDivinationPage({ searchParams }: AiDivinationPag
       <section className="bg-white py-12 md:py-16">
         <div className="section-shell grid gap-8">
           <DivinationEntryModule />
-          <DivinationLocalPreview resetKey={resetKey} followUpKey={followUpKey} />
+          <Suspense fallback={null}>
+            <DivinationSearchParamsBridge />
+          </Suspense>
         </div>
       </section>
     </>

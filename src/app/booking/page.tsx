@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
-import { BookingForm } from '@/components/BookingForm'
+import { Suspense } from 'react'
+import { BookingSearchParamsBridge } from '@/components/BookingSearchParamsBridge'
 import { PageHero } from '@/components/PageHero'
 import { AddConsultationToCartButton } from '@/components/AddConsultationToCartButton'
 import { shouldHideConsultationServices } from '@/lib/siteVisibility'
@@ -9,22 +10,10 @@ import { BOOKING_SERVICE_JSON_LD, serializeJsonLd } from '@/lib/seo/serviceJsonL
 
 export const metadata: Metadata = createPublicMetadata(PUBLIC_PAGE_METADATA.booking)
 
-type BookingPageProps = {
-  searchParams: Promise<Record<string, string | string[] | undefined>>
-}
-
-function getSingleParam(value: string | string[] | undefined) {
-  if (Array.isArray(value)) return value[0] ?? ''
-  return value ?? ''
-}
-
-export default async function BookingPage({ searchParams }: BookingPageProps) {
+export default function BookingPage() {
   if (shouldHideConsultationServices()) {
     redirect('/')
   }
-
-  const resolvedSearchParams = await searchParams
-  const resetKey = getSingleParam(resolvedSearchParams.reset)
 
   return (
     <>
@@ -41,7 +30,9 @@ export default async function BookingPage({ searchParams }: BookingPageProps) {
       <section className="bg-white py-12 md:py-16">
         <div className="section-shell grid gap-8">
           <AddConsultationToCartButton />
-          <BookingForm resetKey={resetKey} />
+          <Suspense fallback={null}>
+            <BookingSearchParamsBridge />
+          </Suspense>
         </div>
       </section>
     </>
