@@ -1,0 +1,81 @@
+name: Divination Contract CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: divination-contract-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: Query and storage contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect relevant changes
+        id: changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${BASE_SHA:-}" || -z "${HEAD_SHA:-}" ]]; then
+            echo "Missing comparison SHA." >&2
+            exit 1
+          fi
+
+          run_tests=false
+
+          if [[ "$EVENT_NAME" == "push" && "$BASE_SHA" =~ ^0+$ ]]; then
+            run_tests=true
+          else
+            changed_files="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
+            printf '%s\n' "$changed_files"
+
+            if printf '%s\n' "$changed_files" |
+              grep -Eq '^(\.github/workflows/divination-contract-ci\.yml|package\.json|package-lock\.json|tsconfig\.json|src/app/ai-divination/|src/components/divination/|src/lib/divination/)'
+            then
+              run_tests=true
+            fi
+          fi
+
+          echo "run_tests=$run_tests" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        if: steps.changes.outputs.run_tests == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        if: steps.changes.outputs.run_tests == 'true'
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run divination contract tests
+        if: steps.changes.outputs.run_tests == 'true'
+        run: node --test src/components/divination/DivinationSearchParamsBridge.test.ts
+
+      - name: Report unrelated change
+        if: steps.changes.outputs.run_tests != 'true'
+        run: |
+          echo "No divination contract paths changed."
+          echo "Contract check completed without dependency installation." >> "$GITHUB_STEP_SUMMARY"
