@@ -1,6 +1,5 @@
 import 'server-only'
 
-import { MUTAGEN_TABLE } from '../../features/ziwei-chart/lib/engine/constants'
 import {
   AI_CHART_D1_ASSET_MANIFEST_VERSION,
   AI_CHART_D1_LOCKED_MANIFEST_SHA256,
@@ -35,6 +34,7 @@ import {
   AI_CHART_D1_K0_MAJOR_STAR_NAMES,
   AI_CHART_D1_K0_MUTAGEN_EXPECTED_BULLET_COUNTS,
   AI_CHART_D1_K0_MUTAGEN_SLUGS,
+  AI_CHART_D1_K0_MEANING_SLUGS,
   AI_CHART_D1_K0_PALACE_MEANING_DEFINITIONS,
   AI_CHART_D1_K0_SOURCE_AUTHORITY_PRIORITIES,
   AI_CHART_D1_K0_SOURCE_FILES,
@@ -47,6 +47,7 @@ import {
   AI_CHART_D1_K0_TEACHER_SUPPLEMENT_SEGMENTS,
   createAiChartD1K0DoubleLocator,
   createAiChartD1K0SupportingLocator,
+  getAiChartD1K0MutagenAssignmentUniverse,
   getAiChartD1K0StarSlug,
   labeledBulletBlock,
   type AiChartD1K0MarkdownLocatorDefinition,
@@ -117,21 +118,6 @@ const FORBIDDEN_SELECTED_CONTENT = Object.freeze([
   '中風',
   '不易懷孕',
 ] as const)
-
-const MEANING_SLUGS: Readonly<Record<string, string>> = Object.freeze({
-  個性: 'personality', 價值觀: 'values', 能力: 'ability', 長相: 'appearance', 遷移宮的內心: 'travel-inner-state', '影響 12 宮': 'twelve-palace-influence',
-  父親: 'father', 身體遺傳: 'physical-inheritance', 身體的使用方式: 'body-use-pattern',
-  靈魂: 'inner-spirit', 來財方式: 'wealth-arrival', 老年生活: 'later-life', 社會價值觀: 'social-values', 花錢方式: 'spending-style', 潛意識: 'subconscious', 福份: 'fortune-capacity', 運氣: 'luck',
-  居住環境: 'living-environment', 家人相處方式: 'family-interaction', 財庫: 'wealth-storage', 家世背景: 'family-background', 風水: 'fengshui-domain',
-  '工作態度／方向／同事相處方式': 'work-attitude-direction-colleagues', 感情對象類型: 'partner-type', 生活重心: 'life-focus', 感情內心: 'relationship-inner-state',
-  異性別兄弟姐妹: 'opposite-gender-siblings', 同事: 'colleagues', 朋友: 'friends', 平輩關係: 'peer-relations',
-  在外人際關係: 'external-relations', 內心想法: 'inner-thoughts', 外界對我的看法: 'public-perception',
-  健康: 'health-domain',
-  對錢的看法: 'money-view', 理財方式: 'financial-management', 賺錢的方式: 'earning-style', 用錢的方式: 'money-use',
-  '對子女／寵物的教養方式': 'children-pets-parenting', 性生活: 'sexual-life-domain', 吃喝享樂的方式: 'enjoyment-style', 所有物: 'possessions', 家的外面: 'outside-home',
-  '感情的態度／對待方式': 'relationship-attitude', 喜歡怎樣的人: 'preferred-partner', 工作在外的狀況: 'work-external-state',
-  媽媽: 'mother', 同性別兄弟姐妹: 'same-gender-siblings', 新認識的朋友: 'new-friends',
-})
 
 function invalid(): never {
   throw new Error('ai_chart_d1_k0_asset_invalid')
@@ -423,7 +409,7 @@ function compilePalaces(asset: AiChartD1VerifiedCompilationAsset): Readonly<{
       selectionTags: [`palace:${palaceSlug}`, 'palace:meanings'],
     }))
     meaningTexts.forEach((text, order) => {
-      const slug = MEANING_SLUGS[text]
+      const slug = AI_CHART_D1_K0_MEANING_SLUGS[text]
       if (!slug || !sourceLine.includes(text)) invalid()
       meanings.push(Object.freeze({
         meaningId: `meaning:palace:${palaceSlug}:${slug}`,
@@ -539,24 +525,7 @@ function compileMutagens(asset: AiChartD1VerifiedCompilationAsset): Readonly<{
     }))
   })
 
-  const assignments = new Map<string, { starName: string; mutagenType: AiChartD1MutagenType }>()
-  for (const row of MUTAGEN_TABLE) {
-    row.forEach((starName, index) => {
-      const mutagenType = commonTypes[index]
-      assignments.set(`${starName}\u0000${mutagenType}`, { starName, mutagenType })
-    })
-  }
-  const inventory = [...assignments.values()]
-    .sort((left, right) => {
-      const leftSlug = getAiChartD1K0StarSlug(left.starName)
-      const rightSlug = getAiChartD1K0StarSlug(right.starName)
-      if (!leftSlug || !rightSlug) invalid()
-      return (
-        leftSlug.localeCompare(rightSlug, 'en') ||
-        commonTypes.indexOf(left.mutagenType) -
-          commonTypes.indexOf(right.mutagenType)
-      )
-    })
+  const inventory = getAiChartD1K0MutagenAssignmentUniverse()
     .map(({ starName, mutagenType }) => {
       const locator = mutagenLocator(starName, mutagenType)
       if (

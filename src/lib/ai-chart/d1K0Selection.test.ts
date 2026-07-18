@@ -216,7 +216,15 @@ function withoutMutagenSpecificRule(
   mutable.rules = mutable.rules.filter((rule) => rule.ruleId !== removedRuleId)
   mutable.coverage.mutagenSpecificCoverage.covered -= 1
   mutable.readiness = 'partial'
-  mutable.warnings.push('warning:k0:missing-mutagen-specific')
+  const oppositeWarningIndex = mutable.warnings.indexOf(
+    'warning:k0:missing-opposite-empty-rule',
+  )
+  assert.notEqual(oppositeWarningIndex, -1)
+  mutable.warnings.splice(
+    oppositeWarningIndex,
+    0,
+    'warning:k0:missing-mutagen-specific',
+  )
   const withoutFingerprint: Partial<Mutable<AiChartD1K0Catalog>> = {
     ...mutable,
   }
@@ -244,6 +252,64 @@ async function run() {
       assert.equal(bundle.callId, inputs[index].callId)
       assert.equal(bundle.targetPalaceId, inputs[index].targetPalace.palaceId)
     })
+  })
+  check('all twelve inputs and bundles share one chart and run identity', () => {
+    assert.equal(new Set(inputs.map((input) => input.chartId)).size, 1)
+    assert.equal(new Set(inputs.map((input) => input.runId)).size, 1)
+    assert.equal(new Set(bundles.map((bundle) => bundle.chartId)).size, 1)
+    assert.equal(new Set(bundles.map((bundle) => bundle.runId)).size, 1)
+    bundles.forEach((bundle, index) => {
+      assert.equal(bundle.chartId, inputs[index].chartId)
+      assert.equal(bundle.runId, inputs[index].runId)
+    })
+  })
+  check('a different chart id in the second input is rejected without id leakage', () => {
+    const mixed = structuredClone(inputs) as Mutable<typeof inputs>
+    mixed[1].chartId = 'chart:other'
+    assert.throws(
+      () =>
+        buildAiChartD1K0P1KnowledgeBundles(catalog, mixed, {
+          bundleIds: ids,
+        }),
+      { message: 'ai_chart_d1_k0_bundle_invalid' },
+    )
+  })
+  check('a different run id in the second input is rejected without id leakage', () => {
+    const mixed = structuredClone(inputs) as Mutable<typeof inputs>
+    mixed[1].runId = 'run:other'
+    assert.throws(
+      () =>
+        buildAiChartD1K0P1KnowledgeBundles(catalog, mixed, {
+          bundleIds: ids,
+        }),
+      { message: 'ai_chart_d1_k0_bundle_invalid' },
+    )
+  })
+  check('mixing two complete charts is rejected', () => {
+    const otherInputs = createInputs(completeSnapshot(), 'other-chart')
+    const mixed = inputs.map((input, index) =>
+      index === 1 ? otherInputs[index] : input,
+    )
+    assert.throws(
+      () =>
+        buildAiChartD1K0P1KnowledgeBundles(catalog, mixed, {
+          bundleIds: ids,
+        }),
+      { message: 'ai_chart_d1_k0_bundle_invalid' },
+    )
+  })
+  check('mixing two structural input runs is rejected', () => {
+    const mixed = structuredClone(inputs) as Mutable<typeof inputs>
+    for (let index = 6; index < mixed.length; index += 1) {
+      mixed[index].runId = 'run:second'
+    }
+    assert.throws(
+      () =>
+        buildAiChartD1K0P1KnowledgeBundles(catalog, mixed, {
+          bundleIds: ids,
+        }),
+      { message: 'ai_chart_d1_k0_bundle_invalid' },
+    )
   })
   check('complete fixture produces ready bundles', () => {
     assert.equal(bundles.every((bundle) => bundle.knowledgeStatus === 'ready'), true)

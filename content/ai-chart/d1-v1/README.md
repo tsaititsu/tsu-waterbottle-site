@@ -105,6 +105,12 @@ meaning、十四主星、合法雙星 inventory、生年四化 assignment invent
 不生成 working inference。目前對宮空宮沒有來源規則，Structure coverage
 明確維持 14/15；遇到該狀態時 bundle 會標記 `partial`。
 
+Catalog parser 不以 fingerprint 代替內容驗證。它會先依固定 Registry、
+正式 `MUTAGEN_TABLE` 與 Catalog 內容重算宮位 meanings、主星、老師補充、
+雙星、四化、輔星、結構規則、coverage、warnings 與 readiness；語意 invariant
+全部成立後，最後才核對 fingerprint。即使呼叫端同步重算 fingerprint，缺少、
+增加、重排或偽造 Registry 內容仍會 fail closed。
+
 每份已驗證的 P1 Structural Input 只會產生一份最小 knowledge bundle。
 固定 selection 依五個 palace roles、實際主星／借星／輔星／生年四化、
 空宮狀態與 target 四馬地選取規則；去重後依 priority descending 與 ruleId
@@ -112,6 +118,13 @@ ASCII ascending 排列。每條 selected rule 都有 deterministic selection tra
 必要專屬規則缺失時 bundle 標記 `partial`。Bundle 不含完整 N0、完整 P1、
 完整 Catalog、Prompt、出生個資或 OpenAI request；`promptStatus` 固定為
 `prompt_builder_required`，`openAiCallable` 固定為 `false`。
+
+建立十二份 bundle 前，所有 P1 inputs 必須同時通過 parser，並具有同一個
+`chartId` 與 `runId`、唯一 `callId`、固定 target index／palace order；十二個
+bundle IDs 也必須唯一。Bundle parser 會逐 index 驗證 rule／trace 對應與
+reason-kind 相容性，並要求五個 palace roles 各自完整包含 Catalog 的 meanings。
+Missing requirements、knowledge status 與唯一固定 warning 亦由實際內容重算，
+不接受呼叫端自報狀態。
 
 ## P1／F1 輸出 Contract 邊界
 

@@ -33,9 +33,20 @@ import {
   AI_CHART_D1_K0_CATALOG_ID,
   AI_CHART_D1_K0_CATALOG_VERSION,
   AI_CHART_D1_K0_COMPILED_AT_POLICY,
+  AI_CHART_D1_K0_DOUBLE_STAR_INVENTORY,
+  AI_CHART_D1_K0_MAJOR_STAR_NAMES,
+  AI_CHART_D1_K0_MEANING_SLUGS,
+  AI_CHART_D1_K0_MUTAGEN_SLUGS,
+  AI_CHART_D1_K0_PALACE_MEANING_DEFINITIONS,
   AI_CHART_D1_K0_SOURCE_AUTHORITY_PRIORITIES,
+  AI_CHART_D1_K0_SOURCE_FILES,
   AI_CHART_D1_K0_SOURCE_SHA256,
   AI_CHART_D1_K0_SOURCE_WHITELIST,
+  AI_CHART_D1_K0_STRUCTURE_RULE_DEFINITIONS,
+  AI_CHART_D1_K0_SUPPORTING_RULE_DEFINITIONS,
+  AI_CHART_D1_K0_TEACHER_SUPPLEMENT_SEGMENTS,
+  getAiChartD1K0MutagenAssignmentUniverse,
+  getAiChartD1K0StarSlug,
 } from './d1K0Registry'
 
 export const AI_CHART_D1_K0_CATALOG_INVALID =
@@ -806,6 +817,342 @@ export function createAiChartD1K0CatalogFingerprint(
   return hashAiChartD1K0Content(JSON.stringify(canonicalize(payload)))
 }
 
+function stableEqual(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function parseRuleContentObject(content: string): Record<string, unknown> {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(content)
+  } catch {
+    catalogInvalid()
+  }
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    Array.isArray(parsed) ||
+    Object.getPrototypeOf(parsed) !== Object.prototype
+  ) {
+    catalogInvalid()
+  }
+  return parsed as Record<string, unknown>
+}
+
+function assertCoverageCount(
+  actual: AiChartD1K0CoverageCount,
+  covered: number,
+  total: number,
+): void {
+  if (actual.covered !== covered || actual.total !== total) catalogInvalid()
+}
+
+export function validateAiChartD1K0CatalogSemantics(
+  catalog: Omit<AiChartD1K0Catalog, 'catalogFingerprint'>,
+): void {
+  try {
+    const rulesById = new Map(catalog.rules.map((rule) => [rule.ruleId, rule]))
+
+    const expectedMeanings = AI_CHART_D1_K0_PALACE_MEANING_DEFINITIONS.flatMap(
+      ([palaceId, , , texts]) => {
+        const palaceSlug = palaceId.slice('palace:'.length)
+        return texts.map((text, order) => {
+          const meaningSlug = AI_CHART_D1_K0_MEANING_SLUGS[text]
+          if (!meaningSlug) catalogInvalid()
+          return {
+            meaningId: `meaning:palace:${palaceSlug}:${meaningSlug}`,
+            palaceId,
+            text,
+            order,
+          }
+        })
+      },
+    )
+    const palaceRules = catalog.rules.filter(
+      (rule) => rule.kind === 'palace_meaning',
+    )
+    if (
+      palaceRules.length !== AI_CHART_D1_K0_PALACE_MEANING_DEFINITIONS.length ||
+      AI_CHART_D1_K0_PALACE_MEANING_DEFINITIONS.some(([palaceId]) => {
+        const palaceSlug = palaceId.slice('palace:'.length)
+        const rule = rulesById.get(`rule:palace:${palaceSlug}:meanings`)
+        return !rule || rule.kind !== 'palace_meaning'
+      }) ||
+      catalog.palaceMeanings.length !== 52 ||
+      !stableEqual(
+        catalog.palaceMeanings.map(
+          ({ meaningId, palaceId, text, order }) => ({
+            meaningId,
+            palaceId,
+            text,
+            order,
+          }),
+        ),
+        expectedMeanings,
+      )
+    ) {
+      catalogInvalid()
+    }
+    assertCoverageCount(
+      catalog.coverage.palaceMeaningCoverage,
+      AI_CHART_D1_K0_PALACE_MEANING_DEFINITIONS.length,
+      AI_CHART_D1_K0_PALACE_MEANING_DEFINITIONS.length,
+    )
+
+    const singleStarRules = catalog.rules.filter(
+      (rule) => rule.kind === 'single_star',
+    )
+    let teacherSupplementCovered = 0
+    if (singleStarRules.length !== AI_CHART_D1_K0_MAJOR_STAR_NAMES.length) {
+      catalogInvalid()
+    }
+    for (const starName of AI_CHART_D1_K0_MAJOR_STAR_NAMES) {
+      const starSlug = getAiChartD1K0StarSlug(starName)
+      if (!starSlug) catalogInvalid()
+      const rule = rulesById.get(`rule:star:${starSlug}:core`)
+      if (
+        !rule ||
+        rule.kind !== 'single_star' ||
+        rule.sourceAuthority !== 'formal_teacher_confirmed' ||
+        rule.ruleStatus !== 'teacher_confirmed' ||
+        rule.sourceFile !== AI_CHART_D1_K0_SOURCE_FILES.stars
+      ) {
+        catalogInvalid()
+      }
+      const content = parseRuleContentObject(rule.content)
+      const approvedSegments = Object.prototype.hasOwnProperty.call(
+        AI_CHART_D1_K0_TEACHER_SUPPLEMENT_SEGMENTS,
+        starName,
+      )
+        ? AI_CHART_D1_K0_TEACHER_SUPPLEMENT_SEGMENTS[
+            starName as keyof typeof AI_CHART_D1_K0_TEACHER_SUPPLEMENT_SEGMENTS
+          ]
+        : undefined
+      const hasSupplement = Object.prototype.hasOwnProperty.call(
+        content,
+        '老師補充D1',
+      )
+      if (approvedSegments) {
+        if (!hasSupplement || !stableEqual(content.老師補充D1, approvedSegments)) {
+          catalogInvalid()
+        }
+        teacherSupplementCovered += 1
+      } else if (hasSupplement) {
+        catalogInvalid()
+      }
+    }
+    assertCoverageCount(
+      catalog.coverage.singleStarCoverage,
+      AI_CHART_D1_K0_MAJOR_STAR_NAMES.length,
+      AI_CHART_D1_K0_MAJOR_STAR_NAMES.length,
+    )
+    assertCoverageCount(
+      catalog.coverage.singleStarTeacherSupplementCoverage,
+      teacherSupplementCovered,
+      AI_CHART_D1_K0_MAJOR_STAR_NAMES.length,
+    )
+
+    let doubleStarCovered = 0
+    const referencedDoubleRuleIds = new Set<string>()
+    if (
+      catalog.doubleStarInventory.length !==
+      AI_CHART_D1_K0_DOUBLE_STAR_INVENTORY.length
+    ) {
+      catalogInvalid()
+    }
+    catalog.doubleStarInventory.forEach((item, index) => {
+      const expected = AI_CHART_D1_K0_DOUBLE_STAR_INVENTORY[index]
+      if (
+        item.pairKey !== expected.pairKey ||
+        item.leftStar !== expected.leftStar ||
+        item.rightStar !== expected.rightStar ||
+        item.canonicalOrder !== expected.canonicalOrder
+      ) {
+        catalogInvalid()
+      }
+      if (item.specificRuleId === null) {
+        if (
+          item.specificRuleStatus !== null ||
+          item.missingReason !== 'missing_confirmed_double_star_core'
+        ) {
+          catalogInvalid()
+        }
+        return
+      }
+      const expectedRuleId = `rule:double:${item.pairKey.slice('pair:'.length)}:core`
+      const rule = rulesById.get(item.specificRuleId)
+      if (
+        item.specificRuleId !== expectedRuleId ||
+        !rule ||
+        rule.kind !== 'double_star' ||
+        item.specificRuleStatus !== rule.ruleStatus ||
+        item.missingReason !== null
+      ) {
+        catalogInvalid()
+      }
+      referencedDoubleRuleIds.add(item.specificRuleId)
+      doubleStarCovered += 1
+    })
+    const doubleStarRules = catalog.rules.filter(
+      (rule) => rule.kind === 'double_star',
+    )
+    if (
+      doubleStarRules.length !== referencedDoubleRuleIds.size ||
+      doubleStarRules.some((rule) => !referencedDoubleRuleIds.has(rule.ruleId))
+    ) {
+      catalogInvalid()
+    }
+    assertCoverageCount(
+      catalog.coverage.doubleStarSpecificCoverage,
+      doubleStarCovered,
+      AI_CHART_D1_K0_DOUBLE_STAR_INVENTORY.length,
+    )
+
+    const mutagenUniverse = getAiChartD1K0MutagenAssignmentUniverse()
+    let mutagenCovered = 0
+    const referencedMutagenRuleIds = new Set<string>()
+    if (catalog.mutagenInventory.length !== mutagenUniverse.length) {
+      catalogInvalid()
+    }
+    catalog.mutagenInventory.forEach((item, index) => {
+      const expected = mutagenUniverse[index]
+      if (
+        item.starName !== expected.starName ||
+        item.mutagenType !== expected.mutagenType
+      ) {
+        catalogInvalid()
+      }
+      if (item.specificRuleId === null) {
+        if (
+          item.sourceAuthority !== null ||
+          item.missingReason !== 'missing_specific_mutagen_rule'
+        ) {
+          catalogInvalid()
+        }
+        return
+      }
+      const starSlug = getAiChartD1K0StarSlug(item.starName)
+      if (!starSlug) catalogInvalid()
+      const expectedRuleId =
+        `rule:mutagen:${starSlug}:${AI_CHART_D1_K0_MUTAGEN_SLUGS[item.mutagenType]}`
+      const rule = rulesById.get(item.specificRuleId)
+      if (
+        item.specificRuleId !== expectedRuleId ||
+        !rule ||
+        rule.kind !== 'natal_mutagen' ||
+        item.sourceAuthority !== rule.sourceAuthority ||
+        item.missingReason !== null
+      ) {
+        catalogInvalid()
+      }
+      referencedMutagenRuleIds.add(item.specificRuleId)
+      mutagenCovered += 1
+    })
+    const mutagenSpecificRules = catalog.rules.filter(
+      (rule) =>
+        rule.kind === 'natal_mutagen' &&
+        !rule.ruleId.startsWith('rule:mutagen:common:'),
+    )
+    if (
+      mutagenSpecificRules.length !== referencedMutagenRuleIds.size ||
+      mutagenSpecificRules.some(
+        (rule) => !referencedMutagenRuleIds.has(rule.ruleId),
+      )
+    ) {
+      catalogInvalid()
+    }
+    assertCoverageCount(
+      catalog.coverage.mutagenSpecificCoverage,
+      mutagenCovered,
+      mutagenUniverse.length,
+    )
+
+    const supportingRules = catalog.rules.filter(
+      (rule) => rule.kind === 'supporting_star',
+    )
+    if (
+      supportingRules.length !==
+      AI_CHART_D1_K0_SUPPORTING_RULE_DEFINITIONS.length
+    ) {
+      catalogInvalid()
+    }
+    for (const definition of AI_CHART_D1_K0_SUPPORTING_RULE_DEFINITIONS) {
+      const starSlug = getAiChartD1K0StarSlug(definition.starName)
+      if (!starSlug) catalogInvalid()
+      const rule = rulesById.get(`rule:supporting:${starSlug}:core`)
+      if (
+        !rule ||
+        rule.kind !== 'supporting_star' ||
+        rule.sourceFile !== AI_CHART_D1_K0_SOURCE_FILES.supporting ||
+        rule.content !==
+          JSON.stringify({ bullets: definition.expectedBullets })
+      ) {
+        catalogInvalid()
+      }
+    }
+    assertCoverageCount(
+      catalog.coverage.supportingStarCoverage,
+      AI_CHART_D1_K0_SUPPORTING_RULE_DEFINITIONS.length,
+      AI_CHART_D1_K0_SUPPORTING_RULE_DEFINITIONS.length,
+    )
+
+    const expectedStructureRuleIds = new Set(
+      AI_CHART_D1_K0_STRUCTURE_RULE_DEFINITIONS.map(
+        (definition) => definition.ruleId,
+      ),
+    )
+    const structureRules = catalog.rules.filter((rule) =>
+      ['common', 'relationship', 'empty_palace', 'four_horse', 'd2_boundary']
+        .includes(rule.kind),
+    )
+    if (
+      structureRules.length !== AI_CHART_D1_K0_STRUCTURE_RULE_DEFINITIONS.length ||
+      structureRules.some((rule) => !expectedStructureRuleIds.has(rule.ruleId)) ||
+      rulesById.has('rule:structure:opposite-empty') ||
+      AI_CHART_D1_K0_STRUCTURE_RULE_DEFINITIONS.some((definition) => {
+        const rule = rulesById.get(definition.ruleId)
+        return (
+          !rule ||
+          rule.kind !== definition.kind ||
+          rule.sourceFile !== definition.sourceFile
+        )
+      })
+    ) {
+      catalogInvalid()
+    }
+    assertCoverageCount(
+      catalog.coverage.structureRuleCoverage,
+      AI_CHART_D1_K0_STRUCTURE_RULE_DEFINITIONS.length,
+      15,
+    )
+
+    const expectedWarnings = [
+      ...(teacherSupplementCovered < AI_CHART_D1_K0_MAJOR_STAR_NAMES.length
+        ? ['warning:k0:missing-single-star-teacher-supplement']
+        : []),
+      ...(doubleStarCovered < AI_CHART_D1_K0_DOUBLE_STAR_INVENTORY.length
+        ? ['warning:k0:missing-double-star-specific']
+        : []),
+      ...(mutagenCovered < mutagenUniverse.length
+        ? ['warning:k0:missing-mutagen-specific']
+        : []),
+      'warning:k0:missing-opposite-empty-rule',
+    ]
+    const allCoverageComplete = Object.values(catalog.coverage).every(
+      (coverage) => coverage.covered === coverage.total,
+    )
+    if (
+      !stableEqual(catalog.warnings, expectedWarnings) ||
+      catalog.readiness !== (allCoverageComplete ? 'ready' : 'partial')
+    ) {
+      catalogInvalid()
+    }
+  } catch (error) {
+    if (error instanceof AiChartD1K0CatalogError) throw error
+    catalogInvalid()
+  }
+}
+
 const CATALOG_FIELDS = Object.freeze([
   'contractVersion',
   'catalogId',
@@ -910,6 +1257,7 @@ export function parseAiChartD1K0Catalog(value: unknown): AiChartD1K0Catalog {
       warnings,
       readiness,
     }
+    validateAiChartD1K0CatalogSemantics(catalogWithoutFingerprint)
     const catalogFingerprint = parseSha(
       record.catalogFingerprint,
       catalogInvalid,
@@ -1033,8 +1381,274 @@ function parseMissing(
   })
 }
 
-function stableEqual(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right)
+export function validateAiChartD1K0P1BundleSemantics(
+  bundle: AiChartD1K0P1Bundle,
+  catalog: AiChartD1K0Catalog,
+): void {
+  try {
+    if (
+      bundle.selectionTrace.length !== bundle.selectedRules.length ||
+      bundle.selectionTrace.some(
+        (trace, index) => trace.ruleId !== bundle.selectedRules[index].ruleId,
+      )
+    ) {
+      bundleInvalid()
+    }
+
+    bundle.selectionTrace.forEach((trace, index) => {
+      const rule = bundle.selectedRules[index]
+      const requiresPalace = trace.reason !== 'required_common_rule'
+      if (
+        (requiresPalace &&
+          (trace.palaceRole === null || trace.palaceId === null)) ||
+        (!requiresPalace &&
+          (trace.palaceRole !== null || trace.palaceId !== null)) ||
+        trace.structuralReference !==
+          (requiresPalace
+            ? `p1:view:${trace.palaceRole}`
+            : 'p1:required-common')
+      ) {
+        bundleInvalid()
+      }
+
+      const hasStarPlacement =
+        trace.starName !== null && trace.placementId !== null
+      const hasNoStarFields =
+        trace.starName === null &&
+        trace.placementId === null &&
+        trace.mutagenType === null
+      switch (trace.reason) {
+        case 'required_common_rule':
+          if (
+            (rule.kind !== 'common' && rule.kind !== 'd2_boundary') ||
+            !hasNoStarFields
+          ) {
+            bundleInvalid()
+          }
+          break
+        case 'palace_meaning':
+          if (rule.kind !== 'palace_meaning' || !hasNoStarFields) {
+            bundleInvalid()
+          }
+          break
+        case 'major_star_present':
+        case 'borrowed_major_star_present':
+          if (rule.kind !== 'single_star' || !hasStarPlacement) {
+            bundleInvalid()
+          }
+          break
+        case 'double_star_present':
+          if (rule.kind !== 'double_star' || !hasNoStarFields) {
+            bundleInvalid()
+          }
+          break
+        case 'natal_mutagen_present':
+          if (
+            rule.kind !== 'natal_mutagen' ||
+            !hasStarPlacement ||
+            trace.mutagenType === null
+          ) {
+            bundleInvalid()
+          }
+          break
+        case 'supporting_star_present':
+          if (rule.kind !== 'supporting_star' || !hasStarPlacement) {
+            bundleInvalid()
+          }
+          break
+        case 'empty_palace_rule':
+          if (rule.kind !== 'empty_palace' || !hasNoStarFields) {
+            bundleInvalid()
+          }
+          break
+        case 'relationship_rule':
+          if (rule.kind !== 'relationship' || !hasNoStarFields) {
+            bundleInvalid()
+          }
+          break
+        case 'four_horse_target':
+          if (
+            (rule.kind !== 'four_horse' &&
+              !(
+                rule.kind === 'd2_boundary' &&
+                rule.ruleId === 'rule:structure:four-horse-d1-boundary'
+              )) ||
+            !hasNoStarFields
+          ) {
+            bundleInvalid()
+          }
+          break
+      }
+    })
+
+    const meaningIds = bundle.selectedMeanings.map(
+      (meaning) => meaning.meaningId,
+    )
+    const roleMeaningIds = bundle.selectedMeanings.map(
+      (meaning) => `${meaning.palaceRole}\u0000${meaning.meaningId}`,
+    )
+    if (
+      new Set(meaningIds).size !== meaningIds.length ||
+      new Set(roleMeaningIds).size !== roleMeaningIds.length
+    ) {
+      bundleInvalid()
+    }
+    const expectedSelectedMeanings: AiChartD1K0SelectedMeaning[] = []
+    for (const role of AI_CHART_D1_K0_PALACE_ROLES) {
+      const roleMeanings = bundle.selectedMeanings.filter(
+        (meaning) => meaning.palaceRole === role,
+      )
+      const palaceIds = new Set(roleMeanings.map((meaning) => meaning.palaceId))
+      if (roleMeanings.length === 0 || palaceIds.size !== 1) bundleInvalid()
+      const palaceId = roleMeanings[0].palaceId
+      if (role === 'target' && palaceId !== bundle.targetPalaceId) {
+        bundleInvalid()
+      }
+      const expectedForPalace = catalog.palaceMeanings.filter(
+        (meaning) => meaning.palaceId === palaceId,
+      )
+      if (expectedForPalace.length === 0) bundleInvalid()
+      expectedSelectedMeanings.push(
+        ...expectedForPalace.map((meaning) => ({
+          palaceRole: role,
+          palaceId: meaning.palaceId,
+          meaningId: meaning.meaningId,
+          text: meaning.text,
+          contentSha256: meaning.contentSha256,
+          order: meaning.order,
+        })),
+      )
+    }
+    if (!stableEqual(bundle.selectedMeanings, expectedSelectedMeanings)) {
+      bundleInvalid()
+    }
+
+    if (
+      new Set(
+        bundle.missingRequirements.map((entry) => entry.requirementId),
+      ).size !== bundle.missingRequirements.length ||
+      bundle.missingRequirements.some(
+        (entry, index) =>
+          index > 0 &&
+          bundle.missingRequirements[index - 1].requirementId.localeCompare(
+            entry.requirementId,
+            'en',
+          ) > 0,
+      )
+    ) {
+      bundleInvalid()
+    }
+    for (const missing of bundle.missingRequirements) {
+      const requiresPalace = missing.kind !== 'common'
+      if (
+        (requiresPalace &&
+          (missing.palaceRole === null || missing.palaceId === null)) ||
+        (!requiresPalace &&
+          (missing.palaceRole !== null || missing.palaceId !== null))
+      ) {
+        bundleInvalid()
+      }
+      const noStar = missing.starName === null
+      const noMutagen = missing.mutagenType === null
+      const noPair = missing.pairKey === null
+      switch (missing.reasonCode) {
+        case 'missing_palace_meaning':
+          if (
+            missing.kind !== 'palace_meaning' ||
+            !noStar ||
+            !noMutagen ||
+            !noPair
+          ) {
+            bundleInvalid()
+          }
+          break
+        case 'missing_single_star_rule':
+          if (
+            missing.kind !== 'single_star' ||
+            missing.starName === null ||
+            !noMutagen ||
+            !noPair
+          ) {
+            bundleInvalid()
+          }
+          break
+        case 'missing_confirmed_double_star_core':
+          if (
+            missing.kind !== 'double_star' ||
+            missing.pairKey === null ||
+            !noStar ||
+            !noMutagen
+          ) {
+            bundleInvalid()
+          }
+          break
+        case 'missing_specific_mutagen_rule':
+          if (
+            missing.kind !== 'natal_mutagen' ||
+            missing.starName === null ||
+            missing.mutagenType === null ||
+            !noPair
+          ) {
+            bundleInvalid()
+          }
+          break
+        case 'missing_supporting_star_rule':
+          if (
+            missing.kind !== 'supporting_star' ||
+            missing.starName === null ||
+            !noMutagen ||
+            !noPair
+          ) {
+            bundleInvalid()
+          }
+          break
+        case 'missing_empty_palace_rule':
+          if (
+            missing.kind !== 'empty_palace' ||
+            !noStar ||
+            !noMutagen ||
+            !noPair
+          ) {
+            bundleInvalid()
+          }
+          break
+        case 'missing_relationship_rule':
+          if (
+            (missing.kind !== 'relationship' && missing.kind !== 'common') ||
+            !noStar ||
+            !noMutagen ||
+            !noPair
+          ) {
+            bundleInvalid()
+          }
+          break
+        case 'missing_four_horse_rule':
+          if (
+            missing.kind !== 'four_horse' ||
+            !noStar ||
+            !noMutagen ||
+            !noPair
+          ) {
+            bundleInvalid()
+          }
+          break
+      }
+    }
+
+    const expectedStatus =
+      bundle.missingRequirements.length === 0 ? 'ready' : 'partial'
+    const expectedWarnings =
+      expectedStatus === 'ready' ? [] : ['warning:k0:bundle-partial']
+    if (
+      bundle.knowledgeStatus !== expectedStatus ||
+      !stableEqual(bundle.warnings, expectedWarnings)
+    ) {
+      bundleInvalid()
+    }
+  } catch (error) {
+    if (error instanceof AiChartD1K0BundleError) throw error
+    bundleInvalid()
+  }
 }
 
 export function parseAiChartD1K0P1Bundle(
@@ -1152,10 +1766,7 @@ export function parseAiChartD1K0P1Bundle(
       'ready',
       'partial',
     ] as const)
-    if ((missingRequirements.length === 0) !== (knowledgeStatus === 'ready')) {
-      bundleInvalid()
-    }
-    return freezeAiChartD1Value({
+    const parsedBundle: AiChartD1K0P1Bundle = {
       contractVersion: AI_CHART_D1_K0_BUNDLE_VERSION,
       bundleId: parseAiChartD1Id(record.bundleId),
       catalogId: AI_CHART_D1_K0_CATALOG_ID,
@@ -1180,7 +1791,9 @@ export function parseAiChartD1K0P1Bundle(
       promptStatus: 'prompt_builder_required',
       openAiCallable: false,
       warnings: parseUniqueStringArray(record.warnings, bundleInvalid),
-    }) as AiChartD1K0P1Bundle
+    }
+    validateAiChartD1K0P1BundleSemantics(parsedBundle, catalog)
+    return freezeAiChartD1Value(parsedBundle) as AiChartD1K0P1Bundle
   } catch (error) {
     if (error instanceof AiChartD1K0BundleError) throw error
     bundleInvalid()

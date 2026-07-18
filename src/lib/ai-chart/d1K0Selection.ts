@@ -230,7 +230,7 @@ function buildOneBundle(
         requirementId: `missing:${view.role}:star:${slug ?? 'unknown'}`,
         kind: 'single_star', role: view.role,
         palaceId: view.palace.palaceId, starName: star.name,
-        mutagenType: star.natalMutagen, pairKey: null,
+        mutagenType: null, pairKey: null,
         reasonCode: 'missing_single_star_rule',
       })
     }
@@ -340,7 +340,7 @@ function buildOneBundle(
           requirementId: `missing:${view.role}:supporting:${slug ?? 'unknown'}`,
           kind: 'supporting_star', role: view.role,
           palaceId: view.palace.palaceId, starName: star.name,
-          mutagenType: star.natalMutagen, pairKey: null,
+          mutagenType: null, pairKey: null,
           reasonCode: 'missing_supporting_star_rule',
         })
       }
@@ -510,6 +510,8 @@ export function buildAiChartD1K0P1KnowledgeBundles(
     const inputs = p1InputValues.map(parseAiChartD1P1StructuralInput)
     if (
       new Set(inputs.map((input) => input.callId)).size !== 12 ||
+      new Set(inputs.map((input) => input.chartId)).size !== 1 ||
+      new Set(inputs.map((input) => input.runId)).size !== 1 ||
       inputs.some(
         (input, index) =>
           input.targetPalace.index !== index ||
@@ -519,9 +521,25 @@ export function buildAiChartD1K0P1KnowledgeBundles(
     ) {
       invalid()
     }
-    return Object.freeze(
+    const bundles = Object.freeze(
       inputs.map((input, index) => buildOneBundle(catalog, input, bundleIds[index])),
     )
+    if (
+      new Set(bundles.map((bundle) => bundle.bundleId)).size !== 12 ||
+      new Set(bundles.map((bundle) => bundle.chartId)).size !== 1 ||
+      new Set(bundles.map((bundle) => bundle.runId)).size !== 1 ||
+      bundles.some(
+        (bundle, index) =>
+          bundle.bundleId !== bundleIds[index] ||
+          bundle.callId !== inputs[index].callId ||
+          bundle.chartId !== inputs[index].chartId ||
+          bundle.runId !== inputs[index].runId ||
+          bundle.targetPalaceId !== inputs[index].targetPalace.palaceId,
+      )
+    ) {
+      invalid()
+    }
+    return bundles
   } catch {
     invalid()
   }

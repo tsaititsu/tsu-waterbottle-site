@@ -1,33 +1,69 @@
 import assert from 'node:assert/strict'
-import {
-  AI_CHART_D1_ASSET_MANIFEST_VERSION,
-  AI_CHART_D1_LOCKED_MANIFEST_SHA256,
-} from './d1Assets'
+import Module, { createRequire } from 'node:module'
 import {
   AI_CHART_D1_K0_CATALOG_INTERNAL_JSON_SCHEMA,
   AI_CHART_D1_K0_CATALOG_INVALID,
-  AI_CHART_D1_K0_D1_SAFETY,
   AI_CHART_D1_K0_P1_BUNDLE_INTERNAL_JSON_SCHEMA,
   AI_CHART_D1_K0_BUNDLE_INVALID,
+  AI_CHART_D1_K0_PALACE_ROLES,
+  compareAiChartD1K0Rules,
   createAiChartD1K0CatalogFingerprint,
   hashAiChartD1K0Content,
   parseAiChartD1K0Catalog,
   parseAiChartD1K0P1Bundle,
   type AiChartD1K0Catalog,
-  type AiChartD1K0Rule,
+  type AiChartD1K0P1Bundle,
 } from './d1K0Contracts'
 import {
   AI_CHART_D1_K0_BUNDLE_VERSION,
-  AI_CHART_D1_K0_CATALOG_ID,
-  AI_CHART_D1_K0_CATALOG_VERSION,
-  AI_CHART_D1_K0_COMPILED_AT_POLICY,
-  AI_CHART_D1_K0_DOUBLE_STAR_INVENTORY,
-  AI_CHART_D1_K0_SOURCE_FILES,
-  AI_CHART_D1_K0_SOURCE_SHA256,
 } from './d1K0Registry'
-import { AI_CHART_D1_P1_STRUCTURAL_INPUT_CONTRACT_VERSION } from './d1N0Constants'
+import {
+  AI_CHART_D1_P1_STRUCTURAL_INPUT_CONTRACT_VERSION,
+  AI_CHART_D1_PALACE_IDENTITIES,
+} from './d1N0Constants'
 
 let checks = 0
+
+type NodeModuleInternals = {
+  _resolveFilename: (
+    request: string,
+    parent: unknown,
+    isMain: boolean,
+    options?: unknown,
+  ) => string
+  _load: (request: string, parent: unknown, isMain: boolean) => unknown
+}
+
+const moduleInternals = Module as unknown as NodeModuleInternals
+const originalResolveFilename = moduleInternals._resolveFilename
+const originalLoad = moduleInternals._load
+const testRequire = createRequire(__filename)
+const serverOnlyStubPath = testRequire.resolve('./d1Assets')
+
+moduleInternals._resolveFilename = function resolveFilenameForTest(
+  this: unknown,
+  request: string,
+  parent: unknown,
+  isMain: boolean,
+  options?: unknown,
+) {
+  if (request === 'server-only') return serverOnlyStubPath
+  return originalResolveFilename.call(this, request, parent, isMain, options)
+}
+moduleInternals._load = function loadForTest(
+  this: unknown,
+  request: string,
+  parent: unknown,
+  isMain: boolean,
+) {
+  if (request === 'server-only') return {}
+  return originalLoad.call(this, request, parent, isMain)
+}
+const { compileAiChartD1K0Catalog } = testRequire(
+  './d1K0Catalog.server',
+) as typeof import('./d1K0Catalog.server')
+moduleInternals._resolveFilename = originalResolveFilename
+moduleInternals._load = originalLoad
 
 type Mutable<T> = {
   -readonly [Key in keyof T]: T[Key] extends readonly (infer Item)[]
@@ -43,125 +79,34 @@ function check(name: string, run: () => void) {
   console.log(`✓ ${name}`)
 }
 
-function jsonLocator(starName: string) {
-  return {
-    sourceType: 'json' as const,
-    headingPath: [],
-    headingLevel: 0 as const,
-    exactHeading: null,
-    occurrenceIndex: 0,
-    extractionMode: 'exact_line' as const,
-    itemIndex: null,
-    exactLabel: null,
-    exactText: null,
-    jsonPath: 'stars',
-    jsonMatchField: 'name',
-    jsonMatchValue: starName,
-  }
-}
-
-function markdownLocator() {
-  return {
-    sourceType: 'markdown' as const,
-    headingPath: [],
-    headingLevel: 2 as const,
-    exactHeading: '二、對宮',
-    occurrenceIndex: 0,
-    extractionMode: 'exact_section' as const,
-    itemIndex: null,
-    exactLabel: null,
-    exactText: null,
-    jsonPath: null,
-    jsonMatchField: null,
-    jsonMatchValue: null,
-  }
-}
-
-function rule(
-  ruleId: string,
-  content: string,
-  sourceAuthority: 'formal_teacher_confirmed' | 'reasoning_confirmed',
-): AiChartD1K0Rule {
-  const formal = sourceAuthority === 'formal_teacher_confirmed'
-  const sourceFile = formal
-    ? AI_CHART_D1_K0_SOURCE_FILES.stars
-    : AI_CHART_D1_K0_SOURCE_FILES.relationships
-  return {
-    ruleId,
-    kind: formal ? 'single_star' : 'relationship',
-    title: formal ? '紫微核心' : '對宮規則',
-    content,
-    contentSha256: hashAiChartD1K0Content(content),
-    ruleStatus: 'teacher_confirmed',
-    sourceAuthority,
-    sourceFile,
-    sourceFileSha256: AI_CHART_D1_K0_SOURCE_SHA256[sourceFile],
-    sourceLocator: formal ? jsonLocator('紫微') : markdownLocator(),
-    appliesTo: formal ? ['star:ziwei'] : ['relationship:opposite'],
-    priority: formal ? 400 : 300,
-    d1Safety: AI_CHART_D1_K0_D1_SAFETY,
-    selectionTags: formal ? ['star:ziwei'] : ['relationship:opposite'],
-  }
-}
-
-function catalogFixture(): AiChartD1K0Catalog {
-  const rules = [
-    rule('rule:star:ziwei:core', '{"核心":"尊重"}', 'formal_teacher_confirmed'),
-    rule('rule:structure:opposite', '先分析本宮，再整合對宮。', 'reasoning_confirmed'),
+function bundleFixture(catalog: AiChartD1K0Catalog): AiChartD1K0P1Bundle {
+  const selectedRules = [
+    'rule:star:ziwei:core',
+    'rule:mutagen:lianzhen:lu',
+    'rule:structure:opposite',
+    'rule:common:possibility-first',
   ]
-  const meaningText = '個性'
-  const withoutFingerprint: Omit<AiChartD1K0Catalog, 'catalogFingerprint'> = {
-    contractVersion: AI_CHART_D1_K0_CATALOG_VERSION,
-    catalogId: AI_CHART_D1_K0_CATALOG_ID,
-    sourceManifestVersion: AI_CHART_D1_ASSET_MANIFEST_VERSION,
-    sourceManifestSha256: AI_CHART_D1_LOCKED_MANIFEST_SHA256,
-    compiledAtPolicy: AI_CHART_D1_K0_COMPILED_AT_POLICY,
-    rules,
-    palaceMeanings: [
-      {
-        meaningId: 'meaning:palace:ming:personality',
-        palaceId: 'palace:ming',
-        text: meaningText,
-        contentSha256: hashAiChartD1K0Content(meaningText),
-        order: 0,
-        sourceFile: AI_CHART_D1_K0_SOURCE_FILES.palaces,
-        sourceFileSha256:
-          AI_CHART_D1_K0_SOURCE_SHA256[AI_CHART_D1_K0_SOURCE_FILES.palaces],
-        sourceLocator: {
-          ...markdownLocator(),
-          exactHeading: '一、十二宮分面（每宮看什麼）',
-          extractionMode: 'exact_bullet',
-          itemIndex: 0,
-          exactText: '命宮：個性、價值觀、能力、長相、遷移宮的內心、影響 12 宮',
-        },
-      },
-    ],
-    doubleStarInventory: AI_CHART_D1_K0_DOUBLE_STAR_INVENTORY.map((entry) => ({
-      ...entry,
-      specificRuleStatus: null,
-      specificRuleId: null,
-      missingReason: 'missing_confirmed_double_star_core',
-    })),
-    mutagenInventory: [],
-    coverage: {
-      palaceMeaningCoverage: { covered: 1, total: 12 },
-      singleStarCoverage: { covered: 1, total: 14 },
-      singleStarTeacherSupplementCoverage: { covered: 0, total: 14 },
-      doubleStarSpecificCoverage: { covered: 0, total: 24 },
-      mutagenSpecificCoverage: { covered: 0, total: 0 },
-      supportingStarCoverage: { covered: 0, total: 11 },
-      structureRuleCoverage: { covered: 1, total: 15 },
+    .map((ruleId) => {
+      const rule = catalog.rules.find((entry) => entry.ruleId === ruleId)
+      assert.ok(rule)
+      return rule
+    })
+    .sort(compareAiChartD1K0Rules)
+  const selectedMeanings = AI_CHART_D1_K0_PALACE_ROLES.flatMap(
+    (palaceRole, index) => {
+      const palaceId = AI_CHART_D1_PALACE_IDENTITIES[index].palaceId
+      return catalog.palaceMeanings
+        .filter((meaning) => meaning.palaceId === palaceId)
+        .map((meaning) => ({
+          palaceRole,
+          palaceId,
+          meaningId: meaning.meaningId,
+          text: meaning.text,
+          contentSha256: meaning.contentSha256,
+          order: meaning.order,
+        }))
     },
-    warnings: ['warning:k0:fixture-partial'],
-    readiness: 'partial',
-  }
-  return {
-    ...withoutFingerprint,
-    catalogFingerprint: createAiChartD1K0CatalogFingerprint(withoutFingerprint),
-  }
-}
-
-function bundleFixture(catalog: AiChartD1K0Catalog) {
+  )
   return {
     contractVersion: AI_CHART_D1_K0_BUNDLE_VERSION,
     bundleId: 'bundle:k0:test:0',
@@ -176,31 +121,32 @@ function bundleFixture(catalog: AiChartD1K0Catalog) {
     p1StructuralInputContractVersion:
       AI_CHART_D1_P1_STRUCTURAL_INPUT_CONTRACT_VERSION,
     outputContractVersion: 'ai-chart-d1-p1-f1/v1',
-    selectedRules: catalog.rules,
-    selectedMeanings: [
-      {
-        palaceRole: 'target',
-        palaceId: 'palace:ming',
-        meaningId: catalog.palaceMeanings[0].meaningId,
-        text: catalog.palaceMeanings[0].text,
-        contentSha256: catalog.palaceMeanings[0].contentSha256,
-        order: 0,
-      },
-    ],
-    selectionTrace: catalog.rules.map((entry) => ({
-      ruleId: entry.ruleId,
-      reason:
-        entry.kind === 'single_star'
-          ? 'major_star_present'
-          : 'relationship_rule',
-      palaceRole: 'target',
-      palaceId: 'palace:ming',
-      placementId:
-        entry.kind === 'single_star' ? 'palace:ming:star:major:0' : null,
-      starName: entry.kind === 'single_star' ? '紫微' : null,
-      mutagenType: null,
-      structuralReference: 'p1:view:target',
-    })),
+    selectedRules,
+    selectedMeanings,
+    selectionTrace: selectedRules.map((entry) => {
+      const isCommon = entry.ruleId === 'rule:common:possibility-first'
+      const isSingle = entry.kind === 'single_star'
+      const isMutagen = entry.kind === 'natal_mutagen'
+      return {
+        ruleId: entry.ruleId,
+        reason: isCommon
+          ? 'required_common_rule'
+          : isSingle
+            ? 'major_star_present'
+            : isMutagen
+              ? 'natal_mutagen_present'
+              : 'relationship_rule',
+        palaceRole: isCommon ? null : 'target',
+        palaceId: isCommon ? null : 'palace:ming',
+        placementId:
+          isSingle || isMutagen ? 'palace:ming:star:major:0' : null,
+        starName: isSingle ? '紫微' : isMutagen ? '廉貞' : null,
+        mutagenType: isMutagen ? '化祿' : null,
+        structuralReference: isCommon
+          ? 'p1:required-common'
+          : 'p1:view:target',
+      }
+    }),
     missingRequirements: [],
     knowledgeStatus: 'ready',
     promptStatus: 'prompt_builder_required',
@@ -219,6 +165,63 @@ function expectBundleInvalid(value: unknown, catalog: unknown) {
   assert.throws(() => parseAiChartD1K0P1Bundle(value, catalog), {
     message: AI_CHART_D1_K0_BUNDLE_INVALID,
   })
+}
+
+function recalculateCatalogFingerprintForTest(
+  catalog: Mutable<AiChartD1K0Catalog>,
+): Mutable<AiChartD1K0Catalog> {
+  const withoutFingerprint = { ...catalog } as Partial<
+    Mutable<AiChartD1K0Catalog>
+  >
+  delete withoutFingerprint.catalogFingerprint
+  catalog.catalogFingerprint = createAiChartD1K0CatalogFingerprint(
+    withoutFingerprint as Omit<AiChartD1K0Catalog, 'catalogFingerprint'>,
+  )
+  return catalog
+}
+
+function mutateCatalog(
+  catalog: AiChartD1K0Catalog,
+  mutate: (value: Mutable<AiChartD1K0Catalog>) => void,
+): Mutable<AiChartD1K0Catalog> {
+  const value = structuredClone(catalog) as Mutable<AiChartD1K0Catalog>
+  mutate(value)
+  return recalculateCatalogFingerprintForTest(value)
+}
+
+function partialBundleFixture(
+  bundle: ReturnType<typeof bundleFixture>,
+): Mutable<ReturnType<typeof bundleFixture>> {
+  const value = structuredClone(bundle) as Mutable<
+    ReturnType<typeof bundleFixture>
+  >
+  value.missingRequirements = [
+    {
+      requirementId: 'missing:opposite:double:ziwei-qisha',
+      kind: 'double_star',
+      palaceRole: 'opposite',
+      palaceId: 'palace:parents',
+      starName: null,
+      mutagenType: null,
+      pairKey: 'pair:ziwei-qisha',
+      reasonCode: 'missing_confirmed_double_star_core',
+    },
+    {
+      requirementId: 'missing:target:empty:opposite-empty',
+      kind: 'empty_palace',
+      palaceRole: 'target',
+      palaceId: 'palace:ming',
+      starName: null,
+      mutagenType: null,
+      pairKey: null,
+      reasonCode: 'missing_empty_palace_rule',
+    },
+  ].sort((left, right) =>
+    left.requirementId.localeCompare(right.requirementId, 'en'),
+  ) as Mutable<ReturnType<typeof bundleFixture>>['missingRequirements']
+  value.knowledgeStatus = 'partial'
+  value.warnings = ['warning:k0:bundle-partial']
+  return value
 }
 
 function containsUniqueItems(value: unknown): boolean {
@@ -240,8 +243,8 @@ function assertStrictObjectSchema(value: unknown): void {
   Object.values(record).forEach(assertStrictObjectSchema)
 }
 
-function run() {
-  const catalog = catalogFixture()
+async function run() {
+  const catalog = await compileAiChartD1K0Catalog()
   const parsedCatalog = parseAiChartD1K0Catalog(catalog)
   const bundle = bundleFixture(parsedCatalog)
   const parsedBundle = parseAiChartD1K0P1Bundle(bundle, parsedCatalog)
@@ -295,6 +298,125 @@ function run() {
   })
   check('catalog wrong fingerprint is rejected', () => {
     expectCatalogInvalid({ ...catalog, catalogFingerprint: '0'.repeat(64) })
+  })
+  check('false 14/14 coverage with recomputed fingerprint is rejected', () => {
+    expectCatalogInvalid(
+      mutateCatalog(catalog, (value) => {
+        value.coverage.doubleStarSpecificCoverage = {
+          covered: 14,
+          total: 14,
+        }
+      }),
+    )
+  })
+  check('false teacher 14/14 with recomputed fingerprint is rejected', () => {
+    expectCatalogInvalid(
+      mutateCatalog(catalog, (value) => {
+        value.coverage.singleStarTeacherSupplementCoverage.covered = 14
+      }),
+    )
+  })
+  check('false structure 15/15 with recomputed fingerprint is rejected', () => {
+    expectCatalogInvalid(
+      mutateCatalog(catalog, (value) => {
+        value.coverage.structureRuleCoverage.covered = 15
+      }),
+    )
+  })
+  check('missing opposite warning with recomputed fingerprint is rejected', () => {
+    expectCatalogInvalid(
+      mutateCatalog(catalog, (value) => {
+        value.warnings = value.warnings.filter(
+          (warning) => warning !== 'warning:k0:missing-opposite-empty-rule',
+        )
+      }),
+    )
+  })
+  check('false ready state with recomputed fingerprint is rejected', () => {
+    expectCatalogInvalid(
+      mutateCatalog(catalog, (value) => {
+        value.readiness = 'ready'
+      }),
+    )
+  })
+  check('mutated double pair key with recomputed fingerprint is rejected', () => {
+    expectCatalogInvalid(
+      mutateCatalog(catalog, (value) => {
+        value.doubleStarInventory[0].pairKey = 'pair:mutated'
+      }),
+    )
+  })
+  check('swapped double stars with recomputed fingerprint are rejected', () => {
+    expectCatalogInvalid(
+      mutateCatalog(catalog, (value) => {
+        const first = value.doubleStarInventory[0]
+        const left = first.leftStar
+        first.leftStar = first.rightStar
+        first.rightStar = left
+      }),
+    )
+  })
+  check('deleted mutagen assignment with recomputed fingerprint is rejected', () => {
+    expectCatalogInvalid(
+      mutateCatalog(catalog, (value) => {
+        value.mutagenInventory.splice(0, 1)
+        value.coverage.mutagenSpecificCoverage.covered -= 1
+        value.coverage.mutagenSpecificCoverage.total -= 1
+      }),
+    )
+  })
+  check('fake mutagen assignment with recomputed fingerprint is rejected', () => {
+    expectCatalogInvalid(
+      mutateCatalog(catalog, (value) => {
+        const fake = structuredClone(
+          value.mutagenInventory[value.mutagenInventory.length - 1],
+        )
+        fake.starName = '假星'
+        fake.specificRuleId = null
+        fake.sourceAuthority = null
+        fake.missingReason = 'missing_specific_mutagen_rule'
+        value.mutagenInventory.push(fake)
+        value.coverage.mutagenSpecificCoverage.total += 1
+      }),
+    )
+  })
+  check('missing supporting rule cannot be hidden by coverage and fingerprint', () => {
+    expectCatalogInvalid(
+      mutateCatalog(catalog, (value) => {
+        value.rules = value.rules.filter(
+          (rule) => rule.ruleId !== 'rule:supporting:wenchang:core',
+        )
+        value.coverage.supportingStarCoverage.covered = 10
+      }),
+    )
+  })
+  check('missing palace meaning cannot be hidden by coverage and fingerprint', () => {
+    expectCatalogInvalid(
+      mutateCatalog(catalog, (value) => {
+        value.palaceMeanings.splice(0, 1)
+        value.coverage.palaceMeaningCoverage.covered = 11
+      }),
+    )
+  })
+  check('forged teacher supplement with recomputed fingerprint is rejected', () => {
+    expectCatalogInvalid(
+      mutateCatalog(catalog, (value) => {
+        const rule = value.rules.find(
+          (entry) => entry.ruleId === 'rule:star:tianxiang:core',
+        )
+        assert.ok(rule)
+        const content = JSON.parse(rule.content) as Record<string, unknown>
+        content.老師補充D1 = [
+          {
+            starName: '天相',
+            segmentId: 'teacher:tianxiang:forged',
+            text: '偽造老師補充',
+          },
+        ]
+        rule.content = JSON.stringify(content)
+        rule.contentSha256 = hashAiChartD1K0Content(rule.content)
+      }),
+    )
   })
   check('catalog wrong priority ordering is rejected', () => {
     const value = structuredClone(catalog) as Mutable<AiChartD1K0Catalog>
@@ -353,6 +475,133 @@ function run() {
     value.selectedRules.reverse()
     expectBundleInvalid(value, catalog)
   })
+  check('bundle selection trace reordering is rejected', () => {
+    const value = structuredClone(bundle) as Mutable<ReturnType<typeof bundleFixture>>
+    const first = value.selectionTrace[0]
+    value.selectionTrace[0] = value.selectionTrace[1]
+    value.selectionTrace[1] = first
+    expectBundleInvalid(value, catalog)
+  })
+  check('bundle trace reason incompatible with rule kind is rejected', () => {
+    const value = structuredClone(bundle) as Mutable<ReturnType<typeof bundleFixture>>
+    const trace = value.selectionTrace.find(
+      (entry) => entry.reason === 'major_star_present',
+    )
+    assert.ok(trace)
+    trace.reason = 'required_common_rule'
+    expectBundleInvalid(value, catalog)
+  })
+  check('major-star trace without placement id is rejected', () => {
+    const value = structuredClone(bundle) as Mutable<ReturnType<typeof bundleFixture>>
+    const trace = value.selectionTrace.find(
+      (entry) => entry.reason === 'major_star_present',
+    )
+    assert.ok(trace)
+    trace.placementId = null
+    expectBundleInvalid(value, catalog)
+  })
+  check('mutagen trace without mutagen type is rejected', () => {
+    const value = structuredClone(bundle) as Mutable<ReturnType<typeof bundleFixture>>
+    const trace = value.selectionTrace.find(
+      (entry) => entry.reason === 'natal_mutagen_present',
+    )
+    assert.ok(trace)
+    trace.mutagenType = null
+    expectBundleInvalid(value, catalog)
+  })
+  check('duplicate selected meaning is rejected', () => {
+    const value = structuredClone(bundle) as Mutable<ReturnType<typeof bundleFixture>>
+    value.selectedMeanings.splice(1, 0, structuredClone(value.selectedMeanings[0]))
+    expectBundleInvalid(value, catalog)
+  })
+  check('missing target role meanings are rejected', () => {
+    const value = structuredClone(bundle) as Mutable<ReturnType<typeof bundleFixture>>
+    value.selectedMeanings = value.selectedMeanings.filter(
+      (meaning) => meaning.palaceRole !== 'target',
+    )
+    expectBundleInvalid(value, catalog)
+  })
+  check('missing trine role meanings are rejected', () => {
+    const value = structuredClone(bundle) as Mutable<ReturnType<typeof bundleFixture>>
+    value.selectedMeanings = value.selectedMeanings.filter(
+      (meaning) => meaning.palaceRole !== 'trine_2',
+    )
+    expectBundleInvalid(value, catalog)
+  })
+  check('one role mixing two palace ids is rejected', () => {
+    const value = structuredClone(bundle) as Mutable<ReturnType<typeof bundleFixture>>
+    const targetEnd = value.selectedMeanings.findIndex(
+      (meaning) => meaning.palaceRole !== 'target',
+    )
+    const extra = catalog.palaceMeanings
+      .filter(
+        (meaning) =>
+          meaning.palaceId === AI_CHART_D1_PALACE_IDENTITIES[5].palaceId,
+      )
+      .map((meaning) => ({
+        palaceRole: 'target' as const,
+        palaceId: meaning.palaceId,
+        meaningId: meaning.meaningId,
+        text: meaning.text,
+        contentSha256: meaning.contentSha256,
+        order: meaning.order,
+      }))
+    value.selectedMeanings.splice(targetEnd, 0, ...extra)
+    expectBundleInvalid(value, catalog)
+  })
+  check('target meanings for a different palace are rejected', () => {
+    const value = structuredClone(bundle) as Mutable<ReturnType<typeof bundleFixture>>
+    const replacement = catalog.palaceMeanings
+      .filter(
+        (meaning) =>
+          meaning.palaceId === AI_CHART_D1_PALACE_IDENTITIES[5].palaceId,
+      )
+      .map((meaning) => ({
+        palaceRole: 'target' as const,
+        palaceId: meaning.palaceId,
+        meaningId: meaning.meaningId,
+        text: meaning.text,
+        contentSha256: meaning.contentSha256,
+        order: meaning.order,
+      }))
+    value.selectedMeanings = [
+      ...replacement,
+      ...value.selectedMeanings.filter(
+        (meaning) => meaning.palaceRole !== 'target',
+      ),
+    ]
+    expectBundleInvalid(value, catalog)
+  })
+  check('missing one catalog meaning is rejected', () => {
+    const value = structuredClone(bundle) as Mutable<ReturnType<typeof bundleFixture>>
+    value.selectedMeanings.splice(0, 1)
+    expectBundleInvalid(value, catalog)
+  })
+  check('reordered missing requirements are rejected', () => {
+    const value = partialBundleFixture(bundle)
+    value.missingRequirements.reverse()
+    expectBundleInvalid(value, catalog)
+  })
+  check('missing reason code incompatible with kind is rejected', () => {
+    const value = partialBundleFixture(bundle)
+    value.missingRequirements[0].kind = 'palace_meaning'
+    expectBundleInvalid(value, catalog)
+  })
+  check('partial bundle without warning is rejected', () => {
+    const value = partialBundleFixture(bundle)
+    value.warnings = []
+    expectBundleInvalid(value, catalog)
+  })
+  check('ready bundle with partial warning is rejected', () => {
+    const value = structuredClone(bundle) as Mutable<ReturnType<typeof bundleFixture>>
+    value.warnings = ['warning:k0:bundle-partial']
+    expectBundleInvalid(value, catalog)
+  })
+  check('partial bundle with extra warning is rejected', () => {
+    const value = partialBundleFixture(bundle)
+    value.warnings.push('warning:k0:extra')
+    expectBundleInvalid(value, catalog)
+  })
   check('bundle partial status requires missing requirement', () => {
     expectBundleInvalid({ ...bundle, knowledgeStatus: 'partial' }, catalog)
   })
@@ -399,4 +648,4 @@ function allSchemaKeys(value: unknown, output = new Set<string>()): Set<string> 
   return output
 }
 
-run()
+void run()
