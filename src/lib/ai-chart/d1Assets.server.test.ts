@@ -5,9 +5,12 @@ import {
   cp,
   mkdir,
   mkdtemp,
+  readdir,
+  readFile,
   rm,
   symlink,
   unlink,
+  writeFile,
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -19,6 +22,7 @@ import {
   AI_CHART_D1_MANIFEST_PATH,
   AI_CHART_D1_RUNTIME_DISABLED,
 } from './d1Assets'
+import { AI_CHART_D1_K0_SOURCE_WHITELIST } from './d1K0Registry'
 
 type NodeModuleInternals = {
   _resolveFilename: (
@@ -33,7 +37,7 @@ type NodeModuleInternals = {
 const moduleInternals = Module as unknown as NodeModuleInternals
 const originalResolveFilename = moduleInternals._resolveFilename
 const originalLoad = moduleInternals._load
-const testRequire = createRequire(import.meta.url)
+const testRequire = createRequire(__filename)
 const serverOnlyStubPath = testRequire.resolve('./d1Assets')
 
 moduleInternals._resolveFilename = function resolveFilenameForTest(
@@ -59,6 +63,7 @@ moduleInternals._load = function loadForTest(
 
 const {
   loadAiChartD1RuntimeAssetBundle,
+  readVerifiedAiChartD1K0CompilationAssets,
   verifyAiChartD1AssetBundle,
 } = testRequire('./d1Assets.server') as typeof import('./d1Assets.server')
 
@@ -84,6 +89,20 @@ async function expectIntegrityFailure(run: () => Promise<unknown>) {
     if (!(error instanceof Error)) assert.fail('expected Error')
     assert.equal(error.message, AI_CHART_D1_ASSET_INTEGRITY_FAILED)
   }
+}
+
+async function sourceFilesUnder(directory: string): Promise<readonly string[]> {
+  const entries = await readdir(directory, { withFileTypes: true })
+  const files: string[] = []
+  for (const entry of entries) {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) {
+      files.push(...(await sourceFilesUnder(path)))
+    } else if (entry.isFile() && /\.(?:ts|tsx)$/.test(entry.name)) {
+      files.push(path)
+    }
+  }
+  return Object.freeze(files)
 }
 
 async function run() {
@@ -122,6 +141,44 @@ async function run() {
       assert.equal(Object.isFrozen(verified.files[index]), true)
     }
 
+    const compilationAssets = await readVerifiedAiChartD1K0CompilationAssets()
+    assert.equal(compilationAssets.length, 9)
+    assert.equal(Object.isFrozen(compilationAssets), true)
+    assert.equal(compilationAssets.every((asset) => Object.isFrozen(asset)), true)
+    assert.equal(compilationAssets.every((asset) => asset.text.length > 0), true)
+
+    for (const injected of [
+      { allowedPaths: ['content/ai-chart/d1-v1/prompt/0_主控.md'] },
+      {
+        paths: [
+          'content/ai-chart/d1-v1/spec/primary/20_D1_本命人格推理總控流程.md',
+        ],
+      },
+      {
+        allowedPaths: [
+          'content/ai-chart/d1-v1/knowledge/reasoning/06_D1_飛化推理模組.md',
+        ],
+      },
+      {
+        paths: [
+          'content/ai-chart/d1-v1/knowledge/core/B1_雙星組合_紫府武廉殺破狼相.md',
+        ],
+      },
+      {
+        paths: [
+          'content/ai-chart/d1-v1/knowledge/core/B2_雙星組合_機月同梁日巨.md',
+        ],
+      },
+    ]) {
+      await expectIntegrityFailure(() =>
+        readVerifiedAiChartD1K0CompilationAssets(
+          injected as Parameters<
+            typeof readVerifiedAiChartD1K0CompilationAssets
+          >[0],
+        ),
+      )
+    }
+
     await assert.rejects(
       () => loadAiChartD1RuntimeAssetBundle(),
       { message: AI_CHART_D1_RUNTIME_DISABLED },
@@ -134,6 +191,26 @@ async function run() {
     )
     await expectIntegrityFailure(() =>
       verifyAiChartD1AssetBundle({ projectRoot: tamperedProject }),
+    )
+    await appendFile(
+      join(tamperedProject, AI_CHART_D1_K0_SOURCE_WHITELIST[0]),
+      '\ntampered-k0-content',
+    )
+    await expectIntegrityFailure(() =>
+      readVerifiedAiChartD1K0CompilationAssets({
+        projectRoot: tamperedProject,
+      }),
+    )
+
+    const invalidUtf8Project = await copyProjectAssets()
+    await writeFile(
+      join(invalidUtf8Project, AI_CHART_D1_K0_SOURCE_WHITELIST[0]),
+      Buffer.from([0xc3, 0x28]),
+    )
+    await expectIntegrityFailure(() =>
+      readVerifiedAiChartD1K0CompilationAssets({
+        projectRoot: invalidUtf8Project,
+      }),
     )
 
     const missingProject = await copyProjectAssets()
@@ -149,8 +226,14 @@ async function run() {
     )
 
     const symlinkProject = await copyProjectAssets()
-    const symlinkPath = join(symlinkProject, verified.manifest.files[0].path)
-    const symlinkTarget = join(symlinkProject, verified.manifest.files[1].path)
+    const symlinkPath = join(
+      symlinkProject,
+      AI_CHART_D1_K0_SOURCE_WHITELIST[0],
+    )
+    const symlinkTarget = join(
+      symlinkProject,
+      AI_CHART_D1_K0_SOURCE_WHITELIST[1],
+    )
     let symlinkCreated = false
 
     try {
@@ -170,14 +253,44 @@ async function run() {
       await expectIntegrityFailure(() =>
         verifyAiChartD1AssetBundle({ projectRoot: symlinkProject }),
       )
+      await expectIntegrityFailure(() =>
+        readVerifiedAiChartD1K0CompilationAssets({
+          projectRoot: symlinkProject,
+        }),
+      )
       console.log('✓ symlink asset rejected')
     }
+
+    const sourceFiles = await sourceFilesUnder(join(repositoryRoot, 'src'))
+    const rawReaderConsumers: string[] = []
+    for (const sourceFile of sourceFiles) {
+      const source = await readFile(sourceFile, 'utf8')
+      if (source.includes('readVerifiedAiChartD1K0CompilationAssets')) {
+        rawReaderConsumers.push(relative(repositoryRoot, sourceFile))
+      }
+      if (
+        sourceFile.startsWith(`${join(repositoryRoot, 'src', 'app')}${sep}`)
+      ) {
+        assert.equal(
+          source.includes('readVerifiedAiChartD1K0CompilationAssets'),
+          false,
+        )
+      }
+    }
+    assert.deepEqual(rawReaderConsumers.sort(), [
+      'src/lib/ai-chart/d1Assets.server.test.ts',
+      'src/lib/ai-chart/d1Assets.server.ts',
+      'src/lib/ai-chart/d1K0Catalog.server.ts',
+    ])
 
     console.log('✓ repository manifest lock and 23 asset SHA checks')
     console.log('✓ tampered asset rejected')
     console.log('✓ missing asset rejected')
     console.log('✓ tampered manifest lock rejected')
     console.log('✓ runtime disabled guard rejected loading')
+    console.log('✓ server-only K0 compilation whitelist and UTF-8 guards')
+    console.log('✓ app routes cannot import the K0 raw reader')
+    console.log('✓ K0 compiler is the only production raw-reader consumer')
   } finally {
     await safeCleanup(suiteRoot)
   }
