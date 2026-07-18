@@ -476,6 +476,45 @@ function buildOneBundle(
   }, catalog)
 }
 
+function canonicalizeBundleValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeBundleValue)
+  if (value === null || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right, 'en'))
+      .map(([key, entry]) => [key, canonicalizeBundleValue(entry)]),
+  )
+}
+
+function bundlesAreStableEqual(left: unknown, right: unknown): boolean {
+  return (
+    JSON.stringify(canonicalizeBundleValue(left)) ===
+    JSON.stringify(canonicalizeBundleValue(right))
+  )
+}
+
+export function assertAiChartD1K0P1KnowledgeBundleMatchesStructuralInput(
+  catalogValue: unknown,
+  structuralInputValue: unknown,
+  bundleValue: unknown,
+): void {
+  try {
+    const catalog = parseAiChartD1K0Catalog(catalogValue)
+    const structuralInput = parseAiChartD1P1StructuralInput(
+      structuralInputValue,
+    )
+    const suppliedBundle = parseAiChartD1K0P1Bundle(bundleValue, catalog)
+    const expectedBundle = buildOneBundle(
+      catalog,
+      structuralInput,
+      suppliedBundle.bundleId,
+    )
+    if (!bundlesAreStableEqual(suppliedBundle, expectedBundle)) invalid()
+  } catch {
+    invalid()
+  }
+}
+
 export function buildAiChartD1K0P1KnowledgeBundles(
   catalogValue: unknown,
   p1InputValues: unknown,

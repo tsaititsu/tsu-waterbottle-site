@@ -18,6 +18,10 @@ import {
   type AiChartD1K0SelectionTrace,
 } from './d1K0Contracts'
 import {
+  assertAiChartD1K0P1KnowledgeBundleMatchesStructuralInput,
+  buildAiChartD1K0P1KnowledgeBundles,
+} from './d1K0Selection'
+import {
   AI_CHART_D1_P1_STRUCTURAL_INPUT_CONTRACT_VERSION,
   AI_CHART_D1_PALACE_IDENTITIES,
   getAiChartD1CanonicalDoubleMajorStarPair,
@@ -392,6 +396,11 @@ export function parseAiChartD1P1ModelInput(
       knowledgeBundleValue,
       catalog,
     )
+    assertAiChartD1K0P1KnowledgeBundleMatchesStructuralInput(
+      catalog,
+      structuralInput,
+      knowledgeBundle,
+    )
     if (
       knowledgeBundle.knowledgeStatus !== 'ready' ||
       knowledgeBundle.missingRequirements.length !== 0 ||
@@ -535,10 +544,29 @@ export function buildAiChartD1P1ModelInputs(
     const structuralInputs = structuralInputValues.map(
       parseAiChartD1P1StructuralInput,
     )
-    const knowledgeBundles = knowledgeBundleValues.map((bundle) =>
+    const suppliedKnowledgeBundles = knowledgeBundleValues.map((bundle) =>
       parseAiChartD1K0P1Bundle(bundle, catalog),
     )
-    assertAtomicSources(catalog, structuralInputs, knowledgeBundles)
+    assertAtomicSources(catalog, structuralInputs, suppliedKnowledgeBundles)
+
+    const knowledgeBundles = buildAiChartD1K0P1KnowledgeBundles(
+      catalog,
+      structuralInputs,
+      {
+        bundleIds: suppliedKnowledgeBundles.map((bundle) => bundle.bundleId),
+      },
+    )
+    if (
+      knowledgeBundles.some(
+        (bundle, index) =>
+          !stableAiChartD1P1ModelInputEqual(
+            bundle,
+            suppliedKnowledgeBundles[index],
+          ),
+      )
+    ) {
+      invalid()
+    }
 
     if (
       knowledgeBundles.some(

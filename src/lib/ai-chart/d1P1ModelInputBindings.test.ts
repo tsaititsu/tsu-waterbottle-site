@@ -78,6 +78,22 @@ function buildWithSources(
   )
 }
 
+function removeBundleRuleAndTrace(
+  bundle: Mutable<AiChartD1K0P1Bundle>,
+  ruleId: string,
+): void {
+  assert.equal(
+    bundle.selectedRules.some((rule) => rule.ruleId === ruleId),
+    true,
+  )
+  bundle.selectedRules = bundle.selectedRules.filter(
+    (rule) => rule.ruleId !== ruleId,
+  )
+  bundle.selectionTrace = bundle.selectionTrace.filter(
+    (trace) => trace.ruleId !== ruleId,
+  )
+}
+
 function sourceFilesUnder(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name)
@@ -156,6 +172,19 @@ async function run() {
       assert.equal(input.bundleId, bundles[index].bundleId)
       assert.equal(input.targetPalaceId, bundles[index].targetPalaceId)
     })
+  })
+  check('fixed-12 deterministic rebuild preserves supplied bundle ids by index', () => {
+    const rebuilt = buildWithSources(fixture)
+    assert.deepEqual(
+      rebuilt.map((input) => input.bundleId),
+      bundles.map((bundle) => bundle.bundleId),
+    )
+  })
+  check('individual parser accepts the exact deterministic bundle', () => {
+    assert.deepEqual(
+      parseFixtureModelInput(fixture, 0, modelInputs[0]),
+      modelInputs[0],
+    )
   })
   check('Catalog may remain partial when all current bundles are ready', () => {
     assert.equal(catalog.readiness, 'partial')
@@ -296,6 +325,25 @@ async function run() {
     assert.equal(isolated[0].callId, modelInputs[0].callId)
     assert.equal(isolated[0].bundleId, modelInputs[0].bundleId)
   })
+  check('authenticated Model Inputs share no mutable supplied bundle references', () => {
+    const suppliedBundles = structuredClone(
+      bundles,
+    ) as Mutable<AiChartD1K0P1Bundle>[]
+    const authenticated = buildWithSources(
+      fixture,
+      structuralInputs,
+      suppliedBundles,
+    )
+    const originalTitle = authenticated[0].knowledgeContext.rules[0].title
+    suppliedBundles[0].selectedRules[0].title = 'changed-after-build'
+    suppliedBundles[0].selectionTrace[0].structuralReference =
+      'p1:view:changed-after-build'
+    assert.equal(authenticated[0].knowledgeContext.rules[0].title, originalTitle)
+    assert.notEqual(
+      authenticated[0].knowledgeContext.selectionTrace[0].structuralReference,
+      'p1:view:changed-after-build',
+    )
+  })
   check('output graph is recursively frozen', () => {
     assert.equal(Object.isFrozen(modelInputs), true)
     assert.equal(Object.isFrozen(modelInputs[0]), true)
@@ -404,6 +452,58 @@ async function run() {
   })
   mutateModelAndReject(fixture, 'missing selected rule is source-rejected', (value) => {
     value.knowledgeContext.rules.splice(0, 1)
+  })
+  check('individual parser rejects synchronized major-rule omission attack', () => {
+    const bundle = structuredClone(
+      bundles[0],
+    ) as Mutable<AiChartD1K0P1Bundle>
+    const model = structuredClone(
+      modelInputs[0],
+    ) as Mutable<AiChartD1P1ModelInput>
+    const majorTrace = bundle.selectionTrace.find(
+      (trace) => trace.reason === 'major_star_present',
+    )
+    assert.ok(majorTrace)
+    removeBundleRuleAndTrace(bundle, majorTrace.ruleId)
+    model.knowledgeContext.rules = model.knowledgeContext.rules.filter(
+      (rule) => rule.ruleId !== majorTrace.ruleId,
+    )
+    model.knowledgeContext.selectionTrace =
+      model.knowledgeContext.selectionTrace.filter(
+        (trace) => trace.ruleId !== majorTrace.ruleId,
+      )
+    recalculateModelInputFingerprint(model)
+    try {
+      parseAiChartD1P1ModelInput(
+        model,
+        catalog,
+        structuralInputs[0],
+        bundle,
+      )
+      assert.fail('expected deterministic K0 completeness rejection')
+    } catch (error) {
+      assert.equal(
+        (error as Error).message,
+        AI_CHART_D1_P1_MODEL_INPUT_INVALID,
+      )
+      assert.doesNotMatch(
+        String(error),
+        /rule:|紫微|palace:|call:|index/u,
+      )
+    }
+  })
+  check('fixed-12 builder rejects a synchronized omitted rule and trace', () => {
+    const suppliedBundles = structuredClone(
+      bundles,
+    ) as Mutable<AiChartD1K0P1Bundle>[]
+    const majorTrace = suppliedBundles[0].selectionTrace.find(
+      (trace) => trace.reason === 'major_star_present',
+    )
+    assert.ok(majorTrace)
+    removeBundleRuleAndTrace(suppliedBundles[0], majorTrace.ruleId)
+    assertInvalid(() =>
+      buildWithSources(fixture, structuralInputs, suppliedBundles),
+    )
   })
   mutateModelAndReject(fixture, 'unselected Catalog rule addition is source-rejected', (value) => {
     const selectedRuleIds = new Set(
@@ -685,6 +785,47 @@ async function run() {
         catalog,
         partialStructures[0],
         partialBundles[0],
+      ),
+    )
+  })
+  check('ready spoof over deterministic partial is invalid before readiness', () => {
+    const spoofedBundles = structuredClone(
+      partialBundles,
+    ) as Mutable<AiChartD1K0P1Bundle>[]
+    const partialIndex = spoofedBundles.findIndex(
+      (bundle) => bundle.knowledgeStatus === 'partial',
+    )
+    assert.notEqual(partialIndex, -1)
+    spoofedBundles[partialIndex].missingRequirements = []
+    spoofedBundles[partialIndex].knowledgeStatus = 'ready'
+    spoofedBundles[partialIndex].warnings = []
+    assertInvalid(() =>
+      buildAiChartD1P1ModelInputs(
+        catalog,
+        partialStructures,
+        spoofedBundles,
+      ),
+    )
+    assertInvalid(() =>
+      parseAiChartD1P1ModelInput(
+        modelInputs[0],
+        catalog,
+        partialStructures[partialIndex],
+        spoofedBundles[partialIndex],
+      ),
+    )
+  })
+  check('exact deterministic partial remains not-ready after authenticity', () => {
+    const partialIndex = partialBundles.findIndex(
+      (bundle) => bundle.knowledgeStatus === 'partial',
+    )
+    assert.notEqual(partialIndex, -1)
+    assertNotReady(() =>
+      parseAiChartD1P1ModelInput(
+        modelInputs[0],
+        catalog,
+        partialStructures[partialIndex],
+        partialBundles[partialIndex],
       ),
     )
   })
