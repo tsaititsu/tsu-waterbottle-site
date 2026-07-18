@@ -23,7 +23,10 @@
 - F1 runtime parser：已建立
 - N0 deterministic normalizer：已完成
 - P1 Structural Input Contract：已完成
-- 完整 P1 Model Input：尚未完成
+- P1 Model Input Contract：已完成
+- P1 Model Input internal JSON Schema：已完成
+- P1 Model Input strict parser：已完成
+- P1 Model Input 固定 12 份 builder：已完成
 - F1 Input Contract：未建立，狀態為
   `F1_BLOCKED_BY_MISSING_FLYING_TRANSFORM_SOURCE`
 - B1／S1／A1／R1／A2／O1 Contract：未建立
@@ -47,7 +50,8 @@ Manifest 與 23 份素材會在 Server 端驗證原始位元組 SHA-256。
 `reasoning_source_candidate`。納管只確認來源位元組、Manifest 與引用
 一致性，不代表素材內容已由老師逐句核准。N0 與 P1 Structural Input
 已建立；K0 Catalog 與 deterministic knowledge selection 已完成，完整
-P1 Model Input 與 Prompt builder 仍未完成，也沒有產生任何 OpenAI request。
+P1 Model Input Contract 與固定 12 份 builder 已完成；Prompt builder 仍未完成，
+也沒有產生任何 OpenAI request。
 
 K0 compiler 只在 Server 端讀取內部固定的九份白名單素材，呼叫端不能傳入
 路徑或自訂 allowlist；逐檔驗證 Manifest、
@@ -61,8 +65,10 @@ Responses adapter 尚未被 Route、Report、付款或 Supabase 流程引用。
 Adapter 使用原生 REST fetch 解析原始 `output` array，不依賴 SDK-only
 的頂層 `output_text`。既有 Adapter 只正式處理 P1／F1 Output Contract；
 本次另建立的 P1 Structural Input 尚不是完整模型輸入。後續仍須完成
-完整 P1 Model Input 與 Prompt 組裝，才能進行受控 Preview 測試。本階段的
-P1 Structural Input 明確標記 `openAiCallable: false`，不得直接送入 Adapter。
+P1 Model Input 仍固定標記 `promptStatus=prompt_builder_required`、
+`promptVersion=null` 與 `openAiCallable=false`；必須另行完成 Prompt 組裝，
+才能進行受控 Preview 測試。P1 Structural Input 與 Model Input 都不得直接
+送入 Adapter。
 
 ## N0 與 P1 Structural Input 邊界
 
@@ -125,6 +131,31 @@ bundle IDs 也必須唯一。Bundle parser 會逐 index 驗證 rule／trace 對�
 reason-kind 相容性，並要求五個 palace roles 各自完整包含 Catalog 的 meanings。
 Missing requirements、knowledge status 與唯一固定 warning 亦由實際內容重算，
 不接受呼叫端自報狀態。
+
+## P1 Model Input Contract 邊界
+
+P1 Model Input 使用獨立版本 `ai-chart-d1-p1-model-input/v1`，只接受一份已驗證
+K0 Catalog、固定 12 份 P1 Structural Inputs 與一一對應的 12 份 K0 P1
+Knowledge Bundles。建立任何一份 Model Input 前，整批會先驗證固定宮位順序、
+chart／run／call／bundle identity、Catalog metadata 與 Contract references。
+只要任一 bundle 為 `partial`，整批以固定 `not_ready` 錯誤阻擋，不回傳 11 份
+成功結果或空 knowledge context。Catalog 全域可以維持 `partial`；只要當次
+12 份 bundles 全部為 `ready`，即可建立 12 份 Model Inputs。
+
+`structuralContext` 是來源 P1 Structural Input 五個必要結構欄位的 exact deep
+copy，保留 Structural `partial` 狀態與 warnings，不重新計算或改寫星曜、借星、
+關係或 scan。Path-aware PII guard 只允許這些固定 Structural Palace 星曜陣列的
+`name` 欄位；值仍由既有十四主星與 modeled supporting star 封閉 enum 驗證。
+其他任何路徑的 `name` 及個資、Report、付款、來源檔、Prompt／OpenAI request
+keys 都會 fail closed。星曜欄位沒有改成 `starName` projection。
+
+`knowledgeContext` 只保留 selected rule 的推理必要 projection、exact meanings
+與 exact selection trace，不含來源檔路徑、完整 Catalog、完整 Bundle wrapper 或
+missing requirements。Parser 會把 trace 的 palace role、placement、星曜、四化、
+雙星、空宮與四馬地重新綁定至 Structural Context；語意與 source binding 全部
+通過後才核對 deterministic `inputFingerprint`。本階段 production consumer 為 0，
+Prompt 0、OpenAI request 0、Route／Runtime 0，F1 仍固定為
+`F1_BLOCKED_BY_MISSING_FLYING_TRANSFORM_SOURCE`。
 
 ## P1／F1 輸出 Contract 邊界
 
