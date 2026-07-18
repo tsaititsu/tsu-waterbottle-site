@@ -3,13 +3,18 @@ import Module, { createRequire } from 'node:module'
 import { normalizeAiChartD1N0 } from './d1N0'
 import {
   AI_CHART_D1_K0_PALACE_ROLES,
+  compareAiChartD1K0Rules,
   createAiChartD1K0CatalogFingerprint,
   parseAiChartD1K0Catalog,
+  parseAiChartD1K0P1Bundle,
   type AiChartD1K0Catalog,
   type AiChartD1K0P1Bundle,
 } from './d1K0Contracts'
 import { getAiChartD1K0StarSlug } from './d1K0Registry'
-import { buildAiChartD1K0P1KnowledgeBundles } from './d1K0Selection'
+import {
+  assertAiChartD1K0P1KnowledgeBundleMatchesStructuralInput,
+  buildAiChartD1K0P1KnowledgeBundles,
+} from './d1K0Selection'
 import {
   AI_CHART_D1_MODELED_SUPPORTING_STARS,
   AI_CHART_D1_PALACE_IDENTITIES,
@@ -196,6 +201,52 @@ function assertRuleOrdering(bundle: AiChartD1K0P1Bundle) {
       true,
     )
   }
+}
+
+function withoutSelectedRule(
+  bundle: AiChartD1K0P1Bundle,
+  ruleId: string,
+): Mutable<AiChartD1K0P1Bundle> {
+  const mutable = structuredClone(bundle) as Mutable<AiChartD1K0P1Bundle>
+  assert.equal(
+    mutable.selectedRules.some((rule) => rule.ruleId === ruleId),
+    true,
+  )
+  mutable.selectedRules = mutable.selectedRules.filter(
+    (rule) => rule.ruleId !== ruleId,
+  )
+  mutable.selectionTrace = mutable.selectionTrace.filter(
+    (trace) => trace.ruleId !== ruleId,
+  )
+  return mutable
+}
+
+function assertAuthenticityInvalid(
+  catalog: AiChartD1K0Catalog,
+  input: ReturnType<typeof createInputs>[number],
+  bundle: unknown,
+): void {
+  assert.throws(
+    () =>
+      assertAiChartD1K0P1KnowledgeBundleMatchesStructuralInput(
+        catalog,
+        input,
+        bundle,
+      ),
+    { message: 'ai_chart_d1_k0_bundle_invalid' },
+  )
+}
+
+function selectedRuleIdForReason(
+  bundle: AiChartD1K0P1Bundle,
+  reason: AiChartD1K0P1Bundle['selectionTrace'][number]['reason'],
+  predicate: (ruleId: string) => boolean = () => true,
+): string {
+  const trace = bundle.selectionTrace.find(
+    (entry) => entry.reason === reason && predicate(entry.ruleId),
+  )
+  assert.ok(trace)
+  return trace.ruleId
 }
 
 function withoutMutagenSpecificRule(
@@ -454,6 +505,141 @@ async function run() {
     })
     assert.deepEqual(repeated, bundles)
   })
+  check('authenticity validator accepts the exact deterministic bundle', () => {
+    assert.doesNotThrow(() =>
+      assertAiChartD1K0P1KnowledgeBundleMatchesStructuralInput(
+        catalog,
+        inputs[0],
+        bundles[0],
+      ),
+    )
+  })
+
+  for (const [label, ruleId] of [
+    ['required common rule', 'rule:common:malefic-preserve-all'],
+    ['possibility-first rule', 'rule:common:possibility-first'],
+    ['opposite relationship rule', 'rule:structure:opposite'],
+    ['hidden-combination relationship rule', 'rule:structure:hidden-combination'],
+    ['trine relationship rule', 'rule:structure:trine'],
+    ['integration-order relationship rule', 'rule:structure:integration-order'],
+  ] as const) {
+    check(`authenticity rejects omitted ${label} and trace`, () => {
+      assertAuthenticityInvalid(
+        catalog,
+        inputs[0],
+        withoutSelectedRule(bundles[0], ruleId),
+      )
+    })
+  }
+
+  for (const [label, ruleId] of [
+    [
+      'palace meaning rule',
+      selectedRuleIdForReason(bundles[0], 'palace_meaning'),
+    ],
+    [
+      'canonical major-star rule',
+      selectedRuleIdForReason(bundles[0], 'major_star_present'),
+    ],
+    [
+      'supporting-star rule',
+      selectedRuleIdForReason(bundles[0], 'supporting_star_present'),
+    ],
+    [
+      'mutagen common rule',
+      selectedRuleIdForReason(
+        bundles[0],
+        'natal_mutagen_present',
+        (ruleId) => ruleId.startsWith('rule:mutagen:common:'),
+      ),
+    ],
+    [
+      'mutagen specific rule',
+      selectedRuleIdForReason(
+        bundles[0],
+        'natal_mutagen_present',
+        (ruleId) => !ruleId.startsWith('rule:mutagen:common:'),
+      ),
+    ],
+  ] as const) {
+    check(`authenticity rejects omitted ${label} and trace`, () => {
+      assertAuthenticityInvalid(
+        catalog,
+        inputs[0],
+        withoutSelectedRule(bundles[0], ruleId),
+      )
+    })
+  }
+
+  check('authenticity rejects an extra unselected Catalog rule and trace', () => {
+    const mutable = structuredClone(bundles[0]) as Mutable<AiChartD1K0P1Bundle>
+    const selectedIds = new Set(mutable.selectedRules.map((rule) => rule.ruleId))
+    const extraRule = catalog.rules.find(
+      (rule) => rule.kind === 'single_star' && !selectedIds.has(rule.ruleId),
+    )
+    assert.ok(extraRule)
+    mutable.selectedRules.push(
+      structuredClone(extraRule) as (typeof mutable.selectedRules)[number],
+    )
+    mutable.selectionTrace.push({
+      ruleId: extraRule.ruleId,
+      reason: 'major_star_present',
+      palaceRole: 'target',
+      palaceId: mutable.targetPalaceId,
+      placementId: 'placement:authenticity:extra',
+      starName: '紫微',
+      mutagenType: null,
+      structuralReference: 'p1:view:target',
+    })
+    mutable.selectedRules.sort((left, right) =>
+      compareAiChartD1K0Rules(left, right),
+    )
+    const traceByRule = new Map(
+      mutable.selectionTrace.map((trace) => [trace.ruleId, trace]),
+    )
+    mutable.selectionTrace = mutable.selectedRules.map((rule) => {
+      const trace = traceByRule.get(rule.ruleId)
+      assert.ok(trace)
+      return trace
+    })
+    assert.doesNotThrow(() => parseAiChartD1K0P1Bundle(mutable, catalog))
+    assertAuthenticityInvalid(catalog, inputs[0], mutable)
+  })
+
+  check('authenticity rejects a different-palace bundle with rewritten envelope ids', () => {
+    const mutable = structuredClone(bundles[1]) as Mutable<AiChartD1K0P1Bundle>
+    mutable.bundleId = bundles[0].bundleId
+    mutable.chartId = inputs[0].chartId
+    mutable.runId = inputs[0].runId
+    mutable.callId = inputs[0].callId
+    assert.doesNotThrow(() => parseAiChartD1K0P1Bundle(mutable, catalog))
+    assertAuthenticityInvalid(catalog, inputs[0], mutable)
+  })
+
+  check('authenticity rejects supplied rules and traces reordered together', () => {
+    const mutable = structuredClone(bundles[0]) as Mutable<AiChartD1K0P1Bundle>
+    mutable.selectedRules.reverse()
+    mutable.selectionTrace.reverse()
+    assertAuthenticityInvalid(catalog, inputs[0], mutable)
+  })
+
+  check('authenticity errors do not leak rule, star, palace, call or index', () => {
+    const removedRuleId = 'rule:common:possibility-first'
+    try {
+      assertAiChartD1K0P1KnowledgeBundleMatchesStructuralInput(
+        catalog,
+        inputs[0],
+        withoutSelectedRule(bundles[0], removedRuleId),
+      )
+      assert.fail('expected authenticity rejection')
+    } catch (error) {
+      assert.equal(String(error), 'Error: ai_chart_d1_k0_bundle_invalid')
+      assert.doesNotMatch(
+        String(error),
+        /possibility|紫微|palace:|call:|index|missing/u,
+      )
+    }
+  })
   check('duplicate bundle ids are rejected', () => {
     assert.throws(() =>
       buildAiChartD1K0P1KnowledgeBundles(catalog, inputs, {
@@ -505,6 +691,52 @@ async function run() {
         (rule) => rule.kind === 'double_star' && rule.ruleStatus === 'working_inference',
       ),
       false,
+    )
+  })
+  check('authenticity accepts the exact deterministic partial bundle', () => {
+    assert.doesNotThrow(() =>
+      assertAiChartD1K0P1KnowledgeBundleMatchesStructuralInput(
+        catalog,
+        partialInputs[0],
+        partialBundles[0],
+      ),
+    )
+  })
+  check('authenticity rejects a ready spoof when deterministic output is partial', () => {
+    const spoof = structuredClone(
+      partialBundles[0],
+    ) as Mutable<AiChartD1K0P1Bundle>
+    spoof.missingRequirements = []
+    spoof.knowledgeStatus = 'ready'
+    spoof.warnings = []
+    assert.doesNotThrow(() => parseAiChartD1K0P1Bundle(spoof, catalog))
+    assertAuthenticityInvalid(catalog, partialInputs[0], spoof)
+  })
+
+  const confirmedDoubleSnapshot = completeSnapshot()
+  const confirmedDoublePalaces = confirmedDoubleSnapshot.palaces as MutableRecord[]
+  confirmedDoublePalaces[0].majorStars = [
+    star('廉貞', 'major', '化祿'),
+    star('七殺', 'major'),
+  ]
+  const confirmedDoubleInputs = createInputs(
+    confirmedDoubleSnapshot,
+    'confirmed-double',
+  )
+  const confirmedDoubleBundles = buildAiChartD1K0P1KnowledgeBundles(
+    catalog,
+    confirmedDoubleInputs,
+    { bundleIds: bundleIds('confirmed-double') },
+  )
+  check('authenticity rejects an omitted confirmed double-star rule and trace', () => {
+    const ruleId = selectedRuleIdForReason(
+      confirmedDoubleBundles[0],
+      'double_star_present',
+    )
+    assertAuthenticityInvalid(
+      catalog,
+      confirmedDoubleInputs[0],
+      withoutSelectedRule(confirmedDoubleBundles[0], ruleId),
     )
   })
 
@@ -560,6 +792,17 @@ async function run() {
         (trace) => trace.reason === 'borrowed_major_star_present',
       ),
       true,
+    )
+  })
+  check('authenticity rejects an omitted borrowed major-star rule and trace', () => {
+    const ruleId = selectedRuleIdForReason(
+      borrowBundles[0],
+      'borrowed_major_star_present',
+    )
+    assertAuthenticityInvalid(
+      catalog,
+      borrowInputs[0],
+      withoutSelectedRule(borrowBundles[0], ruleId),
     )
   })
   check('eligible empty palace selects only the required borrow rules', () => {
@@ -684,6 +927,23 @@ async function run() {
     ])
     assert.doesNotMatch(serialized, /flying|飛化|F1_KNOWLEDGE/iu)
   })
+
+  const fourHorseIndex = inputs.findIndex(
+    (input) => input.targetPalace.isFourHorsePalace,
+  )
+  assert.notEqual(fourHorseIndex, -1)
+  for (const ruleId of [
+    'rule:structure:four-horse',
+    'rule:structure:four-horse-d1-boundary',
+  ] as const) {
+    check(`authenticity rejects omitted ${ruleId} and trace`, () => {
+      assertAuthenticityInvalid(
+        catalog,
+        inputs[fourHorseIndex],
+        withoutSelectedRule(bundles[fourHorseIndex], ruleId),
+      )
+    })
+  }
   console.log(`\n${checks} K0 selection checks passed.`)
 }
 
