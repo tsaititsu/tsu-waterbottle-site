@@ -89,7 +89,11 @@ async function withFakeSessionStorage(
   }
 }
 
+const canonicalDraftStorageKey = 'divination_follow_up_draft'
+const canonicalActiveThreadIdStorageKey = 'divination_follow_up_active_thread_id'
+const canonicalThreadStoragePrefix = 'divination_follow_up_thread:'
 const threadId = 'codex-thread-fixture'
+const canonicalSyntheticThreadStorageKey = `${canonicalThreadStoragePrefix}${threadId}`
 const readingId = 'codex-reading-fixture'
 const question = 'synthetic-question'
 const finalAnswer = 'synthetic-answer'
@@ -208,9 +212,21 @@ test('followUp effect resets empty state and reloads draft plus its matching dis
   assert.match(previewSource, /\{followUpKey && latestFollowUpReading \? \(/)
 })
 
+test('follow-up storage exports preserve canonical browser storage keys', () => {
+  assert.equal(DIVINATION_FOLLOW_UP_DRAFT_STORAGE_KEY, canonicalDraftStorageKey)
+  assert.equal(
+    DIVINATION_FOLLOW_UP_ACTIVE_THREAD_ID_STORAGE_KEY,
+    canonicalActiveThreadIdStorageKey,
+  )
+  assert.equal(
+    getDivinationFollowUpThreadStorageKey(threadId),
+    canonicalSyntheticThreadStorageKey,
+  )
+})
+
 test('follow-up draft loader reads the complete synthetic draft contract', { concurrency: false }, async () => {
   await withFakeSessionStorage((storage) => {
-    storage.setItem(DIVINATION_FOLLOW_UP_DRAFT_STORAGE_KEY, JSON.stringify(syntheticDraft))
+    storage.setItem(canonicalDraftStorageKey, JSON.stringify(syntheticDraft))
 
     const loaded = loadDivinationFollowUpDraft()
 
@@ -223,11 +239,8 @@ test('follow-up draft loader reads the complete synthetic draft contract', { con
 
 test('display loader resolves the synthetic thread through the active thread ID', { concurrency: false }, async () => {
   await withFakeSessionStorage((storage) => {
-    storage.setItem(DIVINATION_FOLLOW_UP_ACTIVE_THREAD_ID_STORAGE_KEY, threadId)
-    storage.setItem(
-      getDivinationFollowUpThreadStorageKey(threadId),
-      JSON.stringify(syntheticDisplayThread),
-    )
+    storage.setItem(canonicalActiveThreadIdStorageKey, threadId)
+    storage.setItem(canonicalSyntheticThreadStorageKey, JSON.stringify(syntheticDisplayThread))
 
     const loaded = loadDivinationFollowUpDisplayThread()
 
@@ -239,9 +252,9 @@ test('display loader resolves the synthetic thread through the active thread ID'
 
 test('draft and display loaders fail closed on invalid synthetic JSON', { concurrency: false }, async () => {
   await withFakeSessionStorage((storage) => {
-    storage.setItem(DIVINATION_FOLLOW_UP_DRAFT_STORAGE_KEY, '{not-json')
-    storage.setItem(DIVINATION_FOLLOW_UP_ACTIVE_THREAD_ID_STORAGE_KEY, threadId)
-    storage.setItem(getDivinationFollowUpThreadStorageKey(threadId), '{not-json')
+    storage.setItem(canonicalDraftStorageKey, '{not-json')
+    storage.setItem(canonicalActiveThreadIdStorageKey, threadId)
+    storage.setItem(canonicalSyntheticThreadStorageKey, '{not-json')
 
     assert.equal(loadDivinationFollowUpDraft(), null)
     assert.equal(loadDivinationFollowUpDisplayThread(), null)
@@ -250,29 +263,28 @@ test('draft and display loaders fail closed on invalid synthetic JSON', { concur
 
 test('draft cleanup removes only the draft key', { concurrency: false }, async () => {
   await withFakeSessionStorage((storage) => {
-    storage.setItem(DIVINATION_FOLLOW_UP_DRAFT_STORAGE_KEY, JSON.stringify(syntheticDraft))
-    storage.setItem(DIVINATION_FOLLOW_UP_ACTIVE_THREAD_ID_STORAGE_KEY, threadId)
+    storage.setItem(canonicalDraftStorageKey, JSON.stringify(syntheticDraft))
+    storage.setItem(canonicalActiveThreadIdStorageKey, threadId)
     storage.setItem(unrelatedSyntheticKey, 'keep')
 
     clearDivinationFollowUpDraft()
 
-    assert.equal(storage.getItem(DIVINATION_FOLLOW_UP_DRAFT_STORAGE_KEY), null)
-    assert.equal(storage.getItem(DIVINATION_FOLLOW_UP_ACTIVE_THREAD_ID_STORAGE_KEY), threadId)
+    assert.equal(storage.getItem(canonicalDraftStorageKey), null)
+    assert.equal(storage.getItem(canonicalActiveThreadIdStorageKey), threadId)
     assert.equal(storage.getItem(unrelatedSyntheticKey), 'keep')
   })
 })
 
 test('display cleanup removes the active thread pair and preserves unrelated synthetic storage', { concurrency: false }, async () => {
   await withFakeSessionStorage((storage) => {
-    const displayThreadKey = getDivinationFollowUpThreadStorageKey(threadId)
-    storage.setItem(DIVINATION_FOLLOW_UP_ACTIVE_THREAD_ID_STORAGE_KEY, threadId)
-    storage.setItem(displayThreadKey, JSON.stringify(syntheticDisplayThread))
+    storage.setItem(canonicalActiveThreadIdStorageKey, threadId)
+    storage.setItem(canonicalSyntheticThreadStorageKey, JSON.stringify(syntheticDisplayThread))
     storage.setItem(unrelatedSyntheticKey, 'keep')
 
     clearDivinationFollowUpDisplayThread()
 
-    assert.equal(storage.getItem(DIVINATION_FOLLOW_UP_ACTIVE_THREAD_ID_STORAGE_KEY), null)
-    assert.equal(storage.getItem(displayThreadKey), null)
+    assert.equal(storage.getItem(canonicalActiveThreadIdStorageKey), null)
+    assert.equal(storage.getItem(canonicalSyntheticThreadStorageKey), null)
     assert.equal(storage.getItem(unrelatedSyntheticKey), 'keep')
   })
 })
