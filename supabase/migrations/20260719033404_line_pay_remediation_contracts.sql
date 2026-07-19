@@ -1,0 +1,3500 @@
+-- LINE Pay remediation PR1: database-only contracts.
+-- This migration does not enable checkout or call any external service.
+
+begin;
+
+do $$
+begin
+  if to_regclass('public.payments') is null then
+    raise exception using
+      errcode = '42P01',
+      message = 'line_pay_contracts_missing_payments_table';
+  end if;
+
+  if to_regclass('public.product_orders') is null then
+    raise exception using
+      errcode = '42P01',
+      message = 'line_pay_contracts_missing_product_orders_table';
+  end if;
+end
+$$;
+
+create or replace function public.line_pay_sanitized_result_is_valid(p_payload jsonb)
+returns boolean
+language sql
+immutable
+parallel safe
+security invoker
+set search_path = ''
+as $$
+  select
+    p_payload is not null
+    and pg_catalog.jsonb_typeof(p_payload) = 'object'
+    and pg_catalog.octet_length(p_payload::text) <= 2048
+    and p_payload::text !~* '(authorization|signature|channel[_-]?secret|gateway[_-]?secret|cookie|email|phone|address|payment[_-]?url|fake_test_token_do_not_use|fake_test_signature_do_not_use|fake_test_authorization_do_not_use)'
+    and not exists (
+      select 1
+      from pg_catalog.jsonb_each(p_payload) as entry(key, value)
+      where not (entry.key = any (array[
+        'result_code',
+        'provider_status',
+        'transaction_id',
+        'merchant_order_no',
+        'response_sha256'
+      ]::text[]))
+        or pg_catalog.jsonb_typeof(entry.value) not in ('string', 'number', 'boolean', 'null')
+    );
+$$;
+
+create or replace function public.line_pay_audit_evidence_is_valid(p_payload jsonb)
+returns boolean
+language sql
+immutable
+parallel safe
+security invoker
+set search_path = ''
+as $$
+  select
+    p_payload is not null
+    and pg_catalog.jsonb_typeof(p_payload) = 'object'
+    and pg_catalog.octet_length(p_payload::text) <= 4096
+    and p_payload::text !~* '(authorization|signature|channel[_-]?id|channel[_-]?secret|gateway[_-]?secret|cookie|email|phone|address|callback|capability|token|request[_-]?body|response[_-]?body|payment[_-]?url|fake_test_token_do_not_use|fake_test_signature_do_not_use|fake_test_authorization_do_not_use)'
+    and not exists (
+      select 1
+      from pg_catalog.jsonb_each(p_payload) as entry(key, value)
+      where not (entry.key = any (array[
+        'result_code',
+        'provider_status',
+        'evidence_sha256',
+        'result_sha256',
+        'reason_code'
+      ]::text[]))
+        or pg_catalog.jsonb_typeof(entry.value) not in ('string', 'number', 'boolean', 'null')
+    );
+$$;
+
+alter table public.product_orders
+  add column if not exists environment text,
+  add column if not exists fulfillment_mode text,
+  add column if not exists sandbox_test boolean,
+  add column if not exists currency text,
+  add column if not exists checkout_attempt_id uuid,
+  add column if not exists payment_request_state text,
+  add column if not exists reconciliation_required boolean,
+  add column if not exists state_version integer;
+
+-- Existing rows are production history. They are classified explicitly without
+-- changing payment provider, payment method, or any paid/order state.
+update public.product_orders
+set environment = 'production'
+where environment is null;
+
+update public.product_orders
+set fulfillment_mode = 'physical'
+where fulfillment_mode is null;
+
+update public.product_orders
+set sandbox_test = false
+where sandbox_test is null;
+
+update public.product_orders
+set currency = 'TWD'
+where currency is null;
+
+update public.product_orders
+set reconciliation_required = false
+where reconciliation_required is null;
+
+update public.product_orders
+set state_version = 0
+where state_version is null;
+
+alter table public.product_orders
+  alter column environment set default 'production',
+  alter column fulfillment_mode set default 'physical',
+  alter column sandbox_test set default false,
+  alter column currency set default 'TWD',
+  alter column reconciliation_required set default false,
+  alter column state_version set default 0;
+
+alter table public.product_orders
+  add constraint product_orders_environment_not_null_check
+  check (environment is not null) not valid,
+  add constraint product_orders_fulfillment_mode_not_null_check
+  check (fulfillment_mode is not null) not valid,
+  add constraint product_orders_sandbox_test_not_null_check
+  check (sandbox_test is not null) not valid,
+  add constraint product_orders_currency_not_null_check
+  check (currency is not null) not valid,
+  add constraint product_orders_reconciliation_not_null_check
+  check (reconciliation_required is not null) not valid,
+  add constraint product_orders_state_version_not_null_check
+  check (state_version is not null) not valid;
+
+alter table public.product_orders
+  validate constraint product_orders_environment_not_null_check;
+alter table public.product_orders
+  validate constraint product_orders_fulfillment_mode_not_null_check;
+alter table public.product_orders
+  validate constraint product_orders_sandbox_test_not_null_check;
+alter table public.product_orders
+  validate constraint product_orders_currency_not_null_check;
+alter table public.product_orders
+  validate constraint product_orders_reconciliation_not_null_check;
+alter table public.product_orders
+  validate constraint product_orders_state_version_not_null_check;
+
+alter table public.product_orders
+  alter column environment set not null,
+  alter column fulfillment_mode set not null,
+  alter column sandbox_test set not null,
+  alter column currency set not null,
+  alter column reconciliation_required set not null,
+  alter column state_version set not null;
+
+alter table public.product_orders
+  drop constraint product_orders_environment_not_null_check,
+  drop constraint product_orders_fulfillment_mode_not_null_check,
+  drop constraint product_orders_sandbox_test_not_null_check,
+  drop constraint product_orders_currency_not_null_check,
+  drop constraint product_orders_reconciliation_not_null_check,
+  drop constraint product_orders_state_version_not_null_check;
+
+alter table public.product_orders
+  drop constraint if exists product_orders_payment_method_check,
+  drop constraint if exists product_orders_order_status_check,
+  drop constraint if exists product_orders_shipping_status_check;
+
+alter table public.product_orders
+  add constraint product_orders_payment_method_check
+  check (payment_method in ('bank_transfer', 'newebpay', 'line_pay')) not valid,
+  add constraint product_orders_order_status_check
+  check (order_status in (
+    'pending_payment',
+    'payment_requesting',
+    'payment_pending',
+    'paid',
+    'payment_failed',
+    'preparing',
+    'shipped',
+    'completed',
+    'canceled'
+  )) not valid,
+  add constraint product_orders_shipping_status_check
+  check (shipping_status in (
+    'not_shipped',
+    'not_applicable',
+    'preparing',
+    'shipped',
+    'delivered',
+    'failed',
+    'returned'
+  )) not valid,
+  add constraint product_orders_environment_check
+  check (environment in ('sandbox', 'production')) not valid,
+  add constraint product_orders_fulfillment_mode_check
+  check (fulfillment_mode in ('physical', 'none')) not valid,
+  add constraint product_orders_currency_check
+  check (currency = 'TWD') not valid,
+  add constraint product_orders_payment_request_state_check
+  check (
+    payment_request_state is null
+    or payment_request_state in (
+      'initialized',
+      'requesting',
+      'pending',
+      'confirmation_processing',
+      'paid',
+      'failed',
+      'canceled',
+      'reconciliation_required'
+    )
+  ) not valid,
+  add constraint product_orders_state_version_check
+  check (state_version >= 0) not valid,
+  add constraint product_orders_line_pay_owner_check
+  check (payment_method <> 'line_pay' or user_id is not null) not valid,
+  add constraint product_orders_line_pay_environment_check
+  check (
+    payment_method <> 'line_pay'
+    or (
+      environment in ('sandbox', 'production')
+      and (
+        environment <> 'sandbox'
+        or (
+          checkout_attempt_id is not null
+          and payment_request_state is not null
+        )
+      )
+    )
+  ) not valid,
+  add constraint product_orders_sandbox_fulfillment_check
+  check (
+    not sandbox_test
+    or (
+      environment = 'sandbox'
+      and payment_method = 'line_pay'
+      and user_id is not null
+      and fulfillment_mode = 'none'
+      and shipping_status = 'not_applicable'
+      and order_status not in ('preparing', 'shipped', 'completed')
+    )
+  ) not valid,
+  add constraint product_orders_line_pay_reconciliation_check
+  check (
+    not reconciliation_required
+    or payment_method = 'line_pay'
+  ) not valid;
+
+alter table public.product_orders validate constraint product_orders_payment_method_check;
+alter table public.product_orders validate constraint product_orders_order_status_check;
+alter table public.product_orders validate constraint product_orders_shipping_status_check;
+alter table public.product_orders validate constraint product_orders_environment_check;
+alter table public.product_orders validate constraint product_orders_fulfillment_mode_check;
+alter table public.product_orders validate constraint product_orders_currency_check;
+alter table public.product_orders validate constraint product_orders_payment_request_state_check;
+alter table public.product_orders validate constraint product_orders_state_version_check;
+alter table public.product_orders validate constraint product_orders_line_pay_owner_check;
+alter table public.product_orders validate constraint product_orders_line_pay_environment_check;
+alter table public.product_orders validate constraint product_orders_sandbox_fulfillment_check;
+alter table public.product_orders validate constraint product_orders_line_pay_reconciliation_check;
+
+alter table public.payments
+  add column if not exists product_order_id uuid,
+  add column if not exists environment text,
+  add column if not exists checkout_attempt_id uuid,
+  add column if not exists request_state text,
+  add column if not exists request_idempotency_key text,
+  add column if not exists request_body_sha256 text,
+  add column if not exists line_pay_transaction_id text,
+  add column if not exists reconciliation_required boolean,
+  add column if not exists state_version integer;
+
+update public.payments
+set environment = 'production'
+where environment is null;
+
+update public.payments
+set reconciliation_required = false
+where reconciliation_required is null;
+
+update public.payments
+set state_version = 0
+where state_version is null;
+
+alter table public.payments
+  alter column environment set default 'production',
+  alter column reconciliation_required set default false,
+  alter column state_version set default 0;
+
+alter table public.payments
+  add constraint payments_environment_not_null_check
+  check (environment is not null) not valid,
+  add constraint payments_reconciliation_not_null_check
+  check (reconciliation_required is not null) not valid,
+  add constraint payments_state_version_not_null_check
+  check (state_version is not null) not valid;
+
+alter table public.payments validate constraint payments_environment_not_null_check;
+alter table public.payments validate constraint payments_reconciliation_not_null_check;
+alter table public.payments validate constraint payments_state_version_not_null_check;
+
+alter table public.payments
+  alter column environment set not null,
+  alter column reconciliation_required set not null,
+  alter column state_version set not null;
+
+alter table public.payments
+  drop constraint payments_environment_not_null_check,
+  drop constraint payments_reconciliation_not_null_check,
+  drop constraint payments_state_version_not_null_check;
+
+alter table public.payments
+  add constraint payments_product_order_id_fkey
+  foreign key (product_order_id)
+  references public.product_orders(id)
+  on delete restrict
+  deferrable initially deferred
+  not valid,
+  add constraint payments_environment_check
+  check (environment in ('sandbox', 'production')) not valid,
+  add constraint payments_request_state_check
+  check (
+    request_state is null
+    or request_state in (
+      'initialized',
+      'requesting',
+      'pending',
+      'confirmation_processing',
+      'paid',
+      'failed',
+      'canceled',
+      'reconciliation_required'
+    )
+  ) not valid,
+  add constraint payments_request_body_sha256_check
+  check (
+    request_body_sha256 is null
+    or request_body_sha256 ~ '^[0-9a-f]{64}$'
+  ) not valid,
+  add constraint payments_request_idempotency_key_check
+  check (
+    request_idempotency_key is null
+    or (
+      pg_catalog.length(request_idempotency_key) between 16 and 200
+      and request_idempotency_key !~ '[[:space:]]'
+    )
+  ) not valid,
+  add constraint payments_line_pay_transaction_id_check
+  check (
+    line_pay_transaction_id is null
+    or (
+      pg_catalog.length(line_pay_transaction_id) between 1 and 128
+      and line_pay_transaction_id !~ '[[:space:]]'
+    )
+  ) not valid,
+  add constraint payments_state_version_check
+  check (state_version >= 0) not valid,
+  add constraint payments_line_pay_contract_check
+  check (
+    provider <> 'line_pay'
+    or (
+      user_id is not null
+      and product_order_id is not null
+      and checkout_attempt_id is not null
+      and environment in ('sandbox', 'production')
+      and currency = 'TWD'
+      and request_state is not null
+      and request_idempotency_key is not null
+      and request_body_sha256 is not null
+    )
+  ) not valid,
+  add constraint payments_line_pay_reconciliation_check
+  check (
+    not reconciliation_required
+    or provider = 'line_pay'
+  ) not valid;
+
+alter table public.payments validate constraint payments_product_order_id_fkey;
+alter table public.payments validate constraint payments_environment_check;
+alter table public.payments validate constraint payments_request_state_check;
+alter table public.payments validate constraint payments_request_body_sha256_check;
+alter table public.payments validate constraint payments_request_idempotency_key_check;
+alter table public.payments validate constraint payments_line_pay_transaction_id_check;
+alter table public.payments validate constraint payments_state_version_check;
+alter table public.payments validate constraint payments_line_pay_contract_check;
+alter table public.payments validate constraint payments_line_pay_reconciliation_check;
+
+create table public.app_environment_attestation (
+  id boolean primary key default true,
+  environment text not null,
+  supabase_project_ref text not null,
+  schema_contract_version text not null,
+  created_at timestamptz not null default pg_catalog.clock_timestamp(),
+  updated_at timestamptz not null default pg_catalog.clock_timestamp(),
+  constraint app_environment_attestation_singleton_check check (id),
+  constraint app_environment_attestation_environment_check
+    check (environment in ('sandbox', 'production')),
+  constraint app_environment_attestation_project_ref_check
+    check (supabase_project_ref ~ '^[a-z0-9]{8,32}$'),
+  constraint app_environment_attestation_version_check
+    check (schema_contract_version = 'line_pay_remediation_v1')
+);
+
+create table public.line_pay_checkout_attempts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete restrict,
+  product_order_id uuid not null references public.product_orders(id) on delete restrict deferrable initially deferred,
+  payment_id uuid null references public.payments(id) on delete restrict deferrable initially deferred,
+  provider text not null default 'line_pay',
+  environment text not null,
+  idempotency_key text not null,
+  request_body_sha256 text not null,
+  request_state text not null default 'initialized',
+  amount_twd integer not null,
+  currency text not null default 'TWD',
+  attempt_count integer not null default 0,
+  next_attempt_at timestamptz null,
+  claim_id uuid null,
+  claimed_at timestamptz null,
+  claim_expires_at timestamptz null,
+  upstream_transaction_id text null,
+  merchant_order_no text not null,
+  sanitized_result jsonb null,
+  last_error_code text null,
+  reconciliation_required boolean not null default false,
+  state_version integer not null default 0,
+  created_at timestamptz not null default pg_catalog.clock_timestamp(),
+  updated_at timestamptz not null default pg_catalog.clock_timestamp(),
+  completed_at timestamptz null,
+  constraint line_pay_checkout_attempts_provider_check
+    check (provider = 'line_pay'),
+  constraint line_pay_checkout_attempts_environment_check
+    check (environment in ('sandbox', 'production')),
+  constraint line_pay_checkout_attempts_idempotency_key_check
+    check (
+      pg_catalog.length(idempotency_key) between 16 and 200
+      and idempotency_key !~ '[[:space:]]'
+    ),
+  constraint line_pay_checkout_attempts_request_body_sha256_check
+    check (request_body_sha256 ~ '^[0-9a-f]{64}$'),
+  constraint line_pay_checkout_attempts_request_state_check
+    check (request_state in (
+      'initialized',
+      'queued',
+      'claimed',
+      'requesting',
+      'pending',
+      'succeeded',
+      'failed',
+      'unknown',
+      'reconciliation_required',
+      'confirmation_processing',
+      'paid',
+      'canceled'
+    )),
+  constraint line_pay_checkout_attempts_amount_check
+    check (amount_twd > 0),
+  constraint line_pay_checkout_attempts_currency_check
+    check (currency = 'TWD'),
+  constraint line_pay_checkout_attempts_attempt_count_check
+    check (attempt_count >= 0),
+  constraint line_pay_checkout_attempts_claim_check
+    check (
+      (claim_id is null and claimed_at is null and claim_expires_at is null)
+      or (
+        claim_id is not null
+        and claimed_at is not null
+        and claim_expires_at is not null
+        and claim_expires_at > claimed_at
+      )
+    ),
+  constraint line_pay_checkout_attempts_transaction_id_check
+    check (
+      upstream_transaction_id is null
+      or (
+        pg_catalog.length(upstream_transaction_id) between 1 and 128
+        and upstream_transaction_id !~ '[[:space:]]'
+      )
+    ),
+  constraint line_pay_checkout_attempts_merchant_order_no_check
+    check (
+      pg_catalog.length(merchant_order_no) between 1 and 100
+      and merchant_order_no !~ '[[:space:]]'
+    ),
+  constraint line_pay_checkout_attempts_sanitized_result_check
+    check (
+      sanitized_result is null
+      or public.line_pay_sanitized_result_is_valid(sanitized_result)
+    ),
+  constraint line_pay_checkout_attempts_error_code_check
+    check (
+      last_error_code is null
+      or (
+        pg_catalog.length(last_error_code) between 1 and 64
+        and last_error_code ~ '^[a-z0-9_:-]+$'
+        and last_error_code !~ '^fake_test_(token|signature|authorization)_do_not_use$'
+      )
+    ),
+  constraint line_pay_checkout_attempts_reconciliation_check
+    check (
+      not reconciliation_required
+      or request_state in ('unknown', 'reconciliation_required', 'paid', 'canceled')
+    ),
+  constraint line_pay_checkout_attempts_state_version_check
+    check (state_version >= 0)
+);
+
+create table public.line_pay_request_outbox (
+  id uuid primary key default gen_random_uuid(),
+  checkout_attempt_id uuid not null references public.line_pay_checkout_attempts(id) on delete restrict,
+  payment_id uuid not null references public.payments(id) on delete restrict,
+  provider text not null default 'line_pay',
+  environment text not null,
+  operation text not null default 'request',
+  idempotency_key text not null,
+  request_body_sha256 text not null,
+  state text not null default 'queued',
+  attempt_count integer not null default 0,
+  next_attempt_at timestamptz null,
+  claim_id uuid null,
+  claimed_at timestamptz null,
+  claim_expires_at timestamptz null,
+  last_error_code text null,
+  created_at timestamptz not null default pg_catalog.clock_timestamp(),
+  updated_at timestamptz not null default pg_catalog.clock_timestamp(),
+  completed_at timestamptz null,
+  constraint line_pay_request_outbox_provider_check check (provider = 'line_pay'),
+  constraint line_pay_request_outbox_environment_check
+    check (environment in ('sandbox', 'production')),
+  constraint line_pay_request_outbox_operation_check check (operation = 'request'),
+  constraint line_pay_request_outbox_idempotency_key_check
+    check (
+      pg_catalog.length(idempotency_key) between 16 and 200
+      and idempotency_key !~ '[[:space:]]'
+    ),
+  constraint line_pay_request_outbox_body_sha256_check
+    check (request_body_sha256 ~ '^[0-9a-f]{64}$'),
+  constraint line_pay_request_outbox_state_check
+    check (state in (
+      'queued',
+      'claimed',
+      'completed',
+      'failed',
+      'unknown',
+      'reconciliation_required',
+      'canceled'
+    )),
+  constraint line_pay_request_outbox_attempt_count_check check (attempt_count >= 0),
+  constraint line_pay_request_outbox_claim_check
+    check (
+      (claim_id is null and claimed_at is null and claim_expires_at is null)
+      or (
+        claim_id is not null
+        and claimed_at is not null
+        and claim_expires_at is not null
+        and claim_expires_at > claimed_at
+      )
+    ),
+  constraint line_pay_request_outbox_error_code_check
+    check (
+      last_error_code is null
+      or (
+        pg_catalog.length(last_error_code) between 1 and 64
+        and last_error_code ~ '^[a-z0-9_:-]+$'
+        and last_error_code !~ '^fake_test_(token|signature|authorization)_do_not_use$'
+      )
+    )
+);
+
+create table public.line_pay_callback_capabilities (
+  id uuid primary key default gen_random_uuid(),
+  payment_id uuid not null references public.payments(id) on delete restrict,
+  product_order_id uuid not null references public.product_orders(id) on delete restrict,
+  checkout_attempt_id uuid not null references public.line_pay_checkout_attempts(id) on delete restrict,
+  environment text not null,
+  purpose text not null,
+  token_hash text not null,
+  capability_version integer not null default 1,
+  claim_id uuid null,
+  claimed_at timestamptz null,
+  claim_expires_at timestamptz null,
+  expires_at timestamptz not null,
+  consumed_at timestamptz null,
+  revoked_at timestamptz null,
+  created_at timestamptz not null default pg_catalog.clock_timestamp(),
+  updated_at timestamptz not null default pg_catalog.clock_timestamp(),
+  constraint line_pay_callback_capabilities_environment_check
+    check (environment in ('sandbox', 'production')),
+  constraint line_pay_callback_capabilities_purpose_check
+    check (purpose in ('confirm', 'cancel')),
+  constraint line_pay_callback_capabilities_token_hash_check
+    check (token_hash ~ '^[0-9a-f]{64}$'),
+  constraint line_pay_callback_capabilities_version_check
+    check (capability_version > 0),
+  constraint line_pay_callback_capabilities_expiry_check
+    check (expires_at > created_at),
+  constraint line_pay_callback_capabilities_claim_check
+    check (
+      (claim_id is null and claimed_at is null and claim_expires_at is null)
+      or (
+        claim_id is not null
+        and claimed_at is not null
+        and claim_expires_at is not null
+        and claim_expires_at > claimed_at
+      )
+    ),
+  constraint line_pay_callback_capabilities_consumed_check
+    check (consumed_at is null or consumed_at >= created_at),
+  constraint line_pay_callback_capabilities_revoked_check
+    check (revoked_at is null or revoked_at >= created_at)
+);
+
+create table public.line_pay_callback_events (
+  id uuid primary key default gen_random_uuid(),
+  capability_id uuid not null references public.line_pay_callback_capabilities(id) on delete restrict,
+  payment_id uuid not null references public.payments(id) on delete restrict,
+  product_order_id uuid not null references public.product_orders(id) on delete restrict,
+  checkout_attempt_id uuid not null references public.line_pay_checkout_attempts(id) on delete restrict,
+  environment text not null,
+  purpose text not null,
+  state text not null default 'received',
+  claim_id uuid null,
+  claimed_at timestamptz null,
+  claim_expires_at timestamptz null,
+  provider_result_sha256 text null,
+  safe_result_code text null,
+  last_error_code text null,
+  created_at timestamptz not null default pg_catalog.clock_timestamp(),
+  updated_at timestamptz not null default pg_catalog.clock_timestamp(),
+  completed_at timestamptz null,
+  constraint line_pay_callback_events_capability_key unique (capability_id),
+  constraint line_pay_callback_events_environment_check
+    check (environment in ('sandbox', 'production')),
+  constraint line_pay_callback_events_purpose_check
+    check (purpose in ('confirm', 'cancel')),
+  constraint line_pay_callback_events_state_check
+    check (state in (
+      'received',
+      'claimed',
+      'provider_verified',
+      'completed',
+      'failed',
+      'reconciliation_required'
+    )),
+  constraint line_pay_callback_events_claim_check
+    check (
+      (claim_id is null and claimed_at is null and claim_expires_at is null)
+      or (
+        claim_id is not null
+        and claimed_at is not null
+        and claim_expires_at is not null
+        and claim_expires_at > claimed_at
+      )
+    ),
+  constraint line_pay_callback_events_result_hash_check
+    check (
+      provider_result_sha256 is null
+      or provider_result_sha256 ~ '^[0-9a-f]{64}$'
+    ),
+  constraint line_pay_callback_events_result_code_check
+    check (
+      safe_result_code is null
+      or (
+        pg_catalog.length(safe_result_code) between 1 and 64
+        and safe_result_code ~ '^[A-Za-z0-9_:-]+$'
+        and safe_result_code !~* '^fake_test_(token|signature|authorization)_do_not_use$'
+      )
+    ),
+  constraint line_pay_callback_events_error_code_check
+    check (
+      last_error_code is null
+      or (
+        pg_catalog.length(last_error_code) between 1 and 64
+        and last_error_code ~ '^[a-z0-9_:-]+$'
+        and last_error_code !~ '^fake_test_(token|signature|authorization)_do_not_use$'
+      )
+    )
+);
+
+create table public.line_pay_payment_audit_events (
+  id uuid primary key default gen_random_uuid(),
+  payment_id uuid null references public.payments(id) on delete restrict,
+  product_order_id uuid null references public.product_orders(id) on delete restrict,
+  checkout_attempt_id uuid null references public.line_pay_checkout_attempts(id) on delete restrict,
+  environment text not null,
+  event_type text not null,
+  from_state text null,
+  to_state text null,
+  error_code text null,
+  request_id text null,
+  evidence jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default pg_catalog.clock_timestamp(),
+  constraint line_pay_payment_audit_events_environment_check
+    check (environment in ('sandbox', 'production')),
+  constraint line_pay_payment_audit_events_event_type_check
+    check (
+      pg_catalog.length(event_type) between 1 and 64
+      and event_type ~ '^[a-z0-9_:-]+$'
+    ),
+  constraint line_pay_payment_audit_events_state_check
+    check (
+      (from_state is null or (
+        pg_catalog.length(from_state) between 1 and 64
+        and from_state ~ '^[a-z0-9_:-]+$'
+      ))
+      and (to_state is null or (
+        pg_catalog.length(to_state) between 1 and 64
+        and to_state ~ '^[a-z0-9_:-]+$'
+      ))
+    ),
+  constraint line_pay_payment_audit_events_error_code_check
+    check (
+      error_code is null
+      or (
+        pg_catalog.length(error_code) between 1 and 64
+        and error_code ~ '^[a-z0-9_:-]+$'
+        and error_code !~ '^fake_test_(token|signature|authorization)_do_not_use$'
+      )
+    ),
+  constraint line_pay_payment_audit_events_request_id_check
+    check (
+      request_id is null
+      or (
+        pg_catalog.length(request_id) between 1 and 128
+        and request_id ~ '^[A-Za-z0-9_.:-]+$'
+      )
+    ),
+  constraint line_pay_payment_audit_events_evidence_check
+    check (public.line_pay_audit_evidence_is_valid(evidence)),
+  constraint line_pay_payment_audit_events_marker_check
+    check (
+      event_type !~ '^fake_test_(token|signature|authorization)_do_not_use$'
+      and coalesce(from_state, '') !~ '^fake_test_(token|signature|authorization)_do_not_use$'
+      and coalesce(to_state, '') !~ '^fake_test_(token|signature|authorization)_do_not_use$'
+      and coalesce(error_code, '') !~ '^fake_test_(token|signature|authorization)_do_not_use$'
+      and coalesce(request_id, '') !~ '^fake_test_(token|signature|authorization)_do_not_use$'
+    )
+);
+
+alter table public.product_orders
+  add constraint product_orders_checkout_attempt_id_fkey
+  foreign key (checkout_attempt_id)
+  references public.line_pay_checkout_attempts(id)
+  on delete restrict
+  deferrable initially deferred
+  not valid;
+
+alter table public.payments
+  add constraint payments_checkout_attempt_id_fkey
+  foreign key (checkout_attempt_id)
+  references public.line_pay_checkout_attempts(id)
+  on delete restrict
+  deferrable initially deferred
+  not valid;
+
+alter table public.product_orders validate constraint product_orders_checkout_attempt_id_fkey;
+alter table public.payments validate constraint payments_checkout_attempt_id_fkey;
+
+create unique index line_pay_checkout_attempts_environment_key_idx
+on public.line_pay_checkout_attempts(environment, provider, idempotency_key);
+
+create unique index line_pay_checkout_attempts_environment_transaction_idx
+on public.line_pay_checkout_attempts(environment, provider, upstream_transaction_id)
+where upstream_transaction_id is not null;
+
+create unique index line_pay_checkout_attempts_environment_merchant_idx
+on public.line_pay_checkout_attempts(environment, provider, merchant_order_no);
+
+create unique index line_pay_checkout_attempts_payment_id_idx
+on public.line_pay_checkout_attempts(payment_id)
+where payment_id is not null;
+
+create index line_pay_checkout_attempts_owner_idx
+on public.line_pay_checkout_attempts(user_id, created_at desc);
+
+create index line_pay_checkout_attempts_order_idx
+on public.line_pay_checkout_attempts(product_order_id, created_at desc);
+
+create index line_pay_checkout_attempts_reconciliation_idx
+on public.line_pay_checkout_attempts(environment, updated_at)
+where reconciliation_required;
+
+create unique index line_pay_request_outbox_attempt_operation_idx
+on public.line_pay_request_outbox(checkout_attempt_id, operation);
+
+create unique index line_pay_request_outbox_environment_key_idx
+on public.line_pay_request_outbox(environment, provider, idempotency_key);
+
+create index line_pay_request_outbox_claimable_idx
+on public.line_pay_request_outbox(environment, next_attempt_at, created_at)
+where state = 'queued';
+
+create index line_pay_request_outbox_reconciliation_idx
+on public.line_pay_request_outbox(environment, updated_at)
+where state in ('unknown', 'reconciliation_required');
+
+create unique index line_pay_callback_capabilities_token_hash_idx
+on public.line_pay_callback_capabilities(token_hash);
+
+create unique index line_pay_callback_capabilities_binding_idx
+on public.line_pay_callback_capabilities(payment_id, purpose, capability_version);
+
+create index line_pay_callback_capabilities_active_idx
+on public.line_pay_callback_capabilities(environment, purpose, expires_at)
+where consumed_at is null and revoked_at is null;
+
+create index line_pay_callback_events_binding_idx
+on public.line_pay_callback_events(payment_id, product_order_id, created_at desc);
+
+create index line_pay_callback_events_reconciliation_idx
+on public.line_pay_callback_events(environment, updated_at)
+where state = 'reconciliation_required';
+
+create index line_pay_payment_audit_events_payment_idx
+on public.line_pay_payment_audit_events(payment_id, created_at desc);
+
+create index line_pay_payment_audit_events_order_idx
+on public.line_pay_payment_audit_events(product_order_id, created_at desc);
+
+create index line_pay_payment_audit_events_attempt_idx
+on public.line_pay_payment_audit_events(checkout_attempt_id, created_at desc);
+
+create index product_orders_owner_id_idx
+on public.product_orders(user_id, id);
+
+create unique index product_orders_checkout_attempt_id_idx
+on public.product_orders(checkout_attempt_id)
+where checkout_attempt_id is not null;
+
+create index payments_product_order_owner_idx
+on public.payments(product_order_id, user_id);
+
+create unique index payments_checkout_attempt_id_idx
+on public.payments(checkout_attempt_id)
+where checkout_attempt_id is not null;
+
+create unique index payments_line_pay_idempotency_idx
+on public.payments(environment, provider, request_idempotency_key)
+where provider = 'line_pay' and request_idempotency_key is not null;
+
+create unique index payments_line_pay_transaction_idx
+on public.payments(environment, provider, line_pay_transaction_id)
+where provider = 'line_pay' and line_pay_transaction_id is not null;
+
+create or replace function public.line_pay_touch_updated_at()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  new.updated_at := pg_catalog.clock_timestamp();
+  return new;
+end;
+$$;
+
+create or replace function public.line_pay_enforce_attempt_transition()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if old.request_state = new.request_state then
+    return new;
+  end if;
+
+  if not (
+    (old.request_state = 'initialized' and new.request_state in ('queued', 'canceled'))
+    or (old.request_state = 'queued' and new.request_state in ('claimed', 'requesting', 'canceled'))
+    or (old.request_state = 'claimed' and new.request_state in ('queued', 'requesting', 'reconciliation_required', 'canceled'))
+    or (old.request_state = 'requesting' and new.request_state in ('pending', 'succeeded', 'failed', 'unknown', 'reconciliation_required', 'canceled'))
+    or (old.request_state = 'pending' and new.request_state in ('succeeded', 'confirmation_processing', 'failed', 'reconciliation_required', 'canceled'))
+    or (old.request_state = 'succeeded' and new.request_state in ('confirmation_processing', 'paid', 'reconciliation_required', 'canceled'))
+    or (old.request_state = 'confirmation_processing' and new.request_state in ('pending', 'paid', 'reconciliation_required'))
+    or (old.request_state = 'unknown' and new.request_state = 'reconciliation_required')
+    or (old.request_state = 'reconciliation_required' and new.request_state in ('pending', 'confirmation_processing', 'paid', 'failed', 'canceled'))
+  ) then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_invalid_attempt_state_transition';
+  end if;
+
+  if new.request_state in ('unknown', 'reconciliation_required')
+     and not new.reconciliation_required then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_attempt_reconciliation_marker_required';
+  end if;
+
+  if old.request_state = 'paid' and new.request_state <> 'paid' then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_paid_attempt_is_terminal';
+  end if;
+
+  new.state_version := old.state_version + 1;
+  return new;
+end;
+$$;
+
+create or replace function public.line_pay_enforce_payment_transition()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if old.provider <> 'line_pay' and new.provider <> 'line_pay' then
+    return new;
+  end if;
+
+  if old.provider <> 'line_pay' and new.provider = 'line_pay' then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_payment_provider_must_be_set_on_insert';
+  end if;
+
+  if old.provider = 'line_pay' and new.provider <> 'line_pay' then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_payment_provider_is_immutable';
+  end if;
+
+  if old.status = 'paid' and new.status <> 'paid' then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_paid_payment_is_terminal';
+  end if;
+
+  if old.status is distinct from new.status
+     and not (
+       old.status = 'pending'
+       and new.status in ('paid', 'failed', 'cancelled')
+     ) then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_invalid_payment_status_transition';
+  end if;
+
+  if old.request_state is distinct from new.request_state then
+    if not (
+      (old.request_state is null and new.request_state = 'initialized')
+      or (old.request_state = 'initialized' and new.request_state in ('requesting', 'failed', 'canceled'))
+      or (old.request_state = 'requesting' and new.request_state in ('pending', 'failed', 'reconciliation_required', 'canceled'))
+      or (old.request_state = 'pending' and new.request_state in ('confirmation_processing', 'paid', 'failed', 'reconciliation_required', 'canceled'))
+      or (old.request_state = 'confirmation_processing' and new.request_state in ('pending', 'paid', 'reconciliation_required'))
+      or (old.request_state = 'reconciliation_required' and new.request_state in ('pending', 'confirmation_processing', 'paid', 'failed', 'canceled'))
+    ) then
+      raise exception using
+        errcode = '23514',
+        message = 'line_pay_invalid_payment_state_transition';
+    end if;
+  end if;
+
+  if new.request_state = 'reconciliation_required'
+     and not new.reconciliation_required then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_payment_reconciliation_marker_required';
+  end if;
+
+  if old.request_state = 'paid' and new.request_state <> 'paid' then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_paid_payment_request_state_is_terminal';
+  end if;
+
+  new.state_version := old.state_version + 1;
+  return new;
+end;
+$$;
+
+create or replace function public.line_pay_enforce_product_order_transition()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if old.payment_method <> 'line_pay' and new.payment_method <> 'line_pay' then
+    return new;
+  end if;
+
+  if old.payment_method <> 'line_pay' and new.payment_method = 'line_pay' then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_order_payment_method_must_be_set_on_insert';
+  end if;
+
+  if old.payment_method = 'line_pay' and new.payment_method <> 'line_pay' then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_order_payment_method_is_immutable';
+  end if;
+
+  if old.payment_status = 'paid' and new.payment_status <> 'paid' then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_paid_order_payment_status_is_terminal';
+  end if;
+
+  if old.payment_status is distinct from new.payment_status
+     and not (
+       old.payment_status = 'pending'
+       and new.payment_status in ('paid', 'failed', 'canceled')
+     ) then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_invalid_product_order_payment_status_transition';
+  end if;
+
+  if old.order_status is distinct from new.order_status then
+    if not (
+      (old.order_status = 'pending_payment' and new.order_status in ('payment_requesting', 'payment_failed', 'canceled'))
+      or (old.order_status = 'payment_requesting' and new.order_status in ('payment_pending', 'payment_failed', 'canceled'))
+      or (old.order_status = 'payment_pending' and new.order_status in ('paid', 'payment_failed', 'canceled'))
+      or (old.order_status = 'paid' and new.order_status in ('preparing', 'shipped', 'completed'))
+      or (old.order_status = 'preparing' and new.order_status in ('shipped', 'completed'))
+      or (old.order_status = 'shipped' and new.order_status = 'completed')
+    ) then
+      raise exception using
+        errcode = '23514',
+        message = 'line_pay_invalid_product_order_state_transition';
+    end if;
+  end if;
+
+  if old.payment_request_state is distinct from new.payment_request_state then
+    if not (
+      (old.payment_request_state is null and new.payment_request_state = 'initialized')
+      or (old.payment_request_state = 'initialized' and new.payment_request_state in ('requesting', 'failed', 'canceled'))
+      or (old.payment_request_state = 'requesting' and new.payment_request_state in ('pending', 'failed', 'reconciliation_required', 'canceled'))
+      or (old.payment_request_state = 'pending' and new.payment_request_state in ('confirmation_processing', 'paid', 'failed', 'reconciliation_required', 'canceled'))
+      or (old.payment_request_state = 'confirmation_processing' and new.payment_request_state in ('pending', 'paid', 'reconciliation_required'))
+      or (old.payment_request_state = 'reconciliation_required' and new.payment_request_state in ('pending', 'confirmation_processing', 'paid', 'failed', 'canceled'))
+    ) then
+      raise exception using
+        errcode = '23514',
+        message = 'line_pay_invalid_product_order_request_state_transition';
+    end if;
+  end if;
+
+  if new.sandbox_test and (
+    new.environment <> 'sandbox'
+    or new.fulfillment_mode <> 'none'
+    or new.shipping_status <> 'not_applicable'
+    or new.order_status in ('preparing', 'shipped', 'completed')
+  ) then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_sandbox_fulfillment_is_forbidden';
+  end if;
+
+  if old.order_status = 'paid' and new.order_status in (
+    'pending_payment',
+    'payment_requesting',
+    'payment_pending',
+    'payment_failed',
+    'canceled'
+  ) then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_paid_product_order_is_terminal';
+  end if;
+
+  new.state_version := old.state_version + 1;
+  return new;
+end;
+$$;
+
+create or replace function public.line_pay_enforce_outbox_transition()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if old.state = new.state then
+    return new;
+  end if;
+
+  if not (
+    (old.state = 'queued' and new.state in ('claimed', 'canceled'))
+    or (old.state = 'claimed' and new.state in ('completed', 'failed', 'unknown', 'reconciliation_required', 'canceled'))
+    or (old.state = 'unknown' and new.state = 'reconciliation_required')
+    or (old.state = 'reconciliation_required' and new.state in ('completed', 'failed', 'canceled'))
+  ) then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_invalid_outbox_state_transition';
+  end if;
+
+  return new;
+end;
+$$;
+
+create or replace function public.line_pay_enforce_callback_event_transition()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if old.state = new.state then
+    return new;
+  end if;
+
+  if not (
+    (old.state = 'received' and new.state = 'claimed')
+    or (old.state = 'claimed' and new.state in ('provider_verified', 'completed', 'failed', 'reconciliation_required'))
+    or (old.state = 'provider_verified' and new.state in ('completed', 'reconciliation_required'))
+    or (old.state = 'reconciliation_required' and new.state in ('provider_verified', 'completed', 'failed'))
+  ) then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_invalid_callback_event_state_transition';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger line_pay_checkout_attempts_touch_updated_at
+before update on public.line_pay_checkout_attempts
+for each row execute function public.line_pay_touch_updated_at();
+
+create trigger line_pay_request_outbox_touch_updated_at
+before update on public.line_pay_request_outbox
+for each row execute function public.line_pay_touch_updated_at();
+
+create trigger line_pay_request_outbox_transition_guard
+before update on public.line_pay_request_outbox
+for each row execute function public.line_pay_enforce_outbox_transition();
+
+create trigger line_pay_callback_capabilities_touch_updated_at
+before update on public.line_pay_callback_capabilities
+for each row execute function public.line_pay_touch_updated_at();
+
+create trigger line_pay_callback_events_touch_updated_at
+before update on public.line_pay_callback_events
+for each row execute function public.line_pay_touch_updated_at();
+
+create trigger line_pay_callback_events_transition_guard
+before update on public.line_pay_callback_events
+for each row execute function public.line_pay_enforce_callback_event_transition();
+
+create trigger line_pay_checkout_attempts_transition_guard
+before update on public.line_pay_checkout_attempts
+for each row execute function public.line_pay_enforce_attempt_transition();
+
+create trigger line_pay_payments_transition_guard
+before update on public.payments
+for each row execute function public.line_pay_enforce_payment_transition();
+
+create trigger line_pay_product_orders_transition_guard
+before update on public.product_orders
+for each row execute function public.line_pay_enforce_product_order_transition();
+
+alter table public.app_environment_attestation enable row level security;
+alter table public.line_pay_checkout_attempts enable row level security;
+alter table public.line_pay_request_outbox enable row level security;
+alter table public.line_pay_callback_capabilities enable row level security;
+alter table public.line_pay_callback_events enable row level security;
+alter table public.line_pay_payment_audit_events enable row level security;
+
+revoke all on table public.app_environment_attestation from public, anon, authenticated;
+revoke all on table public.line_pay_checkout_attempts from public, anon, authenticated;
+revoke all on table public.line_pay_request_outbox from public, anon, authenticated;
+revoke all on table public.line_pay_callback_capabilities from public, anon, authenticated;
+revoke all on table public.line_pay_callback_events from public, anon, authenticated;
+revoke all on table public.line_pay_payment_audit_events from public, anon, authenticated;
+
+grant select on table public.app_environment_attestation to service_role;
+grant select, insert, update on table public.line_pay_checkout_attempts to service_role;
+grant select, insert, update on table public.line_pay_request_outbox to service_role;
+grant select, insert, update on table public.line_pay_callback_capabilities to service_role;
+grant select, insert, update on table public.line_pay_callback_events to service_role;
+grant select, insert on table public.line_pay_payment_audit_events to service_role;
+
+revoke execute on function public.line_pay_sanitized_result_is_valid(jsonb)
+from public, anon, authenticated;
+revoke execute on function public.line_pay_audit_evidence_is_valid(jsonb)
+from public, anon, authenticated;
+revoke execute on function public.line_pay_touch_updated_at()
+from public, anon, authenticated;
+revoke execute on function public.line_pay_enforce_attempt_transition()
+from public, anon, authenticated;
+revoke execute on function public.line_pay_enforce_payment_transition()
+from public, anon, authenticated;
+revoke execute on function public.line_pay_enforce_product_order_transition()
+from public, anon, authenticated;
+revoke execute on function public.line_pay_enforce_outbox_transition()
+from public, anon, authenticated;
+revoke execute on function public.line_pay_enforce_callback_event_transition()
+from public, anon, authenticated;
+
+grant execute on function public.line_pay_sanitized_result_is_valid(jsonb)
+to service_role;
+grant execute on function public.line_pay_audit_evidence_is_valid(jsonb)
+to service_role;
+
+create or replace function public.claim_product_order_line_pay_request(
+  p_attempt_id uuid,
+  p_environment text,
+  p_idempotency_key text,
+  p_request_body_sha256 text,
+  p_claim_id uuid,
+  p_claim_expires_at timestamptz
+)
+returns table (
+  result_code text,
+  attempt_id uuid,
+  payment_id uuid,
+  request_state text,
+  attempt_count integer
+)
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_attempt public.line_pay_checkout_attempts%rowtype;
+  v_outbox public.line_pay_request_outbox%rowtype;
+  v_payment public.payments%rowtype;
+  v_order public.product_orders%rowtype;
+  v_payment_id uuid;
+  v_order_id uuid;
+  v_now timestamptz := pg_catalog.clock_timestamp();
+begin
+  if p_attempt_id is null
+     or p_environment is null
+     or p_environment not in ('sandbox', 'production')
+     or p_idempotency_key is null
+     or p_request_body_sha256 is null
+     or p_claim_id is null
+     or p_claim_expires_at is null
+     or p_claim_expires_at <= v_now
+     or p_claim_expires_at > v_now + interval '5 minutes'
+     or p_request_body_sha256 !~ '^[0-9a-f]{64}$'
+     or pg_catalog.length(p_idempotency_key) not between 16 and 200 then
+    raise exception using
+      errcode = '22023',
+      message = 'line_pay_request_claim_invalid_input';
+  end if;
+
+  select candidate.payment_id, candidate.product_order_id
+  into v_payment_id, v_order_id
+  from public.line_pay_checkout_attempts as candidate
+  where candidate.id = p_attempt_id;
+
+  if not found or v_payment_id is null then
+    raise exception using
+      errcode = 'P0002',
+      message = 'line_pay_request_attempt_not_found';
+  end if;
+
+  select payment.*
+  into strict v_payment
+  from public.payments as payment
+  where payment.id = v_payment_id
+  for update;
+
+  select product_order.*
+  into strict v_order
+  from public.product_orders as product_order
+  where product_order.id = v_order_id
+  for update;
+
+  select attempt.*
+  into strict v_attempt
+  from public.line_pay_checkout_attempts as attempt
+  where attempt.id = p_attempt_id
+  for update;
+
+  select outbox.*
+  into strict v_outbox
+  from public.line_pay_request_outbox as outbox
+  where outbox.checkout_attempt_id = p_attempt_id
+    and outbox.operation = 'request'
+  for update;
+
+  if v_attempt.provider <> 'line_pay'
+     or v_attempt.environment <> p_environment
+     or v_attempt.idempotency_key <> p_idempotency_key
+     or v_attempt.request_body_sha256 <> p_request_body_sha256
+     or v_outbox.environment <> p_environment
+     or v_outbox.provider <> 'line_pay'
+     or v_outbox.idempotency_key <> p_idempotency_key
+     or v_outbox.request_body_sha256 <> p_request_body_sha256
+     or v_outbox.payment_id <> v_attempt.payment_id
+     or v_payment.provider <> 'line_pay'
+     or v_payment.environment <> p_environment
+     or v_payment.product_order_id <> v_order.id
+     or v_payment.checkout_attempt_id <> v_attempt.id
+     or v_payment.request_idempotency_key <> p_idempotency_key
+     or v_payment.request_body_sha256 <> p_request_body_sha256
+     or v_order.payment_method <> 'line_pay'
+     or v_order.environment <> p_environment
+     or v_order.payment_id <> v_payment.id
+     or v_order.checkout_attempt_id <> v_attempt.id
+     or v_order.user_id <> v_attempt.user_id
+     or v_payment.user_id <> v_attempt.user_id
+     or v_payment.amount_twd <> v_attempt.amount_twd
+     or v_order.total_amount_twd <> v_attempt.amount_twd
+     or v_payment.currency <> 'TWD'
+     or v_order.currency <> 'TWD' then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_request_claim_contract_mismatch';
+  end if;
+
+  if v_attempt.request_state in ('succeeded', 'paid') then
+    return query select
+      'already_succeeded'::text,
+      v_attempt.id,
+      v_attempt.payment_id,
+      v_attempt.request_state,
+      v_attempt.attempt_count;
+    return;
+  end if;
+
+  if v_attempt.request_state in ('unknown', 'reconciliation_required') then
+    return query select
+      'reconciliation_required'::text,
+      v_attempt.id,
+      v_attempt.payment_id,
+      v_attempt.request_state,
+      v_attempt.attempt_count;
+    return;
+  end if;
+
+  if v_attempt.request_state in ('failed', 'canceled') then
+    return query select
+      'terminal'::text,
+      v_attempt.id,
+      v_attempt.payment_id,
+      v_attempt.request_state,
+      v_attempt.attempt_count;
+    return;
+  end if;
+
+  if v_attempt.request_state = 'requesting'
+     and v_attempt.claim_id = p_claim_id
+     and v_attempt.claim_expires_at > v_now then
+    return query select
+      'already_claimed'::text,
+      v_attempt.id,
+      v_attempt.payment_id,
+      v_attempt.request_state,
+      v_attempt.attempt_count;
+    return;
+  end if;
+
+  if v_attempt.request_state = 'requesting'
+     and v_attempt.claim_id <> p_claim_id
+     and v_attempt.claim_expires_at > v_now then
+    return query select
+      'claim_busy'::text,
+      v_attempt.id,
+      v_attempt.payment_id,
+      v_attempt.request_state,
+      v_attempt.attempt_count;
+    return;
+  end if;
+
+  if v_attempt.request_state = 'requesting' then
+    update public.line_pay_checkout_attempts
+    set request_state = 'reconciliation_required',
+        reconciliation_required = true,
+        last_error_code = 'request_claim_expired_unknown'
+    where id = v_attempt.id;
+
+    update public.line_pay_request_outbox
+    set state = 'unknown',
+        last_error_code = 'request_claim_expired_unknown'
+    where id = v_outbox.id;
+
+    update public.payments
+    set request_state = 'reconciliation_required',
+        reconciliation_required = true
+    where id = v_payment.id;
+
+    update public.product_orders
+    set order_status = 'payment_pending',
+        payment_request_state = 'reconciliation_required',
+        reconciliation_required = true
+    where id = v_order.id;
+
+    insert into public.line_pay_payment_audit_events (
+      payment_id,
+      product_order_id,
+      checkout_attempt_id,
+      environment,
+      event_type,
+      from_state,
+      to_state,
+      error_code,
+      evidence
+    ) values (
+      v_payment.id,
+      v_order.id,
+      v_attempt.id,
+      p_environment,
+      'request_claim_expired',
+      'requesting',
+      'reconciliation_required',
+      'request_claim_expired_unknown',
+      '{"reason_code":"request_claim_expired_unknown"}'::jsonb
+    );
+
+    return query select
+      'reconciliation_required'::text,
+      v_attempt.id,
+      v_attempt.payment_id,
+      'reconciliation_required'::text,
+      v_attempt.attempt_count;
+    return;
+  end if;
+
+  if v_attempt.request_state not in ('queued', 'claimed')
+     or v_outbox.state not in ('queued', 'claimed') then
+    raise exception using
+      errcode = '55000',
+      message = 'line_pay_request_attempt_not_claimable';
+  end if;
+
+  if v_attempt.request_state = 'claimed'
+     and v_attempt.claim_id <> p_claim_id
+     and v_attempt.claim_expires_at > v_now then
+    return query select
+      'claim_busy'::text,
+      v_attempt.id,
+      v_attempt.payment_id,
+      v_attempt.request_state,
+      v_attempt.attempt_count;
+    return;
+  end if;
+
+  update public.line_pay_checkout_attempts as target_attempt
+  set request_state = 'requesting',
+      attempt_count = target_attempt.attempt_count + 1,
+      claim_id = p_claim_id,
+      claimed_at = v_now,
+      claim_expires_at = p_claim_expires_at,
+      reconciliation_required = false,
+      last_error_code = null
+  where id = v_attempt.id;
+
+  update public.line_pay_request_outbox as target_outbox
+  set state = 'claimed',
+      attempt_count = target_outbox.attempt_count + 1,
+      claim_id = p_claim_id,
+      claimed_at = v_now,
+      claim_expires_at = p_claim_expires_at,
+      last_error_code = null
+  where id = v_outbox.id;
+
+  update public.payments
+  set request_state = 'requesting',
+      reconciliation_required = false
+  where id = v_payment.id;
+
+  if not found then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_request_payment_claim_update_failed';
+  end if;
+
+  update public.product_orders
+  set order_status = 'payment_requesting',
+      payment_request_state = 'requesting',
+      reconciliation_required = false
+  where id = v_order.id;
+
+  if not found then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_request_order_claim_update_failed';
+  end if;
+
+  insert into public.line_pay_payment_audit_events (
+    payment_id,
+    product_order_id,
+    checkout_attempt_id,
+    environment,
+    event_type,
+    from_state,
+    to_state,
+    evidence
+  ) values (
+    v_payment.id,
+    v_order.id,
+    v_attempt.id,
+    p_environment,
+    'request_claimed',
+    v_attempt.request_state,
+    'requesting',
+    '{"result_code":"claimed"}'::jsonb
+  );
+
+  return query
+  select
+    'claimed'::text,
+    v_attempt.id,
+    v_attempt.payment_id,
+    'requesting'::text,
+    v_attempt.attempt_count + 1;
+end;
+$$;
+
+create or replace function public.record_product_order_line_pay_request_success(
+  p_attempt_id uuid,
+  p_environment text,
+  p_idempotency_key text,
+  p_request_body_sha256 text,
+  p_claim_id uuid,
+  p_upstream_transaction_id text,
+  p_merchant_order_no text,
+  p_sanitized_result jsonb,
+  p_request_id text default null
+)
+returns table (
+  result_code text,
+  attempt_id uuid,
+  payment_id uuid,
+  request_state text,
+  upstream_transaction_id text
+)
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_attempt public.line_pay_checkout_attempts%rowtype;
+  v_outbox public.line_pay_request_outbox%rowtype;
+  v_payment public.payments%rowtype;
+  v_order public.product_orders%rowtype;
+  v_payment_id uuid;
+  v_order_id uuid;
+  v_audit_evidence jsonb;
+begin
+  if p_attempt_id is null
+     or p_environment is null
+     or p_environment not in ('sandbox', 'production')
+     or p_idempotency_key is null
+     or p_request_body_sha256 is null
+     or p_upstream_transaction_id is null
+     or p_merchant_order_no is null
+     or p_claim_id is null
+     or p_request_body_sha256 !~ '^[0-9a-f]{64}$'
+     or pg_catalog.length(p_idempotency_key) not between 16 and 200
+     or pg_catalog.length(p_upstream_transaction_id) not between 1 and 128
+     or p_upstream_transaction_id ~ '[[:space:]]'
+     or pg_catalog.length(p_merchant_order_no) not between 1 and 100
+     or p_merchant_order_no ~ '[[:space:]]'
+     or not public.line_pay_sanitized_result_is_valid(p_sanitized_result)
+     or (p_request_id is not null and p_request_id !~ '^[A-Za-z0-9_.:-]{1,128}$') then
+    raise exception using
+      errcode = '22023',
+      message = 'line_pay_request_success_invalid_input';
+  end if;
+
+  select candidate.payment_id, candidate.product_order_id
+  into v_payment_id, v_order_id
+  from public.line_pay_checkout_attempts as candidate
+  where candidate.id = p_attempt_id;
+
+  if not found or v_payment_id is null then
+    raise exception using
+      errcode = 'P0002',
+      message = 'line_pay_request_attempt_not_found';
+  end if;
+
+  select payment.* into strict v_payment
+  from public.payments as payment
+  where payment.id = v_payment_id
+  for update;
+
+  select product_order.* into strict v_order
+  from public.product_orders as product_order
+  where product_order.id = v_order_id
+  for update;
+
+  select attempt.* into strict v_attempt
+  from public.line_pay_checkout_attempts as attempt
+  where attempt.id = p_attempt_id
+  for update;
+
+  select outbox.* into strict v_outbox
+  from public.line_pay_request_outbox as outbox
+  where outbox.checkout_attempt_id = p_attempt_id
+    and outbox.operation = 'request'
+  for update;
+
+  if v_attempt.environment <> p_environment
+     or v_attempt.provider <> 'line_pay'
+     or v_attempt.idempotency_key <> p_idempotency_key
+     or v_attempt.request_body_sha256 <> p_request_body_sha256
+     or v_outbox.environment <> p_environment
+     or v_outbox.idempotency_key <> p_idempotency_key
+     or v_outbox.request_body_sha256 <> p_request_body_sha256
+     or v_payment.provider <> 'line_pay'
+     or v_payment.environment <> p_environment
+     or v_payment.product_order_id <> v_order.id
+     or v_payment.checkout_attempt_id <> v_attempt.id
+     or v_order.payment_method <> 'line_pay'
+     or v_order.environment <> p_environment
+     or v_order.payment_id <> v_payment.id
+     or v_order.checkout_attempt_id <> v_attempt.id
+     or v_attempt.merchant_order_no <> p_merchant_order_no
+     or v_payment.merchant_order_no <> p_merchant_order_no
+     or v_payment.amount_twd <> v_attempt.amount_twd
+     or v_order.total_amount_twd <> v_attempt.amount_twd
+     or v_payment.currency <> 'TWD'
+     or v_order.currency <> 'TWD' then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_request_success_contract_mismatch';
+  end if;
+
+  if v_attempt.request_state in ('succeeded', 'paid') then
+    if v_attempt.upstream_transaction_id <> p_upstream_transaction_id then
+      raise exception using
+        errcode = '23505',
+        message = 'line_pay_request_success_transaction_conflict';
+    end if;
+
+    return query select
+      'already_recorded'::text,
+      v_attempt.id,
+      v_attempt.payment_id,
+      v_attempt.request_state,
+      v_attempt.upstream_transaction_id;
+    return;
+  end if;
+
+  if v_attempt.request_state <> 'requesting'
+     or v_attempt.claim_id <> p_claim_id
+     or v_outbox.state <> 'claimed'
+     or v_outbox.claim_id <> p_claim_id then
+    raise exception using
+      errcode = '55000',
+      message = 'line_pay_request_success_claim_mismatch';
+  end if;
+
+  update public.line_pay_checkout_attempts
+  set request_state = 'succeeded',
+      upstream_transaction_id = p_upstream_transaction_id,
+      sanitized_result = p_sanitized_result,
+      reconciliation_required = false,
+      completed_at = pg_catalog.clock_timestamp(),
+      last_error_code = null
+  where id = v_attempt.id;
+
+  update public.line_pay_request_outbox
+  set state = 'completed',
+      completed_at = pg_catalog.clock_timestamp(),
+      last_error_code = null
+  where id = v_outbox.id;
+
+  update public.payments
+  set request_state = 'pending',
+      line_pay_transaction_id = p_upstream_transaction_id,
+      reconciliation_required = false
+  where id = v_payment.id;
+
+  if not found then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_request_success_payment_update_failed';
+  end if;
+
+  update public.product_orders
+  set order_status = 'payment_pending',
+      payment_request_state = 'pending',
+      reconciliation_required = false
+  where id = v_order.id;
+
+  if not found then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_request_success_order_update_failed';
+  end if;
+
+  v_audit_evidence := pg_catalog.jsonb_strip_nulls(pg_catalog.jsonb_build_object(
+    'result_code', p_sanitized_result ->> 'result_code',
+    'result_sha256', p_sanitized_result ->> 'response_sha256'
+  ));
+
+  insert into public.line_pay_payment_audit_events (
+    payment_id,
+    product_order_id,
+    checkout_attempt_id,
+    environment,
+    event_type,
+    from_state,
+    to_state,
+    request_id,
+    evidence
+  ) values (
+    v_payment.id,
+    v_order.id,
+    v_attempt.id,
+    p_environment,
+    'request_succeeded',
+    'requesting',
+    'pending',
+    p_request_id,
+    v_audit_evidence
+  );
+
+  return query select
+    'recorded'::text,
+    v_attempt.id,
+    v_attempt.payment_id,
+    'succeeded'::text,
+    p_upstream_transaction_id;
+end;
+$$;
+
+create or replace function public.record_product_order_line_pay_request_failure(
+  p_attempt_id uuid,
+  p_environment text,
+  p_idempotency_key text,
+  p_request_body_sha256 text,
+  p_claim_id uuid,
+  p_error_code text,
+  p_request_id text default null
+)
+returns table (
+  result_code text,
+  attempt_id uuid,
+  payment_id uuid,
+  request_state text
+)
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_attempt public.line_pay_checkout_attempts%rowtype;
+  v_outbox public.line_pay_request_outbox%rowtype;
+  v_payment public.payments%rowtype;
+  v_order public.product_orders%rowtype;
+  v_payment_id uuid;
+  v_order_id uuid;
+begin
+  if p_attempt_id is null
+     or p_environment is null
+     or p_environment not in ('sandbox', 'production')
+     or p_idempotency_key is null
+     or p_request_body_sha256 is null
+     or p_error_code is null
+     or p_claim_id is null
+     or p_request_body_sha256 !~ '^[0-9a-f]{64}$'
+     or pg_catalog.length(p_idempotency_key) not between 16 and 200
+     or p_error_code !~ '^[a-z0-9_:-]{1,64}$'
+     or p_error_code ~ '^fake_test_(token|signature|authorization)_do_not_use$'
+     or (p_request_id is not null and p_request_id !~ '^[A-Za-z0-9_.:-]{1,128}$') then
+    raise exception using
+      errcode = '22023',
+      message = 'line_pay_request_failure_invalid_input';
+  end if;
+
+  select candidate.payment_id, candidate.product_order_id
+  into v_payment_id, v_order_id
+  from public.line_pay_checkout_attempts as candidate
+  where candidate.id = p_attempt_id;
+
+  if not found or v_payment_id is null then
+    raise exception using
+      errcode = 'P0002',
+      message = 'line_pay_request_attempt_not_found';
+  end if;
+
+  select payment.* into strict v_payment
+  from public.payments as payment
+  where payment.id = v_payment_id
+  for update;
+
+  select product_order.* into strict v_order
+  from public.product_orders as product_order
+  where product_order.id = v_order_id
+  for update;
+
+  select attempt.* into strict v_attempt
+  from public.line_pay_checkout_attempts as attempt
+  where attempt.id = p_attempt_id
+  for update;
+
+  select outbox.* into strict v_outbox
+  from public.line_pay_request_outbox as outbox
+  where outbox.checkout_attempt_id = p_attempt_id
+    and outbox.operation = 'request'
+  for update;
+
+  if v_attempt.environment <> p_environment
+     or v_attempt.provider <> 'line_pay'
+     or v_attempt.idempotency_key <> p_idempotency_key
+     or v_attempt.request_body_sha256 <> p_request_body_sha256
+     or v_outbox.environment <> p_environment
+     or v_outbox.idempotency_key <> p_idempotency_key
+     or v_outbox.request_body_sha256 <> p_request_body_sha256
+     or v_payment.provider <> 'line_pay'
+     or v_payment.environment <> p_environment
+     or v_payment.product_order_id <> v_order.id
+     or v_payment.checkout_attempt_id <> v_attempt.id
+     or v_order.payment_method <> 'line_pay'
+     or v_order.environment <> p_environment
+     or v_order.payment_id <> v_payment.id
+     or v_order.checkout_attempt_id <> v_attempt.id then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_request_failure_contract_mismatch';
+  end if;
+
+  if v_attempt.request_state = 'failed' then
+    return query select
+      'already_recorded'::text,
+      v_attempt.id,
+      v_attempt.payment_id,
+      v_attempt.request_state;
+    return;
+  end if;
+
+  if v_attempt.request_state <> 'requesting'
+     or v_attempt.claim_id <> p_claim_id
+     or v_outbox.state <> 'claimed'
+     or v_outbox.claim_id <> p_claim_id then
+    raise exception using
+      errcode = '55000',
+      message = 'line_pay_request_failure_claim_mismatch';
+  end if;
+
+  update public.line_pay_checkout_attempts
+  set request_state = 'failed',
+      last_error_code = p_error_code,
+      completed_at = pg_catalog.clock_timestamp(),
+      reconciliation_required = false
+  where id = v_attempt.id;
+
+  update public.line_pay_request_outbox
+  set state = 'failed',
+      last_error_code = p_error_code,
+      completed_at = pg_catalog.clock_timestamp()
+  where id = v_outbox.id;
+
+  update public.payments
+  set status = 'failed',
+      request_state = 'failed',
+      failure_reason = p_error_code,
+      reconciliation_required = false
+  where id = v_payment.id;
+
+  if not found then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_request_failure_payment_update_failed';
+  end if;
+
+  update public.product_orders
+  set payment_status = 'failed',
+      order_status = 'payment_failed',
+      payment_request_state = 'failed',
+      reconciliation_required = false
+  where id = v_order.id;
+
+  if not found then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_request_failure_order_update_failed';
+  end if;
+
+  insert into public.line_pay_payment_audit_events (
+    payment_id,
+    product_order_id,
+    checkout_attempt_id,
+    environment,
+    event_type,
+    from_state,
+    to_state,
+    error_code,
+    request_id,
+    evidence
+  ) values (
+    v_payment.id,
+    v_order.id,
+    v_attempt.id,
+    p_environment,
+    'request_failed',
+    'requesting',
+    'failed',
+    p_error_code,
+    p_request_id,
+    pg_catalog.jsonb_build_object('reason_code', p_error_code)
+  );
+
+  return query select
+    'recorded'::text,
+    v_attempt.id,
+    v_attempt.payment_id,
+    'failed'::text;
+end;
+$$;
+
+create or replace function public.mark_product_order_line_pay_request_unknown(
+  p_attempt_id uuid,
+  p_environment text,
+  p_idempotency_key text,
+  p_request_body_sha256 text,
+  p_claim_id uuid,
+  p_error_code text,
+  p_request_id text default null
+)
+returns table (
+  result_code text,
+  attempt_id uuid,
+  payment_id uuid,
+  request_state text
+)
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_attempt public.line_pay_checkout_attempts%rowtype;
+  v_outbox public.line_pay_request_outbox%rowtype;
+  v_payment public.payments%rowtype;
+  v_order public.product_orders%rowtype;
+  v_payment_id uuid;
+  v_order_id uuid;
+begin
+  if p_attempt_id is null
+     or p_environment is null
+     or p_environment not in ('sandbox', 'production')
+     or p_idempotency_key is null
+     or p_request_body_sha256 is null
+     or p_error_code is null
+     or p_claim_id is null
+     or p_request_body_sha256 !~ '^[0-9a-f]{64}$'
+     or pg_catalog.length(p_idempotency_key) not between 16 and 200
+     or p_error_code !~ '^[a-z0-9_:-]{1,64}$'
+     or p_error_code ~ '^fake_test_(token|signature|authorization)_do_not_use$'
+     or (p_request_id is not null and p_request_id !~ '^[A-Za-z0-9_.:-]{1,128}$') then
+    raise exception using
+      errcode = '22023',
+      message = 'line_pay_request_unknown_invalid_input';
+  end if;
+
+  select candidate.payment_id, candidate.product_order_id
+  into v_payment_id, v_order_id
+  from public.line_pay_checkout_attempts as candidate
+  where candidate.id = p_attempt_id;
+
+  if not found or v_payment_id is null then
+    raise exception using
+      errcode = 'P0002',
+      message = 'line_pay_request_attempt_not_found';
+  end if;
+
+  select payment.* into strict v_payment
+  from public.payments as payment
+  where payment.id = v_payment_id
+  for update;
+
+  select product_order.* into strict v_order
+  from public.product_orders as product_order
+  where product_order.id = v_order_id
+  for update;
+
+  select attempt.* into strict v_attempt
+  from public.line_pay_checkout_attempts as attempt
+  where attempt.id = p_attempt_id
+  for update;
+
+  select outbox.* into strict v_outbox
+  from public.line_pay_request_outbox as outbox
+  where outbox.checkout_attempt_id = p_attempt_id
+    and outbox.operation = 'request'
+  for update;
+
+  if v_attempt.environment <> p_environment
+     or v_attempt.provider <> 'line_pay'
+     or v_attempt.idempotency_key <> p_idempotency_key
+     or v_attempt.request_body_sha256 <> p_request_body_sha256
+     or v_outbox.environment <> p_environment
+     or v_outbox.idempotency_key <> p_idempotency_key
+     or v_outbox.request_body_sha256 <> p_request_body_sha256
+     or v_payment.provider <> 'line_pay'
+     or v_payment.environment <> p_environment
+     or v_payment.product_order_id <> v_order.id
+     or v_payment.checkout_attempt_id <> v_attempt.id
+     or v_order.payment_method <> 'line_pay'
+     or v_order.environment <> p_environment
+     or v_order.payment_id <> v_payment.id
+     or v_order.checkout_attempt_id <> v_attempt.id then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_request_unknown_contract_mismatch';
+  end if;
+
+  if v_attempt.request_state in ('unknown', 'reconciliation_required') then
+    return query select
+      'already_recorded'::text,
+      v_attempt.id,
+      v_attempt.payment_id,
+      v_attempt.request_state;
+    return;
+  end if;
+
+  if v_attempt.request_state <> 'requesting'
+     or v_attempt.claim_id <> p_claim_id
+     or v_outbox.state <> 'claimed'
+     or v_outbox.claim_id <> p_claim_id then
+    raise exception using
+      errcode = '55000',
+      message = 'line_pay_request_unknown_claim_mismatch';
+  end if;
+
+  update public.line_pay_checkout_attempts
+  set request_state = 'unknown',
+      last_error_code = p_error_code,
+      reconciliation_required = true
+  where id = v_attempt.id;
+
+  update public.line_pay_request_outbox
+  set state = 'unknown',
+      last_error_code = p_error_code
+  where id = v_outbox.id;
+
+  update public.payments
+  set request_state = 'reconciliation_required',
+      reconciliation_required = true
+  where id = v_payment.id;
+
+  if not found then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_request_unknown_payment_update_failed';
+  end if;
+
+  update public.product_orders
+  set order_status = 'payment_pending',
+      payment_request_state = 'reconciliation_required',
+      reconciliation_required = true
+  where id = v_order.id;
+
+  if not found then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_request_unknown_order_update_failed';
+  end if;
+
+  insert into public.line_pay_payment_audit_events (
+    payment_id,
+    product_order_id,
+    checkout_attempt_id,
+    environment,
+    event_type,
+    from_state,
+    to_state,
+    error_code,
+    request_id,
+    evidence
+  ) values (
+    v_payment.id,
+    v_order.id,
+    v_attempt.id,
+    p_environment,
+    'request_unknown',
+    'requesting',
+    'reconciliation_required',
+    p_error_code,
+    p_request_id,
+    pg_catalog.jsonb_build_object('reason_code', p_error_code)
+  );
+
+  return query select
+    'recorded'::text,
+    v_attempt.id,
+    v_attempt.payment_id,
+    'unknown'::text;
+end;
+$$;
+
+create or replace function public.read_product_order_line_pay_request_result(
+  p_attempt_id uuid,
+  p_environment text,
+  p_idempotency_key text,
+  p_request_body_sha256 text
+)
+returns table (
+  attempt_id uuid,
+  payment_id uuid,
+  request_state text,
+  upstream_transaction_id text,
+  merchant_order_no text,
+  sanitized_result jsonb,
+  last_error_code text,
+  reconciliation_required boolean,
+  completed_at timestamptz
+)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select
+    attempt.id,
+    attempt.payment_id,
+    attempt.request_state,
+    attempt.upstream_transaction_id,
+    attempt.merchant_order_no,
+    attempt.sanitized_result,
+    attempt.last_error_code,
+    attempt.reconciliation_required,
+    attempt.completed_at
+  from public.line_pay_checkout_attempts as attempt
+  where attempt.id = p_attempt_id
+    and attempt.provider = 'line_pay'
+    and attempt.environment = p_environment
+    and attempt.idempotency_key = p_idempotency_key
+    and attempt.request_body_sha256 = p_request_body_sha256;
+$$;
+
+create or replace function public.claim_line_pay_callback_capability(
+  p_token_hash text,
+  p_environment text,
+  p_purpose text,
+  p_payment_id uuid,
+  p_product_order_id uuid,
+  p_attempt_id uuid,
+  p_claim_id uuid,
+  p_claim_expires_at timestamptz
+)
+returns table (
+  result_code text,
+  capability_id uuid,
+  callback_event_id uuid,
+  payment_id uuid,
+  product_order_id uuid,
+  purpose text,
+  expires_at timestamptz
+)
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_capability public.line_pay_callback_capabilities%rowtype;
+  v_callback_event_id uuid;
+  v_now timestamptz := pg_catalog.clock_timestamp();
+begin
+  if p_token_hash is null
+     or p_token_hash !~ '^[0-9a-f]{64}$'
+     or p_environment is null
+     or p_environment not in ('sandbox', 'production')
+     or p_purpose is null
+     or p_purpose not in ('confirm', 'cancel')
+     or p_payment_id is null
+     or p_product_order_id is null
+     or p_attempt_id is null
+     or p_claim_id is null
+     or p_claim_expires_at is null
+     or p_claim_expires_at <= v_now
+     or p_claim_expires_at > v_now + interval '5 minutes' then
+    raise exception using
+      errcode = '22023',
+      message = 'line_pay_callback_capability_unavailable';
+  end if;
+
+  select capability.*
+  into strict v_capability
+  from public.line_pay_callback_capabilities as capability
+  where capability.token_hash = p_token_hash
+  for update;
+
+  if v_capability.environment <> p_environment
+     or v_capability.purpose <> p_purpose
+     or v_capability.payment_id <> p_payment_id
+     or v_capability.product_order_id <> p_product_order_id
+     or v_capability.checkout_attempt_id <> p_attempt_id then
+    raise exception using
+      errcode = 'P0002',
+      message = 'line_pay_callback_capability_unavailable';
+  end if;
+
+  if v_capability.consumed_at is not null then
+    select callback_event.id into strict v_callback_event_id
+    from public.line_pay_callback_events as callback_event
+    where callback_event.capability_id = v_capability.id;
+
+    return query select
+      'already_consumed'::text,
+      v_capability.id,
+      v_callback_event_id,
+      v_capability.payment_id,
+      v_capability.product_order_id,
+      v_capability.purpose,
+      v_capability.expires_at;
+    return;
+  end if;
+
+  if v_capability.revoked_at is not null
+     or v_capability.expires_at <= v_now then
+    raise exception using
+      errcode = 'P0002',
+      message = 'line_pay_callback_capability_unavailable';
+  end if;
+
+  if v_capability.claim_id = p_claim_id
+     and v_capability.claim_expires_at > v_now then
+    select callback_event.id into strict v_callback_event_id
+    from public.line_pay_callback_events as callback_event
+    where callback_event.capability_id = v_capability.id;
+
+    return query select
+      'already_claimed'::text,
+      v_capability.id,
+      v_callback_event_id,
+      v_capability.payment_id,
+      v_capability.product_order_id,
+      v_capability.purpose,
+      v_capability.expires_at;
+    return;
+  end if;
+
+  if v_capability.claim_id is not null
+     and v_capability.claim_id <> p_claim_id
+     and v_capability.claim_expires_at > v_now then
+    select callback_event.id into v_callback_event_id
+    from public.line_pay_callback_events as callback_event
+    where callback_event.capability_id = v_capability.id;
+
+    return query select
+      'claim_busy'::text,
+      v_capability.id,
+      v_callback_event_id,
+      v_capability.payment_id,
+      v_capability.product_order_id,
+      v_capability.purpose,
+      v_capability.expires_at;
+    return;
+  end if;
+
+  update public.line_pay_callback_capabilities
+  set claim_id = p_claim_id,
+      claimed_at = v_now,
+      claim_expires_at = p_claim_expires_at
+  where id = v_capability.id;
+
+  insert into public.line_pay_callback_events (
+    capability_id,
+    payment_id,
+    product_order_id,
+    checkout_attempt_id,
+    environment,
+    purpose,
+    state,
+    claim_id,
+    claimed_at,
+    claim_expires_at
+  ) values (
+    v_capability.id,
+    v_capability.payment_id,
+    v_capability.product_order_id,
+    v_capability.checkout_attempt_id,
+    v_capability.environment,
+    v_capability.purpose,
+    'claimed',
+    p_claim_id,
+    v_now,
+    p_claim_expires_at
+  )
+  on conflict on constraint line_pay_callback_events_capability_key do update
+  set claim_id = excluded.claim_id,
+      claimed_at = excluded.claimed_at,
+      claim_expires_at = excluded.claim_expires_at,
+      state = 'claimed'
+  where line_pay_callback_events.state in ('received', 'claimed')
+  returning id into v_callback_event_id;
+
+  if v_callback_event_id is null then
+    raise exception using
+      errcode = '55000',
+      message = 'line_pay_callback_event_not_claimable';
+  end if;
+
+  return query select
+    'claimed'::text,
+    v_capability.id,
+    v_callback_event_id,
+    v_capability.payment_id,
+    v_capability.product_order_id,
+    v_capability.purpose,
+    v_capability.expires_at;
+exception
+  when no_data_found then
+    raise exception using
+      errcode = 'P0002',
+      message = 'line_pay_callback_capability_unavailable';
+end;
+$$;
+
+create or replace function public.claim_product_order_line_pay_confirmation(
+  p_environment text,
+  p_payment_id uuid,
+  p_product_order_id uuid,
+  p_attempt_id uuid,
+  p_capability_id uuid,
+  p_callback_event_id uuid,
+  p_callback_claim_id uuid,
+  p_transaction_id text,
+  p_request_id text
+)
+returns table (
+  result_code text,
+  payment_id uuid,
+  product_order_id uuid,
+  request_state text
+)
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_payment public.payments%rowtype;
+  v_order public.product_orders%rowtype;
+  v_attempt public.line_pay_checkout_attempts%rowtype;
+  v_capability public.line_pay_callback_capabilities%rowtype;
+  v_callback_event public.line_pay_callback_events%rowtype;
+  v_now timestamptz := pg_catalog.clock_timestamp();
+begin
+  if p_environment is null
+     or p_environment not in ('sandbox', 'production')
+     or p_payment_id is null
+     or p_product_order_id is null
+     or p_attempt_id is null
+     or p_capability_id is null
+     or p_callback_event_id is null
+     or p_callback_claim_id is null
+     or p_transaction_id is null
+     or pg_catalog.length(p_transaction_id) not between 1 and 128
+     or p_transaction_id ~ '[[:space:]]'
+     or p_request_id is null
+     or p_request_id !~ '^[A-Za-z0-9_.:-]{1,128}$' then
+    raise exception using
+      errcode = '22023',
+      message = 'line_pay_confirmation_claim_invalid_input';
+  end if;
+
+  select payment.* into strict v_payment
+  from public.payments as payment
+  where payment.id = p_payment_id
+  for update;
+
+  select product_order.* into strict v_order
+  from public.product_orders as product_order
+  where product_order.id = p_product_order_id
+  for update;
+
+  select attempt.* into strict v_attempt
+  from public.line_pay_checkout_attempts as attempt
+  where attempt.id = p_attempt_id
+  for update;
+
+  select capability.* into strict v_capability
+  from public.line_pay_callback_capabilities as capability
+  where capability.id = p_capability_id
+  for update;
+
+  select callback_event.* into strict v_callback_event
+  from public.line_pay_callback_events as callback_event
+  where callback_event.id = p_callback_event_id
+  for update;
+
+  if v_payment.provider <> 'line_pay'
+     or v_payment.environment <> p_environment
+     or v_payment.product_order_id <> v_order.id
+     or v_payment.checkout_attempt_id <> v_attempt.id
+     or v_payment.line_pay_transaction_id <> p_transaction_id
+     or v_order.payment_method <> 'line_pay'
+     or v_order.environment <> p_environment
+     or v_order.payment_id <> v_payment.id
+     or v_order.checkout_attempt_id <> v_attempt.id
+     or v_attempt.provider <> 'line_pay'
+     or v_attempt.environment <> p_environment
+     or v_attempt.payment_id <> v_payment.id
+     or v_attempt.product_order_id <> v_order.id
+     or v_attempt.upstream_transaction_id <> p_transaction_id
+     or v_capability.payment_id <> v_payment.id
+     or v_capability.product_order_id <> v_order.id
+     or v_capability.checkout_attempt_id <> v_attempt.id
+     or v_capability.environment <> p_environment
+     or v_capability.purpose <> 'confirm'
+     or v_callback_event.capability_id <> v_capability.id
+     or v_callback_event.payment_id <> v_payment.id
+     or v_callback_event.product_order_id <> v_order.id
+     or v_callback_event.checkout_attempt_id <> v_attempt.id
+     or v_callback_event.environment <> p_environment
+     or v_callback_event.purpose <> 'confirm' then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_confirmation_claim_contract_mismatch';
+  end if;
+
+  if v_payment.status = 'paid' then
+    if v_payment.provider_trade_no = p_transaction_id
+       and v_order.payment_status = 'paid'
+       and v_attempt.request_state = 'paid'
+       and v_capability.consumed_at is not null
+       and v_callback_event.state = 'completed' then
+      return query select
+        'already_paid'::text,
+        v_payment.id,
+        v_order.id,
+        v_payment.request_state;
+      return;
+    end if;
+
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_confirmation_claim_paid_conflict';
+  end if;
+
+  if v_payment.request_state = 'confirmation_processing'
+     and v_order.payment_request_state = 'confirmation_processing'
+     and v_attempt.request_state = 'confirmation_processing'
+     and v_callback_event.claim_id = p_callback_claim_id then
+    return query select
+      'already_claimed'::text,
+      v_payment.id,
+      v_order.id,
+      'confirmation_processing'::text;
+    return;
+  end if;
+
+  if v_payment.status <> 'pending'
+     or v_payment.request_state <> 'pending'
+     or v_order.payment_status <> 'pending'
+     or v_order.order_status <> 'payment_pending'
+     or v_order.payment_request_state <> 'pending'
+     or v_attempt.request_state <> 'succeeded'
+     or v_capability.consumed_at is not null
+     or v_capability.revoked_at is not null
+     or v_capability.expires_at <= v_now
+     or v_capability.claim_id <> p_callback_claim_id
+     or v_capability.claim_expires_at <= v_now
+     or v_callback_event.state <> 'claimed'
+     or v_callback_event.claim_id <> p_callback_claim_id
+     or v_callback_event.claim_expires_at <= v_now then
+    raise exception using
+      errcode = '55000',
+      message = 'line_pay_confirmation_not_claimable';
+  end if;
+
+  update public.payments
+  set request_state = 'confirmation_processing'
+  where id = v_payment.id;
+
+  update public.product_orders
+  set payment_request_state = 'confirmation_processing'
+  where id = v_order.id;
+
+  update public.line_pay_checkout_attempts
+  set request_state = 'confirmation_processing'
+  where id = v_attempt.id;
+
+  insert into public.line_pay_payment_audit_events (
+    payment_id,
+    product_order_id,
+    checkout_attempt_id,
+    environment,
+    event_type,
+    from_state,
+    to_state,
+    request_id,
+    evidence
+  ) values (
+    v_payment.id,
+    v_order.id,
+    v_attempt.id,
+    p_environment,
+    'confirmation_claimed',
+    'pending',
+    'confirmation_processing',
+    p_request_id,
+    '{"result_code":"claimed"}'::jsonb
+  );
+
+  return query select
+    'claimed'::text,
+    v_payment.id,
+    v_order.id,
+    'confirmation_processing'::text;
+exception
+  when no_data_found then
+    raise exception using
+      errcode = 'P0002',
+      message = 'line_pay_confirmation_claim_context_not_found';
+end;
+$$;
+
+create or replace function public.record_product_order_line_pay_confirmation_evidence(
+  p_environment text,
+  p_callback_event_id uuid,
+  p_callback_claim_id uuid,
+  p_provider_result_sha256 text,
+  p_safe_result_code text,
+  p_request_id text
+)
+returns table (
+  result_code text,
+  callback_event_id uuid,
+  provider_result_sha256 text
+)
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_payment public.payments%rowtype;
+  v_order public.product_orders%rowtype;
+  v_attempt public.line_pay_checkout_attempts%rowtype;
+  v_capability public.line_pay_callback_capabilities%rowtype;
+  v_callback_event public.line_pay_callback_events%rowtype;
+  v_payment_id uuid;
+  v_order_id uuid;
+  v_attempt_id uuid;
+  v_capability_id uuid;
+  v_now timestamptz := pg_catalog.clock_timestamp();
+begin
+  if p_environment is null
+     or p_environment not in ('sandbox', 'production')
+     or p_callback_event_id is null
+     or p_callback_claim_id is null
+     or p_provider_result_sha256 is null
+     or p_provider_result_sha256 !~ '^[0-9a-f]{64}$'
+     or p_safe_result_code is null
+     or p_safe_result_code !~ '^[A-Za-z0-9_:-]{1,64}$'
+     or p_request_id is null
+     or p_request_id !~ '^[A-Za-z0-9_.:-]{1,128}$' then
+    raise exception using
+      errcode = '22023',
+      message = 'line_pay_confirmation_evidence_invalid_input';
+  end if;
+
+  select
+    callback_event.payment_id,
+    callback_event.product_order_id,
+    callback_event.checkout_attempt_id,
+    callback_event.capability_id
+  into v_payment_id, v_order_id, v_attempt_id, v_capability_id
+  from public.line_pay_callback_events as callback_event
+  where callback_event.id = p_callback_event_id;
+
+  if not found then
+    raise exception using
+      errcode = 'P0002',
+      message = 'line_pay_confirmation_evidence_context_not_found';
+  end if;
+
+  select payment.* into strict v_payment
+  from public.payments as payment
+  where payment.id = v_payment_id
+  for update;
+
+  select product_order.* into strict v_order
+  from public.product_orders as product_order
+  where product_order.id = v_order_id
+  for update;
+
+  select attempt.* into strict v_attempt
+  from public.line_pay_checkout_attempts as attempt
+  where attempt.id = v_attempt_id
+  for update;
+
+  select capability.* into strict v_capability
+  from public.line_pay_callback_capabilities as capability
+  where capability.id = v_capability_id
+  for update;
+
+  select callback_event.* into strict v_callback_event
+  from public.line_pay_callback_events as callback_event
+  where callback_event.id = p_callback_event_id
+  for update;
+
+  if v_payment.provider <> 'line_pay'
+     or v_payment.environment <> p_environment
+     or v_payment.request_state <> 'confirmation_processing'
+     or v_order.payment_method <> 'line_pay'
+     or v_order.environment <> p_environment
+     or v_order.payment_request_state <> 'confirmation_processing'
+     or v_attempt.provider <> 'line_pay'
+     or v_attempt.environment <> p_environment
+     or v_attempt.request_state <> 'confirmation_processing'
+     or v_capability.environment <> p_environment
+     or v_capability.purpose <> 'confirm'
+     or v_capability.claim_id <> p_callback_claim_id
+     or v_capability.consumed_at is not null
+     or v_capability.revoked_at is not null
+     or v_capability.expires_at <= v_now
+     or v_capability.claim_expires_at <= v_now
+     or v_callback_event.environment <> p_environment
+     or v_callback_event.purpose <> 'confirm'
+     or v_callback_event.claim_id <> p_callback_claim_id
+     or v_callback_event.claim_expires_at <= v_now then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_confirmation_evidence_contract_mismatch';
+  end if;
+
+  if v_callback_event.state = 'provider_verified' then
+    if v_callback_event.provider_result_sha256 <> p_provider_result_sha256
+       or v_callback_event.safe_result_code <> p_safe_result_code then
+      raise exception using
+        errcode = '23505',
+        message = 'line_pay_confirmation_evidence_conflict';
+    end if;
+
+    return query select
+      'already_recorded'::text,
+      v_callback_event.id,
+      v_callback_event.provider_result_sha256;
+    return;
+  end if;
+
+  if v_callback_event.state <> 'claimed' then
+    raise exception using
+      errcode = '55000',
+      message = 'line_pay_confirmation_evidence_invalid_state';
+  end if;
+
+  update public.line_pay_callback_events
+  set state = 'provider_verified',
+      provider_result_sha256 = p_provider_result_sha256,
+      safe_result_code = p_safe_result_code,
+      last_error_code = null
+  where id = v_callback_event.id;
+
+  insert into public.line_pay_payment_audit_events (
+    payment_id,
+    product_order_id,
+    checkout_attempt_id,
+    environment,
+    event_type,
+    from_state,
+    to_state,
+    request_id,
+    evidence
+  ) values (
+    v_payment.id,
+    v_order.id,
+    v_attempt.id,
+    p_environment,
+    'confirmation_evidence_recorded',
+    'confirmation_processing',
+    'confirmation_processing',
+    p_request_id,
+    pg_catalog.jsonb_build_object(
+      'result_code', p_safe_result_code,
+      'evidence_sha256', p_provider_result_sha256
+    )
+  );
+
+  return query select
+    'recorded'::text,
+    v_callback_event.id,
+    p_provider_result_sha256;
+end;
+$$;
+
+create or replace function public.complete_product_order_line_pay_confirmation(
+  p_environment text,
+  p_payment_id uuid,
+  p_product_order_id uuid,
+  p_attempt_id uuid,
+  p_merchant_order_no text,
+  p_transaction_id text,
+  p_amount_twd integer,
+  p_currency text,
+  p_capability_id uuid,
+  p_callback_event_id uuid,
+  p_callback_claim_id uuid,
+  p_confirm_result_sha256 text,
+  p_request_id text,
+  p_audit_evidence jsonb,
+  p_paid_at timestamptz default null
+)
+returns table (
+  result_code text,
+  payment_id uuid,
+  product_order_id uuid,
+  transaction_id text
+)
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_payment public.payments%rowtype;
+  v_order public.product_orders%rowtype;
+  v_attempt public.line_pay_checkout_attempts%rowtype;
+  v_capability public.line_pay_callback_capabilities%rowtype;
+  v_callback_event public.line_pay_callback_events%rowtype;
+  v_now timestamptz := pg_catalog.clock_timestamp();
+  v_row_count integer;
+begin
+  if p_environment is null
+     or p_environment not in ('sandbox', 'production')
+     or p_payment_id is null
+     or p_product_order_id is null
+     or p_attempt_id is null
+     or p_capability_id is null
+     or p_callback_event_id is null
+     or p_merchant_order_no is null
+     or p_transaction_id is null
+     or p_amount_twd is null
+     or p_currency is null
+     or p_confirm_result_sha256 is null
+     or p_confirm_result_sha256 !~ '^[0-9a-f]{64}$'
+     or pg_catalog.length(p_merchant_order_no) not between 1 and 100
+     or p_merchant_order_no ~ '[[:space:]]'
+     or pg_catalog.length(p_transaction_id) not between 1 and 128
+     or p_transaction_id ~ '[[:space:]]'
+     or p_amount_twd <= 0
+     or p_currency <> 'TWD'
+     or p_callback_claim_id is null
+     or p_request_id is null
+     or p_request_id !~ '^[A-Za-z0-9_.:-]{1,128}$'
+     or not public.line_pay_audit_evidence_is_valid(p_audit_evidence)
+     or p_audit_evidence ->> 'evidence_sha256' <> p_confirm_result_sha256 then
+    raise exception using
+      errcode = '22023',
+      message = 'line_pay_confirmation_invalid_input';
+  end if;
+
+  -- Lock order is intentionally payment -> product order -> attempt -> capability.
+  select payment.* into strict v_payment
+  from public.payments as payment
+  where payment.id = p_payment_id
+  for update;
+
+  select product_order.* into strict v_order
+  from public.product_orders as product_order
+  where product_order.id = p_product_order_id
+  for update;
+
+  select attempt.* into strict v_attempt
+  from public.line_pay_checkout_attempts as attempt
+  where attempt.id = p_attempt_id
+  for update;
+
+  select capability.* into strict v_capability
+  from public.line_pay_callback_capabilities as capability
+  where capability.id = p_capability_id
+  for update;
+
+  select callback_event.* into strict v_callback_event
+  from public.line_pay_callback_events as callback_event
+  where callback_event.id = p_callback_event_id
+  for update;
+
+  if v_payment.provider <> 'line_pay'
+     or v_payment.environment <> p_environment
+     or v_payment.product_order_id <> v_order.id
+     or v_payment.checkout_attempt_id <> v_attempt.id
+     or v_payment.user_id <> v_order.user_id
+     or v_payment.user_id <> v_attempt.user_id
+     or v_order.payment_method <> 'line_pay'
+     or v_order.environment <> p_environment
+     or v_order.payment_id <> v_payment.id
+     or v_order.checkout_attempt_id <> v_attempt.id
+     or v_attempt.provider <> 'line_pay'
+     or v_attempt.environment <> p_environment
+     or v_attempt.payment_id <> v_payment.id
+     or v_attempt.product_order_id <> v_order.id
+     or v_payment.merchant_order_no <> p_merchant_order_no
+     or v_attempt.merchant_order_no <> p_merchant_order_no
+     or v_payment.line_pay_transaction_id <> p_transaction_id
+     or v_attempt.upstream_transaction_id <> p_transaction_id
+     or v_payment.amount_twd <> p_amount_twd
+     or v_order.total_amount_twd <> p_amount_twd
+     or v_attempt.amount_twd <> p_amount_twd
+     or v_payment.currency <> p_currency
+     or v_order.currency <> p_currency
+     or v_attempt.currency <> p_currency
+     or v_capability.payment_id <> v_payment.id
+     or v_capability.product_order_id <> v_order.id
+     or v_capability.checkout_attempt_id <> v_attempt.id
+     or v_capability.environment <> p_environment
+     or v_capability.purpose <> 'confirm'
+     or v_callback_event.capability_id <> v_capability.id
+     or v_callback_event.payment_id <> v_payment.id
+     or v_callback_event.product_order_id <> v_order.id
+     or v_callback_event.checkout_attempt_id <> v_attempt.id
+     or v_callback_event.environment <> p_environment
+     or v_callback_event.purpose <> 'confirm'
+     or v_callback_event.provider_result_sha256 <> p_confirm_result_sha256 then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_confirmation_contract_mismatch';
+  end if;
+
+  if v_payment.status = 'paid' then
+    if v_payment.provider_trade_no <> p_transaction_id
+       or v_order.payment_status <> 'paid'
+       or v_order.order_status <> 'paid'
+       or v_attempt.request_state <> 'paid'
+       or v_capability.consumed_at is null
+       or v_callback_event.state <> 'completed' then
+      raise exception using
+        errcode = '23514',
+        message = 'line_pay_confirmation_paid_evidence_conflict';
+    end if;
+
+    return query select
+      'already_completed'::text,
+      v_payment.id,
+      v_order.id,
+      p_transaction_id;
+    return;
+  end if;
+
+  if v_payment.status <> 'pending'
+     or v_payment.request_state not in ('pending', 'confirmation_processing')
+     or v_order.payment_status <> 'pending'
+     or v_order.order_status <> 'payment_pending'
+     or v_order.payment_request_state not in ('pending', 'confirmation_processing')
+     or v_attempt.request_state not in ('succeeded', 'confirmation_processing') then
+    raise exception using
+      errcode = '55000',
+      message = 'line_pay_confirmation_invalid_state';
+  end if;
+
+  if v_capability.consumed_at is not null
+     or v_capability.revoked_at is not null
+     or v_capability.expires_at <= v_now
+     or v_capability.claim_id <> p_callback_claim_id
+     or v_capability.claim_expires_at <= v_now
+     or v_callback_event.state <> 'provider_verified'
+     or v_callback_event.claim_id <> p_callback_claim_id
+     or v_callback_event.claim_expires_at <= v_now then
+    raise exception using
+      errcode = '55000',
+      message = 'line_pay_confirmation_capability_unavailable';
+  end if;
+
+  update public.payments
+  set status = 'paid',
+      request_state = 'paid',
+      provider_trade_no = p_transaction_id,
+      paid_at = coalesce(p_paid_at, v_now),
+      reconciliation_required = false
+  where id = v_payment.id
+    and status = 'pending'
+    and request_state in ('pending', 'confirmation_processing');
+
+  get diagnostics v_row_count = row_count;
+  if v_row_count <> 1 then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_confirmation_payment_update_failed';
+  end if;
+
+  update public.product_orders
+  set payment_status = 'paid',
+      order_status = 'paid',
+      payment_request_state = 'paid',
+      reconciliation_required = false
+  where id = v_order.id
+    and payment_status = 'pending'
+    and order_status = 'payment_pending';
+
+  get diagnostics v_row_count = row_count;
+  if v_row_count <> 1 then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_confirmation_order_update_failed';
+  end if;
+
+  update public.line_pay_checkout_attempts
+  set request_state = 'paid',
+      reconciliation_required = false,
+      completed_at = coalesce(completed_at, v_now)
+  where id = v_attempt.id
+    and request_state in ('succeeded', 'confirmation_processing');
+
+  get diagnostics v_row_count = row_count;
+  if v_row_count <> 1 then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_confirmation_attempt_update_failed';
+  end if;
+
+  update public.line_pay_callback_capabilities
+  set consumed_at = v_now
+  where id = v_capability.id
+    and consumed_at is null
+    and revoked_at is null;
+
+  get diagnostics v_row_count = row_count;
+  if v_row_count <> 1 then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_confirmation_capability_consume_failed';
+  end if;
+
+  update public.line_pay_callback_events
+  set state = 'completed',
+      completed_at = v_now
+  where id = v_callback_event.id
+    and state = 'provider_verified'
+    and provider_result_sha256 = p_confirm_result_sha256;
+
+  get diagnostics v_row_count = row_count;
+  if v_row_count <> 1 then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_confirmation_callback_event_update_failed';
+  end if;
+
+  insert into public.line_pay_payment_audit_events (
+    payment_id,
+    product_order_id,
+    checkout_attempt_id,
+    environment,
+    event_type,
+    from_state,
+    to_state,
+    request_id,
+    evidence
+  ) values (
+    v_payment.id,
+    v_order.id,
+    v_attempt.id,
+    p_environment,
+    'confirmation_completed',
+    v_payment.request_state,
+    'paid',
+    p_request_id,
+    p_audit_evidence
+  );
+
+  return query select
+    'completed'::text,
+    v_payment.id,
+    v_order.id,
+    p_transaction_id;
+exception
+  when no_data_found then
+    raise exception using
+      errcode = 'P0002',
+      message = 'line_pay_confirmation_context_not_found';
+end;
+$$;
+
+create or replace function public.cancel_product_order_line_pay_payment(
+  p_environment text,
+  p_payment_id uuid,
+  p_product_order_id uuid,
+  p_attempt_id uuid,
+  p_capability_id uuid,
+  p_callback_event_id uuid,
+  p_callback_claim_id uuid,
+  p_request_id text,
+  p_audit_evidence jsonb
+)
+returns table (
+  result_code text,
+  payment_id uuid,
+  product_order_id uuid,
+  request_state text
+)
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_payment public.payments%rowtype;
+  v_order public.product_orders%rowtype;
+  v_attempt public.line_pay_checkout_attempts%rowtype;
+  v_capability public.line_pay_callback_capabilities%rowtype;
+  v_callback_event public.line_pay_callback_events%rowtype;
+  v_now timestamptz := pg_catalog.clock_timestamp();
+  v_row_count integer;
+begin
+  if p_environment is null
+     or p_environment not in ('sandbox', 'production')
+     or p_payment_id is null
+     or p_product_order_id is null
+     or p_attempt_id is null
+     or p_capability_id is null
+     or p_callback_event_id is null
+     or p_callback_claim_id is null
+     or p_request_id is null
+     or p_request_id !~ '^[A-Za-z0-9_.:-]{1,128}$'
+     or not public.line_pay_audit_evidence_is_valid(p_audit_evidence) then
+    raise exception using
+      errcode = '22023',
+      message = 'line_pay_cancel_invalid_input';
+  end if;
+
+  select payment.* into strict v_payment
+  from public.payments as payment
+  where payment.id = p_payment_id
+  for update;
+
+  select product_order.* into strict v_order
+  from public.product_orders as product_order
+  where product_order.id = p_product_order_id
+  for update;
+
+  select attempt.* into strict v_attempt
+  from public.line_pay_checkout_attempts as attempt
+  where attempt.id = p_attempt_id
+  for update;
+
+  select capability.* into strict v_capability
+  from public.line_pay_callback_capabilities as capability
+  where capability.id = p_capability_id
+  for update;
+
+  select callback_event.* into strict v_callback_event
+  from public.line_pay_callback_events as callback_event
+  where callback_event.id = p_callback_event_id
+  for update;
+
+  if v_payment.provider <> 'line_pay'
+     or v_payment.environment <> p_environment
+     or v_payment.product_order_id <> v_order.id
+     or v_payment.checkout_attempt_id <> v_attempt.id
+     or v_order.payment_method <> 'line_pay'
+     or v_order.environment <> p_environment
+     or v_order.payment_id <> v_payment.id
+     or v_order.checkout_attempt_id <> v_attempt.id
+     or v_attempt.provider <> 'line_pay'
+     or v_attempt.environment <> p_environment
+     or v_attempt.payment_id <> v_payment.id
+     or v_attempt.product_order_id <> v_order.id
+     or v_capability.payment_id <> v_payment.id
+     or v_capability.product_order_id <> v_order.id
+     or v_capability.checkout_attempt_id <> v_attempt.id
+     or v_capability.environment <> p_environment
+     or v_capability.purpose <> 'cancel'
+     or v_callback_event.capability_id <> v_capability.id
+     or v_callback_event.payment_id <> v_payment.id
+     or v_callback_event.product_order_id <> v_order.id
+     or v_callback_event.checkout_attempt_id <> v_attempt.id
+     or v_callback_event.environment <> p_environment
+     or v_callback_event.purpose <> 'cancel' then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_cancel_contract_mismatch';
+  end if;
+
+  if v_capability.consumed_at is not null then
+    if v_payment.status = 'paid' then
+      if v_callback_event.state <> 'completed' then
+        raise exception using
+          errcode = '23514',
+          message = 'line_pay_cancel_callback_event_conflict';
+      end if;
+
+      return query select
+        'already_paid'::text,
+        v_payment.id,
+        v_order.id,
+        v_payment.request_state;
+      return;
+    end if;
+
+    if v_payment.request_state = 'canceled'
+       and v_order.order_status = 'canceled'
+       and v_attempt.request_state = 'canceled'
+       and v_callback_event.state = 'completed' then
+      return query select
+        'already_canceled'::text,
+        v_payment.id,
+        v_order.id,
+        'canceled'::text;
+      return;
+    end if;
+
+    raise exception using
+      errcode = '55000',
+      message = 'line_pay_cancel_consumed_capability_conflict';
+  end if;
+
+  if v_capability.revoked_at is not null
+     or v_capability.expires_at <= v_now
+     or v_capability.claim_id <> p_callback_claim_id
+     or v_capability.claim_expires_at <= v_now
+     or v_callback_event.state <> 'claimed'
+     or v_callback_event.claim_id <> p_callback_claim_id
+     or v_callback_event.claim_expires_at <= v_now then
+    raise exception using
+      errcode = '55000',
+      message = 'line_pay_cancel_capability_unavailable';
+  end if;
+
+  if v_payment.status = 'paid' then
+    update public.line_pay_callback_capabilities
+    set consumed_at = v_now
+    where id = v_capability.id
+      and consumed_at is null;
+
+    get diagnostics v_row_count = row_count;
+    if v_row_count <> 1 then
+      raise exception using
+        errcode = 'P0001',
+        message = 'line_pay_cancel_after_paid_capability_consume_failed';
+    end if;
+
+    update public.line_pay_callback_events
+    set state = 'completed',
+        completed_at = v_now
+    where id = v_callback_event.id
+      and state = 'claimed';
+
+    get diagnostics v_row_count = row_count;
+    if v_row_count <> 1 then
+      raise exception using
+        errcode = 'P0001',
+        message = 'line_pay_cancel_after_paid_callback_event_update_failed';
+    end if;
+
+    insert into public.line_pay_payment_audit_events (
+      payment_id,
+      product_order_id,
+      checkout_attempt_id,
+      environment,
+      event_type,
+      from_state,
+      to_state,
+      request_id,
+      evidence
+    ) values (
+      v_payment.id,
+      v_order.id,
+      v_attempt.id,
+      p_environment,
+      'cancel_after_paid',
+      'paid',
+      'paid',
+      p_request_id,
+      p_audit_evidence
+    );
+
+    return query select
+      'already_paid'::text,
+      v_payment.id,
+      v_order.id,
+      v_payment.request_state;
+    return;
+  end if;
+
+  if v_payment.request_state = 'reconciliation_required'
+     or v_attempt.request_state in ('unknown', 'reconciliation_required')
+     or v_order.reconciliation_required then
+    raise exception using
+      errcode = '55000',
+      message = 'line_pay_cancel_reconciliation_required';
+  end if;
+
+  if v_payment.request_state not in ('initialized', 'requesting', 'pending')
+     or v_order.order_status not in ('pending_payment', 'payment_requesting', 'payment_pending')
+     or v_attempt.request_state not in ('initialized', 'queued', 'claimed', 'requesting', 'pending', 'succeeded') then
+    raise exception using
+      errcode = '55000',
+      message = 'line_pay_cancel_invalid_state';
+  end if;
+
+  update public.payments
+  set status = 'cancelled',
+      request_state = 'canceled',
+      reconciliation_required = false
+  where id = v_payment.id
+    and status <> 'paid';
+
+  get diagnostics v_row_count = row_count;
+  if v_row_count <> 1 then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_cancel_payment_update_failed';
+  end if;
+
+  update public.product_orders
+  set payment_status = 'canceled',
+      order_status = 'canceled',
+      payment_request_state = 'canceled',
+      reconciliation_required = false
+  where id = v_order.id
+    and payment_status <> 'paid';
+
+  get diagnostics v_row_count = row_count;
+  if v_row_count <> 1 then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_cancel_order_update_failed';
+  end if;
+
+  update public.line_pay_checkout_attempts
+  set request_state = 'canceled',
+      reconciliation_required = false,
+      completed_at = coalesce(completed_at, v_now)
+  where id = v_attempt.id;
+
+  get diagnostics v_row_count = row_count;
+  if v_row_count <> 1 then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_cancel_attempt_update_failed';
+  end if;
+
+  update public.line_pay_callback_capabilities
+  set consumed_at = v_now
+  where id = v_capability.id
+    and consumed_at is null
+    and revoked_at is null;
+
+  get diagnostics v_row_count = row_count;
+  if v_row_count <> 1 then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_cancel_capability_consume_failed';
+  end if;
+
+  update public.line_pay_callback_events
+  set state = 'completed',
+      completed_at = v_now
+  where id = v_callback_event.id
+    and state = 'claimed';
+
+  get diagnostics v_row_count = row_count;
+  if v_row_count <> 1 then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_cancel_callback_event_update_failed';
+  end if;
+
+  insert into public.line_pay_payment_audit_events (
+    payment_id,
+    product_order_id,
+    checkout_attempt_id,
+    environment,
+    event_type,
+    from_state,
+    to_state,
+    request_id,
+    evidence
+  ) values (
+    v_payment.id,
+    v_order.id,
+    v_attempt.id,
+    p_environment,
+    'payment_canceled',
+    v_payment.request_state,
+    'canceled',
+    p_request_id,
+    p_audit_evidence
+  );
+
+  return query select
+    'canceled'::text,
+    v_payment.id,
+    v_order.id,
+    'canceled'::text;
+exception
+  when no_data_found then
+    raise exception using
+      errcode = 'P0002',
+      message = 'line_pay_cancel_context_not_found';
+end;
+$$;
+
+create or replace function public.mark_product_order_line_pay_reconciliation(
+  p_environment text,
+  p_payment_id uuid,
+  p_product_order_id uuid,
+  p_attempt_id uuid,
+  p_reason_code text,
+  p_request_id text,
+  p_audit_evidence jsonb
+)
+returns table (
+  result_code text,
+  payment_id uuid,
+  product_order_id uuid,
+  request_state text
+)
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_payment public.payments%rowtype;
+  v_order public.product_orders%rowtype;
+  v_attempt public.line_pay_checkout_attempts%rowtype;
+  v_target_state text;
+begin
+  if p_environment is null
+     or p_environment not in ('sandbox', 'production')
+     or p_payment_id is null
+     or p_product_order_id is null
+     or p_attempt_id is null
+     or p_reason_code is null
+     or p_reason_code !~ '^[a-z0-9_:-]{1,64}$'
+     or p_reason_code ~ '^fake_test_(token|signature|authorization)_do_not_use$'
+     or p_request_id is null
+     or p_request_id !~ '^[A-Za-z0-9_.:-]{1,128}$'
+     or not public.line_pay_audit_evidence_is_valid(p_audit_evidence) then
+    raise exception using
+      errcode = '22023',
+      message = 'line_pay_reconciliation_invalid_input';
+  end if;
+
+  select payment.* into strict v_payment
+  from public.payments as payment
+  where payment.id = p_payment_id
+  for update;
+
+  select product_order.* into strict v_order
+  from public.product_orders as product_order
+  where product_order.id = p_product_order_id
+  for update;
+
+  select attempt.* into strict v_attempt
+  from public.line_pay_checkout_attempts as attempt
+  where attempt.id = p_attempt_id
+  for update;
+
+  if v_payment.provider <> 'line_pay'
+     or v_payment.environment <> p_environment
+     or v_payment.product_order_id <> v_order.id
+     or v_payment.checkout_attempt_id <> v_attempt.id
+     or v_order.payment_method <> 'line_pay'
+     or v_order.environment <> p_environment
+     or v_order.payment_id <> v_payment.id
+     or v_order.checkout_attempt_id <> v_attempt.id
+     or v_attempt.provider <> 'line_pay'
+     or v_attempt.environment <> p_environment
+     or v_attempt.payment_id <> v_payment.id
+     or v_attempt.product_order_id <> v_order.id then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_reconciliation_contract_mismatch';
+  end if;
+
+  if v_payment.reconciliation_required
+     and v_order.reconciliation_required
+     and v_attempt.reconciliation_required then
+    return query select
+      'already_marked'::text,
+      v_payment.id,
+      v_order.id,
+      v_attempt.request_state;
+    return;
+  end if;
+
+  if v_attempt.request_state in ('paid', 'canceled') then
+    v_target_state := v_attempt.request_state;
+  else
+    v_target_state := 'reconciliation_required';
+  end if;
+
+  update public.payments
+  set request_state = case
+        when request_state in ('paid', 'canceled') then request_state
+        else 'reconciliation_required'
+      end,
+      reconciliation_required = true
+  where id = v_payment.id;
+
+  update public.product_orders
+  set payment_request_state = case
+        when payment_request_state in ('paid', 'canceled') then payment_request_state
+        else 'reconciliation_required'
+      end,
+      reconciliation_required = true
+  where id = v_order.id;
+
+  update public.line_pay_checkout_attempts
+  set request_state = v_target_state,
+      reconciliation_required = true,
+      last_error_code = p_reason_code
+  where id = v_attempt.id;
+
+  update public.line_pay_callback_events
+  set state = 'reconciliation_required',
+      last_error_code = p_reason_code
+  where checkout_attempt_id = v_attempt.id
+    and state in ('claimed', 'provider_verified');
+
+  insert into public.line_pay_payment_audit_events (
+    payment_id,
+    product_order_id,
+    checkout_attempt_id,
+    environment,
+    event_type,
+    from_state,
+    to_state,
+    error_code,
+    request_id,
+    evidence
+  ) values (
+    v_payment.id,
+    v_order.id,
+    v_attempt.id,
+    p_environment,
+    'reconciliation_required',
+    v_attempt.request_state,
+    v_target_state,
+    p_reason_code,
+    p_request_id,
+    p_audit_evidence
+  );
+
+  return query select
+    'marked'::text,
+    v_payment.id,
+    v_order.id,
+    v_target_state;
+exception
+  when no_data_found then
+    raise exception using
+      errcode = 'P0002',
+      message = 'line_pay_reconciliation_context_not_found';
+end;
+$$;
+
+revoke execute on function public.claim_product_order_line_pay_request(
+  uuid, text, text, text, uuid, timestamptz
+) from public, anon, authenticated;
+revoke execute on function public.record_product_order_line_pay_request_success(
+  uuid, text, text, text, uuid, text, text, jsonb, text
+) from public, anon, authenticated;
+revoke execute on function public.record_product_order_line_pay_request_failure(
+  uuid, text, text, text, uuid, text, text
+) from public, anon, authenticated;
+revoke execute on function public.mark_product_order_line_pay_request_unknown(
+  uuid, text, text, text, uuid, text, text
+) from public, anon, authenticated;
+revoke execute on function public.read_product_order_line_pay_request_result(
+  uuid, text, text, text
+) from public, anon, authenticated;
+revoke execute on function public.claim_line_pay_callback_capability(
+  text, text, text, uuid, uuid, uuid, uuid, timestamptz
+) from public, anon, authenticated;
+revoke execute on function public.claim_product_order_line_pay_confirmation(
+  text, uuid, uuid, uuid, uuid, uuid, uuid, text, text
+) from public, anon, authenticated;
+revoke execute on function public.record_product_order_line_pay_confirmation_evidence(
+  text, uuid, uuid, text, text, text
+) from public, anon, authenticated;
+revoke execute on function public.complete_product_order_line_pay_confirmation(
+  text, uuid, uuid, uuid, text, text, integer, text, uuid, uuid, uuid, text, text, jsonb, timestamptz
+) from public, anon, authenticated;
+revoke execute on function public.cancel_product_order_line_pay_payment(
+  text, uuid, uuid, uuid, uuid, uuid, uuid, text, jsonb
+) from public, anon, authenticated;
+revoke execute on function public.mark_product_order_line_pay_reconciliation(
+  text, uuid, uuid, uuid, text, text, jsonb
+) from public, anon, authenticated;
+
+grant execute on function public.claim_product_order_line_pay_request(
+  uuid, text, text, text, uuid, timestamptz
+) to service_role;
+grant execute on function public.record_product_order_line_pay_request_success(
+  uuid, text, text, text, uuid, text, text, jsonb, text
+) to service_role;
+grant execute on function public.record_product_order_line_pay_request_failure(
+  uuid, text, text, text, uuid, text, text
+) to service_role;
+grant execute on function public.mark_product_order_line_pay_request_unknown(
+  uuid, text, text, text, uuid, text, text
+) to service_role;
+grant execute on function public.read_product_order_line_pay_request_result(
+  uuid, text, text, text
+) to service_role;
+grant execute on function public.claim_line_pay_callback_capability(
+  text, text, text, uuid, uuid, uuid, uuid, timestamptz
+) to service_role;
+grant execute on function public.claim_product_order_line_pay_confirmation(
+  text, uuid, uuid, uuid, uuid, uuid, uuid, text, text
+) to service_role;
+grant execute on function public.record_product_order_line_pay_confirmation_evidence(
+  text, uuid, uuid, text, text, text
+) to service_role;
+grant execute on function public.complete_product_order_line_pay_confirmation(
+  text, uuid, uuid, uuid, text, text, integer, text, uuid, uuid, uuid, text, text, jsonb, timestamptz
+) to service_role;
+grant execute on function public.cancel_product_order_line_pay_payment(
+  text, uuid, uuid, uuid, uuid, uuid, uuid, text, jsonb
+) to service_role;
+grant execute on function public.mark_product_order_line_pay_reconciliation(
+  text, uuid, uuid, uuid, text, text, jsonb
+) to service_role;
+
+commit;
