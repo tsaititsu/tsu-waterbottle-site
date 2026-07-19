@@ -219,7 +219,15 @@ userInput、正式 P1 Output Schema，以及既有 Adapter core 的 reasoning、
 與 max output token defaults；Bridge production code 不重建 Responses API body。
 
 Source-bound Result parser 先使用正式 P1 parser，再驗證 call／chart／palace
-identity、status、空宮借星、selected Rule、五個結構宮位、實際星曜、P1 structure
+identity、status 與空宮借星。Candidate collection 依 direct／opposite／hidden／
+trine 各自綁定可用宮位、星曜與必要 structure basis；combined／strengths／
+imbalance 才能使用五宮 union。每個 Candidate 的 `ruleStatus` 必須等於
+`usedRuleIds` 中最低權威的 authenticated Rule status，禁止向上提升權威。
+
+Coverage 只接受 target meanings、target 主星／借星／輔星、target 生年四化、
+target global scan 實際煞忌 signal 與 target 實際貴人星。`complete` 必須完整覆蓋
+全部 authenticated source set；`partial`／`incomplete` 只能使用其子集合，且每個
+缺漏來源都必須在 omitted items 保留 exact trace。Parser 也持續驗證 P1 structure
 boundary、上游 warning traceability 與 audit metadata isolation。Descriptor 固定
 `requestStatus=ready`、`runtimeStatus=runtime_wiring_required`、
 `openAiCallable=false`。Bridge 不 import `openAiResponses.server`、不讀取 API key、

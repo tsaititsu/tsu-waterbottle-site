@@ -2,8 +2,15 @@ import {
   assertAiChartD1SafeGraph,
   freezeAiChartD1Value,
   type AiChartD1Candidate,
+  type AiChartD1RuleStatus,
+  type AiChartD1StructureBasis,
 } from './d1CommonContracts'
-import { AI_CHART_D1_PALACE_IDENTITIES } from './d1N0Constants'
+import {
+  AI_CHART_D1_MAJOR_STAR_NAMES,
+  AI_CHART_D1_MODELED_SUPPORTING_STARS,
+  AI_CHART_D1_MUTAGEN_TYPES,
+  AI_CHART_D1_PALACE_IDENTITIES,
+} from './d1N0Constants'
 import {
   parseAiChartD1P1ModelInput,
 } from './d1P1ModelInputBindings'
@@ -11,6 +18,7 @@ import {
   AiChartD1P1ModelInputError,
   AiChartD1P1ModelInputNotReadyError,
   type AiChartD1P1ModelInput,
+  type AiChartD1P1ModelRule,
 } from './d1P1ModelInputContracts'
 import {
   buildAiChartD1P1PromptPackages,
@@ -44,6 +52,7 @@ import {
   AI_CHART_D1_P1_OUTPUT_SCHEMA,
   AI_CHART_D1_P1_SCHEMA_NAME,
   parseAiChartD1P1Result,
+  type AiChartD1P1Coverage,
   type AiChartD1P1Result,
 } from './d1P1F1Contracts'
 import {
@@ -79,6 +88,50 @@ const P1_ALLOWED_STRUCTURE_BASES = new Set([
   '煞忌',
   '輔星',
 ])
+
+const P1_NOBLE_STAR_NAMES = new Set(['左輔', '右弼', '天魁', '天鉞'])
+const P1_KNOWN_STAR_NAMES = new Set([
+  ...AI_CHART_D1_MAJOR_STAR_NAMES,
+  ...Object.keys(AI_CHART_D1_MODELED_SUPPORTING_STARS),
+])
+const P1_MALEFIC_SIGNAL_TYPES = Object.freeze([
+  '擎羊',
+  '陀羅',
+  '火星',
+  '鈴星',
+  '生年化忌',
+] as const)
+
+const P1_RULE_STATUS_AUTHORITY = Object.freeze({
+  teacher_confirmed: 0,
+  lecture_backfill: 1,
+  working_inference: 2,
+} satisfies Record<AiChartD1RuleStatus, number>)
+
+type CandidateSourcePolicy = Readonly<{
+  allowedPalaceIds: ReadonlySet<string>
+  allowedStarNames: ReadonlySet<string>
+  requiredPalaceIds?: ReadonlySet<string>
+  requiredAnyPalaceIds?: ReadonlySet<string>
+  requiredStructureBasis?: AiChartD1StructureBasis
+  forbiddenStructureBasis?: ReadonlySet<AiChartD1StructureBasis>
+}>
+
+type ExpectedMutagenPair = Readonly<{
+  key: string
+  starName: string
+  mutagenType: string
+}>
+
+type ExpectedCoverageSources = Readonly<{
+  targetMeaningIds: ReadonlySet<string>
+  targetMajorStars: ReadonlySet<string>
+  targetMinorStars: ReadonlySet<string>
+  targetMutagenPairs: readonly ExpectedMutagenPair[]
+  relevantMaleficTypes: ReadonlySet<string>
+  maleficOpaqueIds: ReadonlySet<string>
+  targetNobleStars: ReadonlySet<string>
+}>
 
 function invalid(): never {
   throw new AiChartD1P1AdapterBridgeError()
@@ -165,26 +218,79 @@ function hasDuplicates(values: readonly string[]): boolean {
   return new Set(values).size !== values.length
 }
 
-function assertCandidateSourceBinding(
-  candidate: AiChartD1Candidate,
-  allowedRuleIds: ReadonlySet<string>,
-  allowedPalaceIds: ReadonlySet<string>,
-  allowedStarNames: ReadonlySet<string>,
+export function deriveAiChartD1P1CandidateRuleStatus(
+  usedRuleIds: readonly string[],
+  rules: readonly Pick<AiChartD1P1ModelRule, 'ruleId' | 'ruleStatus'>[],
+): AiChartD1RuleStatus {
+  const ruleStatusById = new Map(
+    rules.map((rule) => [rule.ruleId, rule.ruleStatus]),
+  )
+  if (
+    usedRuleIds.length === 0 ||
+    hasDuplicates(usedRuleIds) ||
+    usedRuleIds.some((ruleId) => !ruleStatusById.has(ruleId))
+  ) {
+    resultInvalid()
+  }
+  return usedRuleIds
+    .map((ruleId) => ruleStatusById.get(ruleId) as AiChartD1RuleStatus)
+    .reduce((weakest, status) =>
+      P1_RULE_STATUS_AUTHORITY[status] > P1_RULE_STATUS_AUTHORITY[weakest]
+        ? status
+        : weakest,
+    )
+}
+
+export function assertAiChartD1P1CandidateRuleAuthority(
+  candidate: Pick<AiChartD1Candidate, 'usedRuleIds' | 'ruleStatus'>,
+  rules: readonly Pick<AiChartD1P1ModelRule, 'ruleId' | 'ruleStatus'>[],
 ): void {
   if (
-    hasDuplicates(candidate.usedRuleIds) ||
-    candidate.usedRuleIds.some((ruleId) => !allowedRuleIds.has(ruleId)) ||
+    candidate.ruleStatus !==
+    deriveAiChartD1P1CandidateRuleStatus(candidate.usedRuleIds, rules)
+  ) {
+    resultInvalid()
+  }
+}
+
+function assertCandidateSourceBinding(
+  candidate: AiChartD1Candidate,
+  rules: readonly AiChartD1P1ModelRule[],
+  policy: CandidateSourcePolicy,
+): void {
+  if (
     hasDuplicates(candidate.palaceIds) ||
-    candidate.palaceIds.some((palaceId) => !allowedPalaceIds.has(palaceId)) ||
+    candidate.palaceIds.some(
+      (palaceId) => !policy.allowedPalaceIds.has(palaceId),
+    ) ||
+    [...(policy.requiredPalaceIds ?? [])].some(
+      (palaceId) => !candidate.palaceIds.includes(palaceId),
+    ) ||
+    (policy.requiredAnyPalaceIds !== undefined &&
+      !candidate.palaceIds.some((palaceId) =>
+        policy.requiredAnyPalaceIds?.has(palaceId),
+      )) ||
     hasDuplicates(candidate.starBasis) ||
-    candidate.starBasis.some((starName) => !allowedStarNames.has(starName)) ||
+    candidate.starBasis.some(
+      (starName) => !policy.allowedStarNames.has(starName),
+    ) ||
     hasDuplicates(candidate.structureBasis) ||
     candidate.structureBasis.some(
       (structure) => !P1_ALLOWED_STRUCTURE_BASES.has(structure),
+    ) ||
+    (policy.requiredStructureBasis !== undefined &&
+      !candidate.structureBasis.includes(policy.requiredStructureBasis)) ||
+    candidate.structureBasis.some((structure) =>
+      policy.forbiddenStructureBasis?.has(structure),
     )
   ) {
     resultInvalid()
   }
+
+  assertAiChartD1P1CandidateRuleAuthority(
+    candidate,
+    rules,
+  )
 }
 
 function allCandidates(result: AiChartD1P1Result): readonly AiChartD1Candidate[] {
@@ -215,23 +321,6 @@ function assertIdentityAndStatus(
     resultInvalid()
   }
 
-  if (
-    result.status === 'complete' &&
-    (!result.coverage.oppositeProcessed ||
-      !result.coverage.hiddenCombinationProcessed ||
-      !result.coverage.trinesProcessed ||
-      result.coverage.omittedItems.length !== 0 ||
-      result.warnings.length !== 0)
-  ) {
-    resultInvalid()
-  }
-
-  if (
-    (result.status === 'partial' || result.status === 'incomplete') &&
-    result.coverage.omittedItems.length === 0
-  ) {
-    resultInvalid()
-  }
 }
 
 function assertBorrowedStarBinding(
@@ -254,40 +343,358 @@ function structuralPalaces(modelInput: AiChartD1P1ModelInput) {
   ]
 }
 
-function assertRulePalaceAndStarBindings(
-  result: AiChartD1P1Result,
-  modelInput: AiChartD1P1ModelInput,
-): void {
-  const allowedRuleIds = new Set(
-    modelInput.knowledgeContext.rules.map((rule) => rule.ruleId),
-  )
-  const palaces = structuralPalaces(modelInput)
-  const allowedPalaceIds = new Set(palaces.map((palace) => palace.palaceId))
-  const allowedStarNames = new Set(
+function starNamesForPalaces(
+  palaces: readonly AiChartD1P1ModelInput['structuralContext']['targetPalace'][],
+): ReadonlySet<string> {
+  return new Set(
     palaces.flatMap((palace) => [
       ...palace.canonicalMajorStars.map((star) => star.name),
       ...palace.borrowedMajorStars.map((star) => star.name),
       ...palace.modeledSupportingStars.map((star) => star.name),
     ]),
   )
+}
+
+function assertRulePalaceAndStarBindings(
+  result: AiChartD1P1Result,
+  modelInput: AiChartD1P1ModelInput,
+): void {
+  const ruleStatusById = new Map(
+    modelInput.knowledgeContext.rules.map((rule) => [
+      rule.ruleId,
+      rule.ruleStatus,
+    ]),
+  )
+  const target = modelInput.structuralContext.targetPalace
+  const opposite = modelInput.structuralContext.oppositePalace
+  const hidden = modelInput.structuralContext.hiddenCombinationPalace
+  const trines = modelInput.structuralContext.otherTrinePalaces
+  const allPalaces = structuralPalaces(modelInput)
+  const targetPalaceIds = new Set([target.palaceId])
+  const oppositePalaceIds = new Set([target.palaceId, opposite.palaceId])
+  const hiddenPalaceIds = new Set([target.palaceId, hidden.palaceId])
+  const trinePalaceIds = new Set([
+    target.palaceId,
+    ...trines.map((palace) => palace.palaceId),
+  ])
+  const otherTrinePalaceIds = new Set(
+    trines.map((palace) => palace.palaceId),
+  )
+  const allPalaceIds = new Set(allPalaces.map((palace) => palace.palaceId))
+  const policies: Record<
+    (typeof P1_CANDIDATE_COLLECTION_FIELDS)[number],
+    CandidateSourcePolicy
+  > = {
+    directCandidates: {
+      allowedPalaceIds: targetPalaceIds,
+      allowedStarNames: starNamesForPalaces([target]),
+      requiredPalaceIds: targetPalaceIds,
+      requiredStructureBasis: '本宮',
+      forbiddenStructureBasis: new Set(['對宮', '暗合', '三方']),
+    },
+    oppositeInfluences: {
+      allowedPalaceIds: oppositePalaceIds,
+      allowedStarNames: starNamesForPalaces([target, opposite]),
+      requiredPalaceIds: new Set([opposite.palaceId]),
+      requiredStructureBasis: '對宮',
+    },
+    hiddenCombinationInfluences: {
+      allowedPalaceIds: hiddenPalaceIds,
+      allowedStarNames: starNamesForPalaces([target, hidden]),
+      requiredPalaceIds: new Set([hidden.palaceId]),
+      requiredStructureBasis: '暗合',
+    },
+    trineInfluences: {
+      allowedPalaceIds: trinePalaceIds,
+      allowedStarNames: starNamesForPalaces([target, ...trines]),
+      requiredAnyPalaceIds: otherTrinePalaceIds,
+      requiredStructureBasis: '三方',
+    },
+    combinedCandidates: {
+      allowedPalaceIds: allPalaceIds,
+      allowedStarNames: starNamesForPalaces(allPalaces),
+    },
+    strengths: {
+      allowedPalaceIds: allPalaceIds,
+      allowedStarNames: starNamesForPalaces(allPalaces),
+    },
+    imbalancePossibilities: {
+      allowedPalaceIds: allPalaceIds,
+      allowedStarNames: starNamesForPalaces(allPalaces),
+    },
+  }
 
   if (
     result.primaryAxis.usedRuleIds.length === 0 ||
     hasDuplicates(result.primaryAxis.usedRuleIds) ||
     result.primaryAxis.usedRuleIds.some(
-      (ruleId) => !allowedRuleIds.has(ruleId),
+      (ruleId) => !ruleStatusById.has(ruleId),
     )
   ) {
     resultInvalid()
   }
 
-  for (const candidate of allCandidates(result)) {
-    assertCandidateSourceBinding(
-      candidate,
-      allowedRuleIds,
-      allowedPalaceIds,
-      allowedStarNames,
+  for (const field of P1_CANDIDATE_COLLECTION_FIELDS) {
+    for (const candidate of result[field]) {
+      assertCandidateSourceBinding(
+        candidate,
+        modelInput.knowledgeContext.rules,
+        policies[field],
+      )
+    }
+  }
+}
+
+function setEquals(
+  actual: ReadonlySet<string>,
+  expected: ReadonlySet<string>,
+): boolean {
+  return (
+    actual.size === expected.size &&
+    [...actual].every((value) => expected.has(value))
+  )
+}
+
+function assertStringCoverageSubset(
+  values: readonly string[],
+  expected: ReadonlySet<string>,
+): ReadonlySet<string> {
+  if (hasDuplicates(values) || values.some((value) => !expected.has(value))) {
+    resultInvalid()
+  }
+  return new Set(values)
+}
+
+function expectedCoverageSources(
+  modelInput: AiChartD1P1ModelInput,
+): ExpectedCoverageSources {
+  const target = modelInput.structuralContext.targetPalace
+  const targetMajorStars = [
+    ...target.canonicalMajorStars,
+    ...target.borrowedMajorStars,
+  ]
+  const targetCoverageStars = [
+    ...targetMajorStars,
+    ...target.modeledSupportingStars,
+  ]
+  const targetMutagenPairs = [
+    ...new Map(
+      targetCoverageStars.flatMap((star) =>
+        star.natalMutagen === null
+          ? []
+          : [[
+              `${star.name}\u0000${star.natalMutagen}`,
+              {
+                key: `${star.name}\u0000${star.natalMutagen}`,
+                starName: star.name,
+                mutagenType: star.natalMutagen,
+              } satisfies ExpectedMutagenPair,
+            ] as const],
+      ),
+    ).values(),
+  ]
+  const relevantSignals = [
+    ...modelInput.structuralContext.targetGlobalScan.directSignals,
+    ...modelInput.structuralContext.targetGlobalScan.oppositeSignals,
+    ...modelInput.structuralContext.targetGlobalScan.hiddenCombinationSignals,
+    ...modelInput.structuralContext.targetGlobalScan.trineSignals,
+  ]
+
+  return {
+    targetMeaningIds: new Set(
+      modelInput.knowledgeContext.meanings
+        .filter((meaning) => meaning.palaceRole === 'target')
+        .map((meaning) => meaning.meaningId),
+    ),
+    targetMajorStars: new Set(targetMajorStars.map((star) => star.name)),
+    targetMinorStars: new Set(
+      target.modeledSupportingStars.map((star) => star.name),
+    ),
+    targetMutagenPairs,
+    relevantMaleficTypes: new Set(
+      relevantSignals.map((signal) => signal.signalType),
+    ),
+    maleficOpaqueIds: new Set(
+      relevantSignals.flatMap((signal) => [
+        signal.signalId,
+        signal.starPlacementId,
+      ]),
+    ),
+    targetNobleStars: new Set(
+      target.modeledSupportingStars
+        .map((star) => star.name)
+        .filter((name) => P1_NOBLE_STAR_NAMES.has(name)),
+    ),
+  }
+}
+
+function representedMutagenPairs(
+  values: readonly string[],
+  expectedPairs: readonly ExpectedMutagenPair[],
+): ReadonlySet<string> {
+  if (hasDuplicates(values)) resultInvalid()
+  const represented = new Set<string>()
+  for (const value of values) {
+    const matches = expectedPairs.filter(
+      (pair) =>
+        value.includes(pair.starName) && value.includes(pair.mutagenType),
     )
+    const matchedStarNames = new Set(matches.map((pair) => pair.starName))
+    const matchedMutagenTypes = new Set(
+      matches.map((pair) => pair.mutagenType),
+    )
+    if (
+      matches.length === 0 ||
+      [...P1_KNOWN_STAR_NAMES].some(
+        (starName) =>
+          value.includes(starName) && !matchedStarNames.has(starName),
+      ) ||
+      AI_CHART_D1_MUTAGEN_TYPES.some(
+        (type) =>
+          value.includes(type) && !matchedMutagenTypes.has(type),
+      )
+    ) {
+      resultInvalid()
+    }
+    if (matches.some((pair) => represented.has(pair.key))) resultInvalid()
+    matches.forEach((pair) => represented.add(pair.key))
+  }
+  return represented
+}
+
+function representedMaleficTypes(
+  values: readonly string[],
+  expectedTypes: ReadonlySet<string>,
+  opaqueIds: ReadonlySet<string>,
+): ReadonlySet<string> {
+  if (hasDuplicates(values)) resultInvalid()
+  const represented = new Set<string>()
+  for (const value of values) {
+    const matches = [...expectedTypes].filter((type) => value.includes(type))
+    if (
+      matches.length === 0 ||
+      [...opaqueIds].some((id) => value.includes(id)) ||
+      P1_MALEFIC_SIGNAL_TYPES.some(
+        (type) => value.includes(type) && !expectedTypes.has(type),
+      )
+    ) {
+      resultInvalid()
+    }
+    if (matches.some((type) => represented.has(type))) resultInvalid()
+    matches.forEach((type) => represented.add(type))
+  }
+  return represented
+}
+
+function omissionTexts(coverage: AiChartD1P1Coverage): readonly string[] {
+  return coverage.omittedItems.map((item) => `${item.item}\n${item.reason}`)
+}
+
+function hasOmissionTrace(
+  texts: readonly string[],
+  ...requiredTerms: readonly string[]
+): boolean {
+  return texts.some((text) =>
+    requiredTerms.every((term) => text.includes(term)),
+  )
+}
+
+function assertCoverageSourceBinding(
+  result: AiChartD1P1Result,
+  modelInput: AiChartD1P1ModelInput,
+): void {
+  const expected = expectedCoverageSources(modelInput)
+  const directMeanings = assertStringCoverageSubset(
+    result.coverage.directMeaningsConsidered,
+    expected.targetMeaningIds,
+  )
+  const majorStars = assertStringCoverageSubset(
+    result.coverage.majorStarsCovered,
+    expected.targetMajorStars,
+  )
+  const minorStars = assertStringCoverageSubset(
+    result.coverage.minorStarsCovered,
+    expected.targetMinorStars,
+  )
+  const mutagenPairs = representedMutagenPairs(
+    result.coverage.mutagensCovered,
+    expected.targetMutagenPairs,
+  )
+  const maleficTypes = representedMaleficTypes(
+    result.coverage.maleficsCovered,
+    expected.relevantMaleficTypes,
+    expected.maleficOpaqueIds,
+  )
+  const nobleStars = assertStringCoverageSubset(
+    result.coverage.noblesCovered,
+    expected.targetNobleStars,
+  )
+  const expectedMutagenPairKeys = new Set(
+    expected.targetMutagenPairs.map((pair) => pair.key),
+  )
+
+  if (result.status === 'complete') {
+    if (
+      !setEquals(directMeanings, expected.targetMeaningIds) ||
+      !setEquals(majorStars, expected.targetMajorStars) ||
+      !setEquals(minorStars, expected.targetMinorStars) ||
+      !setEquals(mutagenPairs, expectedMutagenPairKeys) ||
+      !setEquals(maleficTypes, expected.relevantMaleficTypes) ||
+      !setEquals(nobleStars, expected.targetNobleStars) ||
+      !result.coverage.oppositeProcessed ||
+      !result.coverage.hiddenCombinationProcessed ||
+      !result.coverage.trinesProcessed ||
+      result.coverage.omittedItems.length !== 0 ||
+      result.warnings.length !== 0
+    ) {
+      resultInvalid()
+    }
+    return
+  }
+
+  if (
+    (result.status !== 'partial' && result.status !== 'incomplete') ||
+    result.coverage.omittedItems.length === 0
+  ) {
+    resultInvalid()
+  }
+
+  const omissions = omissionTexts(result.coverage)
+  for (const meaningId of expected.targetMeaningIds) {
+    if (!directMeanings.has(meaningId) && !hasOmissionTrace(omissions, meaningId)) {
+      resultInvalid()
+    }
+  }
+  for (const starName of expected.targetMajorStars) {
+    if (!majorStars.has(starName) && !hasOmissionTrace(omissions, starName)) {
+      resultInvalid()
+    }
+  }
+  for (const starName of expected.targetMinorStars) {
+    if (!minorStars.has(starName) && !hasOmissionTrace(omissions, starName)) {
+      resultInvalid()
+    }
+  }
+  for (const pair of expected.targetMutagenPairs) {
+    if (
+      !mutagenPairs.has(pair.key) &&
+      !hasOmissionTrace(omissions, pair.starName, pair.mutagenType)
+    ) {
+      resultInvalid()
+    }
+  }
+  for (const signalType of expected.relevantMaleficTypes) {
+    if (
+      !maleficTypes.has(signalType) &&
+      !hasOmissionTrace(omissions, signalType)
+    ) {
+      resultInvalid()
+    }
+  }
+  for (const starName of expected.targetNobleStars) {
+    if (!nobleStars.has(starName) && !hasOmissionTrace(omissions, starName)) {
+      resultInvalid()
+    }
   }
 }
 
@@ -370,6 +777,7 @@ function createAiChartD1P1SourceBoundResultParser(
       assertIdentityAndStatus(result, modelInput)
       assertBorrowedStarBinding(result, modelInput)
       assertRulePalaceAndStarBindings(result, modelInput)
+      assertCoverageSourceBinding(result, modelInput)
       assertWarningTraceability(result, modelInput)
       assertMetadataIsolation(result, modelInput, promptPackage)
       return freezeAiChartD1Value(result)

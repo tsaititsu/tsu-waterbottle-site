@@ -25,6 +25,19 @@ export type AdapterBridgeFixture = PromptPackageFixture &
     bridges: readonly AiChartD1P1AdapterBridge[]
   }>
 
+export const AI_CHART_D1_P1_CANDIDATE_COLLECTION_FIELDS = Object.freeze([
+  'directCandidates',
+  'oppositeInfluences',
+  'hiddenCombinationInfluences',
+  'trineInfluences',
+  'combinedCandidates',
+  'strengths',
+  'imbalancePossibilities',
+] as const)
+
+export type AiChartD1P1CandidateCollectionField =
+  (typeof AI_CHART_D1_P1_CANDIDATE_COLLECTION_FIELDS)[number]
+
 export async function createAdapterBridgeFixture(
   identity = 'adapter-bridge',
 ): Promise<AdapterBridgeFixture> {
@@ -42,14 +55,62 @@ export async function createAdapterBridgeFixture(
 export function createValidAiChartD1P1Candidate(
   modelInput: AiChartD1P1ModelInput,
   candidateId = 'candidate:valid',
+  collection: AiChartD1P1CandidateCollectionField = 'directCandidates',
 ): Mutable<AiChartD1Candidate> {
   const target = modelInput.structuralContext.targetPalace
-  const star = [
-    ...target.canonicalMajorStars,
-    ...target.borrowedMajorStars,
-    ...target.modeledSupportingStars,
-    ...modelInput.structuralContext.oppositePalace.canonicalMajorStars,
-  ][0]
+  const opposite = modelInput.structuralContext.oppositePalace
+  const hidden = modelInput.structuralContext.hiddenCombinationPalace
+  const trines = modelInput.structuralContext.otherTrinePalaces
+  const collectionSources = {
+    directCandidates: {
+      palaces: [target],
+      palaceIds: [target.palaceId],
+      structureBasis: ['本宮'],
+    },
+    oppositeInfluences: {
+      palaces: [target, opposite],
+      palaceIds: [opposite.palaceId],
+      structureBasis: ['對宮'],
+    },
+    hiddenCombinationInfluences: {
+      palaces: [target, hidden],
+      palaceIds: [hidden.palaceId],
+      structureBasis: ['暗合'],
+    },
+    trineInfluences: {
+      palaces: [target, ...trines],
+      palaceIds: [trines[0].palaceId],
+      structureBasis: ['三方'],
+    },
+    combinedCandidates: {
+      palaces: [target, opposite, hidden, ...trines],
+      palaceIds: [target.palaceId],
+      structureBasis: ['本宮'],
+    },
+    strengths: {
+      palaces: [target, opposite, hidden, ...trines],
+      palaceIds: [target.palaceId],
+      structureBasis: ['本宮'],
+    },
+    imbalancePossibilities: {
+      palaces: [target, opposite, hidden, ...trines],
+      palaceIds: [target.palaceId],
+      structureBasis: ['本宮'],
+    },
+  } satisfies Record<
+    AiChartD1P1CandidateCollectionField,
+    Readonly<{
+      palaces: readonly typeof target[]
+      palaceIds: readonly string[]
+      structureBasis: readonly AiChartD1StructureBasis[]
+    }>
+  >
+  const source = collectionSources[collection]
+  const star = source.palaces.flatMap((palace) => [
+    ...palace.canonicalMajorStars,
+    ...palace.borrowedMajorStars,
+    ...palace.modeledSupportingStars,
+  ])[0]
   const rule = modelInput.knowledgeContext.rules[0]
   if (!star || !rule) throw new Error('synthetic_fixture_invalid')
 
@@ -58,9 +119,9 @@ export function createValidAiChartD1P1Candidate(
     statement: 'synthetic candidate statement',
     lifeExamples: ['synthetic life example'],
     scopes: ['personality'] as AiChartD1Scope[],
-    palaceIds: [target.palaceId],
+    palaceIds: [...source.palaceIds],
     starBasis: [star.name],
-    structureBasis: ['本宮'] as AiChartD1StructureBasis[],
+    structureBasis: [...source.structureBasis],
     usedRuleIds: [rule.ruleId],
     ruleStatus: rule.ruleStatus,
     intensity: 'normal' as const,
@@ -77,6 +138,30 @@ export function createValidAiChartD1P1Result(
     ...target.canonicalMajorStars,
     ...target.borrowedMajorStars,
   ].map((star) => star.name)
+  const supportingStars = target.modeledSupportingStars.map((star) => star.name)
+  const coverageStars = [
+    ...target.canonicalMajorStars,
+    ...target.borrowedMajorStars,
+    ...target.modeledSupportingStars,
+  ]
+  const targetMeaningIds = modelInput.knowledgeContext.meanings
+    .filter((meaning) => meaning.palaceRole === 'target')
+    .map((meaning) => meaning.meaningId)
+  const mutagensCovered = coverageStars.flatMap((star) =>
+    star.natalMutagen === null
+      ? []
+      : [`${star.name} ${star.natalMutagen}`],
+  )
+  const maleficsCovered = [
+    ...new Set([
+      ...modelInput.structuralContext.targetGlobalScan.directSignals,
+      ...modelInput.structuralContext.targetGlobalScan.oppositeSignals,
+      ...modelInput.structuralContext.targetGlobalScan.hiddenCombinationSignals,
+      ...modelInput.structuralContext.targetGlobalScan.trineSignals,
+    ].map((signal) => signal.signalType)),
+  ]
+  const nobleStars = new Set(['左輔', '右弼', '天魁', '天鉞'])
+  const noblesCovered = supportingStars.filter((name) => nobleStars.has(name))
   const warningCodes = modelInput.warnings.map((warning) => warning.code)
   const isPartial = modelInput.structuralStatus === 'partial'
   const omittedItems = isPartial
@@ -113,12 +198,12 @@ export function createValidAiChartD1P1Result(
     strengths: [],
     imbalancePossibilities: [],
     coverage: {
-      directMeaningsConsidered: [],
+      directMeaningsConsidered: targetMeaningIds,
       majorStarsCovered: majorStars,
-      minorStarsCovered: [],
-      mutagensCovered: [],
-      maleficsCovered: [],
-      noblesCovered: [],
+      minorStarsCovered: supportingStars,
+      mutagensCovered,
+      maleficsCovered,
+      noblesCovered,
       oppositeProcessed: !isPartial,
       hiddenCombinationProcessed: !isPartial,
       trinesProcessed: !isPartial,

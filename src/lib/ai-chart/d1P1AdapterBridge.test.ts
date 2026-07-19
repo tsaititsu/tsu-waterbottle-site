@@ -3,8 +3,10 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { AI_CHART_D1_MODEL_TARGET } from './d1Assets'
 import {
+  assertAiChartD1P1CandidateRuleAuthority,
   buildAiChartD1P1AdapterBridge,
   buildAiChartD1P1AdapterBridges,
+  deriveAiChartD1P1CandidateRuleStatus,
   parseAiChartD1P1AdapterBridgeDescriptor,
   type AiChartD1P1AdapterBridge,
 } from './d1P1AdapterBridge'
@@ -138,7 +140,11 @@ function resultWithSingleCandidate(
     record[candidateField] = []
   })
   record[field] = [
-    createValidAiChartD1P1Candidate(modelInput, `candidate:${field}`),
+    createValidAiChartD1P1Candidate(
+      modelInput,
+      `candidate:${field}`,
+      field,
+    ),
   ]
   return result
 }
@@ -632,6 +638,324 @@ async function run() {
     assert.equal(parseResult(bridge, value).status, 'partial')
   })
 
+  check('complete fixture carries exact authenticated coverage', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    assert.equal(value.coverage.directMeaningsConsidered.length > 0, true)
+    assert.equal(value.coverage.majorStarsCovered.length > 0, true)
+    assert.equal(value.coverage.minorStarsCovered.length > 0, true)
+    assert.doesNotThrow(() => parseResult(bridge, value))
+  })
+  check('complete coverage is order-insensitive', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.coverage.directMeaningsConsidered.reverse()
+    value.coverage.majorStarsCovered.reverse()
+    value.coverage.minorStarsCovered.reverse()
+    value.coverage.mutagensCovered.reverse()
+    value.coverage.maleficsCovered.reverse()
+    value.coverage.noblesCovered.reverse()
+    assert.doesNotThrow(() => parseResult(bridge, value))
+  })
+  for (const [name, field] of [
+    ['target meanings', 'directMeaningsConsidered'],
+    ['target major stars', 'majorStarsCovered'],
+    ['target supporting stars', 'minorStarsCovered'],
+    ['target natal mutagens', 'mutagensCovered'],
+    ['relevant malefic signals', 'maleficsCovered'],
+  ] as const) {
+    check(`complete Result rejects empty ${name}`, () => {
+      const value = createValidAiChartD1P1Result(modelInput)
+      assert.equal(value.coverage[field].length > 0, true)
+      value.coverage[field] = []
+      assertResultInvalid(() => parseResult(bridge, value))
+    })
+    check(`complete Result rejects one missing ${name} source`, () => {
+      const value = createValidAiChartD1P1Result(modelInput)
+      assert.equal(value.coverage[field].length > 0, true)
+      value.coverage[field] = value.coverage[field].slice(1)
+      assertResultInvalid(() => parseResult(bridge, value))
+    })
+    check(`${name} rejects duplicate entries`, () => {
+      const value = createValidAiChartD1P1Result(modelInput)
+      const first = value.coverage[field][0]
+      assert.ok(first)
+      value.coverage[field] = [...value.coverage[field], first]
+      assertResultInvalid(() => parseResult(bridge, value))
+    })
+  }
+  const oppositeMeaning = modelInput.knowledgeContext.meanings.find(
+    (meaning) => meaning.palaceRole === 'opposite',
+  )
+  assert.ok(oppositeMeaning)
+  check('invented meaningId is rejected from direct coverage', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.coverage.directMeaningsConsidered = ['meaning:invented']
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('opposite meaningId is rejected from direct coverage', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.coverage.directMeaningsConsidered = [oppositeMeaning.meaningId]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  const otherMajorStar = modelInputs[1].structuralContext.targetPalace
+    .canonicalMajorStars[0]
+  assert.ok(otherMajorStar)
+  check('another palace major star is rejected from coverage', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.coverage.majorStarsCovered = [otherMajorStar.name]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('an unseen major star is rejected from coverage', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.coverage.majorStarsCovered = ['紫微']
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  const otherSupportingStar = modelInputs[1].structuralContext.targetPalace
+    .modeledSupportingStars[0]
+  assert.ok(otherSupportingStar)
+  check('another palace supporting star is rejected from coverage', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.coverage.minorStarsCovered = [otherSupportingStar.name]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('an unseen supporting star is rejected from coverage', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.coverage.minorStarsCovered = ['天刑']
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('an actual natal-mutagen pair may use descriptive wording', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const targetStar = modelInput.structuralContext.targetPalace
+      .canonicalMajorStars[0]
+    assert.ok(targetStar?.natalMutagen)
+    value.coverage.mutagensCovered = [
+      `已覆蓋 ${targetStar.name} 的 ${targetStar.natalMutagen}`,
+    ]
+    assert.doesNotThrow(() => parseResult(bridge, value))
+  })
+  check('a mismatched star and natal-mutagen pair is rejected', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const targetStar = modelInput.structuralContext.targetPalace
+      .canonicalMajorStars[0]
+    assert.ok(targetStar)
+    value.coverage.mutagensCovered = [`${targetStar.name} 化權`]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('another palace natal-mutagen pair is rejected', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const otherStar = modelInputs[1].structuralContext.targetPalace
+      .canonicalMajorStars[0]
+    assert.ok(otherStar?.natalMutagen)
+    value.coverage.mutagensCovered = [
+      `${otherStar.name} ${otherStar.natalMutagen}`,
+    ]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('valid natal-mutagen wording cannot append another palace pair', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const targetPair = value.coverage.mutagensCovered[0]
+    const otherStar = modelInputs[1].structuralContext.targetPalace
+      .canonicalMajorStars[0]
+    assert.ok(targetPair)
+    assert.ok(otherStar?.natalMutagen)
+    value.coverage.mutagensCovered = [
+      `${targetPair}；${otherStar.name} ${otherStar.natalMutagen}`,
+    ]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('two wordings cannot duplicate one natal-mutagen source', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const pair = value.coverage.mutagensCovered[0]
+    assert.ok(pair)
+    value.coverage.mutagensCovered = [pair, `已覆蓋 ${pair}`]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('actual malefic signal types may use descriptive wording', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.coverage.maleficsCovered = value.coverage.maleficsCovered.map(
+      (signalType) => `已覆蓋 ${signalType} 訊號`,
+    )
+    assert.doesNotThrow(() => parseResult(bridge, value))
+  })
+  check('an unobserved malefic signal type is rejected', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const observed = new Set(value.coverage.maleficsCovered)
+    const unobserved = ['擎羊', '陀羅', '火星', '鈴星', '生年化忌'].find(
+      (type) => !observed.has(type),
+    )
+    assert.ok(unobserved)
+    value.coverage.maleficsCovered = [unobserved]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('valid malefic wording cannot append an unobserved signal type', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const observed = value.coverage.maleficsCovered[0]
+    const observedSet = new Set(value.coverage.maleficsCovered)
+    const unobserved = ['擎羊', '陀羅', '火星', '鈴星', '生年化忌'].find(
+      (type) => !observedSet.has(type),
+    )
+    assert.ok(observed)
+    assert.ok(unobserved)
+    value.coverage.maleficsCovered = [
+      `${observed} 並誤列 ${unobserved}`,
+      ...value.coverage.maleficsCovered.slice(1),
+    ]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('two wordings cannot duplicate one malefic source', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const first = value.coverage.maleficsCovered[0]
+    assert.ok(first)
+    value.coverage.maleficsCovered = [
+      first,
+      `已覆蓋 ${first}`,
+      ...value.coverage.maleficsCovered.slice(1),
+    ]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('a signal placementId cannot replace malefic coverage semantics', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const signal = [
+      ...modelInput.structuralContext.targetGlobalScan.directSignals,
+      ...modelInput.structuralContext.targetGlobalScan.oppositeSignals,
+      ...modelInput.structuralContext.targetGlobalScan.hiddenCombinationSignals,
+      ...modelInput.structuralContext.targetGlobalScan.trineSignals,
+    ][0]
+    assert.ok(signal)
+    value.coverage.maleficsCovered = [signal.starPlacementId]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('a signalId cannot replace malefic coverage semantics', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const signal = [
+      ...modelInput.structuralContext.targetGlobalScan.directSignals,
+      ...modelInput.structuralContext.targetGlobalScan.oppositeSignals,
+      ...modelInput.structuralContext.targetGlobalScan.hiddenCombinationSignals,
+      ...modelInput.structuralContext.targetGlobalScan.trineSignals,
+    ][0]
+    assert.ok(signal)
+    value.coverage.maleficsCovered = [signal.signalId]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+
+  const nobleIndex = modelInputs.findIndex(
+    (input) => input.structuralContext.targetPalace.modeledSupportingStars
+      .some((star) => ['左輔', '右弼', '天魁', '天鉞'].includes(star.name)),
+  )
+  assert.notEqual(nobleIndex, -1)
+  const nobleInput = modelInputs[nobleIndex]
+  const nobleBridge = bridges[nobleIndex]
+  check('an actual target noble star passes coverage binding', () => {
+    const value = createValidAiChartD1P1Result(nobleInput)
+    assert.equal(value.coverage.noblesCovered.length > 0, true)
+    assert.doesNotThrow(() => parseResult(nobleBridge, value))
+  })
+  check('complete Result rejects empty noble coverage when one exists', () => {
+    const value = createValidAiChartD1P1Result(nobleInput)
+    assert.equal(value.coverage.noblesCovered.length > 0, true)
+    value.coverage.noblesCovered = []
+    assertResultInvalid(() => parseResult(nobleBridge, value))
+  })
+  check('noble coverage rejects a noble absent from the target palace', () => {
+    const value = createValidAiChartD1P1Result(nobleInput)
+    const unexpected = ['左輔', '右弼', '天魁', '天鉞'].find(
+      (name) => !value.coverage.noblesCovered.includes(name),
+    )
+    assert.ok(unexpected)
+    value.coverage.noblesCovered = [unexpected]
+    assertResultInvalid(() => parseResult(nobleBridge, value))
+  })
+  check('noble coverage rejects duplicate entries', () => {
+    const value = createValidAiChartD1P1Result(nobleInput)
+    const noble = value.coverage.noblesCovered[0]
+    assert.ok(noble)
+    value.coverage.noblesCovered = [noble, noble]
+    assertResultInvalid(() => parseResult(nobleBridge, value))
+  })
+
+  const coverageInput = modelInputs[2]
+  const coverageBridge = bridges[2]
+  function createSubsetResult(status: 'partial' | 'incomplete') {
+    const value = createValidAiChartD1P1Result(coverageInput)
+    value.status = status
+    const missingMeaning = value.coverage.directMeaningsConsidered.shift()
+    const missingMajor = value.coverage.majorStarsCovered.shift()
+    const missingMinor = value.coverage.minorStarsCovered.shift()
+    const missingMutagen = value.coverage.mutagensCovered.shift()
+    const missingMalefic = value.coverage.maleficsCovered.shift()
+    const missingNoble = value.coverage.noblesCovered.shift()
+    assert.ok(missingMeaning)
+    assert.ok(missingMajor)
+    assert.ok(missingMinor)
+    assert.ok(missingMutagen)
+    assert.ok(missingMalefic)
+    assert.ok(missingNoble)
+    value.coverage.omittedItems = [
+      { item: missingMeaning, reason: 'target meaning omitted' },
+      { item: missingMajor, reason: 'target major star omitted' },
+      {
+        item: missingMinor,
+        reason: missingMinor === missingNoble
+          ? 'target supporting star and target noble omitted'
+          : 'target supporting star omitted',
+      },
+      { item: missingMutagen, reason: 'target natal mutagen omitted' },
+      { item: missingMalefic, reason: 'relevant malefic omitted' },
+      ...(missingNoble === missingMinor
+        ? []
+        : [{ item: missingNoble, reason: 'target noble omitted' }]),
+    ]
+    return value
+  }
+  check('partial authenticated subsets pass with exact omission traces', () => {
+    assert.equal(
+      parseResult(coverageBridge, createSubsetResult('partial')).status,
+      'partial',
+    )
+  })
+  check('incomplete authenticated subsets pass with exact omission traces', () => {
+    assert.equal(
+      parseResult(coverageBridge, createSubsetResult('incomplete')).status,
+      'incomplete',
+    )
+  })
+  for (const status of ['partial', 'incomplete'] as const) {
+    check(`${status} subset rejects a missing meaning omission trace`, () => {
+      const value = createSubsetResult(status)
+      value.coverage.omittedItems = value.coverage.omittedItems.slice(1)
+      assertResultInvalid(() => parseResult(coverageBridge, value))
+    })
+    check(`${status} subset rejects a missing mutagen omission trace`, () => {
+      const value = createSubsetResult(status)
+      value.coverage.omittedItems = value.coverage.omittedItems.filter(
+        (item) => !item.reason.includes('natal mutagen'),
+      )
+      assertResultInvalid(() => parseResult(coverageBridge, value))
+    })
+    check(`${status} coverage rejects an extra unknown source`, () => {
+      const value = createSubsetResult(status)
+      value.coverage.majorStarsCovered.push('紫微')
+      assertResultInvalid(() => parseResult(coverageBridge, value))
+    })
+  }
+  check('partial coverage cannot omit a source without naming it', () => {
+    const value = createValidAiChartD1P1Result(coverageInput)
+    value.status = 'partial'
+    value.coverage.directMeaningsConsidered.shift()
+    value.coverage.omittedItems = [{ item: 'known gap', reason: 'not processed' }]
+    assertResultInvalid(() => parseResult(coverageBridge, value))
+  })
+  check('complete Result cannot use empty coverage and empty omissions', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.coverage.directMeaningsConsidered = []
+    value.coverage.majorStarsCovered = []
+    value.coverage.minorStarsCovered = []
+    value.coverage.mutagensCovered = []
+    value.coverage.maleficsCovered = []
+    value.coverage.noblesCovered = []
+    value.coverage.omittedItems = []
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+
   const partialSnapshot = completeModelInputSnapshot()
   const partialPalaces = partialSnapshot.palaces as MutableRecord[]
   partialPalaces[3].majorStars = [
@@ -763,6 +1087,145 @@ async function run() {
       value[field][0].usedRuleIds = [ruleId, ruleId]
       assertResultInvalid(() => parseResult(bridge, value))
     })
+    check(`${field} rejects empty Rule IDs`, () => {
+      const value = resultWithSingleCandidate(modelInput, field)
+      value[field][0].usedRuleIds = []
+      assertResultInvalid(() => parseResult(bridge, value))
+    })
+  }
+
+  const teacherRule = modelInput.knowledgeContext.rules.find(
+    (rule) => rule.ruleStatus === 'teacher_confirmed',
+  )
+  const lectureRule = modelInput.knowledgeContext.rules.find(
+    (rule) => rule.ruleStatus === 'lecture_backfill',
+  )
+  assert.ok(teacherRule)
+  assert.ok(lectureRule)
+  check('teacher-only Candidate with teacher status passes', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.directCandidates[0].usedRuleIds = [teacherRule.ruleId]
+    value.directCandidates[0].ruleStatus = 'teacher_confirmed'
+    assert.doesNotThrow(() => parseResult(bridge, value))
+  })
+  check('teacher-only Candidate cannot report working status', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.directCandidates[0].usedRuleIds = [teacherRule.ruleId]
+    value.directCandidates[0].ruleStatus = 'working_inference'
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('lecture-only Candidate with lecture status passes', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.directCandidates[0].usedRuleIds = [lectureRule.ruleId]
+    value.directCandidates[0].ruleStatus = 'lecture_backfill'
+    assert.doesNotThrow(() => parseResult(bridge, value))
+  })
+  check('lecture-only Candidate cannot promote to teacher status', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.directCandidates[0].usedRuleIds = [lectureRule.ruleId]
+    value.directCandidates[0].ruleStatus = 'teacher_confirmed'
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('teacher plus lecture derives lecture status', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.directCandidates[0].usedRuleIds = [
+      teacherRule.ruleId,
+      lectureRule.ruleId,
+    ]
+    value.directCandidates[0].ruleStatus = 'lecture_backfill'
+    assert.doesNotThrow(() => parseResult(bridge, value))
+  })
+  check('teacher plus lecture cannot promote to teacher status', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.directCandidates[0].usedRuleIds = [
+      teacherRule.ruleId,
+      lectureRule.ruleId,
+    ]
+    value.directCandidates[0].ruleStatus = 'teacher_confirmed'
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  const syntheticAuthorityRules = [
+    { ruleId: 'rule:teacher', ruleStatus: 'teacher_confirmed' },
+    { ruleId: 'rule:lecture', ruleStatus: 'lecture_backfill' },
+    { ruleId: 'rule:working', ruleStatus: 'working_inference' },
+  ] as const
+  for (const [name, ruleIds, expected] of [
+    ['teacher-only', ['rule:teacher'], 'teacher_confirmed'],
+    ['lecture-only', ['rule:lecture'], 'lecture_backfill'],
+    ['working-only', ['rule:working'], 'working_inference'],
+    ['teacher plus lecture', ['rule:teacher', 'rule:lecture'], 'lecture_backfill'],
+    ['teacher plus working', ['rule:teacher', 'rule:working'], 'working_inference'],
+    ['lecture plus working', ['rule:lecture', 'rule:working'], 'working_inference'],
+  ] as const) {
+    check(`${name} authority derives ${expected}`, () => {
+      assert.equal(
+        deriveAiChartD1P1CandidateRuleStatus(ruleIds, syntheticAuthorityRules),
+        expected,
+      )
+    })
+  }
+  for (const [name, ruleIds, validStatus, promotedStatus] of [
+    ['teacher-only', ['rule:teacher'], 'teacher_confirmed', 'working_inference'],
+    ['lecture-only', ['rule:lecture'], 'lecture_backfill', 'teacher_confirmed'],
+    ['working-only', ['rule:working'], 'working_inference', 'teacher_confirmed'],
+    [
+      'teacher plus lecture',
+      ['rule:teacher', 'rule:lecture'],
+      'lecture_backfill',
+      'teacher_confirmed',
+    ],
+    [
+      'teacher plus working',
+      ['rule:teacher', 'rule:working'],
+      'working_inference',
+      'teacher_confirmed',
+    ],
+  ] as const) {
+    check(`${name} Candidate authority accepts ${validStatus}`, () => {
+      assert.doesNotThrow(() =>
+        assertAiChartD1P1CandidateRuleAuthority(
+          { usedRuleIds: ruleIds, ruleStatus: validStatus },
+          syntheticAuthorityRules,
+        ),
+      )
+    })
+    check(`${name} Candidate authority rejects ${promotedStatus}`, () => {
+      assertResultInvalid(() =>
+        assertAiChartD1P1CandidateRuleAuthority(
+          { usedRuleIds: ruleIds, ruleStatus: promotedStatus },
+          syntheticAuthorityRules,
+        ),
+      )
+    })
+  }
+  check('authority derivation rejects empty usedRuleIds', () => {
+    assertResultInvalid(() =>
+      deriveAiChartD1P1CandidateRuleStatus([], syntheticAuthorityRules),
+    )
+  })
+  check('authority derivation rejects duplicate usedRuleIds', () => {
+    assertResultInvalid(() =>
+      deriveAiChartD1P1CandidateRuleStatus(
+        ['rule:teacher', 'rule:teacher'],
+        syntheticAuthorityRules,
+      ),
+    )
+  })
+  check('authority derivation rejects an unknown Rule ID', () => {
+    assertResultInvalid(() =>
+      deriveAiChartD1P1CandidateRuleStatus(
+        ['rule:unknown'],
+        syntheticAuthorityRules,
+      ),
+    )
+  })
+  for (const field of CANDIDATE_FIELDS) {
+    check(`${field} rejects lecture-to-teacher authority promotion`, () => {
+      const value = resultWithSingleCandidate(modelInput, field)
+      value[field][0].usedRuleIds = [lectureRule.ruleId]
+      value[field][0].ruleStatus = 'teacher_confirmed'
+      assertResultInvalid(() => parseResult(bridge, value))
+    })
   }
 
   const structuralPalaces = [
@@ -771,13 +1234,165 @@ async function run() {
     modelInput.structuralContext.hiddenCombinationPalace,
     ...modelInput.structuralContext.otherTrinePalaces,
   ]
-  check('all five structural palace IDs are accepted', () => {
+  const targetPalace = modelInput.structuralContext.targetPalace
+  const oppositePalace = modelInput.structuralContext.oppositePalace
+  const hiddenPalace = modelInput.structuralContext.hiddenCombinationPalace
+  const trinePalaces = modelInput.structuralContext.otherTrinePalaces
+  const firstStarName = (
+    palace: typeof targetPalace,
+  ) => [
+    ...palace.canonicalMajorStars,
+    ...palace.borrowedMajorStars,
+    ...palace.modeledSupportingStars,
+  ][0]?.name
+
+  for (const [role, palace] of [
+    ['opposite', oppositePalace],
+    ['hidden', hiddenPalace],
+    ['trine one', trinePalaces[0]],
+    ['trine two', trinePalaces[1]],
+  ] as const) {
+    check(`directCandidates rejects ${role} palaceId`, () => {
+      const value = createValidAiChartD1P1Result(modelInput)
+      value.directCandidates[0].palaceIds = [palace.palaceId]
+      assertResultInvalid(() => parseResult(bridge, value))
+    })
+  }
+  for (const [role, palace] of [
+    ['opposite', oppositePalace],
+    ['hidden', hiddenPalace],
+    ['trine', trinePalaces[0]],
+  ] as const) {
+    const starName = firstStarName(palace)
+    assert.ok(starName)
+    check(`directCandidates rejects ${role} star`, () => {
+      const value = createValidAiChartD1P1Result(modelInput)
+      value.directCandidates[0].starBasis = [starName]
+      assertResultInvalid(() => parseResult(bridge, value))
+    })
+  }
+  for (const structure of ['對宮', '暗合', '三方'] as const) {
+    check(`directCandidates rejects ${structure} basis`, () => {
+      const value = createValidAiChartD1P1Result(modelInput)
+      value.directCandidates[0].structureBasis = ['本宮', structure]
+      assertResultInvalid(() => parseResult(bridge, value))
+    })
+  }
+  check('directCandidates requires target palaceId', () => {
     const value = createValidAiChartD1P1Result(modelInput)
-    value.directCandidates[0].palaceIds = structuralPalaces.map(
-      (palace) => palace.palaceId,
-    )
-    assert.doesNotThrow(() => parseResult(bridge, value))
+    value.directCandidates[0].palaceIds = []
+    assertResultInvalid(() => parseResult(bridge, value))
   })
+  check('directCandidates requires 本宮 basis', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.directCandidates[0].structureBasis = ['輔星']
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('oppositeInfluences requires opposite palaceId', () => {
+    const value = resultWithSingleCandidate(modelInput, 'oppositeInfluences')
+    value.oppositeInfluences[0].palaceIds = [targetPalace.palaceId]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('oppositeInfluences rejects hidden palaceId', () => {
+    const value = resultWithSingleCandidate(modelInput, 'oppositeInfluences')
+    value.oppositeInfluences[0].palaceIds = [hiddenPalace.palaceId]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('oppositeInfluences rejects a hidden palace star', () => {
+    const value = resultWithSingleCandidate(modelInput, 'oppositeInfluences')
+    const starName = firstStarName(hiddenPalace)
+    assert.ok(starName)
+    value.oppositeInfluences[0].starBasis = [starName]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('oppositeInfluences requires 對宮 basis', () => {
+    const value = resultWithSingleCandidate(modelInput, 'oppositeInfluences')
+    value.oppositeInfluences[0].structureBasis = ['本宮']
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('hiddenCombinationInfluences requires hidden palaceId', () => {
+    const value = resultWithSingleCandidate(
+      modelInput,
+      'hiddenCombinationInfluences',
+    )
+    value.hiddenCombinationInfluences[0].palaceIds = [targetPalace.palaceId]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('hiddenCombinationInfluences rejects trine palaceId', () => {
+    const value = resultWithSingleCandidate(
+      modelInput,
+      'hiddenCombinationInfluences',
+    )
+    value.hiddenCombinationInfluences[0].palaceIds = [trinePalaces[0].palaceId]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('hiddenCombinationInfluences rejects a trine palace star', () => {
+    const value = resultWithSingleCandidate(
+      modelInput,
+      'hiddenCombinationInfluences',
+    )
+    const starName = firstStarName(trinePalaces[0])
+    assert.ok(starName)
+    value.hiddenCombinationInfluences[0].starBasis = [starName]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('hiddenCombinationInfluences requires 暗合 basis', () => {
+    const value = resultWithSingleCandidate(
+      modelInput,
+      'hiddenCombinationInfluences',
+    )
+    value.hiddenCombinationInfluences[0].structureBasis = ['本宮']
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('trineInfluences requires at least one other trine palaceId', () => {
+    const value = resultWithSingleCandidate(modelInput, 'trineInfluences')
+    value.trineInfluences[0].palaceIds = [targetPalace.palaceId]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('trineInfluences rejects opposite palaceId', () => {
+    const value = resultWithSingleCandidate(modelInput, 'trineInfluences')
+    value.trineInfluences[0].palaceIds = [oppositePalace.palaceId]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('trineInfluences rejects an opposite palace star', () => {
+    const value = resultWithSingleCandidate(modelInput, 'trineInfluences')
+    const starName = firstStarName(oppositePalace)
+    assert.ok(starName)
+    value.trineInfluences[0].starBasis = [starName]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('trineInfluences requires 三方 basis', () => {
+    const value = resultWithSingleCandidate(modelInput, 'trineInfluences')
+    value.trineInfluences[0].structureBasis = ['本宮']
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  for (const field of [
+    'combinedCandidates',
+    'strengths',
+    'imbalancePossibilities',
+  ] as const) {
+    check(`${field} accepts the legal five-palace union`, () => {
+      const value = resultWithSingleCandidate(modelInput, field)
+      value[field][0].palaceIds = structuralPalaces.map(
+        (palace) => palace.palaceId,
+      )
+      value[field][0].starBasis = [
+        ...new Set(structuralPalaces.flatMap((palace) => [
+          ...palace.canonicalMajorStars.map((star) => star.name),
+          ...palace.borrowedMajorStars.map((star) => star.name),
+          ...palace.modeledSupportingStars.map((star) => star.name),
+        ])),
+      ]
+      assert.doesNotThrow(() => parseResult(bridge, value))
+    })
+    for (const structure of ['飛化', '身宮'] as const) {
+      check(`${field} rejects ${structure} basis`, () => {
+        const value = resultWithSingleCandidate(modelInput, field)
+        value[field][0].structureBasis = [structure]
+        assertResultInvalid(() => parseResult(bridge, value))
+      })
+    }
+  }
   check('another canonical palace outside the five views is rejected', () => {
     const allowed = new Set(structuralPalaces.map((palace) => palace.palaceId))
     const outside = AI_CHART_D1_PALACE_IDENTITIES.find(
@@ -868,18 +1483,14 @@ async function run() {
   }
 
   for (const structure of [
-    '本宮',
-    '對宮',
-    '暗合',
-    '三方',
     '空宮借星',
     '生年四化',
     '煞忌',
     '輔星',
   ] as const) {
-    check(`P1 structure ${structure} is accepted`, () => {
+    check(`directCandidates accepts optional P1 structure ${structure}`, () => {
       const value = createValidAiChartD1P1Result(modelInput)
-      value.directCandidates[0].structureBasis = [structure]
+      value.directCandidates[0].structureBasis = ['本宮', structure]
       assert.doesNotThrow(() => parseResult(bridge, value))
     })
   }
