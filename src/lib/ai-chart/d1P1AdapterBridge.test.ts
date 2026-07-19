@@ -26,6 +26,7 @@ import {
 import type { AiChartD1StructureBasis } from './d1CommonContracts'
 import { buildAiChartD1K0P1KnowledgeBundles } from './d1K0Selection'
 import {
+  AI_CHART_D1_MAJOR_STAR_NAMES,
   AI_CHART_D1_MODELED_SUPPORTING_STARS,
   AI_CHART_D1_PALACE_IDENTITIES,
 } from './d1N0Constants'
@@ -1025,12 +1026,9 @@ async function run() {
     },
   ]
   const blockedFixture = await customFixture('bridge-blocked', blockedSnapshot)
-  check('blocked empty source accepts none mode', () => {
+  check('blocked empty source cannot supply a nonempty effective major core', () => {
     const value = createValidAiChartD1P1Result(blockedFixture.modelInputs[0])
-    assert.equal(
-      parseResult(blockedFixture.bridges[0], value).primaryAxis.borrowedStarMode,
-      'none',
-    )
+    assertResultInvalid(() => parseResult(blockedFixture.bridges[0], value))
   })
   check('blocked empty source rejects borrowed mode', () => {
     const value = createValidAiChartD1P1Result(blockedFixture.modelInputs[0])
@@ -1055,6 +1053,163 @@ async function run() {
     const value = createValidAiChartD1P1Result(modelInput)
     const ruleId = modelInput.knowledgeContext.rules[0].ruleId
     value.primaryAxis.usedRuleIds = [ruleId, ruleId]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('primaryAxis majorStarCore is exact for canonical target stars', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    assert.deepEqual(
+      parseResult(bridge, value).primaryAxis.majorStarCore,
+      modelInput.structuralContext.targetPalace.canonicalMajorStars.map(
+        (star) => star.name,
+      ),
+    )
+  })
+  check('primaryAxis rejects an empty majorStarCore', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.primaryAxis.majorStarCore = []
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('primaryAxis rejects an extra major star', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.primaryAxis.majorStarCore.push('紫微')
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('primaryAxis rejects duplicate major stars', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.primaryAxis.majorStarCore.push(value.primaryAxis.majorStarCore[0])
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('primaryAxis rejects another palace major star', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.primaryAxis.majorStarCore = [
+      modelInput.structuralContext.oppositePalace.canonicalMajorStars[0].name,
+    ]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('primaryAxis rejects a supporting star', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.primaryAxis.majorStarCore = [
+      modelInput.structuralContext.targetPalace.modeledSupportingStars[0].name,
+    ]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('borrowed primaryAxis uses the exact borrowed major stars', () => {
+    const value = createValidAiChartD1P1Result(borrowInput)
+    assert.deepEqual(
+      parseResult(borrowBridge, value).primaryAxis.majorStarCore,
+      borrowInput.structuralContext.targetPalace.borrowedMajorStars.map(
+        (star) => star.name,
+      ),
+    )
+  })
+  check('borrowed primaryAxis rejects a nonexistent local major star', () => {
+    const value = createValidAiChartD1P1Result(borrowInput)
+    value.primaryAxis.majorStarCore = [
+      modelInput.structuralContext.targetPalace.canonicalMajorStars[0].name,
+    ]
+    assertResultInvalid(() => parseResult(borrowBridge, value))
+  })
+  check('non-borrowed primaryAxis rejects an opposite borrowed star', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.primaryAxis.majorStarCore = [
+      modelInput.structuralContext.oppositePalace.canonicalMajorStars[0].name,
+    ]
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('target primary star Rule completeness passes', () => {
+    assert.doesNotThrow(() =>
+      parseResult(bridge, createValidAiChartD1P1Result(modelInput)),
+    )
+  })
+  check('missing one target primary star Rule is rejected', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.primaryAxis.usedRuleIds = value.primaryAxis.usedRuleIds.slice(1)
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  for (const role of ['opposite', 'hidden_combination', 'trine_1'] as const) {
+    check(`${role} Rule is rejected from primaryAxis`, () => {
+      const trace = modelInput.knowledgeContext.selectionTrace.find(
+        (entry) => entry.palaceRole === role,
+      )
+      assert.ok(trace)
+      const value = createValidAiChartD1P1Result(modelInput)
+      value.primaryAxis.usedRuleIds.push(trace.ruleId)
+      assertResultInvalid(() => parseResult(bridge, value))
+    })
+  }
+  check('common Rule may coexist with target primary Rules', () => {
+    const trace = modelInput.knowledgeContext.selectionTrace.find(
+      (entry) => entry.palaceRole === null,
+    )
+    assert.ok(trace)
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.primaryAxis.usedRuleIds.push(trace.ruleId)
+    assert.doesNotThrow(() => parseResult(bridge, value))
+  })
+
+  const doubleSnapshot = completeModelInputSnapshot()
+  const doublePalaces = doubleSnapshot.palaces as MutableRecord[]
+  doublePalaces[0].majorStars = [
+    { name: '廉貞', type: 'major', scope: 'origin', mutagen: '化祿' },
+    { name: '七殺', type: 'major', scope: 'origin' },
+  ]
+  const doubleFixture = await customFixture('bridge-double-axis', doubleSnapshot)
+  const doubleInput = doubleFixture.modelInputs[0]
+  const doubleBridge = doubleFixture.bridges[0]
+  const doubleRuleTrace = doubleInput.knowledgeContext.selectionTrace.find(
+    (trace) =>
+      trace.palaceRole === 'target' && trace.reason === 'double_star_present',
+  )
+  assert.ok(doubleRuleTrace)
+  check('authenticated double-star core passes', () => {
+    const value = createValidAiChartD1P1Result(doubleInput)
+    assert.doesNotThrow(() => parseResult(doubleBridge, value))
+  })
+  check('primaryAxis rejects a missing effective major star', () => {
+    const value = createValidAiChartD1P1Result(doubleInput)
+    value.primaryAxis.majorStarCore = [value.primaryAxis.majorStarCore[0]]
+    assertResultInvalid(() => parseResult(doubleBridge, value))
+  })
+  check('double-star majorStarCore order does not affect source equality', () => {
+    const value = createValidAiChartD1P1Result(doubleInput)
+    value.primaryAxis.majorStarCore.reverse()
+    assert.doesNotThrow(() => parseResult(doubleBridge, value))
+  })
+  check('missing authenticated double-star Rule is rejected', () => {
+    const value = createValidAiChartD1P1Result(doubleInput)
+    value.primaryAxis.usedRuleIds = value.primaryAxis.usedRuleIds.filter(
+      (ruleId) => ruleId !== doubleRuleTrace.ruleId,
+    )
+    assertResultInvalid(() => parseResult(doubleBridge, value))
+  })
+  check('null doubleStarCore with an authenticated double Rule is rejected', () => {
+    const value = createValidAiChartD1P1Result(doubleInput)
+    value.primaryAxis.doubleStarCore = null
+    assertResultInvalid(() => parseResult(doubleBridge, value))
+  })
+  check('doubleStarCore missing one effective star name is rejected', () => {
+    const value = createValidAiChartD1P1Result(doubleInput)
+    value.primaryAxis.doubleStarCore = value.primaryAxis.majorStarCore[0]
+    assertResultInvalid(() => parseResult(doubleBridge, value))
+  })
+  check('doubleStarCore containing a third major star is rejected', () => {
+    const value = createValidAiChartD1P1Result(doubleInput)
+    const third = AI_CHART_D1_MAJOR_STAR_NAMES.find(
+      (starName) => !value.primaryAxis.majorStarCore.includes(starName),
+    )
+    assert.ok(third)
+    value.primaryAxis.doubleStarCore = `${value.primaryAxis.doubleStarCore}${third}`
+    assertResultInvalid(() => parseResult(doubleBridge, value))
+  })
+  check('doubleStarCore is rejected without an authenticated double Rule', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.primaryAxis.doubleStarCore = '廉貞與七殺'
+    assertResultInvalid(() => parseResult(bridge, value))
+  })
+  check('primaryAxis metadata leakage is rejected', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.primaryAxis.statement =
+      `leak ${modelInput.knowledgeContext.rules[0].ruleId}`
     assertResultInvalid(() => parseResult(bridge, value))
   })
   check('Catalog Rule not selected for this call is rejected', () => {
@@ -1726,7 +1881,7 @@ async function run() {
     join(repositoryRoot, 'src/lib/ai-chart/d1P1AdapterBridge.ts'),
     'utf8',
   )
-  check('Adapter Bridge has zero production consumers', () => {
+  check('Adapter Bridge production consumer is only Preview Gate', () => {
     const consumers = sourceFiles
       .filter((path) => path.endsWith('.ts') || path.endsWith('.tsx'))
       .filter((path) =>
@@ -1738,9 +1893,12 @@ async function run() {
           !path.endsWith('d1P1AdapterBridge.ts') &&
           !path.endsWith('d1P1AdapterBridge.test.ts') &&
           !path.endsWith('d1P1AdapterBridgeContracts.test.ts') &&
-          !path.endsWith('d1P1AdapterBridgeTestSupport.ts'),
+          !path.endsWith('d1P1AdapterBridgeTestSupport.ts') &&
+          !path.endsWith('d1P1PreviewRequestGate.server.test.ts'),
       )
-    assert.deepEqual(consumers, [])
+    assert.deepEqual(consumers, [
+      'src/lib/ai-chart/d1P1PreviewRequestGate.server.ts',
+    ])
   })
   check('Prompt Package builder production consumer is only the Bridge', () => {
     const consumers = sourceFiles

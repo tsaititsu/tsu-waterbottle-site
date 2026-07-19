@@ -334,6 +334,123 @@ function assertBorrowedStarBinding(
   if (result.primaryAxis.borrowedStarMode !== expectedMode) resultInvalid()
 }
 
+function effectiveTargetMajorStarNames(
+  modelInput: AiChartD1P1ModelInput,
+): readonly string[] {
+  const target = modelInput.structuralContext.targetPalace
+  return (
+    target.borrowStatus === 'eligible_and_borrowed'
+      ? target.borrowedMajorStars
+      : target.canonicalMajorStars
+  ).map((star) => star.name)
+}
+
+function assertPrimaryAxisSourceBinding(
+  result: AiChartD1P1Result,
+  modelInput: AiChartD1P1ModelInput,
+): void {
+  const effectiveMajorStars = effectiveTargetMajorStarNames(modelInput)
+  const actualMajorStars = result.primaryAxis.majorStarCore
+  const rulesById = new Map(
+    modelInput.knowledgeContext.rules.map((rule) => [rule.ruleId, rule]),
+  )
+  const tracesByRuleId = new Map(
+    modelInput.knowledgeContext.selectionTrace.map((trace) => [
+      trace.ruleId,
+      trace,
+    ]),
+  )
+  const primaryReasons = new Set([
+    'major_star_present',
+    'borrowed_major_star_present',
+    'double_star_present',
+  ])
+  const requiredTargetRuleIds = modelInput.knowledgeContext.selectionTrace
+    .filter(
+      (trace) =>
+        trace.palaceRole === 'target' && primaryReasons.has(trace.reason),
+    )
+    .map((trace) => trace.ruleId)
+
+  if (
+    effectiveMajorStars.length === 0 ||
+    hasDuplicates(effectiveMajorStars) ||
+    actualMajorStars.length === 0 ||
+    hasDuplicates(actualMajorStars) ||
+    !setEquals(new Set(actualMajorStars), new Set(effectiveMajorStars)) ||
+    result.primaryAxis.usedRuleIds.length === 0 ||
+    hasDuplicates(result.primaryAxis.usedRuleIds) ||
+    result.primaryAxis.usedRuleIds.some((ruleId) => {
+      const trace = tracesByRuleId.get(ruleId)
+      return (
+        !rulesById.has(ruleId) ||
+        !trace ||
+        (trace.palaceRole !== null && trace.palaceRole !== 'target')
+      )
+    }) ||
+    requiredTargetRuleIds.some(
+      (ruleId) => !result.primaryAxis.usedRuleIds.includes(ruleId),
+    )
+  ) {
+    resultInvalid()
+  }
+
+  const authenticatedTargetDoubleRules = modelInput.knowledgeContext.selectionTrace
+    .filter(
+      (trace) =>
+        trace.palaceRole === 'target' &&
+        trace.reason === 'double_star_present' &&
+        rulesById.get(trace.ruleId)?.kind === 'double_star',
+    )
+    .map((trace) => trace.ruleId)
+
+  if (authenticatedTargetDoubleRules.length === 0) {
+    if (result.primaryAxis.doubleStarCore !== null) resultInvalid()
+  } else {
+    const doubleStarCore = result.primaryAxis.doubleStarCore
+    if (
+      authenticatedTargetDoubleRules.length !== 1 ||
+      effectiveMajorStars.length !== 2 ||
+      doubleStarCore === null ||
+      !result.primaryAxis.usedRuleIds.includes(
+        authenticatedTargetDoubleRules[0],
+      ) ||
+      effectiveMajorStars.some((starName) => !doubleStarCore.includes(starName)) ||
+      AI_CHART_D1_MAJOR_STAR_NAMES.some(
+        (starName) =>
+          !effectiveMajorStars.includes(starName) &&
+          doubleStarCore.includes(starName),
+      )
+    ) {
+      resultInvalid()
+    }
+  }
+
+  const primaryAxisText = [
+    result.primaryAxis.statement,
+    ...(result.primaryAxis.doubleStarCore === null
+      ? []
+      : [result.primaryAxis.doubleStarCore]),
+  ]
+  const forbiddenMetadata = [
+    ...modelInput.knowledgeContext.rules.flatMap((rule) => [
+      rule.ruleId,
+      rule.contentSha256,
+    ]),
+    ...modelInput.knowledgeContext.selectionTrace.flatMap((trace) => [
+      trace.placementId,
+      trace.structuralReference,
+    ]),
+  ].filter((value): value is string => value !== null)
+  if (
+    forbiddenMetadata.some((metadata) =>
+      primaryAxisText.some((text) => text.includes(metadata)),
+    )
+  ) {
+    resultInvalid()
+  }
+}
+
 function structuralPalaces(modelInput: AiChartD1P1ModelInput) {
   return [
     modelInput.structuralContext.targetPalace,
@@ -776,6 +893,7 @@ function createAiChartD1P1SourceBoundResultParser(
       const result = parseAiChartD1P1Result(value)
       assertIdentityAndStatus(result, modelInput)
       assertBorrowedStarBinding(result, modelInput)
+      assertPrimaryAxisSourceBinding(result, modelInput)
       assertRulePalaceAndStarBindings(result, modelInput)
       assertCoverageSourceBinding(result, modelInput)
       assertWarningTraceability(result, modelInput)

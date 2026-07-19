@@ -134,10 +134,36 @@ export function createValidAiChartD1P1Result(
   modelInput: AiChartD1P1ModelInput,
 ): Mutable<AiChartD1P1Result> {
   const target = modelInput.structuralContext.targetPalace
-  const majorStars = [
+  const coverageMajorStars = [
     ...target.canonicalMajorStars,
     ...target.borrowedMajorStars,
   ].map((star) => star.name)
+  const effectiveMajorStars = (
+    target.borrowStatus === 'eligible_and_borrowed'
+      ? target.borrowedMajorStars
+      : target.canonicalMajorStars
+  ).map((star) => star.name)
+  const primaryRuleIds = modelInput.knowledgeContext.selectionTrace
+    .filter(
+      (trace) =>
+        trace.palaceRole === 'target' &&
+        [
+          'major_star_present',
+          'borrowed_major_star_present',
+          'double_star_present',
+        ].includes(trace.reason),
+    )
+    .map((trace) => trace.ruleId)
+  const hasAuthenticatedDoubleRule = modelInput.knowledgeContext.selectionTrace
+    .some(
+      (trace) =>
+        trace.palaceRole === 'target' &&
+        trace.reason === 'double_star_present' &&
+        modelInput.knowledgeContext.rules.some(
+          (rule) =>
+            rule.ruleId === trace.ruleId && rule.kind === 'double_star',
+        ),
+    )
   const supportingStars = target.modeledSupportingStars.map((star) => star.name)
   const coverageStars = [
     ...target.canonicalMajorStars,
@@ -183,11 +209,13 @@ export function createValidAiChartD1P1Result(
     status: isPartial ? 'partial' : 'complete',
     primaryAxis: {
       statement: 'synthetic primary axis',
-      majorStarCore: majorStars,
-      doubleStarCore: null,
+      majorStarCore: effectiveMajorStars,
+      doubleStarCore: hasAuthenticatedDoubleRule
+        ? `以${effectiveMajorStars.join('與')}為核心`
+        : null,
       borrowedStarMode:
         target.borrowStatus === 'eligible_and_borrowed' ? 'borrowed' : 'none',
-      usedRuleIds: [modelInput.knowledgeContext.rules[0].ruleId],
+      usedRuleIds: primaryRuleIds,
     },
     directCandidates: [createValidAiChartD1P1Candidate(modelInput)],
     oppositeInfluences: [],
@@ -199,7 +227,7 @@ export function createValidAiChartD1P1Result(
     imbalancePossibilities: [],
     coverage: {
       directMeaningsConsidered: targetMeaningIds,
-      majorStarsCovered: majorStars,
+      majorStarsCovered: coverageMajorStars,
       minorStarsCovered: supportingStars,
       mutagensCovered,
       maleficsCovered,
