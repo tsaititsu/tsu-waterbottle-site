@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict'
-import {
+import type {
+  CompleteProductOrderLinePayConfirmationResult,
+  LinePayCheckoutAttemptRow,
+} from './linePayDatabaseContracts'
+
+const {
   LINE_PAY_ATTEMPT_STATES,
   LINE_PAY_DATABASE_ENVIRONMENTS,
   LINE_PAY_REQUEST_STATES,
-  type CompleteProductOrderLinePayConfirmationResult,
-  type LinePayCheckoutAttemptRow,
-} from './linePayDatabaseContracts'
+} = (await import(
+  new URL('./linePayDatabaseContracts.ts', import.meta.url).href
+)) as typeof import('./linePayDatabaseContracts')
 
 assert.deepEqual(LINE_PAY_DATABASE_ENVIRONMENTS, ['sandbox', 'production'])
 assert.deepEqual(LINE_PAY_REQUEST_STATES, [

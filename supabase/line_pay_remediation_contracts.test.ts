@@ -24,6 +24,10 @@ const functionNames = [
   'cancel_product_order_line_pay_payment',
   'mark_product_order_line_pay_reconciliation',
 ] as const
+const dedicatedExecutorFunctions = new Set([
+  'record_product_order_line_pay_confirmation_evidence',
+  'complete_product_order_line_pay_confirmation',
+])
 const newTables = [
   'app_environment_attestation',
   'line_pay_checkout_attempts',
@@ -37,7 +41,6 @@ const beginIndex = normalized.indexOf('begin;')
 const preambleWithoutComments = migration.slice(0, beginIndex).replace(/^--.*$/gm, '').trim()
 assert.equal(preambleWithoutComments, '')
 assert.ok(normalized.lastIndexOf('commit;') > beginIndex)
-assert.doesNotMatch(migration, /\bsecurity\s+definer\b/i)
 assert.doesNotMatch(migration, /\bdrop\s+(?:table|schema|column)\b/i)
 assert.doesNotMatch(migration, /\btruncate\b/i)
 assert.doesNotMatch(migration, /\bdelete\s+from\b/i)
@@ -69,11 +72,39 @@ for (const functionName of functionNames) {
     `grant\\s+execute\\s+on\\s+function\\s+public\\.${functionName}\\s*\\([\\s\\S]*?\\)\\s+to\\s+service_role`,
     'i',
   )
+  const dedicatedExecutorGrant = new RegExp(
+    `grant\\s+execute\\s+on\\s+function\\s+public\\.${functionName}\\s*\\([\\s\\S]*?\\)\\s+to\\s+line_pay_payment_executor`,
+    'i',
+  )
 
   assert.match(migration, declaration, `${functionName} must have a fixed empty search_path`)
   assert.match(migration, revoke, `${functionName} must be revoked from browser roles`)
-  assert.match(migration, serviceRoleGrant, `${functionName} must only be granted to service_role`)
+  if (dedicatedExecutorFunctions.has(functionName)) {
+    assert.match(migration, dedicatedExecutorGrant, `${functionName} must use the dedicated executor`)
+  } else {
+    assert.match(migration, serviceRoleGrant, `${functionName} must be granted to service_role`)
+  }
 }
+
+assert.match(migration, /create\s+role\s+line_pay_payment_executor\s+[^;]*nologin[^;]*nobypassrls/i)
+assert.match(migration, /create\s+role\s+line_pay_payment_function_owner\s+[^;]*nologin[^;]*nobypassrls/i)
+assert.match(migration, /create\s+schema\s+line_pay_private\s+authorization\s+line_pay_payment_function_owner/i)
+assert.match(migration, /create\s+table\s+line_pay_private\.line_pay_completion_proofs\b/i)
+assert.match(migration, /line_pay_completion_proof_is_immutable/i)
+assert.match(migration, /line_pay_paid_payment_completion_proof_required/i)
+assert.match(migration, /line_pay_paid_order_completion_proof_required/i)
+assert.match(migration, /line_pay_paid_attempt_completion_proof_required/i)
+assert.match(migration, /line_pay_provider_verified_success_evidence_required/i)
+assert.match(migration, /safe_result_code\s*<>\s*'0000'/i)
+assert.match(migration, /provider_result_code\s*=\s*'0000'/i)
+assert.match(
+  migration,
+  /revoke\s+execute\s+on\s+function\s+public\.complete_product_order_line_pay_confirmation\s*\([\s\S]*?\)\s+from\s+public,\s*anon,\s*authenticated,\s*service_role/i,
+)
+assert.match(
+  migration,
+  /alter\s+function\s+public\.complete_product_order_line_pay_confirmation\s*\([\s\S]*?\)\s+owner\s+to\s+line_pay_payment_function_owner/i,
+)
 
 assert.match(migration, /payment_method\s+in\s*\(\s*'bank_transfer',\s*'newebpay',\s*'line_pay'\s*\)/i)
 assert.match(migration, /environment\s+in\s*\(\s*'sandbox',\s*'production'\s*\)/i)

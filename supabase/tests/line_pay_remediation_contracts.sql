@@ -301,8 +301,7 @@ begin
       'a0000000-0000-4000-8000-000000000002',
       repeat('6', 64),
       'confirm-contract-merchant-mismatch-1',
-      pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('6', 64)),
-      '2026-07-19T01:00:00Z'
+      pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('6', 64))
     );
     raise exception 'merchant_order_mismatch_was_accepted';
   exception
@@ -324,8 +323,7 @@ begin
       'a0000000-0000-4000-8000-000000000002',
       repeat('6', 64),
       'confirm-contract-currency-mismatch-1',
-      pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('6', 64)),
-      '2026-07-19T01:00:00Z'
+      pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('6', 64))
     );
     raise exception 'currency_mismatch_was_accepted';
   exception
@@ -347,8 +345,7 @@ begin
       'a0000000-0000-4000-8000-000000000002',
       repeat('6', 64),
       'confirm-contract-environment-mismatch-1',
-      pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('6', 64)),
-      '2026-07-19T01:00:00Z'
+      pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('6', 64))
     );
     raise exception 'environment_mismatch_was_accepted';
   exception
@@ -370,8 +367,7 @@ begin
       'a0000000-0000-4000-8000-000000000002',
       repeat('6', 64),
       'confirm-contract-mismatch-1',
-      pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('6', 64)),
-      '2026-07-19T01:00:00Z'
+      pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('6', 64))
     );
     raise exception 'amount_mismatch_was_accepted';
   exception
@@ -401,8 +397,7 @@ begin
     'a0000000-0000-4000-8000-000000000002',
     repeat('6', 64),
     'confirm-contract-success-1',
-    pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('6', 64)),
-    '2026-07-19T01:00:00Z'
+    pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('6', 64))
   ) as completed;
 
   if v_result <> 'completed' then
@@ -440,8 +435,7 @@ begin
     'a0000000-0000-4000-8000-000000000002',
     repeat('6', 64),
     'confirm-contract-duplicate-1',
-    pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('6', 64)),
-    '2026-07-19T01:00:00Z'
+    pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('6', 64))
   ) as completed;
 
   if v_result <> 'already_completed' then
@@ -472,8 +466,7 @@ begin
       'a0000000-0000-4000-8000-000000000002',
       repeat('6', 64),
       'confirm-contract-conflict-1',
-      pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('6', 64)),
-      '2026-07-19T01:00:00Z'
+      pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('6', 64))
     );
     raise exception 'different_transaction_after_paid_was_accepted';
   exception
@@ -495,8 +488,7 @@ begin
       'a0000000-0000-4000-8000-000000000002',
       repeat('8', 64),
       'confirm-contract-evidence-conflict-1',
-      pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('8', 64)),
-      '2026-07-19T01:00:00Z'
+      pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('8', 64))
     );
     raise exception 'different_evidence_after_paid_was_accepted';
   exception
@@ -888,8 +880,7 @@ begin
       'a0000000-0000-4000-8000-000000000005',
       repeat('7', 64),
       'confirm-order-binding-mismatch-1',
-      pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('7', 64)),
-      '2026-07-19T02:00:00Z'
+      pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('7', 64))
     );
     raise exception 'order_payment_binding_mismatch_was_accepted';
   exception
@@ -911,8 +902,7 @@ begin
       'a0000000-0000-4000-8000-000000000005',
       repeat('7', 64),
       'confirm-rollback-1',
-      pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('7', 64)),
-      '2026-07-19T02:00:00Z'
+      pg_catalog.jsonb_build_object('result_code', 'verified', 'evidence_sha256', repeat('7', 64))
     );
     raise exception 'injected_order_failure_did_not_fire';
   exception
@@ -1206,42 +1196,79 @@ begin
         'mark_product_order_line_pay_reconciliation'
       )
   loop
+    select procedure.proname into strict v_name
+    from pg_catalog.pg_proc as procedure
+    where procedure.oid = v_function;
+
     if pg_catalog.has_function_privilege('public_probe', v_function, 'execute')
        or pg_catalog.has_function_privilege('anon', v_function, 'execute')
        or pg_catalog.has_function_privilege('authenticated', v_function, 'execute') then
       raise exception 'browser_role_function_execute_found';
     end if;
 
-    if not pg_catalog.has_function_privilege('service_role', v_function, 'execute') then
-      raise exception 'service_role_function_execute_missing';
-    end if;
-
-    if exists (
-      select 1
-      from pg_catalog.pg_proc as procedure
-      where procedure.oid = v_function
-        and (
-          procedure.prosecdef
-          or procedure.proowner <> (
-            select role.oid from pg_catalog.pg_roles as role where role.rolname = 'postgres'
-          )
-          or (
-            procedure.proname = 'read_product_order_line_pay_request_result'
-            and procedure.provolatile <> 's'
-          )
-          or (
-            procedure.proname <> 'read_product_order_line_pay_request_result'
-            and procedure.provolatile <> 'v'
-          )
-          or procedure.proconfig is null
-          or not exists (
-            select 1
-            from unnest(procedure.proconfig) as setting
-            where setting = 'search_path=""'
-          )
-        )
+    if v_name in (
+      'record_product_order_line_pay_confirmation_evidence',
+      'complete_product_order_line_pay_confirmation'
     ) then
-      raise exception 'rpc_security_or_search_path_contract_failed';
+      if pg_catalog.has_function_privilege('service_role', v_function, 'execute')
+         or not pg_catalog.has_function_privilege('line_pay_payment_executor', v_function, 'execute') then
+        raise exception 'dedicated_executor_function_privilege_contract_failed_%', v_name;
+      end if;
+
+      if exists (
+        select 1
+        from pg_catalog.pg_proc as procedure
+        where procedure.oid = v_function
+          and (
+            not procedure.prosecdef
+            or procedure.proowner <> (
+              select role.oid
+              from pg_catalog.pg_roles as role
+              where role.rolname = 'line_pay_payment_function_owner'
+            )
+            or procedure.provolatile <> 'v'
+            or procedure.proconfig is null
+            or not exists (
+              select 1
+              from unnest(procedure.proconfig) as setting
+              where setting = 'search_path=""'
+            )
+          )
+      ) then
+        raise exception 'dedicated_executor_rpc_security_contract_failed_%', v_name;
+      end if;
+    else
+      if not pg_catalog.has_function_privilege('service_role', v_function, 'execute') then
+        raise exception 'service_role_function_execute_missing_%', v_name;
+      end if;
+
+      if exists (
+        select 1
+        from pg_catalog.pg_proc as procedure
+        where procedure.oid = v_function
+          and (
+            procedure.prosecdef
+            or procedure.proowner <> (
+              select role.oid from pg_catalog.pg_roles as role where role.rolname = 'postgres'
+            )
+            or (
+              procedure.proname = 'read_product_order_line_pay_request_result'
+              and procedure.provolatile <> 's'
+            )
+            or (
+              procedure.proname <> 'read_product_order_line_pay_request_result'
+              and procedure.provolatile <> 'v'
+            )
+            or procedure.proconfig is null
+            or not exists (
+              select 1
+              from unnest(procedure.proconfig) as setting
+              where setting = 'search_path=""'
+            )
+          )
+      ) then
+        raise exception 'rpc_security_or_search_path_contract_failed_%', v_name;
+      end if;
     end if;
   end loop;
 end

@@ -16,10 +16,9 @@ const fakeMarkers = [
   'fake_test_signature_do_not_use',
   'fake_test_authorization_do_not_use',
 ]
-const migration = join(
-  root,
-  'supabase/migrations/20260719033404_line_pay_remediation_contracts.sql',
-)
+const migration = process.env.LINE_PAY_MIGRATION_UNDER_TEST
+  ? resolve(process.env.LINE_PAY_MIGRATION_UNDER_TEST)
+  : join(root, 'supabase/migrations/20260719033404_line_pay_remediation_contracts.sql')
 const baselineFiles = [
   'supabase/schema.sql',
   'supabase/bank_transfer_submissions_patch.sql',
@@ -344,6 +343,7 @@ async function main() {
   prepareBaseline('line_pay_clean')
   psqlFile('line_pay_clean', migration)
   psqlFile('line_pay_clean', 'supabase/tests/line_pay_remediation_contracts.sql')
+  psqlFile('line_pay_clean', 'supabase/tests/line_pay_paid_security_invariants.sql')
   psqlFile('line_pay_clean', 'supabase/tests/line_pay_request_outcomes.sql')
   await testConcurrentClaim('line_pay_clean')
   testRoleAccess('line_pay_clean')
