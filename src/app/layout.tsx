@@ -1,7 +1,5 @@
 import type { Metadata, Viewport } from 'next'
-import '@/features/ziwei-chart/original-chart.css'
 import './globals.css'
-import '@/features/ziwei-chart/package/ziwei-chart-package.css'
 import { Footer } from '@/components/Footer'
 import { FloatingLineButton } from '@/components/FloatingLineButton'
 import { CartProvider } from '@/components/CartContext'

@@ -7,27 +7,32 @@ const globals = readFileSync(join(root, 'src/app/globals.css'), 'utf8')
 const originalChart = readFileSync(join(root, 'src/features/ziwei-chart/original-chart.css'), 'utf8')
 const chartForm = readFileSync(join(root, 'src/components/ChartBirthForm.tsx'), 'utf8')
 const divination = readFileSync(join(root, 'src/components/divination/DivinationDrawPreview.tsx'), 'utf8')
+const resultChartCss = readFileSync(
+  join(root, 'src/app/ai-chart/result/result-chart.css'),
+  'utf8',
+)
+const chartFormCss = readFileSync(join(root, 'src/app/ai-chart/chart-form.css'), 'utf8')
 
 // 實際使用中的命盤 DOM grid 必須跟著窄版父層縮小，不依賴頁面裁切。
-assert.equal(globals.includes('.original-ziwei-view {\n  max-width: 100%;\n  min-width: 0;'), true)
-assert.equal(globals.includes('.original-ziwei-view .chart-wrapper {\n  max-width: 100%;\n  min-width: 0;'), true)
-assert.equal(globals.includes('.original-ziwei-view .chart-grid {'), true)
-assert.equal(globals.includes('.original-ziwei-view .palace-cell,\n.original-ziwei-view .center-cell {\n  min-width: 0;'), true)
+assert.equal(resultChartCss.includes('.original-ziwei-view {\n  max-width: 100%;\n  min-width: 0;'), true)
+assert.equal(resultChartCss.includes('.original-ziwei-view .chart-wrapper {\n  max-width: 100%;\n  min-width: 0;'), true)
+assert.equal(resultChartCss.includes('.original-ziwei-view .chart-grid {'), true)
+assert.equal(resultChartCss.includes('.original-ziwei-view .palace-cell,\n.original-ziwei-view .center-cell {\n  min-width: 0;'), true)
 assert.equal(originalChart.includes('grid-template-columns: repeat(4, minmax(0, 1fr))'), true)
 
 // 手機盤面下限：主星 13px、宮位與地支 12px、次要資訊 11px。
-assert.equal(globals.includes('--fs-zh-star: 13px'), true)
-assert.equal(globals.includes('--fs-zh-small: 12px'), true)
-assert.equal(globals.includes('--fs-zh-tiny: 11px'), true)
+assert.equal(resultChartCss.includes('--fs-zh-star: 13px'), true)
+assert.equal(resultChartCss.includes('--fs-zh-small: 12px'), true)
+assert.equal(resultChartCss.includes('--fs-zh-tiny: 11px'), true)
 assert.equal(originalChart.includes('.doctor-label .star-zh { font-size: 11px; }'), true)
 assert.equal(originalChart.includes('.native-id .id-zh       { font-size: 12px; }'), true)
 
 // 實際出生資料表單在 iOS 手機維持至少 16px，桌面規則不被改寫。
 assert.equal(chartForm.includes('className="chart-birth-form grid min-w-0 max-w-full'), true)
-assert.equal(globals.includes(".chart-birth-form input:not([type='checkbox']):not([type='radio'])"), true)
-assert.equal(globals.includes('.chart-birth-form select,'), true)
-assert.equal(globals.includes('.chart-birth-form textarea {\n    font-size: 16px;'), true)
-assert.equal(globals.includes('@media (max-width: 768px)'), true)
+assert.equal(chartFormCss.includes(".chart-birth-form input:not([type='checkbox']):not([type='radio'])"), true)
+assert.equal(chartFormCss.includes('.chart-birth-form select,'), true)
+assert.equal(chartFormCss.includes('.chart-birth-form textarea {\n    font-size: 16px;'), true)
+assert.equal(chartFormCss.includes('@media (max-width: 768px)'), true)
 
 // 手動選牌沿用 ziwei-card 的完整 14 張橢圓扇形，不再拆成五張分頁。
 assert.equal(divination.includes('mobile-card-fan-stage relative -mx-5 flex h-[260px]'), true)

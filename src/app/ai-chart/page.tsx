@@ -1,3 +1,4 @@
+import './chart-form.css'
 import type { Metadata } from 'next'
 import { ChartBirthForm } from '@/components/ChartBirthForm'
 import { PageHero } from '@/components/PageHero'
