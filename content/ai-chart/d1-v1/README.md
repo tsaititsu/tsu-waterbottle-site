@@ -34,7 +34,12 @@
 - P1 固定 instructions：已完成
 - P1 canonical userInput：已完成
 - P1 Output Schema fingerprint binding：已完成
-- Adapter Bridge：尚未完成
+- P1 Adapter Bridge Contract：已完成
+- 固定 12 份 P1 Adapter Bridges：已完成
+- Structured Request mapping：已完成
+- Source-bound P1 Result parser：已完成
+- Responses body compatibility：已完成
+- Server request：尚未接線
 - F1 Input Contract：未建立，狀態為
   `F1_BLOCKED_BY_MISSING_FLYING_TRANSFORM_SOURCE`
 - B1／S1／A1／R1／A2／O1 Contract：未建立
@@ -60,15 +65,17 @@ Manifest 與 23 份素材會在 Server 端驗證原始位元組 SHA-256。
 一致性，不代表素材內容已由老師逐句核准。N0 與 P1 Structural Input
 已建立；K0 Catalog 與 deterministic knowledge selection 已完成，完整
 P1 Model Input Contract 與固定 12 份 builder 已完成；P1 Prompt Package
-Contract 與固定 12 份 builder 也已完成，但 Adapter Bridge 仍未完成，
-也沒有產生任何 OpenAI request。
+Contract 與固定 12 份 builder 也已完成；P1 Adapter Bridge Contract 與
+固定 12 份 Runtime Bridges 已完成。目前仍未接入 Server request，也沒有
+發送任何 OpenAI network request。
 
 K0 compiler 只在 Server 端讀取內部固定的九份白名單素材，呼叫端不能傳入
 路徑或自訂 allowlist；逐檔驗證 Manifest、
 Repository-relative path、regular-file／non-symlink、SHA-256 與 strict UTF-8。
 它不會讀取 Prompt，也不會把原始完整素材回傳給任何 Route。
 
-Responses adapter 尚未被 Route、Report、付款或 Supabase 流程引用。
+P1 Adapter Bridge 只引用 Responses adapter core，不引用 Server request；
+Responses adapter 與 Bridge 尚未被 Route、Report、付款或 Supabase 流程引用。
 測試只使用 mock fetch，沒有測試會呼叫 OpenAI；目前也不會讀取或
 傳送本目錄的 D1 素材。所有 `runtimeEnabled` 仍為 `false`。
 
@@ -77,9 +84,10 @@ Adapter 使用原生 REST fetch 解析原始 `output` array，不依賴 SDK-only
 本次另建立的 P1 Structural Input 尚不是完整模型輸入。P1 Model Input 仍固定
 標記 `promptStatus=prompt_builder_required`、`promptVersion=null` 與
 `openAiCallable=false`。P1 Prompt Package 另行標記 `promptStatus=ready`、
-`adapterStatus=adapter_bridge_required` 與 `openAiCallable=false`；必須另行
-完成 Adapter Bridge，才能進行受控 Preview 測試。P1 Structural Input、
-Model Input 與 Prompt Package 都不得直接送入既有 Adapter。
+`adapterStatus=adapter_bridge_required` 與 `openAiCallable=false`；必須通過
+Adapter Bridge 的 authenticated rebuild，才能建立記憶體內 Structured Request。
+P1 Structural Input、Model Input 與 Prompt Package 都不得直接送入既有
+Adapter；下一階段才是受控 Preview Request Gate／Runtime。
 
 ## N0 與 P1 Structural Input 邊界
 
@@ -165,8 +173,9 @@ keys 都會 fail closed。星曜欄位沒有改成 `starName` projection。
 missing requirements。Parser 會把 trace 的 palace role、placement、星曜、四化、
 雙星、空宮與四馬地重新綁定至 Structural Context；語意與 source binding 全部
 通過後才核對 deterministic `inputFingerprint`。Model Input 的唯一 production
-consumer 是 P1 Prompt Package builder；Prompt Package production consumer 0、
-OpenAI request 0、Route／Runtime 0，F1 仍固定為
+consumer 是 P1 Prompt Package builder；Prompt Package builder 的唯一 production
+consumer 是 P1 Adapter Bridge，Bridge production consumer 0、OpenAI network
+request 0、Route／Runtime 0，F1 仍固定為
 `F1_BLOCKED_BY_MISSING_FLYING_TRANSFORM_SOURCE`。
 
 ## P1 Prompt Package Contract 邊界
@@ -188,8 +197,35 @@ Package parser 會重新驗證上游來源、重建 expected Package，再做 ex
 與 fingerprint 檢查。`userInput` 只允許 authenticated Model Input 的 canonical
 serialization，不能插入 caller instructions 或額外個資。Package 固定為
 `promptStatus=ready`、`adapterStatus=adapter_bridge_required`、
-`openAiCallable=false`。下一階段才是 Adapter Bridge；目前 OpenAI request 0、
-Runtime 接線 0，F1 仍為 `F1_BLOCKED_BY_MISSING_FLYING_TRANSFORM_SOURCE`。
+`openAiCallable=false`。Package 只能由 Adapter Bridge 重新驗證來源後使用；
+目前 OpenAI network request 0、Runtime 接線 0，F1 仍為
+`F1_BLOCKED_BY_MISSING_FLYING_TRANSFORM_SOURCE`。
+
+## P1 Adapter Bridge Contract 邊界
+
+P1 Adapter Bridge 使用純 JSON Descriptor
+`ai-chart-d1-p1-adapter-bridge/v1` 與記憶體內 Runtime Bridge 兩層結構。
+Descriptor 不包含 function、raw instructions、raw userInput、Schema object、
+model、API URL、header、request body 或 response；其 canonical SHA-256
+`bridgeFingerprint` 只涵蓋固定 Descriptor 欄位。Runtime Bridge 才包含既有
+Adapter core 驗證並凍結的 Structured Request 與 source-bound `parseResult`
+function，function 不會序列化或進入 Descriptor。
+
+固定 12 份 builder 會由 Catalog、Structural Inputs、K0 Bundles 與 Model Inputs
+重新建立 expected Prompt Packages，再逐份 exact 驗證 caller supplied Packages。
+任一份重排、變造、來源不一致或 not-ready 都會整批 fail closed，不回傳 11 份
+ready subset。每份 request 固定使用 authenticated Package 的 instructions 與
+userInput、正式 P1 Output Schema，以及既有 Adapter core 的 reasoning、timeout
+與 max output token defaults；Bridge production code 不重建 Responses API body。
+
+Source-bound Result parser 先使用正式 P1 parser，再驗證 call／chart／palace
+identity、status、空宮借星、selected Rule、五個結構宮位、實際星曜、P1 structure
+boundary、上游 warning traceability 與 audit metadata isolation。Descriptor 固定
+`requestStatus=ready`、`runtimeStatus=runtime_wiring_required`、
+`openAiCallable=false`。Bridge 不 import `openAiResponses.server`、不讀取 API key、
+不執行 fetch；Server request、Preview 模型呼叫、Route、Runtime、Orchestrator、
+Result persistence 與 F1 都尚未接線。Prompt instructions／SHA 與 Output
+Schema／SHA 均未修改。
 
 ## P1／F1 輸出 Contract 邊界
 
@@ -206,7 +242,7 @@ MeaningItem × 落入宮 MeaningItem 覆蓋率，留待未來 F1 Input Contract
 本階段沒有把它宣稱為正式 Runtime Schema，也沒有修改其內容。
 
 本階段只由 Server-only K0 compiler 讀取並驗證九份白名單素材；沒有傳送
-正式素材全文，沒有 Adapter Bridge、OpenAI 呼叫、Route、Report 或付款接線；
+正式素材全文，沒有 OpenAI network 呼叫、Route、Report 或付款接線；
 所有 `runtimeEnabled` 仍為 `false`。
 
 ## 功能邊界
