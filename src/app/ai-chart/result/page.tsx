@@ -1,3 +1,5 @@
+import '@/features/ziwei-chart/original-chart.css'
+import './result-chart.css'
 import { ChartResultSessionView } from '@/components/ChartResultSessionView'
 import { PageHero } from '@/components/PageHero'
 
