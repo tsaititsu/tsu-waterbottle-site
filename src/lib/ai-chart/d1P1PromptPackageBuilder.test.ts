@@ -652,7 +652,7 @@ async function run() {
 
   const repositoryRoot = process.cwd()
   const sourceFiles = sourceFilesUnder(join(repositoryRoot, 'src'))
-  check('production consumers of the Prompt Package builder remain zero', () => {
+  check('Adapter Bridge is the only production Prompt Package builder consumer', () => {
     const consumers = sourceFiles
       .filter((path) => path.endsWith('.ts') || path.endsWith('.tsx'))
       .filter((path) =>
@@ -663,9 +663,13 @@ async function run() {
         (path) =>
           !path.endsWith('d1P1PromptPackageBuilder.ts') &&
           !path.endsWith('d1P1PromptPackageBuilder.test.ts') &&
-          !path.endsWith('d1P1PromptPackageTestSupport.ts'),
+          !path.endsWith('d1P1PromptPackageTestSupport.ts') &&
+          !path.endsWith('d1P1AdapterBridge.test.ts') &&
+          !path.endsWith('d1P1AdapterBridgeTestSupport.ts'),
       )
-    assert.deepEqual(consumers, [])
+    assert.deepEqual(consumers, [
+      'src/lib/ai-chart/d1P1AdapterBridge.ts',
+    ])
   })
   check('src/app does not import Prompt Package modules', () => {
     const appFiles = sourceFilesUnder(join(repositoryRoot, 'src', 'app'))
