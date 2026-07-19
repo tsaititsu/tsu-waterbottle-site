@@ -991,7 +991,7 @@ async function run() {
     )
   })
 
-  check('production consumers of the Model Input builder remain zero', () => {
+  check('Prompt Package builder is the only production Model Input consumer', () => {
     const repositoryRoot = process.cwd()
     const sourceFiles = sourceFilesUnder(join(repositoryRoot, 'src'))
     const consumers = sourceFiles
@@ -1006,7 +1006,9 @@ async function run() {
           !path.endsWith('d1P1ModelInputBindings.test.ts') &&
           !path.endsWith('d1P1ModelInputTestSupport.ts'),
       )
-    assert.deepEqual(consumers, [])
+    assert.deepEqual(consumers, [
+      'src/lib/ai-chart/d1P1PromptPackageBuilder.ts',
+    ])
   })
   check('src/app does not import P1 Model Input modules', () => {
     const appFiles = sourceFilesUnder(join(process.cwd(), 'src', 'app'))

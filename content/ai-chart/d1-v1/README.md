@@ -27,6 +27,14 @@
 - P1 Model Input internal JSON Schema：已完成
 - P1 Model Input strict parser：已完成
 - P1 Model Input 固定 12 份 builder：已完成
+- P1 Prompt Package Contract：已完成
+- P1 Prompt Package internal JSON Schema：已完成
+- P1 Prompt Package strict parser：已完成
+- 固定 12 份 P1 Prompt Packages：已完成
+- P1 固定 instructions：已完成
+- P1 canonical userInput：已完成
+- P1 Output Schema fingerprint binding：已完成
+- Adapter Bridge：尚未完成
 - F1 Input Contract：未建立，狀態為
   `F1_BLOCKED_BY_MISSING_FLYING_TRANSFORM_SOURCE`
 - B1／S1／A1／R1／A2／O1 Contract：未建立
@@ -35,7 +43,8 @@
   （`ai-chart-d1-k0-p1-bundle/v1`）
 - K0 Server-only verified compiler：已完成
 - P1 deterministic knowledge selection：已完成，固定建立 12 份 bundle
-- P1／F1 Prompt builder：尚未完成
+- P1 Prompt Package builder：已完成
+- F1 Prompt builder：尚未完成
 - P1 OpenAI call：0
 - Orchestrator：未建立
 - Runtime 接線：未建立
@@ -50,7 +59,8 @@ Manifest 與 23 份素材會在 Server 端驗證原始位元組 SHA-256。
 `reasoning_source_candidate`。納管只確認來源位元組、Manifest 與引用
 一致性，不代表素材內容已由老師逐句核准。N0 與 P1 Structural Input
 已建立；K0 Catalog 與 deterministic knowledge selection 已完成，完整
-P1 Model Input Contract 與固定 12 份 builder 已完成；Prompt builder 仍未完成，
+P1 Model Input Contract 與固定 12 份 builder 已完成；P1 Prompt Package
+Contract 與固定 12 份 builder 也已完成，但 Adapter Bridge 仍未完成，
 也沒有產生任何 OpenAI request。
 
 K0 compiler 只在 Server 端讀取內部固定的九份白名單素材，呼叫端不能傳入
@@ -64,11 +74,12 @@ Responses adapter 尚未被 Route、Report、付款或 Supabase 流程引用。
 
 Adapter 使用原生 REST fetch 解析原始 `output` array，不依賴 SDK-only
 的頂層 `output_text`。既有 Adapter 只正式處理 P1／F1 Output Contract；
-本次另建立的 P1 Structural Input 尚不是完整模型輸入。後續仍須完成
-P1 Model Input 仍固定標記 `promptStatus=prompt_builder_required`、
-`promptVersion=null` 與 `openAiCallable=false`；必須另行完成 Prompt 組裝，
-才能進行受控 Preview 測試。P1 Structural Input 與 Model Input 都不得直接
-送入 Adapter。
+本次另建立的 P1 Structural Input 尚不是完整模型輸入。P1 Model Input 仍固定
+標記 `promptStatus=prompt_builder_required`、`promptVersion=null` 與
+`openAiCallable=false`。P1 Prompt Package 另行標記 `promptStatus=ready`、
+`adapterStatus=adapter_bridge_required` 與 `openAiCallable=false`；必須另行
+完成 Adapter Bridge，才能進行受控 Preview 測試。P1 Structural Input、
+Model Input 與 Prompt Package 都不得直接送入既有 Adapter。
 
 ## N0 與 P1 Structural Input 邊界
 
@@ -153,9 +164,32 @@ keys 都會 fail closed。星曜欄位沒有改成 `starName` projection。
 與 exact selection trace，不含來源檔路徑、完整 Catalog、完整 Bundle wrapper 或
 missing requirements。Parser 會把 trace 的 palace role、placement、星曜、四化、
 雙星、空宮與四馬地重新綁定至 Structural Context；語意與 source binding 全部
-通過後才核對 deterministic `inputFingerprint`。本階段 production consumer 為 0，
-Prompt 0、OpenAI request 0、Route／Runtime 0，F1 仍固定為
+通過後才核對 deterministic `inputFingerprint`。Model Input 的唯一 production
+consumer 是 P1 Prompt Package builder；Prompt Package production consumer 0、
+OpenAI request 0、Route／Runtime 0，F1 仍固定為
 `F1_BLOCKED_BY_MISSING_FLYING_TRANSFORM_SOURCE`。
+
+## P1 Prompt Package Contract 邊界
+
+P1 Prompt Package 使用獨立版本 `ai-chart-d1-p1-prompt-package/v1` 與固定
+Prompt 版本 `ai-chart-d1-p1-prompt/v1`。固定 12 份 builder 會先由既有
+Catalog、Structural Inputs 與 K0 Bundles 重建 expected Model Inputs，再逐份
+驗證 caller 提供的 Model Input；任一不一致、重排或 partial 狀態都會整批
+拒絕，不會回傳 ready subset。
+
+每份 Package 只包含固定 instructions、authenticated Model Input 的 canonical
+JSON `userInput`、既有 P1 Output Schema 的 deterministic fingerprint、來源 trace
+與 UTF-8 byte budget。它不包含 model、reasoning、timeout、token、Responses API
+body 或完整 Schema object。Instructions 不從 Markdown 載入，舊
+`prompt/0_主控.md` 未用於 P1 Runtime Prompt；舊五步、B1／B2 與飛化流程也未
+進入 P1。
+
+Package parser 會重新驗證上游來源、重建 expected Package，再做 exact equality
+與 fingerprint 檢查。`userInput` 只允許 authenticated Model Input 的 canonical
+serialization，不能插入 caller instructions 或額外個資。Package 固定為
+`promptStatus=ready`、`adapterStatus=adapter_bridge_required`、
+`openAiCallable=false`。下一階段才是 Adapter Bridge；目前 OpenAI request 0、
+Runtime 接線 0，F1 仍為 `F1_BLOCKED_BY_MISSING_FLYING_TRANSFORM_SOURCE`。
 
 ## P1／F1 輸出 Contract 邊界
 
@@ -172,7 +206,7 @@ MeaningItem × 落入宮 MeaningItem 覆蓋率，留待未來 F1 Input Contract
 本階段沒有把它宣稱為正式 Runtime Schema，也沒有修改其內容。
 
 本階段只由 Server-only K0 compiler 讀取並驗證九份白名單素材；沒有傳送
-正式素材全文，沒有 Prompt 組裝、OpenAI 呼叫、Route、Report 或付款接線；
+正式素材全文，沒有 Adapter Bridge、OpenAI 呼叫、Route、Report 或付款接線；
 所有 `runtimeEnabled` 仍為 `false`。
 
 ## 功能邊界
