@@ -1,0 +1,60 @@
+name: AI Chart Contract CI
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/ai-chart-contract-ci.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
+      - "scripts/ai-chart/**"
+      - "src/lib/ai-chart/**"
+      - "content/ai-chart/d1-v1/README.md"
+      - "docs/TEST_RELEASE_RULES.md"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/ai-chart-contract-ci.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
+      - "scripts/ai-chart/**"
+      - "src/lib/ai-chart/**"
+      - "content/ai-chart/d1-v1/README.md"
+      - "docs/TEST_RELEASE_RULES.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-chart-contract-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: Canonical assertions and typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.16.0"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run canonical AI chart tests
+        run: npm run test:ai-chart
+
+      - name: Run TypeScript typecheck
+        run: npm run typecheck -- --incremental false
