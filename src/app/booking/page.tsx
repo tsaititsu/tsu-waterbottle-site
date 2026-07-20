@@ -1,6 +1,5 @@
 import type { Metadata } from 'next'
-import { Suspense } from 'react'
-import { BookingSearchParamsBridge } from '@/components/BookingSearchParamsBridge'
+import { BookingPageShell } from '@/components/BookingPageShell'
 import { PageHero } from '@/components/PageHero'
 import { AddConsultationToCartButton } from '@/components/AddConsultationToCartButton'
 import { shouldHideConsultationServices } from '@/lib/siteVisibility'
@@ -30,9 +29,7 @@ export default function BookingPage() {
       <section className="bg-white py-12 md:py-16">
         <div className="section-shell grid gap-8">
           <AddConsultationToCartButton />
-          <Suspense fallback={null}>
-            <BookingSearchParamsBridge />
-          </Suspense>
+          <BookingPageShell />
         </div>
       </section>
     </>

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { DivinationQuestionForm } from "./DivinationQuestionForm"
+import { DivinationQuestionContextPanel } from "./DivinationQuestionContextPanel"
 import { getAuthAccessToken } from "@/lib/mockAuth"
 import {
   clearDivinationFollowUpDraft,
@@ -18,7 +19,6 @@ import type {
   DivinationFollowUpDisplayThread,
   DivinationInterpretation,
   DivinationReadingSession,
-  DivinationPosition,
 } from "@/lib/divination/types"
 
 type DrawMode = DivinationDrawMode
@@ -35,11 +35,6 @@ const readingSessionStorageKey = "divination_reading_session"
 type DivinationLocalPreviewProps = {
   resetKey?: string
   followUpKey?: string
-}
-
-const positionLabels: Record<DivinationPosition, string> = {
-  upright: "正位",
-  reversed: "反位",
 }
 
 function createLocalUserId() {
@@ -222,61 +217,11 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
         </p>
       </div>
       <section className="grid gap-4">
-        <div>
-          <p className="text-sm font-semibold tracking-[0.18em] text-darkGold">第一步</p>
-          <p className="mt-2 leading-7 text-textMuted">
-            填寫一個清楚的問題，選擇你想要的抽牌方式。
-          </p>
-        </div>
-        {followUpKey && latestFollowUpReading ? (
-          <article className="rounded-2xl border border-purple-100 bg-white p-5 shadow-soft">
-            <p className="text-sm font-semibold tracking-[0.18em] text-darkGold">
-              正在延續上一題追問
-            </p>
-            <div className="mt-3 grid gap-3 leading-7 text-textMuted">
-              <div>
-                <p className="font-semibold text-deepPurple">上一題：</p>
-                <p>「{latestFollowUpReading.question}」</p>
-              </div>
-              <div>
-                <p className="font-semibold text-deepPurple">抽到：</p>
-                <p>
-                  {latestFollowUpReading.cardName || "紫微牌卡"}
-                  {latestFollowUpReading.position ? `｜${positionLabels[latestFollowUpReading.position]}` : ""}
-                </p>
-              </div>
-              <p>
-                請輸入這次想追問的問題。下一步仍會重新抽牌，AI 解讀每次 NT$50。
-              </p>
-            </div>
-            {latestDisplayReading ? (
-              <details className="mt-4 rounded-2xl border border-purple-100 bg-softPurple/60 p-4">
-                <summary className="cursor-pointer text-sm font-semibold text-deepPurple">
-                  查看上一題題目與解答
-                </summary>
-                <div className="mt-4 grid gap-4 leading-7 text-textMuted">
-                  <div>
-                    <p className="font-semibold text-deepPurple">上一題問題：</p>
-                    <p>「{latestDisplayReading.question}」</p>
-                  </div>
-                  <div>
-                    <p className="font-semibold text-deepPurple">抽到：</p>
-                    <p>
-                      {latestDisplayReading.cardName || "紫微牌卡"}
-                      {latestDisplayReading.position ? `｜${positionLabels[latestDisplayReading.position]}` : ""}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="font-semibold text-deepPurple">上一題解答：</p>
-                    <div className="mt-2 max-h-80 overflow-y-auto whitespace-pre-line rounded-xl bg-white p-4 text-sm leading-7 text-textDark">
-                      {latestDisplayReading.finalAnswer}
-                    </div>
-                  </div>
-                </div>
-              </details>
-            ) : null}
-          </article>
-        ) : null}
+        <DivinationQuestionContextPanel
+          isFollowUp={Boolean(followUpKey)}
+          followUpReading={latestFollowUpReading}
+          displayReading={latestDisplayReading}
+        />
         <DivinationQuestionForm key={resetKey || "initial"} onQuestionSubmit={handleQuestionSubmit} />
         {isCreatingReading ? (
           <p className="rounded-xl border border-purple-100 bg-purple-50 px-4 py-3 text-sm leading-7 text-textMuted">
