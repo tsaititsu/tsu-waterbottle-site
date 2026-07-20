@@ -20,6 +20,8 @@ export const WORKFLOW_FILE =
   '.github/workflows/supabase-emergency-profiles-acl.yml'
 export const EXPECTED_MIGRATION_SHA256 =
   'f7f2207135ffaf1dd3476108a38ffb95184410ad0fad962f4d0e71e9e9613e7d'
+export const EXPECTED_RUNNER_SHA256 =
+  'c9f90800a5675e2ca544f14e26ffc13c71c84307143b549d34ed5e9098d4f8f9'
 export const PSQL_BINARY = '/usr/lib/postgresql/16/bin/psql'
 export const EXPECTED_PSQL_MAJOR = 16
 
@@ -181,6 +183,13 @@ export function validateConfirmation(value) {
 export function validateMigrationHash(actualHash) {
   if (actualHash !== EXPECTED_MIGRATION_SHA256) {
     fail('MIGRATION_HASH_MISMATCH')
+  }
+  return true
+}
+
+export function validateRunnerHash(actualHash) {
+  if (actualHash !== EXPECTED_RUNNER_SHA256) {
+    fail('RUNNER_HASH_MISMATCH')
   }
   return true
 }
@@ -458,7 +467,9 @@ export function validateSource(environment = process.env, root = process.cwd()) 
   }
   if (runGit(['rev-parse', 'HEAD'], root) !== githubSha) fail('SOURCE_CONTEXT_INVALID')
   const migration = fileContents.get(MIGRATION_FILE)
+  const runner = fileContents.get(RUNNER_FILE)
   validateMigrationHash(createHash('sha256').update(migration).digest('hex'))
+  validateRunnerHash(createHash('sha256').update(runner).digest('hex'))
   assertMigrationStaticSafety(migration)
   assertMetadataSqlStaticSafety(fileContents.get(PREFLIGHT_FILE))
   assertMetadataSqlStaticSafety(fileContents.get(POSTFLIGHT_FILE))
@@ -481,6 +492,7 @@ const SAFE_ERROR_CODES = new Set([
   'SOURCE_CONTEXT_INVALID', 'SOURCE_VALIDATION_FAILED', 'UNSAFE_MIGRATION_SQL',
   'UNSAFE_METADATA_SQL', 'INVALID_SQL_SYNTAX', 'PSQL_VERSION_CHECK_FAILED',
   'UNSUPPORTED_PSQL_VERSION',
+  'RUNNER_HASH_MISMATCH',
 ])
 
 async function main() {
