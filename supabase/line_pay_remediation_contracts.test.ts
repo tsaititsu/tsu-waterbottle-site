@@ -63,6 +63,83 @@ assert.doesNotMatch(postgresImageContract, /process\.env|github\.event|workflow_
 assert.match(postgresRunner, /const image = LINE_PAY_POSTGRES_IMAGE/)
 assert.doesNotMatch(postgresRunner, /process\.env\.[A-Z0-9_]*POSTGRES[A-Z0-9_]*IMAGE/i)
 
+function assertRelationLockContract(source: string) {
+  const transactionBegins = [...source.matchAll(/^begin;\s*$/gim)]
+  const transactionCommits = [...source.matchAll(/^commit;\s*$/gim)]
+  const lockTimeouts = [...source.matchAll(/^set local lock_timeout = '5s';\s*$/gim)]
+  const timeoutResets = [...source.matchAll(/^set local lock_timeout = '0';\s*$/gim)]
+  const relationLocks = [
+    ...source.matchAll(/^lock table public\.product_orders in access exclusive mode;\s*$/gim),
+  ]
+  const relationExistenceGuard = source.indexOf("if to_regclass('public.product_orders') is null then")
+  const relationLockIndex = relationLocks[0]?.index ?? -1
+  const paymentMethodGuardIndex = source.indexOf('-- Guard every same-name constraint type')
+  const paymentMethodDropIndex = source.indexOf(
+    'drop constraint if exists product_orders_payment_method_check',
+  )
+  const paymentMethodRecreateIndex = source.indexOf(
+    'add constraint product_orders_payment_method_check',
+  )
+  const transactionCommitIndex = transactionCommits[0]?.index ?? -1
+
+  assert.equal(transactionBegins.length, 1, 'migration must have one explicit outer BEGIN')
+  assert.equal(transactionCommits.length, 1, 'migration must have one explicit outer COMMIT')
+  assert.equal(lockTimeouts.length, 1, 'relation lock must have one fixed transaction-local timeout')
+  assert.equal(timeoutResets.length, 1, 'lock timeout must reset only after relation lock acquisition')
+  assert.equal(relationLocks.length, 1, 'product_orders must have one exact ACCESS EXCLUSIVE lock')
+  assert.ok(relationExistenceGuard >= 0, 'relation existence guard must be present')
+  assert.ok(transactionBegins[0].index! < relationExistenceGuard)
+  assert.ok(relationExistenceGuard < lockTimeouts[0].index!)
+  assert.ok(lockTimeouts[0].index! < relationLockIndex)
+  assert.ok(relationLockIndex < timeoutResets[0].index!)
+  assert.ok(timeoutResets[0].index! < paymentMethodGuardIndex)
+  assert.ok(paymentMethodGuardIndex < paymentMethodDropIndex)
+  assert.ok(paymentMethodDropIndex < paymentMethodRecreateIndex)
+  assert.ok(paymentMethodRecreateIndex < transactionCommitIndex)
+
+  const lockLifetime = source.slice(relationLockIndex, transactionCommitIndex)
+  const lockAcquisition = source.slice(lockTimeouts[0].index!, paymentMethodGuardIndex)
+  assert.doesNotMatch(lockLifetime, /^\s*(?:commit|rollback);\s*$/gim)
+  assert.doesNotMatch(lockAcquisition, /pg_(?:try_)?advisory_lock/i)
+  assert.doesNotMatch(lockAcquisition, /\bnowait\b/i)
+  assert.doesNotMatch(lockAcquisition, /\bexception\b/i)
+}
+
+assertRelationLockContract(migration)
+
+const exactRelationLock = 'lock table public.product_orders in access exclusive mode;'
+const exactLockTimeout = "set local lock_timeout = '5s';"
+const exactTimeoutReset = "set local lock_timeout = '0';"
+const relationLockNegativeContracts = [
+  migration.replace(`${exactLockTimeout}\n${exactRelationLock}\n${exactTimeoutReset}\n`, ''),
+  migration.replace(exactRelationLock, 'select pg_catalog.pg_advisory_lock(1);'),
+  migration.replace(exactRelationLock, 'lock table public.product_orders in access share mode;'),
+  migration.replace(exactRelationLock, `${exactRelationLock.slice(0, -1)} nowait;`),
+  migration.replace(
+    `${exactLockTimeout}\n${exactRelationLock}\n${exactTimeoutReset}`,
+    `${exactLockTimeout}\n${exactTimeoutReset}\n${exactRelationLock}`,
+  ),
+  migration.replace(
+    `${exactLockTimeout}\n${exactRelationLock}\n${exactTimeoutReset}`,
+    `${exactLockTimeout}\n${exactRelationLock}\ncommit;\nbegin;\n${exactTimeoutReset}`,
+  ),
+  migration.replace(
+    `${exactLockTimeout}\n${exactRelationLock}\n${exactTimeoutReset}`,
+    `${exactLockTimeout}\ndo $$\nbegin\n  ${exactRelationLock}\nexception when others then null;\nend\n$$;\n${exactTimeoutReset}`,
+  ),
+  migration.replace(
+    `${exactLockTimeout}\n${exactRelationLock}\n${exactTimeoutReset}\n\n-- Guard every same-name constraint type`,
+    `-- Guard every same-name constraint type`,
+  ).replace(
+    'drop constraint if exists product_orders_payment_method_check,',
+    `drop constraint if exists product_orders_payment_method_check;\n${exactLockTimeout}\n${exactRelationLock}\n${exactTimeoutReset}\nalter table public.product_orders`,
+  ),
+]
+
+for (const weakenedContract of relationLockNegativeContracts) {
+  assert.throws(() => assertRelationLockContract(weakenedContract))
+}
+
 for (const table of newTables) {
   assert.match(migration, new RegExp(`create\\s+table\\s+public\\.${table}\\b`, 'i'))
   assert.match(

@@ -247,6 +247,20 @@ const mutations = [
     },
   },
   {
+    name: 'payment_method_relation_lock',
+    runner: 'conflict',
+    scenario: 'relation-lock-commit',
+    expectRelationLockMutation: true,
+    apply(input) {
+      return replaceRequired(
+        input,
+        'lock table public.product_orders in access exclusive mode;\n',
+        '',
+        this.name,
+      )
+    },
+  },
+  {
     name: 'provider_success_check',
     apply(input) {
       let output = replaceRequired(
@@ -434,6 +448,9 @@ try {
           ...(mutation.expectFindingAGuardMutation
             ? { LINE_PAY_EXPECT_FINDING_A_MUTATION: '1' }
             : {}),
+          ...(mutation.expectRelationLockMutation
+            ? { LINE_PAY_EXPECT_RELATION_LOCK_MUTATION: '1' }
+            : {}),
         },
         maxBuffer: 16 * 1024 * 1024,
       })
@@ -445,6 +462,15 @@ try {
 
       if (mutation.expectFindingAGuardMutation) {
         const expectedMarker = `FINDING_A_GUARD_MUTATION_CAUGHT:${scenario}:unsafe_non_check_replacement`
+        const combinedOutput = `${result.stdout}\n${result.stderr}`
+        if (!combinedOutput.includes(expectedMarker)) {
+          throw new Error(
+            `INVALID_MUTATION_CATCH_REASON: ${mutation.name}/${scenario}\n${combinedOutput.slice(-2000)}`,
+          )
+        }
+      }
+      if (mutation.expectRelationLockMutation) {
+        const expectedMarker = 'RELATION_LOCK_MUTATION_CAUGHT:unsafe_concurrent_constraint_replacement'
         const combinedOutput = `${result.stdout}\n${result.stderr}`
         if (!combinedOutput.includes(expectedMarker)) {
           throw new Error(
