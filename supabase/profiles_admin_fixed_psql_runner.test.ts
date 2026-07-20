@@ -396,9 +396,12 @@ async function main() {
     assert.doesNotMatch(runnerSource, /console[.]error\([^\n]*(stderr|result[.]stderr)/)
   })
 
-  await contract('fixed psql 16 version succeeds', async () => {
+  await contract('Ubuntu packaged fixed psql 16 version succeeds', async () => {
     const calls: SpawnCall[] = []
-    const spawnImplementation = fakeSpawnSequence([{ code: 0, stdout: 'psql (PostgreSQL) 16.8\n' }], calls)
+    const spawnImplementation = fakeSpawnSequence([{
+      code: 0,
+      stdout: 'psql (PostgreSQL) 16.14 (Ubuntu 16.14-0ubuntu0.24.04.1)\n',
+    }], calls)
     assert.equal(await runner.verifyFixedPsql(spawnImplementation), true)
     assert.equal(calls[0].binary, validator.PSQL_BINARY)
     assert.deepEqual(calls[0].args, ['--version'])
@@ -411,6 +414,28 @@ async function main() {
   await contract('psql version process failure is fixed-code only', async () => {
     const spawnImplementation = fakeSpawnSequence([{ code: 1, stderr: `secret ${fakeUrl}` }], [])
     await assert.rejects(() => runner.verifyFixedPsql(spawnImplementation), /PSQL_VERSION_CHECK_FAILED/)
+  })
+  await contract('non-16 psql fails before URL parsing, credentials, or database child creation', async () => {
+    const runnerTemp = await makeRunnerTemp()
+    const calls: SpawnCall[] = []
+    const spawnImplementation = fakeSpawnSequence([{
+      code: 0,
+      stdout: 'psql (PostgreSQL) 17.1 (Ubuntu 17.1-1)\n',
+    }], calls)
+    await assert.rejects(
+      () => runner.runDatabasePhase('migration', {
+        environment: {
+          RUNNER_TEMP: runnerTemp,
+          SUPABASE_DB_URL: fakeUrl,
+          SUPABASE_PROJECT_ID: projectId,
+        },
+        spawnImplementation,
+      }),
+      (error: unknown) => error instanceof Error && error.message === 'UNSUPPORTED_PSQL_VERSION',
+    )
+    assert.equal(calls.length, 1)
+    assert.deepEqual(await fs.readdir(runnerTemp), [])
+    await fs.rmdir(runnerTemp)
   })
 
   await contract('credential file uses unpredictable directory and 0600 mode', async () => {

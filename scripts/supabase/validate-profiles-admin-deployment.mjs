@@ -198,8 +198,18 @@ export function validatePsqlVersionOutput(output) {
   if (typeof output !== 'string') {
     fail('UNSUPPORTED_PSQL_VERSION')
   }
-  const match = /^psql \(PostgreSQL\) (\d+)(?:[.]\d+)*\s*$/.exec(output.trim())
-  if (!match || Number(match[1]) !== EXPECTED_PSQL_MAJOR) {
+  const record = output.endsWith('\n') ? output.slice(0, -1) : output
+  if (!record || /[\x00-\x1f\x7f]/u.test(record)) {
+    fail('UNSUPPORTED_PSQL_VERSION')
+  }
+  const match = /^psql \(PostgreSQL\) ([0-9]+(?:[.][0-9]+)*)(?: \(([\x20-\x27\x2a-\x7e]+)\))?$/u.exec(record)
+  const major = match?.[1].split('.')[0]
+  const vendor = match?.[2]
+  if (
+    !match ||
+    major !== String(EXPECTED_PSQL_MAJOR) ||
+    (vendor !== undefined && !/[\x21-\x27\x2a-\x7e]/u.test(vendor))
+  ) {
     fail('UNSUPPORTED_PSQL_VERSION')
   }
   return true
@@ -476,10 +486,10 @@ export function validateSource(environment = process.env, root = process.cwd()) 
   return true
 }
 
-export function validateInstalledPsql() {
+export function validateInstalledPsql(execImplementation = execFileSync) {
   let output
   try {
-    output = execFileSync(PSQL_BINARY, ['--version'], {
+    output = execImplementation(PSQL_BINARY, ['--version'], {
       encoding: 'utf8', env: { LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }, stdio: ['ignore', 'pipe', 'pipe'],
     })
   } catch { fail('PSQL_VERSION_CHECK_FAILED') }
