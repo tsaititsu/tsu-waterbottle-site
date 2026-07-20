@@ -74,6 +74,16 @@ npm run test:ai-chart
 npm run typecheck -- --incremental false
 ```
 
+### AI 命盤 Local Preview timeout contract
+
+`AI_CHART_D1_P1_PREVIEW_TIMEOUT_MS` 只可由 Preview Gate contract tests 透過
+synthetic environment dependency 注入，不得在測試程序設定真實 Preview
+環境，也不得提供 `OPENAI_API_KEY`。測試必須覆蓋預設 `120000`、唯一 override
+`300000`、Plan／Bridge／request timeout 一致、fingerprint 與 Authorization
+binding、Production／CI／Vercel fail closed、`maxRequests=1`，以及無 retry、
+fallback 或第二次 request。Plan build 與 mock execution 的 global fetch sentinel
+必須維持 `0`；任何測試都不得發送 OpenAI request。
+
 ## 2. 功能測試
 
 說明：

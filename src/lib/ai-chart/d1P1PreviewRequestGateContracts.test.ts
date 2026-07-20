@@ -24,6 +24,7 @@ import {
   AI_CHART_D1_P1_PREVIEW_GATE_SCHEMA_NAME,
   AI_CHART_D1_P1_PREVIEW_GATE_TASK,
   AiChartD1P1PreviewGateError,
+  createAiChartD1P1PreviewEvidenceContractSummary,
   createAiChartD1P1PreviewAuthorization,
   createAiChartD1P1PreviewRequestPlanFingerprint,
   parseAiChartD1P1PreviewAuthorization,
@@ -33,6 +34,12 @@ import {
   type AiChartD1P1PreviewRequestPlanWithoutFingerprint,
 } from './d1P1PreviewRequestGateContracts'
 import { AI_CHART_D1_P1_SCHEMA_NAME } from './d1P1F1Contracts'
+import {
+  AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+  AI_CHART_D1_P1_PREVIEW_TIMEOUT_ENVIRONMENT_VARIABLE,
+  AI_CHART_D1_P1_PREVIEW_TIMEOUT_VALUES,
+  type AiChartD1P1PreviewTimeoutMs,
+} from './d1P1PreviewTimeoutContracts'
 import {
   AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
   AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
@@ -69,6 +76,7 @@ function withoutFingerprint(
 
 function planFixture(
   targetPalaceId: 'palace:ming' | 'palace:siblings' = 'palace:ming',
+  timeoutMs: AiChartD1P1PreviewTimeoutMs = AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
 ): AiChartD1P1PreviewRequestPlan {
   const suffix = targetPalaceId === 'palace:ming' ? 'a' : 'b'
   const value: AiChartD1P1PreviewRequestPlanWithoutFingerprint = {
@@ -91,7 +99,7 @@ function planFixture(
     outputSchemaSha256: AI_CHART_D1_P1_OUTPUT_SCHEMA_SHA256,
     modelTarget: AI_CHART_D1_MODEL_TARGET,
     reasoningEffort: AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
-    timeoutMs: AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
+    timeoutMs,
     maxOutputTokens: AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
     maxRequests: 1,
     serverOnly: true,
@@ -122,6 +130,10 @@ function collectKeys(value: unknown, output = new Set<string>()): Set<string> {
 
 function run() {
   const plan = planFixture()
+  const localPreviewPlan = planFixture(
+    'palace:ming',
+    AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+  )
   const otherPlan = planFixture('palace:siblings')
   const parsed = parseAiChartD1P1PreviewRequestPlanShape(plan)
   const authorization = createAiChartD1P1PreviewAuthorization(plan)
@@ -147,6 +159,8 @@ function run() {
     ['Authorization version', AI_CHART_D1_P1_PREVIEW_AUTHORIZATION_VERSION, 'ai-chart-d1-p1-preview-authorization/v1'],
     ['Authorization mode', AI_CHART_D1_P1_PREVIEW_AUTHORIZATION_MODE, 'execute_once'],
     ['Authorization acknowledgement', AI_CHART_D1_P1_PREVIEW_AUTHORIZATION_ACKNOWLEDGEMENT, 'EXECUTE_ONE_PAID_OPENAI_PREVIEW_REQUEST'],
+    ['Local Preview timeout environment variable', AI_CHART_D1_P1_PREVIEW_TIMEOUT_ENVIRONMENT_VARIABLE, 'AI_CHART_D1_P1_PREVIEW_TIMEOUT_MS'],
+    ['Local Preview timeout', AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS, 300_000],
   ] as const) {
     check(`${name} is locked`, () => assert.equal(actual, expected))
   }
@@ -187,6 +201,37 @@ function run() {
     assert.equal(plan.reasoningEffort, AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT)
     assert.equal(plan.timeoutMs, AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS)
     assert.equal(plan.maxOutputTokens, AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS)
+  })
+  check('Plan timeout contract allows only default and Local Preview values', () => {
+    assert.deepEqual(AI_CHART_D1_P1_PREVIEW_TIMEOUT_VALUES, [
+      AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
+      AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+    ])
+    assert.equal(localPreviewPlan.timeoutMs, AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS)
+    assert.equal(
+      parseAiChartD1P1PreviewRequestPlanShape(localPreviewPlan).timeoutMs,
+      AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+    )
+  })
+  check('Effective timeout changes the Plan fingerprint', () => {
+    assert.notEqual(localPreviewPlan.planFingerprint, plan.planFingerprint)
+    const defaultPayload = withoutFingerprint(plan)
+    const localPayload = withoutFingerprint(localPreviewPlan)
+    assert.deepEqual(
+      { ...localPayload, timeoutMs: defaultPayload.timeoutMs },
+      defaultPayload,
+    )
+  })
+  check('Evidence contract summary includes the effective timeout', () => {
+    assert.deepEqual(
+      createAiChartD1P1PreviewEvidenceContractSummary(localPreviewPlan),
+      {
+        planFingerprint: localPreviewPlan.planFingerprint,
+        timeoutMs: AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+        maxRequests: 1,
+        productionCallable: false,
+      },
+    )
   })
   check('Plan excludes raw request and private content fields', () => {
     const keys = collectKeys(plan)
@@ -238,6 +283,21 @@ function run() {
   check('Shape parser rejects a wrong fixed constant', () => {
     assertInvalid(() => parseAiChartD1P1PreviewRequestPlanShape({ ...plan, maxRequests: 2 }))
   })
+  for (const timeoutMs of [
+    0,
+    -1,
+    120_001,
+    299_999,
+    300_001,
+    Number.NaN,
+    '300000',
+  ]) {
+    check(`Shape parser rejects timeout ${String(timeoutMs)}`, () => {
+      assertInvalid(() =>
+        parseAiChartD1P1PreviewRequestPlanShape({ ...plan, timeoutMs }),
+      )
+    })
+  }
   check('Shape parser rejects an invalid target palace', () => {
     assertInvalid(() => parseAiChartD1P1PreviewRequestPlanShape({ ...plan, targetPalaceId: 'palace:unknown' }))
   })
@@ -275,6 +335,16 @@ function run() {
     assert.deepEqual(
       Object.keys(planSchema.properties as Record<string, unknown>),
       AI_CHART_D1_P1_PREVIEW_GATE_FIELDS,
+    )
+  })
+  check('Plan Schema exposes only the two timeout contract values', () => {
+    const properties = planSchema.properties as Record<
+      string,
+      Record<string, unknown>
+    >
+    assert.deepEqual(
+      properties.timeoutMs.enum,
+      AI_CHART_D1_P1_PREVIEW_TIMEOUT_VALUES,
     )
   })
   check('Authorization Schema is strict and exact', () => {
@@ -331,6 +401,11 @@ function run() {
   })
   check('Authorization wrong Plan fingerprint is rejected', () => {
     assertInvalid(() => parseAiChartD1P1PreviewAuthorization({ ...authorization, planFingerprint: 'f'.repeat(64) }, plan))
+  })
+  check('Default timeout Authorization is rejected for Local Preview Plan', () => {
+    assertInvalid(() =>
+      parseAiChartD1P1PreviewAuthorization(authorization, localPreviewPlan),
+    )
   })
   check('Authorization wrong target palace is rejected', () => {
     assertInvalid(() => parseAiChartD1P1PreviewAuthorization({ ...authorization, targetPalaceId: 'palace:siblings' }, plan))

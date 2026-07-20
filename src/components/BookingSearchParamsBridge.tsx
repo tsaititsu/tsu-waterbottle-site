@@ -1,11 +1,22 @@
 'use client'
 
+import { useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { BookingForm } from '@/components/BookingForm'
+import type { BookingSearchParamState } from '@/lib/publicFormSearchParams'
 
-export function BookingSearchParamsBridge() {
+type BookingSearchParamsBridgeProps = {
+  onChange: (state: BookingSearchParamState) => void
+}
+
+export function BookingSearchParamsBridge({
+  onChange,
+}: BookingSearchParamsBridgeProps) {
   const searchParams = useSearchParams()
   const resetKey = searchParams.get('reset') ?? ''
 
-  return <BookingForm resetKey={resetKey} />
+  useEffect(() => {
+    onChange({ resetKey })
+  }, [onChange, resetKey])
+
+  return null
 }

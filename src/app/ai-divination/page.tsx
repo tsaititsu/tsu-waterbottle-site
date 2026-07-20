@@ -1,7 +1,6 @@
 import type { Metadata } from 'next'
-import { Suspense } from 'react'
 import { DivinationEntryModule } from '@/components/DivinationEntryModule'
-import { DivinationSearchParamsBridge } from '@/components/divination/DivinationSearchParamsBridge'
+import { DivinationPageShell } from '@/components/divination/DivinationPageShell'
 import { PageHero } from '@/components/PageHero'
 import { shouldHideAiDivinationServices } from '@/lib/siteVisibility'
 import { redirect } from 'next/navigation'
@@ -30,9 +29,7 @@ export default function AiDivinationPage() {
       <section className="bg-white py-12 md:py-16">
         <div className="section-shell grid gap-8">
           <DivinationEntryModule />
-          <Suspense fallback={null}>
-            <DivinationSearchParamsBridge />
-          </Suspense>
+          <DivinationPageShell />
         </div>
       </section>
     </>

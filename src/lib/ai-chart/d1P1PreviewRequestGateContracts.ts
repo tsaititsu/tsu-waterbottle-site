@@ -26,9 +26,13 @@ import {
 } from './d1P1PromptPackageContracts'
 import { AI_CHART_D1_P1_SCHEMA_NAME } from './d1P1F1Contracts'
 import {
+  AI_CHART_D1_P1_PREVIEW_TIMEOUT_VALUES,
+  isAiChartD1P1PreviewTimeoutMs,
+  type AiChartD1P1PreviewTimeoutMs,
+} from './d1P1PreviewTimeoutContracts'
+import {
   AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
   AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
-  AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
 } from './openAiResponses'
 
 export const AI_CHART_D1_P1_PREVIEW_GATE_CONTRACT_VERSION =
@@ -90,7 +94,7 @@ export type AiChartD1P1PreviewRequestPlan = Readonly<{
   outputSchemaSha256: typeof AI_CHART_D1_P1_OUTPUT_SCHEMA_SHA256
   modelTarget: typeof AI_CHART_D1_MODEL_TARGET
   reasoningEffort: typeof AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT
-  timeoutMs: typeof AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS
+  timeoutMs: AiChartD1P1PreviewTimeoutMs
   maxOutputTokens: typeof AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS
   maxRequests: 1
   serverOnly: true
@@ -114,6 +118,13 @@ export type AiChartD1P1PreviewAuthorization = Readonly<{
   planFingerprint: string
   targetPalaceId: AiChartD1PalaceId
   acknowledgement: typeof AI_CHART_D1_P1_PREVIEW_AUTHORIZATION_ACKNOWLEDGEMENT
+}>
+
+export type AiChartD1P1PreviewEvidenceContractSummary = Readonly<{
+  planFingerprint: string
+  timeoutMs: AiChartD1P1PreviewTimeoutMs
+  maxRequests: 1
+  productionCallable: false
 }>
 
 export const AI_CHART_D1_P1_PREVIEW_GATE_FIELDS = Object.freeze([
@@ -183,6 +194,11 @@ function parsePalaceId(value: unknown): AiChartD1PalaceId {
 function parseFixedInteger(value: unknown, expected: number): number {
   if (!Number.isInteger(value) || value !== expected) invalid()
   return value as number
+}
+
+function parsePreviewTimeout(value: unknown): AiChartD1P1PreviewTimeoutMs {
+  if (!isAiChartD1P1PreviewTimeoutMs(value)) invalid()
+  return value
 }
 
 export function createAiChartD1P1PreviewRequestPlanFingerprint(
@@ -268,10 +284,7 @@ export function parseAiChartD1P1PreviewRequestPlanShape(
       outputSchemaSha256: AI_CHART_D1_P1_OUTPUT_SCHEMA_SHA256,
       modelTarget: AI_CHART_D1_MODEL_TARGET,
       reasoningEffort: AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
-      timeoutMs: parseFixedInteger(
-        record.timeoutMs,
-        AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
-      ) as typeof AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
+      timeoutMs: parsePreviewTimeout(record.timeoutMs),
       maxOutputTokens: parseFixedInteger(
         record.maxOutputTokens,
         AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
@@ -290,6 +303,18 @@ export function parseAiChartD1P1PreviewRequestPlanShape(
     if (error instanceof AiChartD1P1PreviewGateError) throw error
     invalid()
   }
+}
+
+export function createAiChartD1P1PreviewEvidenceContractSummary(
+  planValue: unknown,
+): AiChartD1P1PreviewEvidenceContractSummary {
+  const plan = parseAiChartD1P1PreviewRequestPlanShape(planValue)
+  return freezeAiChartD1Value({
+    planFingerprint: plan.planFingerprint,
+    timeoutMs: plan.timeoutMs,
+    maxRequests: plan.maxRequests,
+    productionCallable: plan.productionCallable,
+  })
 }
 
 export function createAiChartD1P1PreviewAuthorization(
@@ -396,8 +421,7 @@ export const AI_CHART_D1_P1_PREVIEW_GATE_INTERNAL_JSON_SCHEMA: AiChartD1JsonSche
     }),
     timeoutMs: freezeAiChartD1Value({
       type: 'integer',
-      minimum: AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
-      maximum: AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
+      enum: AI_CHART_D1_P1_PREVIEW_TIMEOUT_VALUES,
     }),
     maxOutputTokens: freezeAiChartD1Value({
       type: 'integer',
