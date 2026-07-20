@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -35,6 +36,7 @@ type SpawnImplementation = (
 }
 
 type RunnerModule = {
+  CONNECTION_MODES: Record<string, string>
   PHASE_FILES: Record<string, string>
   SUCCESS_MESSAGES: Record<string, string>
   buildChildEnvironment: (connection: Record<string, string>, pgpassFile: string) => Record<string, string>
@@ -44,6 +46,7 @@ type RunnerModule = {
   createCredentialFile: (runnerTemp: string, connection: Record<string, string>, filesystem?: unknown) => Promise<{ directory: string; pgpassFile: string; cleaned?: boolean }>
   escapePgpass: (value: string) => string
   installSignalCleanup: (cleanup: () => Promise<void>, processObject: EventEmitter & Record<string, unknown>) => () => void
+  isValidSupavisorSessionHostname: (hostname: string) => boolean
   parseDatabaseUrl: (url: string, projectId: string) => Record<string, string>
   redactSensitiveText: (text: string, connection: Record<string, string>) => string
   runDatabasePhase: (phase: string, options?: {
@@ -63,7 +66,9 @@ type ValidatorModule = {
   CANONICAL_FUNCTION_CONTRACT: Record<string, unknown>
   CANONICAL_POLICY_REFERENCES: readonly string[]
   CANONICAL_PUBLIC_SCHEMA_CONTRACT: Record<string, unknown>
+  EXPECTED_RUNNER_SHA256: string
   PSQL_BINARY: string
+  validateRunnerHash: (actualHash: string) => true
 }
 
 const root = process.cwd()
@@ -141,8 +146,14 @@ function auditFixture(phase: 'preflight' | 'postflight') {
 }
 
 const projectId = 'abcdefghijklmnopqrst'
+const otherProjectId = 'bbbbbbbbbbbbbbbbbbbb'
+const directHost = `db.${projectId}.supabase.co`
+const poolerHost = 'aws-0-us-east-1.pooler.supabase.com'
 const fakeUrl =
-  `postgresql://fake_user:fake%3Apass%5Cword@db.${projectId}.supabase.co:5432/fake%20database` +
+  `postgresql://postgres:fake%3Apass%5Cword@${directHost}:5432/postgres` +
+  '?sslmode=require'
+const poolerUrl =
+  `postgresql://postgres.${projectId}:fake%3Apass%5Cword@${poolerHost}:5432/postgres` +
   '?sslmode=require'
 
 async function makeRunnerTemp() {
@@ -182,22 +193,59 @@ async function main() {
     assert.throws(() => runner.buildPsqlArgs('/tmp/evil.sql'), /UNSUPPORTED_DATABASE_PHASE/)
   })
 
-  await contract('valid PostgreSQL URL parses percent encoding', () => {
+  await contract('direct URL parses percent-encoded password and derives direct mode', () => {
     const parsed = runner.parseDatabaseUrl(fakeUrl, projectId)
-    assert.equal(parsed.username, 'fake_user')
+    assert.equal(parsed.username, 'postgres')
     assert.equal(parsed.password, 'fake:pass\\word')
-    assert.equal(parsed.database, 'fake database')
+    assert.equal(parsed.database, 'postgres')
+    assert.equal(parsed.port, '5432')
     assert.equal(parsed.sslmode, 'require')
+    assert.equal(parsed.mode, runner.CONNECTION_MODES.direct)
+    assert.equal(Object.isFrozen(parsed), true)
   })
   await contract('postgres protocol is accepted', () => {
-    assert.equal(runner.parseDatabaseUrl(fakeUrl.replace('postgresql:', 'postgres:'), projectId).host, `db.${projectId}.supabase.co`)
+    assert.equal(runner.parseDatabaseUrl(fakeUrl.replace('postgresql:', 'postgres:'), projectId).host, directHost)
   })
-  await contract('missing sslmode defaults to require', () => {
+  await contract('direct omitted port normalizes to 5432', () => {
+    const parsed = runner.parseDatabaseUrl(fakeUrl.replace(':5432/', '/'), projectId)
+    assert.equal(parsed.port, '5432')
+    assert.equal(parsed.mode, runner.CONNECTION_MODES.direct)
+  })
+  await contract('Supavisor session URL derives bound session mode', () => {
+    const parsed = runner.parseDatabaseUrl(poolerUrl, projectId)
+    assert.equal(parsed.host, poolerHost)
+    assert.equal(parsed.username, `postgres.${projectId}`)
+    assert.equal(parsed.database, 'postgres')
+    assert.equal(parsed.port, '5432')
+    assert.equal(parsed.mode, runner.CONNECTION_MODES.supavisorSession)
+    assert.equal(Object.isFrozen(parsed), true)
+  })
+  await contract('Supavisor session omitted port normalizes to 5432', () => {
+    const parsed = runner.parseDatabaseUrl(poolerUrl.replace(':5432/', '/'), projectId)
+    assert.equal(parsed.port, '5432')
+    assert.equal(parsed.mode, runner.CONNECTION_MODES.supavisorSession)
+  })
+  await contract('percent-encoded pooler username is validated after decoding', () => {
+    const encodedUsernameUrl = poolerUrl.replace('postgres.', 'postgres%2E')
+    assert.equal(runner.parseDatabaseUrl(encodedUsernameUrl, projectId).username, `postgres.${projectId}`)
+  })
+  await contract('formal Supabase shared pooler host grammar is accepted without a region allowlist', () => {
+    for (const host of [
+      'aws-0-us-east-1.pooler.supabase.com',
+      'aws-7-eu-central-2.pooler.supabase.com',
+      'aws-12-us-gov-east-1.pooler.supabase.com',
+    ]) {
+      assert.equal(runner.isValidSupavisorSessionHostname(host), true)
+    }
+  })
+  await contract('missing sslmode defaults to require for both modes', () => {
     assert.equal(runner.parseDatabaseUrl(fakeUrl.replace('?sslmode=require', ''), projectId).sslmode, 'require')
+    assert.equal(runner.parseDatabaseUrl(poolerUrl.replace('?sslmode=require', ''), projectId).sslmode, 'require')
   })
   for (const sslmode of ['require', 'verify-ca', 'verify-full']) {
-    await contract(`sslmode ${sslmode} is accepted`, () => {
+    await contract(`sslmode ${sslmode} is accepted for direct and session modes`, () => {
       assert.equal(runner.parseDatabaseUrl(fakeUrl.replace('sslmode=require', `sslmode=${sslmode}`), projectId).sslmode, sslmode)
+      assert.equal(runner.parseDatabaseUrl(poolerUrl.replace('sslmode=require', `sslmode=${sslmode}`), projectId).sslmode, sslmode)
     })
   }
   for (const sslmode of ['disable', 'allow', 'prefer']) {
@@ -205,30 +253,80 @@ async function main() {
       assert.throws(() => runner.parseDatabaseUrl(fakeUrl.replace('sslmode=require', `sslmode=${sslmode}`), projectId), /DATABASE_URL_INVALID/)
     })
   }
-  const invalidUrls: Array<[string, string]> = [
-    ['missing URL', ''],
-    ['non PostgreSQL protocol', fakeUrl.replace('postgresql:', 'https:')],
-    ['missing host', 'postgresql://fake_user:fake-password@:5432/postgres?sslmode=require'],
-    ['missing username', `postgresql://:fake-password@db.${projectId}.supabase.co:5432/postgres?sslmode=require`],
-    ['missing password', `postgresql://fake_user@db.${projectId}.supabase.co:5432/postgres?sslmode=require`],
-    ['missing database', `postgresql://fake_user:fake-password@db.${projectId}.supabase.co:5432/?sslmode=require`],
-    ['fragment', `${fakeUrl}#fragment`],
-    ['unknown query parameter', `${fakeUrl}&application_name=unsafe`],
-    ['duplicate sslmode', `${fakeUrl}&sslmode=require`],
-    ['port zero', fakeUrl.replace(':5432/', ':0/')],
+  const invalidUrls: Array<[string, string, RegExp]> = [
+    ['missing URL', '', /SUPABASE_DB_URL_MISSING/],
+    ['non PostgreSQL protocol', fakeUrl.replace('postgresql:', 'https:'), /DATABASE_URL_INVALID/],
+    ['missing host', 'postgresql://postgres:fake-password@:5432/postgres?sslmode=require', /DATABASE_URL_INVALID/],
+    ['missing username', `postgresql://:fake-password@${directHost}:5432/postgres?sslmode=require`, /DATABASE_URL_INVALID/],
+    ['missing password', `postgresql://postgres@${directHost}:5432/postgres?sslmode=require`, /DATABASE_URL_INVALID/],
+    ['missing database', `postgresql://postgres:fake-password@${directHost}:5432/?sslmode=require`, /DATABASE_URL_INVALID/],
+    ['database mismatch', fakeUrl.replace('/postgres?', '/other?'), /DATABASE_URL_INVALID/],
+    ['fragment', `${fakeUrl}#fragment`, /DATABASE_URL_INVALID/],
+    ['unknown query parameter', `${fakeUrl}&application_name=unsafe`, /DATABASE_URL_INVALID/],
+    ['gssencmode query cannot control child environment', `${poolerUrl}&gssencmode=disable`, /DATABASE_URL_INVALID/],
+    ['duplicate sslmode', `${fakeUrl}&sslmode=require`, /DATABASE_URL_INVALID/],
+    ['invalid sslmode', fakeUrl.replace('sslmode=require', 'sslmode=prefer'), /DATABASE_URL_INVALID/],
+    ['port zero', fakeUrl.replace(':5432/', ':0/'), /DATABASE_URL_INVALID/],
+    ['empty explicit port', fakeUrl.replace(':5432/', ':/'), /DATABASE_URL_INVALID/],
+    ['port 65536', fakeUrl.replace(':5432/', ':65536/'), /DATABASE_URL_INVALID/],
+    ['non-numeric port', fakeUrl.replace(':5432/', ':abc/'), /DATABASE_URL_INVALID/],
+    ['shared transaction pooler 6543', poolerUrl.replace(':5432/', ':6543/'), /DATABASE_URL_INVALID/],
+    ['dedicated transaction pooler 6543', fakeUrl.replace(':5432/', ':6543/'), /DATABASE_URL_INVALID/],
+    ['pooler username missing project ref', poolerUrl.replace(`postgres.${projectId}`, 'postgres'), /DATABASE_TARGET_MISMATCH/],
+    ['pooler username project mismatch', poolerUrl.replace(projectId, otherProjectId), /DATABASE_TARGET_MISMATCH/],
+    ['percent-encoded username decodes to mismatch', poolerUrl.replace(`postgres.${projectId}`, `postgres%2E${otherProjectId}`), /DATABASE_TARGET_MISMATCH/],
+    ['direct host project mismatch', fakeUrl.replace(projectId, otherProjectId), /DATABASE_TARGET_MISMATCH/],
+    ['direct username mismatch', fakeUrl.replace('postgres:', 'other:'), /DATABASE_URL_INVALID/],
+    ['pooler hostname has no AWS region prefix', poolerUrl.replace(poolerHost, 'pooler.supabase.com'), /DATABASE_URL_INVALID/],
+    ['informal evil pooler prefix', poolerUrl.replace(poolerHost, 'evil.pooler.supabase.com'), /DATABASE_URL_INVALID/],
+    ['pooler extra suffix', poolerUrl.replace(poolerHost, `${poolerHost}.evil.example`), /DATABASE_URL_INVALID/],
+    ['pooler suffix substring bypass', poolerUrl.replace(poolerHost, 'aws-0-us-east-1.pooler.supabase.com.evil.example'), /DATABASE_URL_INVALID/],
+    ['localhost', poolerUrl.replace(poolerHost, 'localhost'), /DATABASE_URL_INVALID/],
+    ['IPv4 literal', poolerUrl.replace(poolerHost, '127.0.0.1'), /DATABASE_URL_INVALID/],
+    ['IPv6 literal', poolerUrl.replace(poolerHost, '[::1]'), /DATABASE_URL_INVALID/],
+    ['Unicode hostname', poolerUrl.replace(poolerHost, 'aws-0-us-éast-1.pooler.supabase.com'), /DATABASE_URL_INVALID/],
+    ['punycode hostname', poolerUrl.replace(poolerHost, 'aws-0-xn--east-9za-1.pooler.supabase.com'), /DATABASE_URL_INVALID/],
+    ['pooler node has a leading zero', poolerUrl.replace(poolerHost, 'aws-00-us-east-1.pooler.supabase.com'), /DATABASE_URL_INVALID/],
+    ['pooler region number has a leading zero', poolerUrl.replace(poolerHost, 'aws-0-us-east-01.pooler.supabase.com'), /DATABASE_URL_INVALID/],
+    ['uppercase hostname normalization', poolerUrl.replace(poolerHost, 'AWS-0-US-EAST-1.POOLER.SUPABASE.COM'), /DATABASE_URL_INVALID/],
+    ['trailing dot hostname', poolerUrl.replace(poolerHost, `${poolerHost}.`), /DATABASE_URL_INVALID/],
+    ['raw whitespace', poolerUrl.replace('fake%3Apass', 'fake pass'), /DATABASE_URL_INVALID/],
+    ['encoded password newline', poolerUrl.replace('fake%3Apass%5Cword', 'fake%0Apass'), /DATABASE_URL_INVALID/],
   ]
-  for (const [name, url] of invalidUrls) {
-    await contract(`${name} is rejected`, () => assert.throws(() => runner.parseDatabaseUrl(url, projectId), /SUPABASE_DB_URL_MISSING|DATABASE_URL_INVALID/))
+  for (const [name, url, expectedCode] of invalidUrls) {
+    await contract(`${name} is rejected fail closed`, () => {
+      assert.throws(() => runner.parseDatabaseUrl(url, projectId), expectedCode)
+    })
   }
   await contract('missing project id is rejected', () => assert.throws(() => runner.parseDatabaseUrl(fakeUrl, ''), /SUPABASE_PROJECT_ID_MISSING/))
-  await contract('invalid project id is rejected', () => assert.throws(() => runner.parseDatabaseUrl(fakeUrl, 'short'), /DATABASE_TARGET_MISMATCH/))
-  await contract('host and project mismatch is rejected', () => assert.throws(() => runner.parseDatabaseUrl(fakeUrl, 'bbbbbbbbbbbbbbbbbbbb'), /DATABASE_TARGET_MISMATCH/))
+  for (const invalidProjectId of ['short', projectId.toUpperCase(), `${projectId}x`, 'abcdefghijklmnopqrs-']) {
+    await contract(`invalid project id ${JSON.stringify(invalidProjectId)} is rejected`, () => {
+      assert.throws(() => runner.parseDatabaseUrl(fakeUrl, invalidProjectId), /DATABASE_TARGET_MISMATCH/)
+    })
+  }
+  await contract('invalid URL errors never contain connection identity', () => {
+    for (const [, url] of invalidUrls) {
+      try {
+        runner.parseDatabaseUrl(url, projectId)
+        assert.fail('expected parse failure')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        for (const sensitive of [url, projectId, poolerHost, directHost, 'fake:pass\\word']) {
+          if (sensitive) assert.equal(message.includes(sensitive), false)
+        }
+      }
+    }
+  })
 
   await contract('pgpass escapes colon', () => assert.equal(runner.escapePgpass('fake:pass'), 'fake\\:pass'))
   await contract('pgpass escapes backslash', () => assert.equal(runner.escapePgpass('fake\\pass'), 'fake\\\\pass'))
   await contract('pgpass line escapes every field', () => {
     const connection = runner.parseDatabaseUrl(fakeUrl, projectId)
-    assert.equal(runner.buildPgpassLine(connection), `db.${projectId}.supabase.co:5432:fake database:fake_user:fake\\:pass\\\\word`)
+    assert.equal(runner.buildPgpassLine(connection), `${directHost}:5432:postgres:postgres:fake\\:pass\\\\word`)
+  })
+  await contract('Supavisor session pgpass line preserves the bound username', () => {
+    const connection = runner.parseDatabaseUrl(poolerUrl, projectId)
+    assert.equal(runner.buildPgpassLine(connection), `${poolerHost}:5432:postgres:postgres.${projectId}:fake\\:pass\\\\word`)
   })
 
   await contract('child environment contains only approved keys', () => {
@@ -246,12 +344,49 @@ async function main() {
     assert.equal(env.PGAPPNAME, 'profiles-admin-emergency-migration')
     assert.equal(env.PGCONNECT_TIMEOUT, '15')
   })
+  await contract('Supavisor session child environment is complete and disables GSS negotiation', () => {
+    const connection = runner.parseDatabaseUrl(poolerUrl, projectId)
+    const env = runner.buildChildEnvironment(connection, '/tmp/fake-pgpass')
+    assert.deepEqual(env, {
+      LANG: 'C.UTF-8',
+      LC_ALL: 'C.UTF-8',
+      PGHOST: poolerHost,
+      PGPORT: '5432',
+      PGDATABASE: 'postgres',
+      PGUSER: `postgres.${projectId}`,
+      PGPASSFILE: '/tmp/fake-pgpass',
+      PGSSLMODE: 'require',
+      PGAPPNAME: 'profiles-admin-emergency-migration',
+      PGCONNECT_TIMEOUT: '15',
+      PGGSSENCMODE: 'disable',
+    })
+  })
+  await contract('direct child environment does not change GSS behavior', () => {
+    const env = runner.buildChildEnvironment(runner.parseDatabaseUrl(fakeUrl, projectId), '/tmp/fake-pgpass')
+    assert.equal(Object.hasOwn(env, 'PGGSSENCMODE'), false)
+  })
 
   await contract('redaction removes URL and decoded or encoded secrets', () => {
     const connection = runner.parseDatabaseUrl(fakeUrl, projectId)
     const raw = `${fakeUrl} ${connection.password} ${connection.encodedPassword} ${connection.username} ${connection.host} ${connection.database} ${projectId}`
     const redacted = runner.redactSensitiveText(raw, connection)
     for (const secret of [fakeUrl, connection.password, connection.encodedPassword, connection.username, connection.host, connection.database, projectId]) assert.equal(redacted.includes(secret), false)
+  })
+  await contract('Supavisor redaction removes pooler identity and project binding', () => {
+    const connection = runner.parseDatabaseUrl(poolerUrl, projectId)
+    const raw = `${poolerUrl} ${connection.password} ${connection.encodedPassword} ${connection.username} ${connection.host} ${connection.database} ${projectId}`
+    const redacted = runner.redactSensitiveText(raw, connection)
+    for (const secret of [poolerUrl, connection.password, connection.encodedPassword, connection.username, connection.host, connection.database, projectId]) {
+      assert.equal(redacted.includes(secret), false)
+    }
+  })
+  await contract('runner source performs no DNS or network lookup', () => {
+    assert.doesNotMatch(runnerSource, /node:(?:dns|net|tls)|\bfetch\s*\(/u)
+  })
+  await contract('runner source hash matches the source validator contract', () => {
+    assert.equal(createHash('sha256').update(runnerSource).digest('hex'), validator.EXPECTED_RUNNER_SHA256)
+    assert.equal(validator.validateRunnerHash(validator.EXPECTED_RUNNER_SHA256), true)
+    assert.throws(() => validator.validateRunnerHash('0'.repeat(64)), /RUNNER_HASH_MISMATCH/)
   })
   await contract('source never spreads process env into child', () => assert.doesNotMatch(runnerSource, /\.\.\.process[.]env/))
   await contract('source never references PGPASSWORD or db-url', () => assert.doesNotMatch(runnerSource, /PGPASSWORD|--db-url/))
@@ -300,7 +435,11 @@ async function main() {
     await fs.rmdir(runnerTemp)
   })
 
-  async function runPhase(phase: 'preflight' | 'migration' | 'postflight', phaseResult: FakeResult) {
+  async function runPhase(
+    phase: 'preflight' | 'migration' | 'postflight',
+    phaseResult: FakeResult,
+    databaseUrl = fakeUrl,
+  ) {
     const runnerTemp = await makeRunnerTemp()
     const calls: SpawnCall[] = []
     const spawnImplementation = fakeSpawnSequence([
@@ -310,13 +449,47 @@ async function main() {
     const execution = runner.runDatabasePhase(phase, {
       environment: {
         RUNNER_TEMP: runnerTemp,
-        SUPABASE_DB_URL: fakeUrl,
+        SUPABASE_DB_URL: databaseUrl,
         SUPABASE_PROJECT_ID: projectId,
       },
       spawnImplementation,
     })
     return { calls, execution, runnerTemp }
   }
+
+  await contract('Supavisor session mode reaches only the mocked psql child with approved environment', async () => {
+    const { calls, execution, runnerTemp } = await runPhase('migration', { code: 0 }, poolerUrl)
+    assert.equal(await execution, runner.SUCCESS_MESSAGES.migration)
+    assert.equal(calls.length, 2)
+    assert.equal(calls[1].options.env?.PGHOST, poolerHost)
+    assert.equal(calls[1].options.env?.PGPORT, '5432')
+    assert.equal(calls[1].options.env?.PGUSER, `postgres.${projectId}`)
+    assert.equal(calls[1].options.env?.PGGSSENCMODE, 'disable')
+    assert.equal(Object.hasOwn(calls[1].options.env ?? {}, 'PGPASSWORD'), false)
+    assert.deepEqual(await fs.readdir(runnerTemp), [])
+    await fs.rmdir(runnerTemp)
+  })
+  await contract('invalid transaction pooler fails before credential or database child creation', async () => {
+    const runnerTemp = await makeRunnerTemp()
+    const calls: SpawnCall[] = []
+    const spawnImplementation = fakeSpawnSequence([
+      { code: 0, stdout: 'psql (PostgreSQL) 16.8\n' },
+    ], calls)
+    await assert.rejects(
+      () => runner.runDatabasePhase('migration', {
+        environment: {
+          RUNNER_TEMP: runnerTemp,
+          SUPABASE_DB_URL: poolerUrl.replace(':5432/', ':6543/'),
+          SUPABASE_PROJECT_ID: projectId,
+        },
+        spawnImplementation,
+      }),
+      /DATABASE_URL_INVALID/,
+    )
+    assert.equal(calls.length, 1)
+    assert.deepEqual(await fs.readdir(runnerTemp), [])
+    await fs.rmdir(runnerTemp)
+  })
 
   for (const phase of ['preflight', 'migration', 'postflight'] as const) {
     await contract(`${phase} succeeds with fixed message and cleans credentials`, async () => {
@@ -335,7 +508,9 @@ async function main() {
     const { calls, execution, runnerTemp } = await runPhase('migration', { code: 0 })
     await execution
     const argv = calls[1].args.join(' ')
-    for (const secret of [fakeUrl, 'fake_user', `db.${projectId}.supabase.co`, 'fake database', 'fake:pass\\word', projectId]) assert.equal(argv.includes(secret), false)
+    for (const secret of [fakeUrl, 'postgres', directHost, 'fake:pass\\word', projectId]) {
+      assert.equal(argv.includes(secret), false)
+    }
     await fs.rmdir(runnerTemp)
   })
   await contract('database child env never inherits URL or project id', async () => {
