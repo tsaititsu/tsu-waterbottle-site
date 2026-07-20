@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -17,6 +17,7 @@ const migration = process.env.LINE_PAY_MIGRATION_UNDER_TEST
   : join(root, 'supabase/migrations/20260719033404_line_pay_remediation_contracts.sql')
 const selectedScenario = process.env.LINE_PAY_CONFLICT_SCENARIO ?? null
 const expectFindingAGuardMutation = process.env.LINE_PAY_EXPECT_FINDING_A_MUTATION === '1'
+const expectRelationLockMutation = process.env.LINE_PAY_EXPECT_RELATION_LOCK_MUTATION === '1'
 const baselineFiles = [
   'supabase/schema.sql',
   'supabase/bank_transfer_submissions_patch.sql',
@@ -76,6 +77,213 @@ function psql(database, sql, label) {
 function psqlFile(database, path, label = path) {
   const absolutePath = path.startsWith('/') ? path : join(root, path)
   return psql(database, readFileSync(absolutePath, 'utf8'), label)
+}
+
+function delay(milliseconds) {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds))
+}
+
+function startPsql(database, sql, applicationName) {
+  const child = spawn(
+    'docker',
+    [
+      'exec', '-i', '--env', `PGAPPNAME=${applicationName}`, containerName,
+      'psql', '-X', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', database,
+    ],
+    { cwd: root, encoding: 'utf8' },
+  )
+  let stdout = ''
+  let stderr = ''
+  const completion = new Promise((resolvePromise, rejectPromise) => {
+    child.stdout.on('data', (chunk) => { stdout += chunk })
+    child.stderr.on('data', (chunk) => { stderr += chunk })
+    child.on('error', rejectPromise)
+    child.on('close', (code) => {
+      const combinedOutput = `${stdout}\n${stderr}`
+      assertNoFakeMarker(combinedOutput, applicationName)
+      resolvePromise({ code, stdout, stderr, combinedOutput })
+    })
+  })
+  child.stdin.end(sql)
+  return { child, completion }
+}
+
+async function withTimeout(promise, milliseconds, label) {
+  const timeout = delay(milliseconds).then(() => {
+    throw new Error(`${label} timed out after ${milliseconds}ms`)
+  })
+  return Promise.race([promise, timeout])
+}
+
+async function settleWithin(promise, milliseconds) {
+  return Promise.race([promise, delay(milliseconds).then(() => null)])
+}
+
+async function waitForQuery(database, sql, predicate, label, timeoutMilliseconds = 5000) {
+  const deadline = Date.now() + timeoutMilliseconds
+  let lastOutput = ''
+  while (Date.now() < deadline) {
+    lastOutput = psql(database, sql, label)
+    if (predicate(lastOutput)) return lastOutput
+    await delay(50)
+  }
+  throw new Error(`${label} was not observed; last output: ${lastOutput}`)
+}
+
+async function startCatalogPause(database, applicationName) {
+  const blocker = startPsql(
+    database,
+    `
+      begin;
+      lock table pg_catalog.pg_default_acl in access exclusive mode;
+      select 'catalog_pause_ready';
+      select pg_catalog.pg_sleep(600);
+      commit;
+    `,
+    applicationName,
+  )
+  await waitForQuery(
+    database,
+    `
+      select pg_catalog.count(*)::text
+      from pg_catalog.pg_stat_activity as activity
+      join pg_catalog.pg_locks as held_lock
+        on held_lock.pid = activity.pid
+       and held_lock.locktype = 'relation'
+       and held_lock.relation = 'pg_catalog.pg_default_acl'::regclass
+       and held_lock.mode = 'AccessExclusiveLock'
+       and held_lock.granted
+      where activity.application_name = '${applicationName}'
+        and activity.state = 'active';
+    `,
+    (output) => output === '1',
+    `${applicationName} catalog pause`,
+  )
+  return blocker
+}
+
+async function terminateApplication(database, applicationName, label) {
+  const result = psql(
+    database,
+    `
+      select coalesce(pg_catalog.bool_and(pg_catalog.pg_terminate_backend(activity.pid)), true)::text
+      from pg_catalog.pg_stat_activity as activity
+      where activity.datname = pg_catalog.current_database()
+        and activity.application_name = '${applicationName}'
+        and activity.pid <> pg_catalog.pg_backend_pid();
+    `,
+    label,
+  )
+  if (result !== 'true') throw new Error(`${label} could not terminate the test session`)
+}
+
+async function waitForMigrationGuardPause(database, migrationApplication, blockerApplication, label) {
+  return waitForQuery(
+    database,
+    `
+      select pg_catalog.concat_ws(
+        '|',
+        migration_activity.pid::text,
+        migration_activity.wait_event_type,
+        product_lock.mode,
+        product_lock.granted::text,
+        pg_catalog.array_position(
+          pg_catalog.pg_blocking_pids(migration_activity.pid),
+          blocker_activity.pid
+        ) is not null
+      )
+      from pg_catalog.pg_stat_activity as migration_activity
+      join pg_catalog.pg_stat_activity as blocker_activity
+        on blocker_activity.application_name = '${blockerApplication}'
+      join pg_catalog.pg_locks as product_lock
+        on product_lock.pid = migration_activity.pid
+       and product_lock.locktype = 'relation'
+       and product_lock.relation = 'public.product_orders'::regclass
+       and product_lock.mode = 'AccessExclusiveLock'
+       and product_lock.granted
+      where migration_activity.application_name = '${migrationApplication}'
+        and migration_activity.wait_event_type = 'Lock'
+        and exists (
+          select 1
+          from pg_catalog.pg_locks as pending_lock
+          where pending_lock.pid = migration_activity.pid
+            and pending_lock.locktype = 'relation'
+            and pending_lock.relation = 'pg_catalog.pg_default_acl'::regclass
+            and not pending_lock.granted
+        );
+    `,
+    (output) => /\|Lock\|AccessExclusiveLock\|true\|t$/.test(output),
+    label,
+  )
+}
+
+async function waitForUnlockedMigrationGuardPause(database, migrationApplication, blockerApplication, label) {
+  return waitForQuery(
+    database,
+    `
+      select pg_catalog.concat_ws(
+        '|',
+        migration_activity.pid::text,
+        migration_activity.wait_event_type,
+        pg_catalog.array_position(
+          pg_catalog.pg_blocking_pids(migration_activity.pid),
+          blocker_activity.pid
+        ) is not null,
+        not exists (
+          select 1
+          from pg_catalog.pg_locks as product_lock
+          where product_lock.pid = migration_activity.pid
+            and product_lock.locktype = 'relation'
+            and product_lock.relation = 'public.product_orders'::regclass
+            and product_lock.mode = 'AccessExclusiveLock'
+            and product_lock.granted
+        )
+      )
+      from pg_catalog.pg_stat_activity as migration_activity
+      join pg_catalog.pg_stat_activity as blocker_activity
+        on blocker_activity.application_name = '${blockerApplication}'
+      where migration_activity.application_name = '${migrationApplication}'
+        and migration_activity.wait_event_type = 'Lock'
+        and exists (
+          select 1
+          from pg_catalog.pg_locks as pending_lock
+          where pending_lock.pid = migration_activity.pid
+            and pending_lock.locktype = 'relation'
+            and pending_lock.relation = 'pg_catalog.pg_default_acl'::regclass
+            and not pending_lock.granted
+        );
+    `,
+    (output) => /\|Lock\|t\|t$/.test(output),
+    label,
+  )
+}
+
+async function waitForProductOrdersBlock(database, waiterApplication, blockerApplication, label) {
+  return waitForQuery(
+    database,
+    `
+      select pg_catalog.concat_ws(
+        '|',
+        waiter.pid::text,
+        waiter.wait_event_type,
+        pending_lock.mode,
+        pending_lock.granted::text,
+        pg_catalog.array_position(pg_catalog.pg_blocking_pids(waiter.pid), blocker.pid) is not null
+      )
+      from pg_catalog.pg_stat_activity as waiter
+      join pg_catalog.pg_stat_activity as blocker
+        on blocker.application_name = '${blockerApplication}'
+      join pg_catalog.pg_locks as pending_lock
+        on pending_lock.pid = waiter.pid
+       and pending_lock.locktype = 'relation'
+       and pending_lock.relation = 'public.product_orders'::regclass
+       and not pending_lock.granted
+      where waiter.application_name = '${waiterApplication}'
+        and waiter.wait_event_type = 'Lock';
+    `,
+    (output) => /\|Lock\|[A-Za-z]+Lock\|false\|t$/.test(output),
+    label,
+  )
 }
 
 function prepareBaseline(database) {
@@ -167,6 +375,16 @@ function readPaymentMethodConstraintFingerprint(database, label) {
 }
 
 function cleanupScenarioDatabase(database) {
+  psql(
+    'postgres',
+    `
+      select pg_catalog.pg_terminate_backend(activity.pid)
+      from pg_catalog.pg_stat_activity as activity
+      where activity.datname = '${database}'
+        and activity.pid <> pg_catalog.pg_backend_pid();
+    `,
+    `terminate sessions for ${database}`,
+  )
   psql('postgres', `drop database if exists ${database};`, `drop ${database}`)
   psql(
     'postgres',
@@ -187,6 +405,19 @@ function runScenario(name, setup, expectation) {
     prepareBaseline(database)
     setup(database)
     expectation(database)
+  } finally {
+    cleanupScenarioDatabase(database)
+  }
+  return 1
+}
+
+async function runAsyncScenario(name, scenario) {
+  if (selectedScenario !== null && selectedScenario !== name) return 0
+  const database = `lp_conflict_${name.replaceAll('-', '_')}`.slice(0, 60)
+  psql('postgres', `create database ${database};`, `create ${database}`)
+  try {
+    prepareBaseline(database)
+    await scenario(database)
   } finally {
     cleanupScenarioDatabase(database)
   }
@@ -236,6 +467,401 @@ const roleFixtures = [
     psql('postgres', `grant line_pay_conflict_peer to ${role};`, 'inherited privilege membership')
   }],
 ]
+
+const relationLockMetrics = {
+  commitLockMilliseconds: 0,
+  rollbackReleaseMilliseconds: 0,
+  impactWaitMilliseconds: 0,
+  timeoutMilliseconds: 0,
+}
+
+function assertPsqlSucceeded(result, label) {
+  if (result.code !== 0) {
+    throw new Error(`${label} failed\n${result.stderr || result.stdout}`)
+  }
+}
+
+function assertPsqlFailed(result, expectedPattern, label) {
+  if (result.code === 0 || !expectedPattern.test(result.combinedOutput)) {
+    throw new Error(`${label} did not fail as expected\n${result.stderr || result.stdout}`)
+  }
+}
+
+function dropPaymentMethodConstraint(database, label) {
+  psql(
+    database,
+    'alter table public.product_orders drop constraint product_orders_payment_method_check;',
+    label,
+  )
+}
+
+function assertSameNameConstraintCount(database, expected, label) {
+  const count = psql(
+    database,
+    `
+      select pg_catalog.count(*)::text
+      from pg_catalog.pg_constraint as constraint_row
+      where constraint_row.conrelid = 'public.product_orders'::regclass
+        and constraint_row.conname = 'product_orders_payment_method_check';
+    `,
+    label,
+  )
+  if (count !== String(expected)) {
+    throw new Error(`${label} expected ${expected}, received ${count}`)
+  }
+}
+
+async function runRelationLockCommitScenario(database) {
+  dropPaymentMethodConstraint(database, 'relation lock commit absent constraint')
+  const blockerApplication = 'lp_lock_commit_catalog'
+  const migrationApplication = 'lp_lock_commit_migration'
+  const concurrentApplication = 'lp_lock_commit_concurrent'
+  const blocker = await startCatalogPause(database, blockerApplication)
+  const migrationStartedAt = Date.now()
+  const migrationSession = startPsql(
+    database,
+    readFileSync(migration, 'utf8'),
+    migrationApplication,
+  )
+
+  if (expectRelationLockMutation) {
+    await waitForUnlockedMigrationGuardPause(
+      database,
+      migrationApplication,
+      blockerApplication,
+      'mutated migration guard pause without relation lock',
+    )
+  } else {
+    await waitForMigrationGuardPause(
+      database,
+      migrationApplication,
+      blockerApplication,
+      'migration guard pause with relation lock',
+    )
+  }
+
+  const concurrentSession = startPsql(
+    database,
+    `
+      alter table public.product_orders
+        add constraint product_orders_payment_method_check unique (id);
+    `,
+    concurrentApplication,
+  )
+  const earlyConcurrentResult = await settleWithin(concurrentSession.completion, 500)
+
+  if (expectRelationLockMutation) {
+    if (earlyConcurrentResult === null) {
+      throw new Error('relation-lock mutation did not reopen the concurrent DDL window')
+    }
+    assertPsqlSucceeded(earlyConcurrentResult, 'mutated concurrent UNIQUE creation')
+    const beforeReplacement = readPaymentMethodConstraintFingerprint(
+      database,
+      'mutated concurrent UNIQUE before replacement',
+    )
+    if (JSON.parse(beforeReplacement).contype !== 'u') {
+      throw new Error('relation-lock mutation did not create the expected UNIQUE constraint')
+    }
+
+    await terminateApplication(database, blockerApplication, 'release mutated catalog pause')
+    await withTimeout(blocker.completion, 5000, 'mutated catalog blocker exit')
+    const migrationResult = await withTimeout(
+      migrationSession.completion,
+      20000,
+      'mutated migration completion',
+    )
+    assertPsqlSucceeded(migrationResult, 'mutated migration')
+    const afterReplacement = readPaymentMethodConstraintFingerprint(
+      database,
+      'mutated replacement result',
+    )
+    if (
+      JSON.parse(afterReplacement).contype !== 'c'
+      || afterReplacement === beforeReplacement
+    ) {
+      throw new Error('relation-lock mutation did not reproduce the unsafe replacement')
+    }
+    throw new Error('RELATION_LOCK_MUTATION_CAUGHT:unsafe_concurrent_constraint_replacement')
+  }
+
+  if (earlyConcurrentResult !== null) {
+    throw new Error('concurrent DDL completed while Session A held ACCESS EXCLUSIVE')
+  }
+  const blockingEvidence = await waitForProductOrdersBlock(
+    database,
+    concurrentApplication,
+    migrationApplication,
+    'concurrent same-name UNIQUE lock wait',
+  )
+  assertSameNameConstraintCount(database, 0, 'concurrent constraint absence while blocked')
+
+  await terminateApplication(database, blockerApplication, 'release commit catalog pause')
+  await withTimeout(blocker.completion, 5000, 'commit catalog blocker exit')
+  const migrationResult = await withTimeout(
+    migrationSession.completion,
+    20000,
+    'commit migration completion',
+  )
+  const concurrentResult = await withTimeout(
+    concurrentSession.completion,
+    20000,
+    'commit concurrent DDL completion',
+  )
+  assertPsqlSucceeded(migrationResult, 'relation lock commit migration')
+  assertPsqlFailed(
+    concurrentResult,
+    /constraint .*product_orders_payment_method_check.* already exists/i,
+    'post-commit concurrent same-name UNIQUE',
+  )
+  const after = readPaymentMethodConstraintFingerprint(database, 'commit CHECK result')
+  if (JSON.parse(after).contype !== 'c') {
+    throw new Error('commit scenario did not retain the reviewed CHECK constraint')
+  }
+  relationLockMetrics.commitLockMilliseconds = Date.now() - migrationStartedAt
+  process.stdout.write(
+    `relation_lock_commit_evidence: waiter_blocked=true blocker_is_session_a=true mode=AccessExclusiveLock evidence=${blockingEvidence}\n`,
+  )
+}
+
+async function runRelationLockRollbackScenario(database) {
+  dropPaymentMethodConstraint(database, 'relation lock rollback absent constraint')
+  const blockerApplication = 'lp_lock_rollback_catalog'
+  const migrationApplication = 'lp_lock_rollback_migration'
+  const concurrentApplication = 'lp_lock_rollback_concurrent'
+  const blocker = await startCatalogPause(database, blockerApplication)
+  const migrationSession = startPsql(
+    database,
+    readFileSync(migration, 'utf8'),
+    migrationApplication,
+  )
+  await waitForMigrationGuardPause(
+    database,
+    migrationApplication,
+    blockerApplication,
+    'rollback migration guard pause',
+  )
+  const concurrentSession = startPsql(
+    database,
+    `
+      alter table public.product_orders
+        add constraint product_orders_payment_method_check unique (id);
+    `,
+    concurrentApplication,
+  )
+  await waitForProductOrdersBlock(
+    database,
+    concurrentApplication,
+    migrationApplication,
+    'rollback concurrent DDL lock wait',
+  )
+
+  const rollbackStartedAt = Date.now()
+  await terminateApplication(database, migrationApplication, 'force migration rollback')
+  const migrationResult = await withTimeout(
+    migrationSession.completion,
+    5000,
+    'rolled-back migration exit',
+  )
+  const concurrentResult = await withTimeout(
+    concurrentSession.completion,
+    10000,
+    'post-rollback concurrent DDL completion',
+  )
+  relationLockMetrics.rollbackReleaseMilliseconds = Date.now() - rollbackStartedAt
+  if (migrationResult.code === 0) {
+    throw new Error('terminated migration unexpectedly committed')
+  }
+  assertPsqlSucceeded(concurrentResult, 'post-rollback concurrent UNIQUE creation')
+  const after = readPaymentMethodConstraintFingerprint(database, 'rollback UNIQUE result')
+  if (JSON.parse(after).contype !== 'u') {
+    throw new Error('rollback scenario did not release the relation for Session B')
+  }
+  assertMigrationRollback(database, 'relation lock rollback')
+  assertNoLinePayRoles(database, 'relation lock rollback')
+  await terminateApplication(database, blockerApplication, 'release rollback catalog pause')
+  await withTimeout(blocker.completion, 5000, 'rollback catalog blocker exit')
+}
+
+async function runPreexistingUnknownConstraintScenario(database) {
+  dropPaymentMethodConstraint(database, 'preexisting unknown absent constraint')
+  const blockerApplication = 'lp_lock_preexisting_catalog'
+  const concurrentApplication = 'lp_lock_preexisting_unknown'
+  const migrationApplication = 'lp_lock_preexisting_migration'
+  const blocker = await startCatalogPause(database, blockerApplication)
+  const concurrentSession = startPsql(
+    database,
+    `
+      begin;
+      alter table public.product_orders
+        add constraint product_orders_payment_method_check unique (id);
+      lock table pg_catalog.pg_default_acl in access share mode;
+      commit;
+    `,
+    concurrentApplication,
+  )
+  await waitForQuery(
+    database,
+    `
+      select pg_catalog.concat_ws('|', product_lock.mode, product_lock.granted::text)
+      from pg_catalog.pg_stat_activity as activity
+      join pg_catalog.pg_locks as product_lock
+        on product_lock.pid = activity.pid
+       and product_lock.locktype = 'relation'
+       and product_lock.relation = 'public.product_orders'::regclass
+       and product_lock.mode = 'AccessExclusiveLock'
+       and product_lock.granted
+      where activity.application_name = '${concurrentApplication}'
+        and activity.wait_event_type = 'Lock';
+    `,
+    (output) => output === 'AccessExclusiveLock|true',
+    'preexisting Session B holds product_orders lock',
+  )
+
+  const migrationSession = startPsql(
+    database,
+    readFileSync(migration, 'utf8'),
+    migrationApplication,
+  )
+  await waitForProductOrdersBlock(
+    database,
+    migrationApplication,
+    concurrentApplication,
+    'migration waits for preexisting unknown DDL',
+  )
+  await terminateApplication(database, blockerApplication, 'release preexisting catalog pause')
+  await withTimeout(blocker.completion, 5000, 'preexisting catalog blocker exit')
+  const concurrentResult = await withTimeout(
+    concurrentSession.completion,
+    5000,
+    'preexisting constraint commit',
+  )
+  assertPsqlSucceeded(concurrentResult, 'preexisting unknown constraint commit')
+  const before = readPaymentMethodConstraintFingerprint(database, 'preexisting unknown before migration')
+  const migrationResult = await withTimeout(
+    migrationSession.completion,
+    10000,
+    'preexisting unknown migration failure',
+  )
+  assertPsqlFailed(
+    migrationResult,
+    /product_orders_payment_method_constraint_type_conflict/,
+    'preexisting unknown constraint migration',
+  )
+  assertMigrationRollback(database, 'preexisting unknown constraint')
+  assertNoLinePayRoles(database, 'preexisting unknown constraint')
+  const after = readPaymentMethodConstraintFingerprint(database, 'preexisting unknown preserved')
+  if (JSON.parse(after).contype !== 'u' || after !== before) {
+    throw new Error('preexisting unknown constraint fingerprint changed')
+  }
+}
+
+async function runRelationLockImpactScenario(database) {
+  const blockerApplication = 'lp_lock_impact_catalog'
+  const migrationApplication = 'lp_lock_impact_migration'
+  const blocker = await startCatalogPause(database, blockerApplication)
+  const migrationStartedAt = Date.now()
+  const migrationSession = startPsql(
+    database,
+    readFileSync(migration, 'utf8'),
+    migrationApplication,
+  )
+  await waitForMigrationGuardPause(
+    database,
+    migrationApplication,
+    blockerApplication,
+    'lock impact migration guard pause',
+  )
+
+  const probes = [
+    ['select', 'select pg_catalog.count(*) from public.product_orders;'],
+    ['insert', 'insert into public.product_orders select * from public.product_orders where false;'],
+    ['update', 'update public.product_orders set id = id where false;'],
+    ['delete', 'delete from public.product_orders where false;'],
+    ['alter', 'alter table public.product_orders add column line_pay_lock_impact_probe integer;'],
+  ].map(([name, sql]) => ({
+    name,
+    applicationName: `lp_lock_impact_${name}`,
+    session: startPsql(database, sql, `lp_lock_impact_${name}`),
+  }))
+  const probesStartedAt = Date.now()
+
+  for (const probe of probes) {
+    await waitForProductOrdersBlock(
+      database,
+      probe.applicationName,
+      migrationApplication,
+      `${probe.name} relation lock impact`,
+    )
+  }
+  relationLockMetrics.impactWaitMilliseconds = Date.now() - probesStartedAt
+  await terminateApplication(database, blockerApplication, 'release lock impact catalog pause')
+  await withTimeout(blocker.completion, 5000, 'lock impact catalog blocker exit')
+  const migrationResult = await withTimeout(
+    migrationSession.completion,
+    20000,
+    'lock impact migration completion',
+  )
+  assertPsqlSucceeded(migrationResult, 'lock impact migration')
+  const probeResults = await Promise.all(
+    probes.map((probe) => withTimeout(probe.session.completion, 20000, `${probe.name} probe completion`)),
+  )
+  for (const [index, result] of probeResults.entries()) {
+    assertPsqlSucceeded(result, `${probes[index].name} post-lock probe`)
+  }
+  relationLockMetrics.commitLockMilliseconds = Math.max(
+    relationLockMetrics.commitLockMilliseconds,
+    Date.now() - migrationStartedAt,
+  )
+}
+
+async function runRelationLockTimeoutScenario(database) {
+  const holderApplication = 'lp_lock_timeout_holder'
+  const holder = startPsql(
+    database,
+    `
+      begin;
+      lock table public.product_orders in access exclusive mode;
+      select pg_catalog.pg_sleep(600);
+      commit;
+    `,
+    holderApplication,
+  )
+  await waitForQuery(
+    database,
+    `
+      select pg_catalog.count(*)::text
+      from pg_catalog.pg_stat_activity as activity
+      join pg_catalog.pg_locks as held_lock
+        on held_lock.pid = activity.pid
+       and held_lock.locktype = 'relation'
+       and held_lock.relation = 'public.product_orders'::regclass
+       and held_lock.mode = 'AccessExclusiveLock'
+       and held_lock.granted
+      where activity.application_name = '${holderApplication}';
+    `,
+    (output) => output === '1',
+    'relation lock timeout holder',
+  )
+  const startedAt = Date.now()
+  const result = psqlResult(database, readFileSync(migration, 'utf8'))
+  relationLockMetrics.timeoutMilliseconds = Date.now() - startedAt
+  if (
+    result.status === 0
+    || !/canceling statement due to lock timeout/i.test(result.combinedOutput)
+  ) {
+    throw new Error(`migration did not fail closed on relation lock timeout\n${result.combinedOutput}`)
+  }
+  if (
+    relationLockMetrics.timeoutMilliseconds < 4000
+    || relationLockMetrics.timeoutMilliseconds > 15000
+  ) {
+    throw new Error(`unexpected relation lock timeout duration: ${relationLockMetrics.timeoutMilliseconds}ms`)
+  }
+  assertMigrationRollback(database, 'relation lock timeout')
+  assertNoLinePayRoles(database, 'relation lock timeout')
+  await terminateApplication(database, holderApplication, 'release relation lock timeout holder')
+  await withTimeout(holder.completion, 5000, 'relation lock timeout holder exit')
+}
 
 async function main() {
   runDocker(['pull', image])
@@ -468,6 +1094,33 @@ async function main() {
           throw new Error(`${name} constraint type, definition, or metadata changed after rollback`)
         }
       },
+    )
+  }
+
+  scenarioCount += await runAsyncScenario(
+    'relation-lock-commit',
+    runRelationLockCommitScenario,
+  )
+  scenarioCount += await runAsyncScenario(
+    'relation-lock-rollback',
+    runRelationLockRollbackScenario,
+  )
+  scenarioCount += await runAsyncScenario(
+    'relation-lock-preexisting-unknown',
+    runPreexistingUnknownConstraintScenario,
+  )
+  scenarioCount += await runAsyncScenario(
+    'relation-lock-impact',
+    runRelationLockImpactScenario,
+  )
+  scenarioCount += await runAsyncScenario(
+    'relation-lock-timeout',
+    runRelationLockTimeoutScenario,
+  )
+
+  if (selectedScenario === null) {
+    process.stdout.write(
+      `relation_lock_impact: select=blocked writes=blocked alter_table=blocked impact_observation_ms=${relationLockMetrics.impactWaitMilliseconds} migration_lock_ms=${relationLockMetrics.commitLockMilliseconds} rollback_release_ms=${relationLockMetrics.rollbackReleaseMilliseconds} timeout_ms=${relationLockMetrics.timeoutMilliseconds}\n`,
     )
   }
 

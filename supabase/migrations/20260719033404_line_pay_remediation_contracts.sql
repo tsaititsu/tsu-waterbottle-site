@@ -69,6 +69,14 @@ begin
 end
 $$;
 
+-- Serialize the reviewed catalog snapshot with every later product_orders DDL.
+-- The timeout applies only while acquiring this relation lock. A timeout aborts
+-- the transaction; there is no unlocked fallback. PostgreSQL retains the lock
+-- until this migration transaction commits or rolls back.
+set local lock_timeout = '5s';
+lock table public.product_orders in access exclusive mode;
+set local lock_timeout = '0';
+
 -- Guard every same-name constraint type before any side-effect DDL. The
 -- legacy CHECK definition is taken from the reviewed base schema.
 -- pg_get_constraintdef provides a canonical deparse; whitespace and case are
