@@ -5,9 +5,9 @@ import { pathToFileURL } from 'node:url'
 
 export const AI_CHART_TEST_DIRECTORY = 'src/lib/ai-chart'
 export const AI_CHART_TEST_FILE_SUFFIX = '.test.ts'
-export const AI_CHART_TEST_NODE_MAJOR = 24
+export const AI_CHART_TEST_NODE_VERSION = '24.16.0'
 
-export const SENSITIVE_TEST_ENVIRONMENT_KEYS = Object.freeze([
+export const REMOVED_TEST_ENVIRONMENT_KEYS = Object.freeze([
   'OPENAI_API_KEY',
   'OPENAI_AI_CHART_MODEL',
   'OPENAI_BASE_URL',
@@ -19,20 +19,12 @@ export const SENSITIVE_TEST_ENVIRONMENT_KEYS = Object.freeze([
   'AI_CHART_D1_P1_PREVIEW_CONFIRM',
   'VERCEL',
   'VERCEL_ENV',
-])
-
-const SUPABASE_TEST_ENVIRONMENT_KEYS = Object.freeze([
   'NEXT_PUBLIC_SUPABASE_URL',
   'NEXT_PUBLIC_SUPABASE_ANON_KEY',
   'SUPABASE_ACCESS_TOKEN',
   'SUPABASE_DB_PASSWORD',
   'SUPABASE_SERVICE_ROLE_KEY',
   'DATABASE_URL',
-])
-
-const ALL_REMOVED_TEST_ENVIRONMENT_KEYS = Object.freeze([
-  ...SENSITIVE_TEST_ENVIRONMENT_KEYS,
-  ...SUPABASE_TEST_ENVIRONMENT_KEYS,
   'NODE_OPTIONS',
   'TSX_TSCONFIG_PATH',
 ])
@@ -57,15 +49,14 @@ function toRepositoryRelativePath(repositoryRoot, absolutePath) {
 }
 
 export function assertCanonicalNodeVersion(version = process.versions.node) {
-  const major = Number.parseInt(version.split('.')[0] ?? '', 10)
-  if (major !== AI_CHART_TEST_NODE_MAJOR) {
+  if (version !== AI_CHART_TEST_NODE_VERSION) {
     throw new AiChartTestRunnerError('AI_CHART_TEST_RUNNER_NODE_VERSION_INVALID')
   }
 }
 
 export function createIsolatedTestEnvironment(sourceEnvironment = process.env) {
   const isolated = { ...sourceEnvironment, NODE_ENV: 'test' }
-  for (const key of ALL_REMOVED_TEST_ENVIRONMENT_KEYS) delete isolated[key]
+  for (const key of REMOVED_TEST_ENVIRONMENT_KEYS) delete isolated[key]
   return isolated
 }
 

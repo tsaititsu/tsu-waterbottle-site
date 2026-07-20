@@ -31,6 +31,8 @@ npm run test:ai-chart
 
 此指令固定使用 Node `24.16.0` 與 exact `tsx@4.23.1`，由
 `scripts/ai-chart/run-tests.mjs` 遞迴發現 `src/lib/ai-chart/**/*.test.ts`。
+Runner 逐字驗證 `process.versions.node === '24.16.0'`；patch 或 minor 版本漂移
+都會 fail closed。
 Runner 只接受 regular file、拒絕 symlink，以 Repository-relative path 做
 deterministic 排序與去重，逐檔循序執行並 fail fast。Runner contract 目前固定
 驗證 Repository 應發現 26 個測試檔；新增或移除測試時必須明確更新 contract，
@@ -49,11 +51,21 @@ deterministic 排序與去重，逐檔循序執行並 fail fast。Runner contrac
 - `AI_CHART_D1_P1_PREVIEW_CONFIRM`
 - `VERCEL`
 - `VERCEL_ENV`
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_ACCESS_TOKEN`
+- `SUPABASE_DB_PASSWORD`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `DATABASE_URL`
+- `NODE_OPTIONS`
+- `TSX_TSCONFIG_PATH`
 
-Runner 亦移除 Supabase 連線相關環境變數。測試只可使用 synthetic fixture、
-mock request 或 mock fetch，不得發送 OpenAI request、連接 Supabase 或使用真實
-客戶資料。Runner 不輸出被移除環境變數的值、長度、hash、prefix、suffix 或
-masked value。
+Implementation 與 contract 共用上述單一 canonical removed-key list；contract
+會為每個 key 注入 synthetic value，並以真實 child probe 驗證全部移除、
+`NODE_ENV=test`、無關安全變數保留，且原始 environment 不被修改。測試只可
+使用 synthetic fixture、mock request 或 mock fetch，不得發送 OpenAI request、
+連接 Supabase 或使用真實客戶資料。Runner 不輸出被移除環境變數的值、長度、
+hash、prefix、suffix 或 masked value。
 
 Assertion tests 與 TypeScript typecheck 是不同檢查，交付前必須分別執行：
 

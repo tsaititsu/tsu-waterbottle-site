@@ -4,9 +4,9 @@ import { lstat } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
-  AI_CHART_TEST_NODE_MAJOR,
+  AI_CHART_TEST_NODE_VERSION,
   AiChartTestRunnerError,
-  SENSITIVE_TEST_ENVIRONMENT_KEYS,
+  REMOVED_TEST_ENVIRONMENT_KEYS,
   assertCanonicalNodeVersion,
   createIsolatedTestEnvironment,
   discoverAiChartTestFiles,
@@ -41,33 +41,38 @@ export async function runTestRunnerContract(
 ) {
   let checks = 0
 
-  await check('Node major is canonical', async () => {
+  await check('Node version is exactly canonical', async () => {
     assertCanonicalNodeVersion()
-    assert.equal(Number.parseInt(process.versions.node, 10), AI_CHART_TEST_NODE_MAJOR)
-    assert.throws(() => assertCanonicalNodeVersion('23.0.0'), {
-      code: 'AI_CHART_TEST_RUNNER_NODE_VERSION_INVALID',
-    })
+    assert.equal(process.versions.node, AI_CHART_TEST_NODE_VERSION)
+    assert.doesNotThrow(() => assertCanonicalNodeVersion('24.16.0'))
+    for (const rejectedVersion of ['24.16.1', '24.17.0', '23.0.0']) {
+      assert.throws(() => assertCanonicalNodeVersion(rejectedVersion), {
+        code: 'AI_CHART_TEST_RUNNER_NODE_VERSION_INVALID',
+      })
+    }
   })
   checks += 1
 
-  await check('sensitive environment is removed and NODE_ENV is test', async () => {
+  await check('complete removed environment is isolated from children', async () => {
     const sourceEnvironment = Object.fromEntries(
-      SENSITIVE_TEST_ENVIRONMENT_KEYS.map((key) => [key, 'synthetic-value']),
+      REMOVED_TEST_ENVIRONMENT_KEYS.map((key) => [key, 'synthetic-value']),
     )
     sourceEnvironment.NODE_ENV = 'production'
     sourceEnvironment.UNRELATED_SAFE_VALUE = 'preserved'
+    const originalEnvironment = { ...sourceEnvironment }
     const isolated = createIsolatedTestEnvironment(sourceEnvironment)
 
     assert.equal(isolated.NODE_ENV, 'test')
     assert.equal(isolated.UNRELATED_SAFE_VALUE, 'preserved')
-    for (const key of SENSITIVE_TEST_ENVIRONMENT_KEYS) {
+    for (const key of REMOVED_TEST_ENVIRONMENT_KEYS) {
       assert.equal(Object.hasOwn(isolated, key), false)
-      assert.equal(sourceEnvironment[key], 'synthetic-value')
     }
+    assert.deepEqual(sourceEnvironment, originalEnvironment)
 
     const childProbe = [
-      `const forbidden = ${JSON.stringify(SENSITIVE_TEST_ENVIRONMENT_KEYS)};`,
+      `const forbidden = ${JSON.stringify(REMOVED_TEST_ENVIRONMENT_KEYS)};`,
       "if (process.env.NODE_ENV !== 'test') process.exit(1);",
+      "if (process.env.UNRELATED_SAFE_VALUE !== 'preserved') process.exit(1);",
       'if (forbidden.some((key) => Object.hasOwn(process.env, key))) process.exit(1);',
       'process.exit(0);',
     ].join('')

@@ -69,12 +69,15 @@ Runner 使用 Node `24.16.0` 與 exact devDependency `tsx@4.23.1`。它會在
 symlink，以 Repository-relative path 做 deterministic ASCII 排序並檢查沒有
 重複。測試逐檔、循序執行，第一個失敗即停止；Workflow 不維護第二份測試
 清單。Runner contract 會先驗證目前應發現 26 個測試檔、環境隔離、排序、
-去重、fail-fast、全成功條件、Node major 與本機 exact `tsx`。
+去重、fail-fast、全成功條件、exact Node 與本機 exact `tsx`。Node contract 會
+逐字驗證 `process.versions.node === '24.16.0'`，任何 patch 或 minor drift 都會
+fail closed。
 
 每個測試 child process 都固定使用 `NODE_ENV=test`，並移除 OpenAI、P1
-Preview、Vercel 與 Supabase 連線相關環境變數；不會輸出這些變數的值或衍生
-資訊。既有 AI 命盤測試只使用 synthetic fixture、mock request 或 mock fetch，
-canonical runner 不會發送 OpenAI request，也不會連接 Supabase。
+Preview、Vercel、Supabase、`DATABASE_URL`、`NODE_OPTIONS` 與
+`TSX_TSCONFIG_PATH` 等 canonical removed-key list；不會輸出這些變數的值或
+衍生資訊。既有 AI 命盤測試只使用 synthetic fixture、mock request 或 mock
+fetch，canonical runner 不會發送 OpenAI request，也不會連接 Supabase。
 
 Runner assertion tests 與 TypeScript typecheck 是不同驗證，兩者都必須執行：
 
