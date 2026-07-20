@@ -29,6 +29,7 @@ import {
   AI_CHART_D1_P1_PREVIEW_GATE_INVALID,
   AI_CHART_D1_P1_PREVIEW_GATE_NOT_READY,
   AI_CHART_D1_P1_PREVIEW_GATE_PRODUCTION_FORBIDDEN,
+  createAiChartD1P1PreviewEvidenceContractSummary,
   createAiChartD1P1PreviewAuthorization,
   createAiChartD1P1PreviewRequestPlanFingerprint,
   type AiChartD1P1PreviewAuthorization,
@@ -37,6 +38,11 @@ import {
 } from './d1P1PreviewRequestGateContracts'
 import type { AiChartD1P1Result } from './d1P1F1Contracts'
 import {
+  AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+  AI_CHART_D1_P1_PREVIEW_TIMEOUT_ENVIRONMENT_VARIABLE,
+} from './d1P1PreviewTimeoutContracts'
+import {
+  AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
   AI_CHART_OPENAI_REQUEST_FAILED,
   AI_CHART_OPENAI_RESPONSE_INVALID,
   AI_CHART_OPENAI_TIMEOUT,
@@ -114,6 +120,7 @@ const GATE_ENV_KEYS = [
   'AI_CHART_D1_P1_PREVIEW_TARGET_PALACE_ID',
   'AI_CHART_D1_P1_PREVIEW_PLAN_FINGERPRINT',
   'AI_CHART_D1_P1_PREVIEW_CONFIRM',
+  AI_CHART_D1_P1_PREVIEW_TIMEOUT_ENVIRONMENT_VARIABLE,
 ] as const
 
 let checks = 0
@@ -160,6 +167,27 @@ function environmentFor(
     AI_CHART_D1_P1_PREVIEW_PLAN_FINGERPRINT: plan.planFingerprint,
     AI_CHART_D1_P1_PREVIEW_CONFIRM:
       AI_CHART_D1_P1_PREVIEW_AUTHORIZATION_ACKNOWLEDGEMENT,
+    ...(plan.timeoutMs === AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS
+      ? {
+          [AI_CHART_D1_P1_PREVIEW_TIMEOUT_ENVIRONMENT_VARIABLE]: String(
+            AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+          ),
+        }
+      : {}),
+    ...overrides,
+  }
+}
+
+function localPreviewBuildEnvironment(
+  targetPalaceId: string,
+  timeoutValue = String(AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS),
+  overrides: Readonly<Record<string, string | undefined>> = {},
+): Record<string, string | undefined> {
+  return {
+    NODE_ENV: 'development',
+    AI_CHART_D1_P1_PREVIEW_ENABLED: '1',
+    AI_CHART_D1_P1_PREVIEW_TARGET_PALACE_ID: targetPalaceId,
+    [AI_CHART_D1_P1_PREVIEW_TIMEOUT_ENVIRONMENT_VARIABLE]: timeoutValue,
     ...overrides,
   }
 }
@@ -185,7 +213,19 @@ function buildPlan(
   targetPalaceId = fixture.modelInputs[0].targetPalaceId,
   modelInputs: unknown = fixture.modelInputs,
   promptPackages: unknown = fixture.promptPackages,
+  environment?: Record<string, string | undefined>,
 ): AiChartD1P1PreviewRequestPlan {
+  if (environment !== undefined) {
+    return buildAiChartD1P1PreviewRequestPlan(
+      fixture.catalog,
+      fixture.structuralInputs,
+      fixture.bundles,
+      modelInputs,
+      promptPackages,
+      targetPalaceId,
+      { environment },
+    )
+  }
   return buildAiChartD1P1PreviewRequestPlan(
     fixture.catalog,
     fixture.structuralInputs,
@@ -250,12 +290,72 @@ async function run() {
   try {
     const fixture = await createAdapterBridgeFixture('preview-gate-server')
     const plan = buildPlan(fixture)
+    const localPreviewPlan = buildPlan(
+      fixture,
+      fixture.modelInputs[0].targetPalaceId,
+      fixture.modelInputs,
+      fixture.promptPackages,
+      localPreviewBuildEnvironment(fixture.modelInputs[0].targetPalaceId),
+    )
     const secondPlan = buildPlan(fixture, fixture.modelInputs[1].targetPalaceId)
     const authorization = createAiChartD1P1PreviewAuthorization(plan)
+    const localPreviewAuthorization =
+      createAiChartD1P1PreviewAuthorization(localPreviewPlan)
 
     check('Plan builder authenticates one target from fixed twelve Bridges', () => {
       assert.equal(fixture.bridges.length, 12)
       assert.equal(plan.targetPalaceId, fixture.bridges[0].descriptor.targetPalaceId)
+    })
+    check('Default Plan timeout remains 120 seconds', () => {
+      assert.equal(plan.timeoutMs, AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS)
+      assert.equal(plan.maxRequests, 1)
+      assert.equal(plan.productionCallable, false)
+    })
+    check('Local Preview override binds 300 seconds into Plan and Bridge fingerprint', () => {
+      assert.equal(
+        localPreviewPlan.timeoutMs,
+        AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+      )
+      assert.equal(localPreviewPlan.maxRequests, 1)
+      assert.equal(localPreviewPlan.productionCallable, false)
+      assert.notEqual(
+        localPreviewPlan.bridgeFingerprint,
+        plan.bridgeFingerprint,
+      )
+      assert.notEqual(
+        localPreviewPlan.planFingerprint,
+        plan.planFingerprint,
+      )
+    })
+    check('Local Preview evidence summary records the effective timeout', () => {
+      assert.deepEqual(
+        createAiChartD1P1PreviewEvidenceContractSummary(localPreviewPlan),
+        {
+          planFingerprint: localPreviewPlan.planFingerprint,
+          timeoutMs: AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+          maxRequests: 1,
+          productionCallable: false,
+        },
+      )
+    })
+    check('Local Preview Plan parser requires and accepts the same override environment', () => {
+      assert.deepEqual(
+        parseAiChartD1P1PreviewRequestPlan(
+          localPreviewPlan,
+          fixture.catalog,
+          fixture.structuralInputs,
+          fixture.bundles,
+          fixture.modelInputs,
+          fixture.promptPackages,
+          localPreviewPlan.targetPalaceId,
+          {
+            environment: localPreviewBuildEnvironment(
+              localPreviewPlan.targetPalaceId,
+            ),
+          },
+        ),
+        localPreviewPlan,
+      )
     })
     check('Plan maps exact Bridge identity and fingerprints', () => {
       const descriptor = fixture.bridges[0].descriptor
@@ -278,6 +378,16 @@ async function run() {
       }) as typeof fetch
       try {
         assert.deepEqual(buildPlan(fixture), plan)
+        assert.deepEqual(
+          buildPlan(
+            fixture,
+            localPreviewPlan.targetPalaceId,
+            fixture.modelInputs,
+            fixture.promptPackages,
+            localPreviewBuildEnvironment(localPreviewPlan.targetPalaceId),
+          ),
+          localPreviewPlan,
+        )
       } finally {
         globalThis.fetch = originalFetch
       }
@@ -313,6 +423,97 @@ async function run() {
         plan,
       )
     })
+    check('Local Preview Plan is rejected when the override is not present', () => {
+      assert.throws(
+        () =>
+          parseAiChartD1P1PreviewRequestPlan(
+            localPreviewPlan,
+            fixture.catalog,
+            fixture.structuralInputs,
+            fixture.bundles,
+            fixture.modelInputs,
+            fixture.promptPackages,
+            localPreviewPlan.targetPalaceId,
+          ),
+        { message: AI_CHART_D1_P1_PREVIEW_GATE_INVALID },
+      )
+    })
+    for (const timeoutValue of [
+      'not-a-number',
+      '0',
+      '-1',
+      '120001',
+      '299999',
+      '300001',
+    ]) {
+      check(`Local Preview timeout ${timeoutValue} is rejected`, () => {
+        assert.throws(
+          () =>
+            buildPlan(
+              fixture,
+              plan.targetPalaceId,
+              fixture.modelInputs,
+              fixture.promptPackages,
+              localPreviewBuildEnvironment(
+                plan.targetPalaceId,
+                timeoutValue,
+              ),
+            ),
+          { message: AI_CHART_D1_P1_PREVIEW_GATE_INVALID },
+        )
+      })
+    }
+    for (const [name, overrides] of [
+      ['production', { NODE_ENV: 'production' }],
+      ['CI true', { CI: 'true' }],
+      ['CI false but present', { CI: 'false' }],
+      ['Vercel', { VERCEL: '1' }],
+      ['Vercel environment', { VERCEL_ENV: 'preview' }],
+    ] as const) {
+      check(`Local Preview override rejects ${name}`, () => {
+        assert.throws(
+          () =>
+            buildPlan(
+              fixture,
+              plan.targetPalaceId,
+              fixture.modelInputs,
+              fixture.promptPackages,
+              localPreviewBuildEnvironment(
+                plan.targetPalaceId,
+                undefined,
+                overrides,
+              ),
+            ),
+          { message: AI_CHART_D1_P1_PREVIEW_GATE_PRODUCTION_FORBIDDEN },
+        )
+      })
+    }
+    for (const [name, overrides] of [
+      ['test environment', { NODE_ENV: 'test' }],
+      ['missing enabled flag', { AI_CHART_D1_P1_PREVIEW_ENABLED: undefined }],
+      [
+        'wrong target binding',
+        { AI_CHART_D1_P1_PREVIEW_TARGET_PALACE_ID: 'palace:siblings' },
+      ],
+    ] as const) {
+      check(`Local Preview override rejects ${name}`, () => {
+        assert.throws(
+          () =>
+            buildPlan(
+              fixture,
+              plan.targetPalaceId,
+              fixture.modelInputs,
+              fixture.promptPackages,
+              localPreviewBuildEnvironment(
+                plan.targetPalaceId,
+                undefined,
+                overrides,
+              ),
+            ),
+          { message: AI_CHART_D1_P1_PREVIEW_GATE_DISABLED },
+        )
+      })
+    }
     check('Plan parser returns a frozen Plan', () => {
       const parsed = parseAiChartD1P1PreviewRequestPlan(
         plan,
@@ -553,6 +754,35 @@ async function run() {
       environmentFor(plan),
       successRequest,
     )
+    let localPreviewRequestCount = 0
+    let localPreviewRequestTimeoutMs: number | undefined
+    const localPreviewSuccess = await execute(
+      fixture,
+      localPreviewPlan,
+      localPreviewAuthorization,
+      environmentFor(localPreviewPlan),
+      async (request) => {
+        localPreviewRequestCount += 1
+        localPreviewRequestTimeoutMs = request.timeoutMs
+        return {
+          data: createValidAiChartD1P1Result(fixture.modelInputs[0]),
+          usage: null,
+        }
+      },
+    )
+    check('Local Preview Plan and actual adapter request both use 300 seconds', () => {
+      assert.equal(localPreviewRequestCount, 1)
+      assert.equal(
+        localPreviewSuccess.plan.timeoutMs,
+        AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+      )
+      assert.equal(
+        localPreviewRequestTimeoutMs,
+        AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+      )
+      assert.equal(localPreviewSuccess.executedRequests, 1)
+      assert.equal(localPreviewSuccess.plan.maxRequests, 1)
+    })
     check('Development policy with explicit authorization executes one mock request', () => {
       assert.equal(successCount, 1)
       assert.equal(success.executedRequests, 1)
@@ -612,6 +842,16 @@ async function run() {
           authorization,
           environmentFor(plan),
           successRequest,
+        )
+        await execute(
+          fixture,
+          localPreviewPlan,
+          localPreviewAuthorization,
+          environmentFor(localPreviewPlan),
+          async () => ({
+            data: createValidAiChartD1P1Result(fixture.modelInputs[0]),
+            usage: null,
+          }),
         )
       } finally {
         globalThis.fetch = originalFetch
@@ -880,6 +1120,35 @@ async function run() {
         )
         assert.equal(requestCount, 0)
       })
+    }
+
+    for (const [name, overrides] of [
+      ['production', { NODE_ENV: 'production' }],
+      ['CI present', { CI: 'false' }],
+      ['Vercel', { VERCEL: '1' }],
+      ['Vercel environment', { VERCEL_ENV: 'preview' }],
+    ] as const) {
+      await asyncCheck(
+        `Local Preview override rejects ${name} with zero requests`,
+        async () => {
+          let requestCount = 0
+          await assert.rejects(
+            () =>
+              execute(
+                fixture,
+                localPreviewPlan,
+                localPreviewAuthorization,
+                environmentFor(localPreviewPlan, overrides),
+                async () => {
+                  requestCount += 1
+                  return successRequest(fixture.bridges[0].request)
+                },
+              ),
+            { message: AI_CHART_D1_P1_PREVIEW_GATE_PRODUCTION_FORBIDDEN },
+          )
+          assert.equal(requestCount, 0)
+        },
+      )
     }
 
     await asyncCheck('Real request path is disabled in test runtime with zero requests', async () => {

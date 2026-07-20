@@ -20,9 +20,13 @@ import {
 } from './d1P1PromptPackageContracts'
 import { AI_CHART_D1_P1_SCHEMA_NAME } from './d1P1F1Contracts'
 import {
+  AI_CHART_D1_P1_PREVIEW_TIMEOUT_VALUES,
+  isAiChartD1P1PreviewTimeoutMs,
+  type AiChartD1P1PreviewTimeoutMs,
+} from './d1P1PreviewTimeoutContracts'
+import {
   AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
   AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
-  AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
 } from './openAiResponses'
 
 export const AI_CHART_D1_P1_ADAPTER_BRIDGE_CONTRACT_VERSION =
@@ -58,7 +62,7 @@ export type AiChartD1P1AdapterBridgeDescriptor = Readonly<{
   userInputSha256: string
   description: typeof AI_CHART_D1_P1_ADAPTER_BRIDGE_DESCRIPTION
   reasoningEffort: typeof AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT
-  timeoutMs: typeof AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS
+  timeoutMs: AiChartD1P1PreviewTimeoutMs
   maxOutputTokens: typeof AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS
   requestStatus: 'ready'
   runtimeStatus: 'runtime_wiring_required'
@@ -137,6 +141,11 @@ function parseSha(value: unknown): string {
   return value
 }
 
+function parsePreviewTimeout(value: unknown): AiChartD1P1PreviewTimeoutMs {
+  if (!isAiChartD1P1PreviewTimeoutMs(value)) invalid()
+  return value
+}
+
 export function createAiChartD1P1AdapterBridgeFingerprint(
   value: AiChartD1P1AdapterBridgeDescriptorWithoutFingerprint,
 ): string {
@@ -187,7 +196,7 @@ export function parseAiChartD1P1AdapterBridgeDescriptorShape(
       record.description !== AI_CHART_D1_P1_ADAPTER_BRIDGE_DESCRIPTION ||
       record.reasoningEffort !==
         AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT ||
-      record.timeoutMs !== AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS ||
+      !isAiChartD1P1PreviewTimeoutMs(record.timeoutMs) ||
       record.maxOutputTokens !==
         AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS ||
       record.requestStatus !== 'ready' ||
@@ -219,7 +228,7 @@ export function parseAiChartD1P1AdapterBridgeDescriptorShape(
       userInputSha256: parseSha(record.userInputSha256),
       description: AI_CHART_D1_P1_ADAPTER_BRIDGE_DESCRIPTION,
       reasoningEffort: AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
-      timeoutMs: AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
+      timeoutMs: parsePreviewTimeout(record.timeoutMs),
       maxOutputTokens: AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
       requestStatus: 'ready' as const,
       runtimeStatus: 'runtime_wiring_required' as const,
@@ -287,7 +296,8 @@ export const AI_CHART_D1_P1_ADAPTER_BRIDGE_INTERNAL_JSON_SCHEMA: AiChartD1JsonSc
       const: AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
     }),
     timeoutMs: freezeAiChartD1Value({
-      const: AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
+      type: 'integer',
+      enum: AI_CHART_D1_P1_PREVIEW_TIMEOUT_VALUES,
     }),
     maxOutputTokens: freezeAiChartD1Value({
       const: AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,

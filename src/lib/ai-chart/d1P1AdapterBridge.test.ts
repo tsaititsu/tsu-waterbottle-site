@@ -6,6 +6,7 @@ import {
   assertAiChartD1P1CandidateRuleAuthority,
   buildAiChartD1P1AdapterBridge,
   buildAiChartD1P1AdapterBridges,
+  buildAiChartD1P1LocalPreviewAdapterBridges,
   deriveAiChartD1P1CandidateRuleStatus,
   parseAiChartD1P1AdapterBridgeDescriptor,
   type AiChartD1P1AdapterBridge,
@@ -56,6 +57,7 @@ import {
   AI_CHART_D1_P1_SCHEMA_NAME,
   type AiChartD1P1Result,
 } from './d1P1F1Contracts'
+import { AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS } from './d1P1PreviewTimeoutContracts'
 import {
   AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
   AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
@@ -178,6 +180,13 @@ async function customFixture(identity: string, snapshot: MutableRecord) {
 async function run() {
   const fixture = await createAdapterBridgeFixture('bridge-builder')
   const { bridges, modelInputs, promptPackages } = fixture
+  const localPreviewBridges = buildAiChartD1P1LocalPreviewAdapterBridges(
+    fixture.catalog,
+    fixture.structuralInputs,
+    fixture.bundles,
+    fixture.modelInputs,
+    fixture.promptPackages,
+  )
   const bridge = bridges[0]
   const modelInput = modelInputs[0]
 
@@ -311,6 +320,28 @@ async function run() {
   check('request timeout uses the Adapter default', () => {
     assert.equal(bridge.request.timeoutMs, AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS)
   })
+  check('Local Preview Bridges bind 300 seconds to Descriptor and request', () => {
+    assert.equal(localPreviewBridges.length, 12)
+    for (const localPreviewBridge of localPreviewBridges) {
+      assert.equal(
+        localPreviewBridge.descriptor.timeoutMs,
+        AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+      )
+      assert.equal(
+        localPreviewBridge.request.timeoutMs,
+        AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+      )
+      assert.equal(localPreviewBridge.descriptor.openAiCallable, false)
+    }
+  })
+  check('Local Preview timeout changes every Bridge fingerprint', () => {
+    bridges.forEach((entry, index) => {
+      assert.notEqual(
+        localPreviewBridges[index].descriptor.bridgeFingerprint,
+        entry.descriptor.bridgeFingerprint,
+      )
+    })
+  })
   check('request token budget uses the Adapter default', () => {
     assert.equal(
       bridge.request.maxOutputTokens,
@@ -361,6 +392,12 @@ async function run() {
   })
 
   const body = buildAiChartOpenAiResponsesBody(bridge.request)
+  const localPreviewBody = buildAiChartOpenAiResponsesBody(
+    localPreviewBridges[0].request,
+  )
+  check('Local Preview timeout does not change the Responses body contract', () => {
+    assert.deepEqual(localPreviewBody, body)
+  })
   check('Responses body model uses the existing target', () => {
     assert.equal(body.model, AI_CHART_D1_MODEL_TARGET)
   })
@@ -1972,6 +2009,26 @@ async function run() {
           !path.endsWith('d1P1AdapterBridge.test.ts') &&
           !path.endsWith('d1P1AdapterBridgeContracts.test.ts') &&
           !path.endsWith('d1P1AdapterBridgeTestSupport.ts') &&
+          !path.endsWith('d1P1PreviewRequestGate.server.test.ts'),
+      )
+    assert.deepEqual(consumers, [
+      'src/lib/ai-chart/d1P1PreviewRequestGate.server.ts',
+    ])
+  })
+  check('Local Preview Bridge builder production consumer is only Preview Gate', () => {
+    const consumers = sourceFiles
+      .filter((path) => path.endsWith('.ts') || path.endsWith('.tsx'))
+      .filter((path) =>
+        readFileSync(path, 'utf8').includes(
+          'buildAiChartD1P1LocalPreviewAdapterBridges',
+        ),
+      )
+      .map((path) => relative(repositoryRoot, path))
+      .filter(
+        (path) =>
+          !path.endsWith('d1P1AdapterBridge.ts') &&
+          !path.endsWith('d1P1AdapterBridge.test.ts') &&
+          !path.endsWith('d1P1AdapterBridgeContracts.test.ts') &&
           !path.endsWith('d1P1PreviewRequestGate.server.test.ts'),
       )
     assert.deepEqual(consumers, [
