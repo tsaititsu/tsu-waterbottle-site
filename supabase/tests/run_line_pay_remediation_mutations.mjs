@@ -214,8 +214,34 @@ const mutations = [
     apply(input) {
       return replaceRequired(
         input,
-        /-- The legacy constraint definition is taken[\s\S]*?\n\$\$;\n\n(?=create or replace function public\.line_pay_sanitized_result_is_valid)/,
+        /-- Guard every same-name constraint type[\s\S]*?\n\$\$;\n\n(?=-- Default ACLs must be rejected)/,
         '',
+        this.name,
+      )
+    },
+  },
+  {
+    name: 'same_name_non_check_constraint_guard',
+    runner: 'conflict',
+    scenarios: [
+      'constraint-unique',
+      'constraint-primary-key',
+      'constraint-foreign-key',
+      'constraint-exclude',
+    ],
+    expectFindingAGuardMutation: true,
+    apply(input) {
+      return replaceRequired(
+        input,
+        `  where constraint_row.conrelid = v_relation_oid
+    and constraint_row.conname = 'product_orders_payment_method_check';
+
+  if v_constraint_count > 1 then`,
+        `  where constraint_row.conrelid = v_relation_oid
+    and constraint_row.conname = 'product_orders_payment_method_check'
+    and constraint_row.contype = 'c';
+
+  if v_constraint_count > 1 then`,
         this.name,
       )
     },
@@ -394,19 +420,42 @@ try {
     writeFileSync(mutationFile, mutated, { encoding: 'utf8', mode: 0o600 })
 
     const selectedRunner = mutation.runner === 'conflict' ? conflictRunner : contractRunner
-    const result = spawnSync(process.execPath, [selectedRunner], {
-      cwd: root,
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        LINE_PAY_MIGRATION_UNDER_TEST: mutationFile,
-        ...(mutation.scenario ? { LINE_PAY_CONFLICT_SCENARIO: mutation.scenario } : {}),
-      },
-      maxBuffer: 16 * 1024 * 1024,
-    })
+    const scenarios = mutation.scenarios ?? [mutation.scenario ?? null]
+    let mutationWasCaught = true
 
-    if (result.status === 0) uncaught.push(mutation.name)
-    else caught.push(mutation.name)
+    for (const scenario of scenarios) {
+      const result = spawnSync(process.execPath, [selectedRunner], {
+        cwd: root,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          LINE_PAY_MIGRATION_UNDER_TEST: mutationFile,
+          ...(scenario ? { LINE_PAY_CONFLICT_SCENARIO: scenario } : {}),
+          ...(mutation.expectFindingAGuardMutation
+            ? { LINE_PAY_EXPECT_FINDING_A_MUTATION: '1' }
+            : {}),
+        },
+        maxBuffer: 16 * 1024 * 1024,
+      })
+
+      if (result.status === 0) {
+        mutationWasCaught = false
+        break
+      }
+
+      if (mutation.expectFindingAGuardMutation) {
+        const expectedMarker = `FINDING_A_GUARD_MUTATION_CAUGHT:${scenario}:unsafe_non_check_replacement`
+        const combinedOutput = `${result.stdout}\n${result.stderr}`
+        if (!combinedOutput.includes(expectedMarker)) {
+          throw new Error(
+            `INVALID_MUTATION_CATCH_REASON: ${mutation.name}/${scenario}\n${combinedOutput.slice(-2000)}`,
+          )
+        }
+      }
+    }
+
+    if (mutationWasCaught) caught.push(mutation.name)
+    else uncaught.push(mutation.name)
   }
 
   if (selectedMutation === null || selectedMutation === 'postgres_mutable_tag') {

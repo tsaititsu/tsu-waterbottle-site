@@ -16,6 +16,7 @@ const migration = process.env.LINE_PAY_MIGRATION_UNDER_TEST
   ? resolve(process.env.LINE_PAY_MIGRATION_UNDER_TEST)
   : join(root, 'supabase/migrations/20260719033404_line_pay_remediation_contracts.sql')
 const selectedScenario = process.env.LINE_PAY_CONFLICT_SCENARIO ?? null
+const expectFindingAGuardMutation = process.env.LINE_PAY_EXPECT_FINDING_A_MUTATION === '1'
 const baselineFiles = [
   'supabase/schema.sql',
   'supabase/bank_transfer_submissions_patch.sql',
@@ -89,6 +90,10 @@ function assertMigrationRollback(database, label) {
       select (
         pg_catalog.to_regprocedure('public.line_pay_sanitized_result_is_valid(jsonb)') is null
         and pg_catalog.to_regclass('public.line_pay_checkout_attempts') is null
+        and pg_catalog.to_regclass('public.line_pay_request_outbox') is null
+        and pg_catalog.to_regclass('public.line_pay_callback_capabilities') is null
+        and pg_catalog.to_regclass('public.line_pay_callback_events') is null
+        and pg_catalog.to_regclass('public.line_pay_payment_audit_events') is null
         and not exists (
           select 1
           from pg_catalog.pg_attribute as attribute
@@ -111,6 +116,54 @@ function applyMigrationExpectFailure(database, expectedPattern, label) {
     )
   }
   assertMigrationRollback(database, label)
+}
+
+function assertNoLinePayRoles(database, label) {
+  const roleCount = psql(
+    database,
+    `
+      select pg_catalog.count(*)::text
+      from pg_catalog.pg_roles as role
+      where role.rolname in (
+        'line_pay_payment_executor',
+        'line_pay_payment_function_owner'
+      );
+    `,
+    `${label} role rollback assertion`,
+  )
+  if (roleCount !== '0') throw new Error(`${label} created a LINE Pay role before failing`)
+}
+
+function readPaymentMethodConstraintFingerprint(database, label) {
+  const output = psql(
+    database,
+    `
+      select pg_catalog.jsonb_build_object(
+        'contype', constraint_row.contype,
+        'definition', pg_catalog.pg_get_constraintdef(constraint_row.oid, false),
+        'validated', constraint_row.convalidated,
+        'noinherit', constraint_row.connoinherit,
+        'deferrable', constraint_row.condeferrable,
+        'deferred', constraint_row.condeferred,
+        'islocal', constraint_row.conislocal,
+        'inhcount', constraint_row.coninhcount,
+        'parentid', constraint_row.conparentid,
+        'contypid', constraint_row.contypid,
+        'conrelid', constraint_row.conrelid,
+        'namespace', constraint_row.connamespace,
+        'indexid', constraint_row.conindid
+      )::text
+      from pg_catalog.pg_constraint as constraint_row
+      where constraint_row.conrelid = 'public.product_orders'::regclass
+        and constraint_row.conname = 'product_orders_payment_method_check';
+    `,
+    `${label} constraint fingerprint`,
+  )
+  const rows = output.split('\n').filter(Boolean)
+  if (rows.length !== 1) {
+    throw new Error(`${label} expected exactly one same-name constraint, received ${rows.length}`)
+  }
+  return rows[0]
 }
 
 function cleanupScenarioDatabase(database) {
@@ -310,6 +363,109 @@ async function main() {
             /product_orders_payment_method_constraint_definition_conflict/,
             name,
           )
+        }
+      },
+    )
+  }
+
+  const nonCheckConstraintCases = [
+    {
+      name: 'constraint-unique',
+      contype: 'u',
+      setupSql: `
+        alter table public.product_orders
+          drop constraint product_orders_payment_method_check;
+        alter table public.product_orders
+          add constraint product_orders_payment_method_check unique (id);
+      `,
+    },
+    {
+      name: 'constraint-primary-key',
+      contype: 'p',
+      setupSql: `
+        alter table public.product_orders
+          drop constraint product_orders_payment_method_check;
+        alter table public.product_orders
+          add constraint product_orders_id_finding_a_unique unique (id);
+        do $$
+        declare
+          dependency record;
+        begin
+          for dependency in
+            select foreign_key.conrelid::pg_catalog.regclass as relation_name,
+                   foreign_key.conname
+            from pg_catalog.pg_constraint as foreign_key
+            where foreign_key.contype = 'f'
+              and foreign_key.confrelid = 'public.product_orders'::pg_catalog.regclass
+          loop
+            execute pg_catalog.format(
+              'alter table %s drop constraint %I',
+              dependency.relation_name,
+              dependency.conname
+            );
+          end loop;
+        end
+        $$;
+        alter table public.product_orders drop constraint product_orders_pkey;
+        alter table public.product_orders
+          add constraint product_orders_payment_method_check primary key (id);
+      `,
+    },
+    {
+      name: 'constraint-foreign-key',
+      contype: 'f',
+      setupSql: `
+        alter table public.product_orders
+          drop constraint product_orders_payment_method_check;
+        alter table public.product_orders
+          add constraint product_orders_payment_method_check
+          foreign key (user_id) references auth.users(id);
+      `,
+    },
+    {
+      name: 'constraint-exclude',
+      contype: 'x',
+      setupSql: `
+        create extension if not exists btree_gist;
+        alter table public.product_orders
+          drop constraint product_orders_payment_method_check;
+        alter table public.product_orders
+          add constraint product_orders_payment_method_check
+          exclude using gist (id with =);
+      `,
+    },
+  ]
+
+  for (const { name, contype, setupSql } of nonCheckConstraintCases) {
+    scenarioCount += runScenario(
+      name,
+      (database) => psql(database, setupSql, `${name} fixture`),
+      (database) => {
+        const before = readPaymentMethodConstraintFingerprint(database, name)
+        const beforeType = JSON.parse(before).contype
+        if (beforeType !== contype) {
+          throw new Error(`${name} fixture has contype ${beforeType}, expected ${contype}`)
+        }
+
+        if (expectFindingAGuardMutation) {
+          psqlFile(database, migration, `${name} mutated migration`)
+          const afterMutation = readPaymentMethodConstraintFingerprint(database, `${name} mutated`)
+          const afterMutationType = JSON.parse(afterMutation).contype
+          if (afterMutationType !== 'c' || afterMutation === before) {
+            throw new Error(`${name} mutation did not reproduce unsafe non-CHECK replacement`)
+          }
+          throw new Error(`FINDING_A_GUARD_MUTATION_CAUGHT:${name}:unsafe_non_check_replacement`)
+        }
+
+        applyMigrationExpectFailure(
+          database,
+          /product_orders_payment_method_constraint_type_conflict/,
+          name,
+        )
+        assertNoLinePayRoles(database, name)
+        const after = readPaymentMethodConstraintFingerprint(database, `${name} preserved`)
+        if (after !== before) {
+          throw new Error(`${name} constraint type, definition, or metadata changed after rollback`)
         }
       },
     )

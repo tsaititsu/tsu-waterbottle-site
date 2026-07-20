@@ -69,27 +69,69 @@ begin
 end
 $$;
 
--- The legacy constraint definition is taken from the reviewed base schema.
+-- Guard every same-name constraint type before any side-effect DDL. The
+-- legacy CHECK definition is taken from the reviewed base schema.
 -- pg_get_constraintdef provides a canonical deparse; whitespace and case are
 -- normalized deterministically before an exact allowlist comparison.
 do $$
 declare
+  v_relation_oid oid := pg_catalog.to_regclass('public.product_orders');
+  v_constraint_count bigint;
+  v_constraint_type text;
   v_constraint_definition text;
   v_normalized_definition text;
+  v_constraint_metadata_valid boolean;
 begin
-  select pg_catalog.pg_get_constraintdef(constraint_row.oid, false)
-  into v_constraint_definition
+  -- line_pay_constraint_guard:all_same_name_types
+  select pg_catalog.count(*)
+  into v_constraint_count
   from pg_catalog.pg_constraint as constraint_row
-  join pg_catalog.pg_class as relation
-    on relation.oid = constraint_row.conrelid
-  join pg_catalog.pg_namespace as namespace
-    on namespace.oid = relation.relnamespace
-  where namespace.nspname = 'public'
-    and relation.relname = 'product_orders'
-    and constraint_row.conname = 'product_orders_payment_method_check'
-    and constraint_row.contype = 'c';
+  where constraint_row.conrelid = v_relation_oid
+    and constraint_row.conname = 'product_orders_payment_method_check';
 
-  if v_constraint_definition is not null then
+  if v_constraint_count > 1 then
+    raise exception using
+      errcode = '42710',
+      message = 'product_orders_payment_method_constraint_duplicate_name_conflict',
+      detail = pg_catalog.format('count=%s', v_constraint_count);
+  end if;
+
+  if v_constraint_count = 1 then
+    select
+      constraint_row.contype::text,
+      pg_catalog.pg_get_constraintdef(constraint_row.oid, false),
+      constraint_row.convalidated
+        and not constraint_row.connoinherit
+        and not constraint_row.condeferrable
+        and not constraint_row.condeferred
+        and constraint_row.conislocal
+        and constraint_row.coninhcount = 0
+        and constraint_row.conparentid = 0
+        and constraint_row.contypid = 0
+        and constraint_row.connamespace = relation.relnamespace
+    into
+      v_constraint_type,
+      v_constraint_definition,
+      v_constraint_metadata_valid
+    from pg_catalog.pg_constraint as constraint_row
+    join pg_catalog.pg_class as relation
+      on relation.oid = constraint_row.conrelid
+    where constraint_row.conrelid = v_relation_oid
+      and constraint_row.conname = 'product_orders_payment_method_check';
+
+    if v_constraint_type is distinct from 'c' then
+      raise exception using
+        errcode = '42809',
+        message = 'product_orders_payment_method_constraint_type_conflict',
+        detail = pg_catalog.format('contype=%s', coalesce(v_constraint_type, '<null>'));
+    end if;
+
+    if v_constraint_metadata_valid is distinct from true then
+      raise exception using
+        errcode = '23514',
+        message = 'product_orders_payment_method_constraint_metadata_conflict';
+    end if;
+
     v_normalized_definition := pg_catalog.lower(
       pg_catalog.regexp_replace(
         pg_catalog.btrim(v_constraint_definition),

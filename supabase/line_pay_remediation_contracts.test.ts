@@ -122,6 +122,34 @@ assert.match(
   /alter\s+function\s+public\.complete_product_order_line_pay_confirmation\s*\([\s\S]*?\)\s+owner\s+to\s+line_pay_payment_function_owner/i,
 )
 
+const paymentMethodGuardStart = migration.indexOf('-- Guard every same-name constraint type')
+const paymentMethodGuardEnd = migration.indexOf('-- Default ACLs must be rejected', paymentMethodGuardStart)
+assert.ok(paymentMethodGuardStart >= 0, 'payment-method all-contype guard must be present')
+assert.ok(paymentMethodGuardEnd > paymentMethodGuardStart, 'payment-method guard must precede side-effect DDL')
+const paymentMethodGuard = migration.slice(paymentMethodGuardStart, paymentMethodGuardEnd)
+assert.match(paymentMethodGuard, /line_pay_constraint_guard:all_same_name_types/i)
+assert.match(paymentMethodGuard, /constraint_row\.conrelid\s*=\s*v_relation_oid/i)
+assert.match(paymentMethodGuard, /constraint_row\.conname\s*=\s*'product_orders_payment_method_check'/i)
+assert.doesNotMatch(paymentMethodGuard, /and\s+constraint_row\.contype\s*=/i)
+assert.match(paymentMethodGuard, /if\s+v_constraint_count\s*>\s*1\s+then/i)
+assert.match(paymentMethodGuard, /if\s+v_constraint_type\s+is\s+distinct\s+from\s+'c'\s+then/i)
+assert.match(paymentMethodGuard, /product_orders_payment_method_constraint_duplicate_name_conflict/i)
+assert.match(paymentMethodGuard, /product_orders_payment_method_constraint_type_conflict/i)
+assert.match(paymentMethodGuard, /product_orders_payment_method_constraint_metadata_conflict/i)
+for (const metadataGuard of [
+  /constraint_row\.convalidated/i,
+  /not\s+constraint_row\.connoinherit/i,
+  /not\s+constraint_row\.condeferrable/i,
+  /not\s+constraint_row\.condeferred/i,
+  /constraint_row\.conislocal/i,
+  /constraint_row\.coninhcount\s*=\s*0/i,
+  /constraint_row\.conparentid\s*=\s*0/i,
+  /constraint_row\.contypid\s*=\s*0/i,
+  /constraint_row\.connamespace\s*=\s*relation\.relnamespace/i,
+]) {
+  assert.match(paymentMethodGuard, metadataGuard)
+}
+
 assert.match(migration, /payment_method\s+in\s*\(\s*'bank_transfer',\s*'newebpay',\s*'line_pay'\s*\)/i)
 assert.match(migration, /environment\s+in\s*\(\s*'sandbox',\s*'production'\s*\)/i)
 assert.match(migration, /unique\s+index\s+line_pay_checkout_attempts_environment_key_idx/i)
