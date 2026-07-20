@@ -8,14 +8,23 @@ import {
   AI_CHART_OPENAI_MAX_TIMEOUT_MS,
   AI_CHART_OPENAI_MIN_OUTPUT_TOKENS,
   AI_CHART_OPENAI_MIN_TIMEOUT_MS,
+  AI_CHART_OPENAI_OUTPUT_JSON_INVALID,
+  AI_CHART_OPENAI_OUTPUT_MISSING,
+  AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID,
+  AI_CHART_OPENAI_RESPONSE_INCOMPLETE,
   AI_CHART_OPENAI_RESPONSE_INVALID,
+  AI_CHART_OPENAI_RESPONSE_REFUSED,
   AiChartOpenAiError,
   buildAiChartOpenAiResponsesBody,
   getAiChartOpenAiModel,
   parseAiChartOpenAiStructuredResponse,
   validateAiChartOpenAiStructuredRequest,
+  type AiChartOpenAiErrorCode,
   type AiChartOpenAiStructuredRequest,
 } from './openAiResponses'
+import {
+  AiChartD1P1AdapterBridgeResultInvalidError,
+} from './d1P1AdapterBridgeContracts'
 
 type ParsedResult = {
   answer: string
@@ -29,6 +38,8 @@ type MutableRecord = Record<string, unknown>
 const SYNTHETIC_API_KEY = 'synthetic-api-key-value'
 const SYNTHETIC_PROMPT = 'synthetic-private-prompt-value'
 const SYNTHETIC_RESPONSE_BODY = 'synthetic-raw-response-body-value'
+const SYNTHETIC_SENSITIVE_OUTPUT_TEXT =
+  'synthetic-sensitive-output-text-must-not-leak'
 const SYNTHETIC_REASONING_SUMMARY = 'synthetic-private-reasoning-summary'
 const SYNTHETIC_ENCRYPTED_REASONING =
   'synthetic-private-encrypted-reasoning-content'
@@ -187,22 +198,33 @@ function expectConfigInvalid(run: () => unknown, markers: string[] = []) {
   }
 }
 
-function expectResponseInvalid(run: () => unknown, markers: string[] = []) {
+function expectResponseError(
+  run: () => unknown,
+  code: AiChartOpenAiErrorCode,
+  markers: string[] = [],
+): AiChartOpenAiError {
   try {
     run()
-    assert.fail('expected response invalid')
+    assert.fail(`expected ${code}`)
   } catch (error) {
     assert.equal(error instanceof AiChartOpenAiError, true)
     if (!(error instanceof AiChartOpenAiError)) {
       assert.fail('expected AiChartOpenAiError')
     }
-    assert.equal(error.message, AI_CHART_OPENAI_RESPONSE_INVALID)
-    assert.equal(error.code, AI_CHART_OPENAI_RESPONSE_INVALID)
+    assert.equal(error.message, code)
+    assert.equal(error.code, code)
     assert.equal(error.retryable, false)
     for (const marker of markers) {
       assert.equal(error.message.includes(marker), false)
+      assert.equal(String(error).includes(marker), false)
+      assert.equal(JSON.stringify(error).includes(marker), false)
     }
+    return error
   }
+}
+
+function expectResponseInvalid(run: () => unknown, markers: string[] = []) {
+  return expectResponseError(run, AI_CHART_OPENAI_RESPONSE_INVALID, markers)
 }
 
 test('unset model defaults to gpt-5.6-sol', () => {
@@ -654,14 +676,39 @@ test('reasoning item with incomplete status is rejected', () => {
 })
 
 test('reasoning-only output without output_text is rejected', () => {
-  expectResponseInvalid(() =>
-    parseAiChartOpenAiStructuredResponse(
-      responseFixture({
-        output: [reasoningOutputFixture()],
-      }),
-      parseResult,
-    ),
+  expectResponseError(
+    () =>
+      parseAiChartOpenAiStructuredResponse(
+        responseFixture({
+          output: [reasoningOutputFixture()],
+        }),
+        parseResult,
+      ),
+    AI_CHART_OPENAI_OUTPUT_MISSING,
   )
+})
+
+test('message without output_text is classified as output missing', () => {
+  const error = expectResponseError(
+    () =>
+      parseAiChartOpenAiStructuredResponse(
+        responseFixture({
+          output: [
+            {
+              type: 'message',
+              status: 'completed',
+              content: [],
+            },
+          ],
+        }),
+        parseResult,
+      ),
+    AI_CHART_OPENAI_OUTPUT_MISSING,
+  )
+  assert.equal(error.diagnostic?.responseStatus, 'completed')
+  assert.deepEqual(error.diagnostic?.outputItemTypes, ['message'])
+  assert.deepEqual(error.diagnostic?.contentItemTypes, [])
+  assert.equal(error.diagnostic?.outputTextCount, 0)
 })
 
 test('reasoning item does not affect usage parsing', () => {
@@ -681,7 +728,7 @@ test('reasoning item does not affect usage parsing', () => {
 })
 
 test('invalid reasoning error does not leak summary', () => {
-  expectResponseInvalid(
+  expectResponseError(
     () =>
       parseAiChartOpenAiStructuredResponse(
         responseFixture({
@@ -699,12 +746,13 @@ test('invalid reasoning error does not leak summary', () => {
         }),
         parseResult,
       ),
+    AI_CHART_OPENAI_OUTPUT_MISSING,
     [SYNTHETIC_REASONING_SUMMARY],
   )
 })
 
 test('invalid reasoning error does not leak encrypted content', () => {
-  expectResponseInvalid(
+  expectResponseError(
     () =>
       parseAiChartOpenAiStructuredResponse(
         responseFixture({
@@ -717,66 +765,123 @@ test('invalid reasoning error does not leak encrypted content', () => {
         }),
         parseResult,
       ),
+    AI_CHART_OPENAI_OUTPUT_MISSING,
     [SYNTHETIC_ENCRYPTED_REASONING],
   )
 })
 
 test('top-level SDK-only output_text is rejected', () => {
-  expectResponseInvalid(() =>
-    parseAiChartOpenAiStructuredResponse(
-      {
-        status: 'completed',
-        output_text: JSON.stringify({
-          answer: 'must-not-be-used',
-          nested: { score: 1 },
-        }),
-      },
-      parseResult,
-    ),
+  expectResponseError(
+    () =>
+      parseAiChartOpenAiStructuredResponse(
+        {
+          status: 'completed',
+          output_text: JSON.stringify({
+            answer: 'must-not-be-used',
+            nested: { score: 1 },
+          }),
+        },
+        parseResult,
+      ),
+    AI_CHART_OPENAI_OUTPUT_MISSING,
   )
 })
 
 test('refusal content is rejected', () => {
-  expectResponseInvalid(() =>
-    parseAiChartOpenAiStructuredResponse(
-      responseFixture({
-        output: [
-          {
-            type: 'message',
-            content: [
+  const refusalText = 'synthetic refusal must not leak'
+  const error = expectResponseError(
+    () =>
+      parseAiChartOpenAiStructuredResponse(
+        responseFixture({
+          output: [
+            {
+              type: 'message',
+              content: [
+                {
+                  type: 'refusal',
+                  refusal: refusalText,
+                },
+              ],
+            },
+          ],
+        }),
+        parseResult,
+      ),
+    AI_CHART_OPENAI_RESPONSE_REFUSED,
+    [refusalText],
+  )
+  assert.deepEqual(error.diagnostic?.contentItemTypes, ['refusal'])
+  assert.equal(error.diagnostic?.outputTextCount, 0)
+})
+
+for (const incompleteReason of ['max_output_tokens', 'content_filter']) {
+  test(`incomplete response preserves safe ${incompleteReason} metadata`, () => {
+    const error = expectResponseError(
+      () =>
+        parseAiChartOpenAiStructuredResponse(
+          responseFixture({
+            status: 'incomplete',
+            incomplete_details: {
+              reason: incompleteReason,
+            },
+            output: [
               {
-                type: 'refusal',
-                refusal: 'synthetic refusal',
+                type: 'message',
+                status: 'incomplete',
+                content: [
+                  {
+                    type: 'output_text',
+                    text: SYNTHETIC_SENSITIVE_OUTPUT_TEXT,
+                  },
+                ],
               },
             ],
-          },
-        ],
-      }),
-      parseResult,
-    ),
-  )
-})
+          }),
+          parseResult,
+        ),
+      AI_CHART_OPENAI_RESPONSE_INCOMPLETE,
+      [SYNTHETIC_SENSITIVE_OUTPUT_TEXT],
+    )
 
-test('incomplete response is rejected', () => {
-  expectResponseInvalid(() =>
-    parseAiChartOpenAiStructuredResponse(
-      responseFixture({
-        status: 'incomplete',
-        incomplete_details: {
-          reason: 'max_output_tokens',
-        },
-      }),
-      parseResult,
-    ),
-  )
-})
+    assert.equal(error.diagnostic?.responseStatus, 'incomplete')
+    assert.equal(error.diagnostic?.incompleteReason, incompleteReason)
+    assert.deepEqual(error.diagnostic?.outputItemTypes, ['message'])
+    assert.deepEqual(error.diagnostic?.contentItemTypes, ['output_text'])
+    assert.equal(error.diagnostic?.outputTextCount, 1)
+    assert.deepEqual(error.diagnostic?.usage, {
+      inputTokens: 10,
+      outputTokens: 20,
+      reasoningTokens: 5,
+      totalTokens: 30,
+    })
+    assert.deepEqual(Object.keys(error.diagnostic ?? {}).sort(), [
+      'contentItemTypes',
+      'incompleteReason',
+      'outputItemTypes',
+      'outputTextCount',
+      'responseErrorCode',
+      'responseStatus',
+      'usage',
+    ])
+    assert.deepEqual(Object.keys(error).sort(), [
+      'code',
+      'diagnostic',
+      'retryable',
+    ])
+    assert.equal(Object.isFrozen(error.diagnostic), true)
+    assert.equal(Object.isFrozen(error.diagnostic?.outputItemTypes), true)
+    assert.equal(Object.isFrozen(error.diagnostic?.contentItemTypes), true)
+    assert.equal(Object.isFrozen(error.diagnostic?.usage), true)
+  })
+}
 
 test('response error is rejected without leaking its body', () => {
-  expectResponseInvalid(
+  const error = expectResponseInvalid(
     () =>
       parseAiChartOpenAiStructuredResponse(
         responseFixture({
           error: {
+            code: 'server_error',
             message: SYNTHETIC_RESPONSE_BODY,
           },
         }),
@@ -784,42 +889,53 @@ test('response error is rejected without leaking its body', () => {
       ),
     [SYNTHETIC_RESPONSE_BODY],
   )
+  assert.equal(error.diagnostic?.responseErrorCode, 'server_error')
 })
 
 test('unknown content type is rejected', () => {
-  expectResponseInvalid(() =>
-    parseAiChartOpenAiStructuredResponse(
-      responseFixture({
-        output: [
-          {
-            type: 'message',
-            content: [
-              {
-                type: 'synthetic_unknown_content',
-                text: '{}',
-              },
-            ],
-          },
-        ],
-      }),
-      parseResult,
-    ),
+  const unknownContentType = 'synthetic_sensitive_content_type'
+  const error = expectResponseError(
+    () =>
+      parseAiChartOpenAiStructuredResponse(
+        responseFixture({
+          output: [
+            {
+              type: 'message',
+              content: [
+                {
+                  type: unknownContentType,
+                  text: '{}',
+                },
+              ],
+            },
+          ],
+        }),
+        parseResult,
+      ),
+    AI_CHART_OPENAI_OUTPUT_MISSING,
+    [unknownContentType],
   )
+  assert.deepEqual(error.diagnostic?.contentItemTypes, ['invalid'])
 })
 
 test('unknown output item type is rejected', () => {
-  expectResponseInvalid(() =>
-    parseAiChartOpenAiStructuredResponse(
-      responseFixture({
-        output: [
-          {
-            type: 'synthetic_unknown_output_item',
-          },
-        ],
-      }),
-      parseResult,
-    ),
+  const unknownOutputType = 'synthetic_sensitive_output_type'
+  const error = expectResponseError(
+    () =>
+      parseAiChartOpenAiStructuredResponse(
+        responseFixture({
+          output: [
+            {
+              type: unknownOutputType,
+            },
+          ],
+        }),
+        parseResult,
+      ),
+    AI_CHART_OPENAI_OUTPUT_MISSING,
+    [unknownOutputType],
   )
+  assert.deepEqual(error.diagnostic?.outputItemTypes, ['invalid'])
 })
 
 test('multiple output_text items are rejected', () => {
@@ -848,7 +964,7 @@ test('multiple output_text items are rejected', () => {
 })
 
 test('invalid output JSON is rejected', () => {
-  expectResponseInvalid(
+  expectResponseError(
     () =>
       parseAiChartOpenAiStructuredResponse(
         responseFixture({
@@ -866,17 +982,21 @@ test('invalid output JSON is rejected', () => {
         }),
         parseResult,
       ),
+    AI_CHART_OPENAI_OUTPUT_JSON_INVALID,
     [SYNTHETIC_RESPONSE_BODY],
   )
 })
 
-test('parseResult failure becomes fixed response invalid', () => {
-  expectResponseInvalid(
+test('valid JSON rejected by the source-bound parser is schema invalid', () => {
+  expectResponseError(
     () =>
-      parseAiChartOpenAiStructuredResponse(responseFixture(), () => {
-        throw new Error(SYNTHETIC_RESPONSE_BODY)
-      }),
-    [SYNTHETIC_RESPONSE_BODY],
+      parseAiChartOpenAiStructuredResponse(
+        responseFixture(),
+        () => {
+          throw new AiChartD1P1AdapterBridgeResultInvalidError()
+        },
+      ),
+    AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID,
   )
 })
 

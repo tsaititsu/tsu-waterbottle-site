@@ -2,13 +2,22 @@ import assert from 'node:assert/strict'
 import Module, { createRequire } from 'node:module'
 import {
   AI_CHART_OPENAI_CONFIG_INVALID,
+  AI_CHART_OPENAI_OUTPUT_JSON_INVALID,
+  AI_CHART_OPENAI_OUTPUT_MISSING,
+  AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID,
   AI_CHART_OPENAI_REQUEST_FAILED,
+  AI_CHART_OPENAI_RESPONSE_INCOMPLETE,
   AI_CHART_OPENAI_RESPONSE_INVALID,
+  AI_CHART_OPENAI_RESPONSE_REFUSED,
   AI_CHART_OPENAI_RESPONSES_URL,
   AI_CHART_OPENAI_TIMEOUT,
   AiChartOpenAiError,
+  type AiChartOpenAiErrorCode,
   type AiChartOpenAiStructuredRequest,
 } from './openAiResponses'
+import {
+  AiChartD1P1AdapterBridgeResultInvalidError,
+} from './d1P1AdapterBridgeContracts'
 
 type NodeModuleInternals = {
   _resolveFilename: (
@@ -218,11 +227,7 @@ function mockFetch(
 
 async function captureSafeError(
   run: () => Promise<unknown>,
-  code:
-    | typeof AI_CHART_OPENAI_CONFIG_INVALID
-    | typeof AI_CHART_OPENAI_REQUEST_FAILED
-    | typeof AI_CHART_OPENAI_TIMEOUT
-    | typeof AI_CHART_OPENAI_RESPONSE_INVALID,
+  code: AiChartOpenAiErrorCode,
   retryable: boolean,
   markers: string[] = [],
 ): Promise<AiChartOpenAiError> {
@@ -434,6 +439,62 @@ async function run() {
       false,
     )
   })
+
+  for (const incompleteReason of ['max_output_tokens', 'content_filter']) {
+    await asyncTest(
+      `top-level incomplete ${incompleteReason} preserves only safe diagnostics`,
+      async () => {
+        const error = await captureSafeError(
+          () =>
+            requestAiChartOpenAiStructuredResponse(requestFixture(), {
+              env: syntheticEnv(),
+              fetchImpl: mockFetch(
+                async () =>
+                  new Response(
+                    JSON.stringify(
+                      rawResponseFixture({
+                        status: 'incomplete',
+                        incomplete_details: {
+                          reason: incompleteReason,
+                        },
+                        output: [
+                          {
+                            type: 'message',
+                            status: 'incomplete',
+                            content: [
+                              {
+                                type: 'output_text',
+                                text: SYNTHETIC_RESPONSE_BODY,
+                              },
+                            ],
+                          },
+                        ],
+                      }),
+                    ),
+                    { status: 200 },
+                  ),
+              ),
+            }),
+          AI_CHART_OPENAI_RESPONSE_INCOMPLETE,
+          false,
+          [SYNTHETIC_RESPONSE_BODY],
+        )
+
+        assert.equal(error.diagnostic?.responseStatus, 'incomplete')
+        assert.equal(error.diagnostic?.incompleteReason, incompleteReason)
+        assert.deepEqual(error.diagnostic?.usage, {
+          inputTokens: 10,
+          outputTokens: 5,
+          reasoningTokens: 2,
+          totalTokens: 15,
+        })
+        assert.equal(
+          JSON.stringify(error).includes(SYNTHETIC_RESPONSE_BODY),
+          false,
+        )
+      },
+    )
+  }
 
   await asyncTest('missing API key fails before fetch', async () => {
     let fetchCount = 0
@@ -721,6 +782,70 @@ async function run() {
     )
   })
 
+  await asyncTest(
+    'malformed output_text JSON keeps its specific error code',
+    async () => {
+      await captureSafeError(
+        () =>
+          requestAiChartOpenAiStructuredResponse(requestFixture(), {
+            env: syntheticEnv(),
+            fetchImpl: mockFetch(
+              async () =>
+                new Response(
+                  JSON.stringify(
+                    rawResponseFixture({
+                      output: [
+                        {
+                          type: 'message',
+                          status: 'completed',
+                          content: [
+                            {
+                              type: 'output_text',
+                              text: SYNTHETIC_RESPONSE_BODY,
+                            },
+                          ],
+                        },
+                      ],
+                    }),
+                  ),
+                  { status: 200 },
+                ),
+            ),
+          }),
+        AI_CHART_OPENAI_OUTPUT_JSON_INVALID,
+        false,
+        [SYNTHETIC_RESPONSE_BODY],
+      )
+    },
+  )
+
+  await asyncTest(
+    'source-bound parser rejection keeps schema invalid code',
+    async () => {
+      await captureSafeError(
+        () =>
+          requestAiChartOpenAiStructuredResponse(
+            requestFixture({
+              parseResult: () => {
+                throw new AiChartD1P1AdapterBridgeResultInvalidError()
+              },
+            }),
+            {
+              env: syntheticEnv(),
+              fetchImpl: mockFetch(
+                async () =>
+                  new Response(JSON.stringify(rawResponseFixture()), {
+                    status: 200,
+                  }),
+              ),
+            },
+          ),
+        AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID,
+        false,
+      )
+    },
+  )
+
   await asyncTest('malformed Structured Output is rejected', async () => {
     await captureSafeError(
       () =>
@@ -748,7 +873,7 @@ async function run() {
               ),
           ),
         }),
-      AI_CHART_OPENAI_RESPONSE_INVALID,
+      AI_CHART_OPENAI_OUTPUT_MISSING,
       false,
     )
   })
@@ -769,7 +894,7 @@ async function run() {
               ),
           ),
         }),
-      AI_CHART_OPENAI_RESPONSE_INVALID,
+      AI_CHART_OPENAI_OUTPUT_MISSING,
       false,
     )
   })
@@ -801,7 +926,7 @@ async function run() {
               ),
           ),
         }),
-      AI_CHART_OPENAI_RESPONSE_INVALID,
+      AI_CHART_OPENAI_RESPONSE_REFUSED,
       false,
       [SYNTHETIC_RESPONSE_BODY],
     )

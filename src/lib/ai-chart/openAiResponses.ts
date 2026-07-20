@@ -18,6 +18,16 @@ export const AI_CHART_OPENAI_CONFIG_INVALID =
 export const AI_CHART_OPENAI_REQUEST_FAILED =
   'ai_chart_openai_request_failed' as const
 export const AI_CHART_OPENAI_TIMEOUT = 'ai_chart_openai_timeout' as const
+export const AI_CHART_OPENAI_RESPONSE_INCOMPLETE =
+  'ai_chart_openai_response_incomplete' as const
+export const AI_CHART_OPENAI_RESPONSE_REFUSED =
+  'ai_chart_openai_response_refused' as const
+export const AI_CHART_OPENAI_OUTPUT_MISSING =
+  'ai_chart_openai_output_missing' as const
+export const AI_CHART_OPENAI_OUTPUT_JSON_INVALID =
+  'ai_chart_openai_output_json_invalid' as const
+export const AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID =
+  'ai_chart_openai_output_schema_invalid' as const
 export const AI_CHART_OPENAI_RESPONSE_INVALID =
   'ai_chart_openai_response_invalid' as const
 
@@ -25,6 +35,11 @@ export type AiChartOpenAiErrorCode =
   | typeof AI_CHART_OPENAI_CONFIG_INVALID
   | typeof AI_CHART_OPENAI_REQUEST_FAILED
   | typeof AI_CHART_OPENAI_TIMEOUT
+  | typeof AI_CHART_OPENAI_RESPONSE_INCOMPLETE
+  | typeof AI_CHART_OPENAI_RESPONSE_REFUSED
+  | typeof AI_CHART_OPENAI_OUTPUT_MISSING
+  | typeof AI_CHART_OPENAI_OUTPUT_JSON_INVALID
+  | typeof AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID
   | typeof AI_CHART_OPENAI_RESPONSE_INVALID
 
 export type AiChartOpenAiReasoningEffort = 'low' | 'medium' | 'high'
@@ -34,6 +49,16 @@ export type AiChartOpenAiUsage = Readonly<{
   outputTokens: number
   reasoningTokens: number
   totalTokens: number
+}>
+
+export type AiChartOpenAiResponseDiagnostic = Readonly<{
+  responseStatus: string | null
+  incompleteReason: string | null
+  responseErrorCode: string | null
+  outputItemTypes: readonly string[]
+  contentItemTypes: readonly string[]
+  outputTextCount: number
+  usage: AiChartOpenAiUsage | null
 }>
 
 export type AiChartOpenAiStructuredResult<T> = Readonly<{
@@ -102,11 +127,24 @@ const REASONING_EFFORTS = new Set<unknown>(['low', 'medium', 'high'])
 export class AiChartOpenAiError extends Error {
   readonly code: AiChartOpenAiErrorCode
   readonly retryable: boolean
+  declare readonly diagnostic?: AiChartOpenAiResponseDiagnostic
 
-  constructor(code: AiChartOpenAiErrorCode, retryable: boolean) {
+  constructor(
+    code: AiChartOpenAiErrorCode,
+    retryable: boolean,
+    diagnostic?: AiChartOpenAiResponseDiagnostic,
+  ) {
     super(code)
     this.code = code
     this.retryable = retryable
+    if (diagnostic !== undefined) {
+      Object.defineProperty(this, 'diagnostic', {
+        value: diagnostic,
+        enumerable: true,
+        configurable: false,
+        writable: false,
+      })
+    }
   }
 }
 
@@ -114,8 +152,23 @@ function configInvalid(): never {
   throw new AiChartOpenAiError(AI_CHART_OPENAI_CONFIG_INVALID, false)
 }
 
-function responseInvalid(): never {
-  throw new AiChartOpenAiError(AI_CHART_OPENAI_RESPONSE_INVALID, false)
+function responseFailure(
+  code:
+    | typeof AI_CHART_OPENAI_RESPONSE_INCOMPLETE
+    | typeof AI_CHART_OPENAI_RESPONSE_REFUSED
+    | typeof AI_CHART_OPENAI_OUTPUT_MISSING
+    | typeof AI_CHART_OPENAI_OUTPUT_JSON_INVALID
+    | typeof AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID
+    | typeof AI_CHART_OPENAI_RESPONSE_INVALID,
+  diagnostic?: AiChartOpenAiResponseDiagnostic,
+): never {
+  throw new AiChartOpenAiError(code, false, diagnostic)
+}
+
+function responseInvalid(
+  diagnostic?: AiChartOpenAiResponseDiagnostic,
+): never {
+  responseFailure(AI_CHART_OPENAI_RESPONSE_INVALID, diagnostic)
 }
 
 function isPlainObject(value: unknown): value is PlainRecord {
@@ -223,6 +276,96 @@ function normalizeUsageInteger(value: unknown): number {
     value >= 0
     ? value
     : 0
+}
+
+const SAFE_RESPONSE_METADATA_TOKEN = /^[A-Za-z0-9_.:-]{1,80}$/u
+const SAFE_OUTPUT_ITEM_TYPES = new Set<unknown>(['reasoning', 'message'])
+const SAFE_CONTENT_ITEM_TYPES = new Set<unknown>(['output_text', 'refusal'])
+
+function sanitizeResponseMetadataToken(value: unknown): string | null {
+  return typeof value === 'string' && SAFE_RESPONSE_METADATA_TOKEN.test(value)
+    ? value
+    : null
+}
+
+function sanitizeResponseItemType(
+  value: unknown,
+  allowedTypes: ReadonlySet<unknown>,
+): string {
+  return allowedTypes.has(value) && typeof value === 'string'
+    ? value
+    : 'invalid'
+}
+
+function parseUsageMetadata(value: unknown): Readonly<{
+  valid: boolean
+  usage: AiChartOpenAiUsage | null
+}> {
+  if (value === undefined) {
+    return Object.freeze({ valid: true, usage: null })
+  }
+  if (!isPlainObject(value)) {
+    return Object.freeze({ valid: false, usage: null })
+  }
+
+  const outputTokenDetails = isPlainObject(value.output_tokens_details)
+    ? value.output_tokens_details
+    : undefined
+  return Object.freeze({
+    valid: true,
+    usage: Object.freeze({
+      inputTokens: normalizeUsageInteger(value.input_tokens),
+      outputTokens: normalizeUsageInteger(value.output_tokens),
+      reasoningTokens: normalizeUsageInteger(
+        outputTokenDetails?.reasoning_tokens,
+      ),
+      totalTokens: normalizeUsageInteger(value.total_tokens),
+    }),
+  })
+}
+
+function buildResponseDiagnostic(
+  value: PlainRecord,
+): AiChartOpenAiResponseDiagnostic {
+  const outputItemTypes: string[] = []
+  const contentItemTypes: string[] = []
+  let outputTextCount = 0
+
+  if (Array.isArray(value.output)) {
+    for (const outputItem of value.output) {
+      const outputRecord = isPlainObject(outputItem) ? outputItem : null
+      outputItemTypes.push(
+        sanitizeResponseItemType(outputRecord?.type, SAFE_OUTPUT_ITEM_TYPES),
+      )
+      if (!Array.isArray(outputRecord?.content)) continue
+
+      for (const contentItem of outputRecord.content) {
+        const contentRecord = isPlainObject(contentItem) ? contentItem : null
+        const contentType = sanitizeResponseItemType(
+          contentRecord?.type,
+          SAFE_CONTENT_ITEM_TYPES,
+        )
+        contentItemTypes.push(contentType)
+        if (contentType === 'output_text') outputTextCount += 1
+      }
+    }
+  }
+
+  const incompleteDetails = isPlainObject(value.incomplete_details)
+    ? value.incomplete_details
+    : null
+  const responseError = isPlainObject(value.error) ? value.error : null
+  const usage = parseUsageMetadata(value.usage).usage
+
+  return Object.freeze({
+    responseStatus: sanitizeResponseMetadataToken(value.status),
+    incompleteReason: sanitizeResponseMetadataToken(incompleteDetails?.reason),
+    responseErrorCode: sanitizeResponseMetadataToken(responseError?.code),
+    outputItemTypes: Object.freeze(outputItemTypes),
+    contentItemTypes: Object.freeze(contentItemTypes),
+    outputTextCount,
+    usage,
+  })
 }
 
 export function getAiChartOpenAiModel(
@@ -392,95 +535,135 @@ export function buildAiChartOpenAiResponsesBody<T>(
   })
 }
 
-export function parseAiChartOpenAiStructuredResponse<T>(
+function parseAiChartOpenAiStructuredResponseInternal<T>(
   value: unknown,
   parseResult: (value: unknown) => T,
 ): AiChartOpenAiStructuredResult<T> {
-  try {
-    if (!isPlainObject(value) || value.status !== 'completed') {
-      responseInvalid()
-    }
-    if (
-      (value.error !== undefined && value.error !== null) ||
-      (value.incomplete_details !== undefined &&
-        value.incomplete_details !== null) ||
-      !Array.isArray(value.output) ||
-      typeof parseResult !== 'function'
-    ) {
-      responseInvalid()
-    }
+  if (!isPlainObject(value) || typeof parseResult !== 'function') {
+    responseInvalid()
+  }
 
-    let outputText: string | undefined
+  const diagnostic = buildResponseDiagnostic(value)
+  if (value.status === 'incomplete') {
+    responseFailure(AI_CHART_OPENAI_RESPONSE_INCOMPLETE, diagnostic)
+  }
+  if (value.error !== undefined && value.error !== null) {
+    responseInvalid(diagnostic)
+  }
 
+  let refusalFound = false
+  let messageCount = 0
+  let outputText: string | undefined
+  let envelopeInvalid = value.status !== 'completed' || !Array.isArray(value.output)
+
+  if (Array.isArray(value.output)) {
     for (const outputItem of value.output) {
-      if (!isPlainObject(outputItem)) responseInvalid()
+      if (!isPlainObject(outputItem)) {
+        envelopeInvalid = true
+        continue
+      }
 
       if (outputItem.type === 'reasoning') {
         if (
           outputItem.status !== undefined &&
           outputItem.status !== 'completed'
         ) {
-          responseInvalid()
+          envelopeInvalid = true
         }
-
         continue
       }
 
+      if (outputItem.type !== 'message') {
+        envelopeInvalid = true
+        continue
+      }
+
+      messageCount += 1
       if (
-        outputItem.type !== 'message' ||
         (outputItem.status !== undefined &&
           outputItem.status !== 'completed') ||
         !Array.isArray(outputItem.content)
       ) {
-        responseInvalid()
+        envelopeInvalid = true
+        continue
       }
 
       for (const contentItem of outputItem.content) {
-        if (!isPlainObject(contentItem)) responseInvalid()
-        if (contentItem.type === 'refusal') responseInvalid()
-        if (
-          contentItem.type !== 'output_text' ||
-          typeof contentItem.text !== 'string' ||
-          contentItem.text.trim().length === 0 ||
-          outputText !== undefined
-        ) {
-          responseInvalid()
+        if (!isPlainObject(contentItem)) {
+          envelopeInvalid = true
+          continue
         }
-
+        if (contentItem.type === 'refusal') {
+          refusalFound = true
+          continue
+        }
+        if (contentItem.type !== 'output_text') {
+          envelopeInvalid = true
+          continue
+        }
+        if (
+          typeof contentItem.text !== 'string' ||
+          contentItem.text.trim().length === 0
+        ) {
+          continue
+        }
+        if (outputText !== undefined) {
+          envelopeInvalid = true
+          continue
+        }
         outputText = contentItem.text
       }
     }
+  }
 
-    if (outputText === undefined) responseInvalid()
+  if (refusalFound) {
+    responseFailure(AI_CHART_OPENAI_RESPONSE_REFUSED, diagnostic)
+  }
+  if (messageCount === 0 || outputText === undefined) {
+    responseFailure(AI_CHART_OPENAI_OUTPUT_MISSING, diagnostic)
+  }
+  if (diagnostic.outputTextCount !== 1) {
+    responseInvalid(diagnostic)
+  }
 
-    const parsed = parseResult(JSON.parse(outputText) as unknown)
-    const usageValue = value.usage
-    let usage: AiChartOpenAiUsage | null = null
-
-    if (usageValue !== undefined) {
-      if (!isPlainObject(usageValue)) responseInvalid()
-
-      const outputTokenDetails = isPlainObject(
-        usageValue.output_tokens_details,
-      )
-        ? usageValue.output_tokens_details
-        : undefined
-
-      usage = Object.freeze({
-        inputTokens: normalizeUsageInteger(usageValue.input_tokens),
-        outputTokens: normalizeUsageInteger(usageValue.output_tokens),
-        reasoningTokens: normalizeUsageInteger(
-          outputTokenDetails?.reasoning_tokens,
-        ),
-        totalTokens: normalizeUsageInteger(usageValue.total_tokens),
-      })
-    }
-
-    return Object.freeze({
-      data: cloneAndFreezeResult(parsed),
-      usage,
-    })
+  let decoded: unknown
+  try {
+    decoded = JSON.parse(outputText) as unknown
   } catch {
+    responseFailure(AI_CHART_OPENAI_OUTPUT_JSON_INVALID, diagnostic)
+  }
+
+  let parsed: T
+  try {
+    parsed = cloneAndFreezeResult(parseResult(decoded))
+  } catch {
+    responseFailure(AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID, diagnostic)
+  }
+
+  const usageMetadata = parseUsageMetadata(value.usage)
+  if (
+    envelopeInvalid ||
+    (value.incomplete_details !== undefined &&
+      value.incomplete_details !== null) ||
+    !usageMetadata.valid
+  ) {
+    responseInvalid(diagnostic)
+  }
+
+  return Object.freeze({
+    data: parsed,
+    usage: usageMetadata.usage,
+  })
+}
+
+export function parseAiChartOpenAiStructuredResponse<T>(
+  value: unknown,
+  parseResult: (value: unknown) => T,
+): AiChartOpenAiStructuredResult<T> {
+  try {
+    return parseAiChartOpenAiStructuredResponseInternal(value, parseResult)
+  } catch (error) {
+    if (error instanceof AiChartOpenAiError) throw error
     responseInvalid()
   }
 }
