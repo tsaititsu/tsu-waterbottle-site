@@ -433,7 +433,86 @@ test('followUp effect resets empty state and reloads draft plus its matching dis
     occurrenceCount(followUpEffect, /loadDivinationFollowUpDisplayThread\(draft\?\.threadId\)/g),
     1,
   )
-  assert.match(previewSource, /\{followUpKey && latestFollowUpReading \? \(/)
+})
+
+test('follow-up context panel keeps one unconditional shell before the question form', () => {
+  const preview = parseSource(
+    'src/components/divination/DivinationLocalPreview.tsx',
+  )
+  const previewSource = preview.getFullText()
+  const panels = findJsxTag(preview, 'DivinationQuestionContextPanel')
+  const questionForms = findJsxTag(preview, 'DivinationQuestionForm')
+
+  assert.equal(panels.length, 1)
+  assert.equal(questionForms.length, 1)
+  assert.equal(
+    hasJsxAncestor(panels[0], preview, 'Suspense'),
+    false,
+  )
+  assert.ok(
+    panels[0].getStart(preview) < questionForms[0].getStart(preview),
+    'the stable context panel must remain before the question form',
+  )
+  assert.equal(
+    getJsxAttribute(panels[0], 'isFollowUp')?.initializer?.getText(),
+    '{Boolean(followUpKey)}',
+  )
+  assert.equal(
+    getJsxAttribute(panels[0], 'followUpReading')?.initializer?.getText(),
+    '{latestFollowUpReading}',
+  )
+  assert.equal(
+    getJsxAttribute(panels[0], 'displayReading')?.initializer?.getText(),
+    '{latestDisplayReading}',
+  )
+  assert.doesNotMatch(
+    previewSource,
+    /\{followUpKey && latestFollowUpReading \? \(/,
+  )
+})
+
+test('context panel uses fixed grid rows and clamps dynamic follow-up text', () => {
+  const panel = parseSource(
+    'src/components/divination/DivinationQuestionContextPanel.tsx',
+  )
+  const panelSource = panel.getFullText()
+  const articles = findJsxTag(panel, 'article')
+  const details = findJsxTag(panel, 'details')
+  const paragraphs = findJsxTag(panel, 'p')
+  const questionRow = paragraphs.find(
+    (paragraph) =>
+      getJsxAttribute(paragraph, 'data-context-row')?.initializer?.getText() ===
+      '"question"',
+  )
+  const cardRow = paragraphs.find(
+    (paragraph) =>
+      getJsxAttribute(paragraph, 'data-context-row')?.initializer?.getText() ===
+      '"card"',
+  )
+
+  assert.equal(articles.length, 1)
+  assert.equal(details.length, 1)
+  assert.ok(questionRow)
+  assert.ok(cardRow)
+  assert.equal(
+    getJsxAttribute(articles[0], 'data-testid')?.initializer?.getText(),
+    '"divination-question-context-panel"',
+  )
+  assert.match(
+    getJsxAttribute(articles[0], 'className')?.initializer?.getText() ?? '',
+    /grid-rows-\[1\.5rem_4rem_1\.75rem_3\.5rem_auto\]/,
+  )
+  assert.match(
+    getJsxAttribute(questionRow, 'className')?.initializer?.getText() ?? '',
+    /line-clamp-2.*overflow-hidden/,
+  )
+  assert.match(
+    getJsxAttribute(cardRow, 'className')?.initializer?.getText() ?? '',
+    /truncate/,
+  )
+  assert.match(panelSource, /查看上一題題目與解答/)
+  assert.match(panelSource, /displayReading\.finalAnswer/)
+  assert.match(panelSource, /完成一次占卜後，可從解答頁延續追問/)
 })
 
 test('follow-up storage exports preserve canonical browser storage keys', () => {
