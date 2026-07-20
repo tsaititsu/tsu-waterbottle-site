@@ -1,12 +1,23 @@
 'use client'
 
+import { useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { DivinationLocalPreview } from '@/components/divination/DivinationLocalPreview'
+import type { DivinationSearchParamState } from '@/lib/publicFormSearchParams'
 
-export function DivinationSearchParamsBridge() {
+type DivinationSearchParamsBridgeProps = {
+  onChange: (state: DivinationSearchParamState) => void
+}
+
+export function DivinationSearchParamsBridge({
+  onChange,
+}: DivinationSearchParamsBridgeProps) {
   const searchParams = useSearchParams()
   const resetKey = searchParams.get('reset') ?? ''
   const followUpKey = searchParams.get('followUp') ?? ''
 
-  return <DivinationLocalPreview resetKey={resetKey} followUpKey={followUpKey} />
+  useEffect(() => {
+    onChange({ resetKey, followUpKey })
+  }, [followUpKey, onChange, resetKey])
+
+  return null
 }
