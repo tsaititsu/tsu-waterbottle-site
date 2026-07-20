@@ -56,6 +56,36 @@
 - Background job：未建立
 - Production：未啟用
 
+## Canonical AI 命盤測試
+
+Repository 唯一正式的 AI 命盤 assertion test 指令是：
+
+```bash
+npm run test:ai-chart
+```
+
+Runner 使用 Node `24.16.0` 與 exact devDependency `tsx@4.23.1`。它會在
+`src/lib/ai-chart` 下遞迴尋找所有 `*.test.ts`，只接受 regular file、拒絕
+symlink，以 Repository-relative path 做 deterministic ASCII 排序並檢查沒有
+重複。測試逐檔、循序執行，第一個失敗即停止；Workflow 不維護第二份測試
+清單。Runner contract 會先驗證目前應發現 26 個測試檔、環境隔離、排序、
+去重、fail-fast、全成功條件、exact Node 與本機 exact `tsx`。Node contract 會
+逐字驗證 `process.versions.node === '24.16.0'`，任何 patch 或 minor drift 都會
+fail closed。
+
+每個測試 child process 都固定使用 `NODE_ENV=test`，並移除 OpenAI、P1
+Preview、Vercel、Supabase、`DATABASE_URL`、`NODE_OPTIONS` 與
+`TSX_TSCONFIG_PATH` 等 canonical removed-key list；不會輸出這些變數的值或
+衍生資訊。既有 AI 命盤測試只使用 synthetic fixture、mock request 或 mock
+fetch，canonical runner 不會發送 OpenAI request，也不會連接 Supabase。
+
+Runner assertion tests 與 TypeScript typecheck 是不同驗證，兩者都必須執行：
+
+```bash
+npm run test:ai-chart
+npm run typecheck -- --incremental false
+```
+
 Manifest 與 23 份素材會在 Server 端驗證原始位元組 SHA-256。
 `draft` 與 `reference_only` 素材不能被 Runtime 啟用，目前所有
 `runtimeEnabled` 仍為 `false`。
