@@ -33,6 +33,11 @@ export const SUCCESS_MESSAGES = Object.freeze({
 })
 
 const PROJECT_REF_PATTERN = /^[a-z0-9]{20}$/u
+const DIRECT_HOST_PATTERN = /^db[.]([a-z0-9]{20})[.]supabase[.]co$/u
+const SUPAVISOR_SESSION_HOST_PATTERN =
+  /^aws-(?:0|[1-9][0-9]*)-[a-z]{2}(?:-[a-z]+)+-[1-9][0-9]*[.]pooler[.]supabase[.]com$/u
+const POOLER_USERNAME_PATTERN = /^postgres[.]([a-z0-9]{20})$/u
+const ASCII_HOST_PATTERN = /^[a-z0-9.-]+$/u
 const ALLOWED_SSL_MODES = new Set(['require', 'verify-ca', 'verify-full'])
 const MAX_CAPTURE_BYTES = 1024 * 1024
 const SAFE_FAILURE_CODES = new Set([
@@ -67,6 +72,77 @@ function decodeComponent(value) {
   }
 }
 
+export const CONNECTION_MODES = Object.freeze({
+  direct: 'direct',
+  supavisorSession: 'supavisor_session',
+})
+
+function parseRawAuthority(databaseUrl, parsed) {
+  if (/[\u0000-\u0020\u007f]/u.test(databaseUrl)) fail('DATABASE_URL_INVALID')
+  const schemeEnd = databaseUrl.indexOf('://')
+  if (schemeEnd < 0) fail('DATABASE_URL_INVALID')
+  const authorityStart = schemeEnd + 3
+  const authorityEndMatch = /[/?#]/u.exec(databaseUrl.slice(authorityStart))
+  const authorityEnd = authorityEndMatch
+    ? authorityStart + authorityEndMatch.index
+    : databaseUrl.length
+  const authority = databaseUrl.slice(authorityStart, authorityEnd)
+  const at = authority.lastIndexOf('@')
+  if (at <= 0 || authority.indexOf('@') !== at) fail('DATABASE_URL_INVALID')
+
+  const rawHostPort = authority.slice(at + 1)
+  if (!rawHostPort || rawHostPort.startsWith('[')) fail('DATABASE_URL_INVALID')
+  const firstColon = rawHostPort.indexOf(':')
+  const lastColon = rawHostPort.lastIndexOf(':')
+  if (firstColon !== lastColon) fail('DATABASE_URL_INVALID')
+  const rawHostname = firstColon < 0
+    ? rawHostPort
+    : rawHostPort.slice(0, firstColon)
+  const rawPort = firstColon < 0 ? '' : rawHostPort.slice(firstColon + 1)
+
+  if (
+    !rawHostname ||
+    !ASCII_HOST_PATTERN.test(rawHostname) ||
+    rawHostname !== parsed.hostname
+  ) {
+    fail('DATABASE_URL_INVALID')
+  }
+  if (firstColon >= 0 && !rawPort) fail('DATABASE_URL_INVALID')
+  if (rawPort && (!/^\d+$/u.test(rawPort) || rawPort !== parsed.port)) {
+    fail('DATABASE_URL_INVALID')
+  }
+  return rawPort
+}
+
+export function isValidSupavisorSessionHostname(hostname) {
+  return (
+    typeof hostname === 'string' &&
+    hostname.length <= 253 &&
+    ASCII_HOST_PATTERN.test(hostname) &&
+    !hostname.includes('xn--') &&
+    SUPAVISOR_SESSION_HOST_PATTERN.test(hostname)
+  )
+}
+
+function determineConnectionMode(hostname, username, projectId) {
+  const directMatch = DIRECT_HOST_PATTERN.exec(hostname)
+  if (directMatch) {
+    if (directMatch[1] !== projectId) fail('DATABASE_TARGET_MISMATCH')
+    if (username !== 'postgres') fail('DATABASE_URL_INVALID')
+    return CONNECTION_MODES.direct
+  }
+
+  if (isValidSupavisorSessionHostname(hostname)) {
+    const usernameMatch = POOLER_USERNAME_PATTERN.exec(username)
+    if (!usernameMatch || usernameMatch[1] !== projectId) {
+      fail('DATABASE_TARGET_MISMATCH')
+    }
+    return CONNECTION_MODES.supavisorSession
+  }
+
+  fail('DATABASE_URL_INVALID')
+}
+
 export function validatePhase(phase) {
   if (typeof phase !== 'string' || !Object.hasOwn(PHASE_FILES, phase)) {
     fail('UNSUPPORTED_DATABASE_PHASE')
@@ -96,20 +172,21 @@ export function parseDatabaseUrl(databaseUrl, projectId) {
     fail('DATABASE_URL_INVALID')
   }
   if (parsed.hash) fail('DATABASE_URL_INVALID')
-  if (parsed.hostname !== `db.${projectId}.supabase.co`) {
-    fail('DATABASE_TARGET_MISMATCH')
-  }
 
   const database = decodeComponent(parsed.pathname.slice(1))
   const username = decodeComponent(parsed.username)
   const password = decodeComponent(parsed.password)
   if (!database || !username || !password) fail('DATABASE_URL_INVALID')
+  if (database !== 'postgres') fail('DATABASE_URL_INVALID')
+  if (/[\u0000-\u001f\u007f]/u.test(password)) fail('DATABASE_URL_INVALID')
 
-  const port = parsed.port || '5432'
+  const rawPort = parseRawAuthority(databaseUrl, parsed)
+  const port = rawPort || '5432'
   const numericPort = Number(port)
   if (!/^\d+$/u.test(port) || numericPort < 1 || numericPort > 65535) {
     fail('DATABASE_URL_INVALID')
   }
+  if (port !== '5432') fail('DATABASE_URL_INVALID')
 
   const queryKeys = [...parsed.searchParams.keys()]
   if (queryKeys.some((key) => key !== 'sslmode')) fail('DATABASE_URL_INVALID')
@@ -118,17 +195,20 @@ export function parseDatabaseUrl(databaseUrl, projectId) {
   const sslmode = sslModes[0] ?? 'require'
   if (!ALLOWED_SSL_MODES.has(sslmode)) fail('DATABASE_URL_INVALID')
 
-  return {
+  const mode = determineConnectionMode(parsed.hostname, username, projectId)
+
+  return Object.freeze({
     database,
     databaseUrl,
     encodedPassword: parsed.password,
     host: parsed.hostname,
+    mode,
     password,
     port,
     projectId,
     sslmode,
     username,
-  }
+  })
 }
 
 export function escapePgpass(value) {
@@ -159,7 +239,7 @@ export function buildPsqlArgs(phase) {
 }
 
 export function buildChildEnvironment(connection, pgpassFile) {
-  return {
+  const environment = {
     LANG: 'C.UTF-8',
     LC_ALL: 'C.UTF-8',
     PGHOST: connection.host,
@@ -171,6 +251,10 @@ export function buildChildEnvironment(connection, pgpassFile) {
     PGAPPNAME: 'profiles-admin-emergency-migration',
     PGCONNECT_TIMEOUT: '15',
   }
+  if (connection.mode === CONNECTION_MODES.supavisorSession) {
+    environment.PGGSSENCMODE = 'disable'
+  }
+  return environment
 }
 
 export function redactSensitiveText(text, connection) {
