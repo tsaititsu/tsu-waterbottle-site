@@ -66,8 +66,11 @@ Manifest 與 23 份素材會在 Server 端驗證原始位元組 SHA-256。
 已建立；K0 Catalog 與 deterministic knowledge selection 已完成，完整
 P1 Model Input Contract 與固定 12 份 builder 已完成；P1 Prompt Package
 Contract 與固定 12 份 builder 也已完成；P1 Adapter Bridge Contract 與
-固定 12 份 Runtime Bridges 已完成。目前仍未接入 Server request，也沒有
-發送任何 OpenAI network request。
+固定 12 份 Runtime Bridges 已完成；Primary Axis source binding、P1 Preview
+Request Plan Contract、Preview Authorization Contract、本機單宮 request gate
+與 mock request execution 也已完成。Gate 會先驗證所選宮位具有非空且不重複的
+effective major stars；`blocked_by_local_star` 與其他不可驗收 target 不會建立可執行
+Plan。本版本沒有發送任何 OpenAI network request。
 
 K0 compiler 只在 Server 端讀取內部固定的九份白名單素材，呼叫端不能傳入
 路徑或自訂 allowlist；逐檔驗證 Manifest、
@@ -75,9 +78,15 @@ Repository-relative path、regular-file／non-symlink、SHA-256 與 strict UTF-8
 它不會讀取 Prompt，也不會把原始完整素材回傳給任何 Route。
 
 P1 Adapter Bridge 只引用 Responses adapter core，不引用 Server request；
-Responses adapter 與 Bridge 尚未被 Route、Report、付款或 Supabase 流程引用。
-測試只使用 mock fetch，沒有測試會呼叫 OpenAI；目前也不會讀取或
-傳送本目錄的 D1 素材。所有 `runtimeEnabled` 仍為 `false`。
+只有 Server-only Preview Gate 會重建固定 12 份 authenticated Bridges，再選取
+一個宮位並呼叫既有 Server request。Gate 預設關閉，只允許本機
+development，且每次只允許一宮一請求；沒有 retry、Route、正式 Runtime 或
+持久化。CI、Vercel 與 Production 一律拒絕。Gate 不直接讀 API key、不直接
+使用 fetch，也不自行建立 Responses body。測試只使用 mock request，沒有
+測試會呼叫 OpenAI。Gate 會在自己的 trust boundary 驗證 response wrapper 與
+usage，並再次使用 authenticated Bridge parser 驗證 raw result data；mock 無法
+繞過 source binding。目前也不會傳送本目錄的 D1 素材。所有
+`runtimeEnabled` 仍為 `false`。
 
 Adapter 使用原生 REST fetch 解析原始 `output` array，不依賴 SDK-only
 的頂層 `output_text`。既有 Adapter 只正式處理 P1／F1 Output Contract；
@@ -87,7 +96,16 @@ Adapter 使用原生 REST fetch 解析原始 `output` array，不依賴 SDK-only
 `adapterStatus=adapter_bridge_required` 與 `openAiCallable=false`；必須通過
 Adapter Bridge 的 authenticated rebuild，才能建立記憶體內 Structured Request。
 P1 Structural Input、Model Input 與 Prompt Package 都不得直接送入既有
-Adapter；下一階段才是受控 Preview Request Gate／Runtime。
+Adapter。下一階段才會在另一個明確授權任務中執行一次 one-shot local
+Preview；Preview runner 尚未建立，Live OpenAI Preview request 維持 0，
+Route／Runtime 維持 0，Production 維持停用。
+
+P1 Result 的 Primary Axis 現在會依 target palace 的 canonical／borrowed
+狀態驗證有效主星集合、authenticated double-star core 與 target-role Rule
+completeness；對宮、暗合與三方專屬 Rule 不得冒充本宮主軸來源。Primary Axis
+statement 與 double-star core 也會拒絕完整的 authenticated identity、fingerprint、
+Rule trace 與 structural metadata。F1 仍固定維持
+`F1_BLOCKED_BY_MISSING_FLYING_TRANSFORM_SOURCE`。
 
 ## N0 與 P1 Structural Input 邊界
 
