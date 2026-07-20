@@ -15,16 +15,6 @@ export const metadata: Metadata = {
     template: `%s｜${SITE_TITLE}`,
   },
   description: SITE_DESCRIPTION,
-  icons: {
-    icon: [
-      {
-        url: '/brand/waterbottle-logo-transparent-cropped.png',
-        type: 'image/png'
-      }
-    ],
-    shortcut: '/brand/waterbottle-logo-transparent-cropped.png',
-    apple: '/brand/waterbottle-logo-web.png'
-  },
   openGraph: {
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
