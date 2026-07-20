@@ -20,6 +20,7 @@ type ValidatorModule = {
   CANONICAL_POLICY_REFERENCES: readonly string[]
   CANONICAL_PUBLIC_SCHEMA_CONTRACT: Record<string, unknown>
   EXPECTED_MIGRATION_SHA256: string
+  EXPECTED_PSQL_MAJOR: number
   MIGRATION_FILE: string
   PSQL_BINARY: string
   assertMetadataSqlStaticSafety: (sql: string) => true
@@ -35,7 +36,12 @@ type ValidatorModule = {
   validateFunctionContract: (value: Record<string, unknown>) => true
   validateMigrationHash: (value: string) => true
   validatePolicyReferences: (value: Array<Record<string, unknown>>) => string[]
-  validatePsqlVersionOutput: (value: string) => true
+  validateInstalledPsql: (implementation?: (
+    binary: string,
+    args: string[],
+    options: Record<string, unknown>,
+  ) => string) => true
+  validatePsqlVersionOutput: (value: unknown) => true
   validatePublicSchemaContract: (value: Record<string, unknown>) => true
 }
 
@@ -268,14 +274,82 @@ async function main() {
   contract('fixed PostgreSQL binary is exact', () => {
     assert.equal(validator.PSQL_BINARY, '/usr/lib/postgresql/16/bin/psql')
   })
-  contract('PostgreSQL 16 versions pass', () => {
-    assert.equal(validator.validatePsqlVersionOutput('psql (PostgreSQL) 16.9\n'), true)
+  contract('expected PostgreSQL major remains fixed at 16', () => {
+    assert.equal(validator.EXPECTED_PSQL_MAJOR, 16)
   })
-  for (const version of ['15.12', '17.4', '16beta1', 'unknown']) {
-    contract(`PostgreSQL version ${version} fails`, () => {
-      assert.throws(() => validator.validatePsqlVersionOutput(`psql (PostgreSQL) ${version}`), /UNSUPPORTED_PSQL_VERSION/)
+  for (const output of [
+    'psql (PostgreSQL) 16',
+    'psql (PostgreSQL) 16.0',
+    'psql (PostgreSQL) 16.14',
+    'psql (PostgreSQL) 16.14 (Ubuntu 16.14-0ubuntu0.24.04.1)',
+    'psql (PostgreSQL) 16.14 (Ubuntu 16.14-1.pgdg24.04+1)',
+  ]) {
+    contract(`approved PostgreSQL version output passes: ${output}`, () => {
+      assert.equal(validator.validatePsqlVersionOutput(output), true)
     })
   }
+  const rejectedVersionOutputs: unknown[] = [
+    null,
+    undefined,
+    16,
+    {},
+    '',
+    'psql (PostgreSQL) 15',
+    'psql (PostgreSQL) 17',
+    'psql (PostgreSQL) 016.14',
+    'psql (PostgreSQL) 16evil',
+    'psql (PostgreSQL) v16',
+    'psql (PostgreSQL) 16.',
+    'psql (PostgreSQL) 16..14',
+    'psql (PostgreSQL) 16.14 Ubuntu',
+    'psql (PostgreSQL) 16.14 ()',
+    'psql (PostgreSQL) 16.14 ( )',
+    'psql (PostgreSQL) 16.14 (Ubuntu) extra',
+    'psql (PostgreSQL) 16.14 (Ubuntu) (Extra)',
+    'psql (PostgreSQL) 16.14 (Ubuntu (nested))',
+    'psql (PostgreSQL) 16.14 (Ubuntü)',
+    'psql (PostgreSQL) 16.14\nmalicious',
+    'psql (PostgreSQL) 16.14\n\n',
+    'leading psql (PostgreSQL) 16.14',
+    'psql (PostgreSQL) 16.14 trailing',
+    'psql (PostgreSQL) 16.14\0',
+    'psql (PostgreSQL) 16.14\t',
+    'psql (PostgreSQL) 16.14\x1b',
+    'psql (PostgreSQL) 16.14\x7f',
+    'psql (PostgreSQL) 16.14\r',
+  ]
+  for (const output of rejectedVersionOutputs) {
+    contract(`unapproved PostgreSQL version output fails: ${JSON.stringify(output)}`, () => {
+      assert.throws(
+        () => validator.validatePsqlVersionOutput(output),
+        (error: unknown) => error instanceof Error && error.message === 'UNSUPPORTED_PSQL_VERSION',
+      )
+    })
+  }
+  contract('version failures expose only the fixed safe code', () => {
+    const unsafeOutput = 'psql (PostgreSQL) 17.1 (credential-like-text) trailing'
+    assert.throws(
+      () => validator.validatePsqlVersionOutput(unsafeOutput),
+      (error: unknown) => error instanceof Error && error.message === 'UNSUPPORTED_PSQL_VERSION',
+    )
+  })
+  contract('installed psql accepts the Ubuntu 24.04 packaged version output', () => {
+    const calls: Array<{ binary: string; args: string[]; options: Record<string, unknown> }> = []
+    const result = validator.validateInstalledPsql((binary, args, options) => {
+      calls.push({ binary, args, options })
+      return 'psql (PostgreSQL) 16.14 (Ubuntu 16.14-0ubuntu0.24.04.1)\n'
+    })
+    assert.equal(result, true)
+    assert.deepEqual(calls, [{
+      binary: '/usr/lib/postgresql/16/bin/psql',
+      args: ['--version'],
+      options: {
+        encoding: 'utf8',
+        env: { LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    }])
+  })
   contract('full lowercase SHA passes', () => {
     const sha = 'a'.repeat(40)
     assert.equal(validator.validateFullSha(sha), sha)
