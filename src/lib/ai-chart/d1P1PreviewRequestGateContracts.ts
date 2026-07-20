@@ -41,6 +41,8 @@ export const AI_CHART_D1_P1_PREVIEW_GATE_REQUEST_MODE =
   'single_palace_single_request' as const
 export const AI_CHART_D1_P1_PREVIEW_GATE_INVALID =
   'ai_chart_d1_p1_preview_gate_invalid' as const
+export const AI_CHART_D1_P1_PREVIEW_GATE_NOT_READY =
+  'ai_chart_d1_p1_preview_gate_not_ready' as const
 export const AI_CHART_D1_P1_PREVIEW_GATE_DISABLED =
   'ai_chart_d1_p1_preview_gate_disabled' as const
 export const AI_CHART_D1_P1_PREVIEW_GATE_PRODUCTION_FORBIDDEN =
@@ -55,6 +57,7 @@ export const AI_CHART_D1_P1_PREVIEW_AUTHORIZATION_ACKNOWLEDGEMENT =
 
 export type AiChartD1P1PreviewGateErrorCode =
   | typeof AI_CHART_D1_P1_PREVIEW_GATE_INVALID
+  | typeof AI_CHART_D1_P1_PREVIEW_GATE_NOT_READY
   | typeof AI_CHART_D1_P1_PREVIEW_GATE_DISABLED
   | typeof AI_CHART_D1_P1_PREVIEW_GATE_PRODUCTION_FORBIDDEN
 

@@ -3,6 +3,7 @@ import 'server-only'
 import {
   assertAiChartD1SafeGraph,
   freezeAiChartD1Value,
+  requireAiChartD1ExactObject,
 } from './d1CommonContracts'
 import { AI_CHART_D1_MODEL_TARGET } from './d1Assets'
 import {
@@ -15,7 +16,12 @@ import {
 } from './d1P1AdapterBridge'
 import {
   AI_CHART_D1_P1_ADAPTER_BRIDGE_CONTRACT_VERSION,
+  AiChartD1P1AdapterBridgeNotReadyError,
 } from './d1P1AdapterBridgeContracts'
+import { parseAiChartD1P1ModelInput } from './d1P1ModelInputBindings'
+import {
+  AiChartD1P1ModelInputNotReadyError,
+} from './d1P1ModelInputContracts'
 import {
   AI_CHART_D1_P1_OUTPUT_SCHEMA_SHA256,
   AI_CHART_D1_P1_PROMPT_INSTRUCTIONS_SHA256,
@@ -26,6 +32,7 @@ import {
   AI_CHART_D1_P1_PREVIEW_GATE_CONTRACT_VERSION,
   AI_CHART_D1_P1_PREVIEW_GATE_DISABLED,
   AI_CHART_D1_P1_PREVIEW_GATE_INVALID,
+  AI_CHART_D1_P1_PREVIEW_GATE_NOT_READY,
   AI_CHART_D1_P1_PREVIEW_GATE_PRODUCTION_FORBIDDEN,
   AI_CHART_D1_P1_PREVIEW_GATE_REQUEST_MODE,
   AI_CHART_D1_P1_PREVIEW_GATE_TASK,
@@ -46,6 +53,8 @@ import {
   AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
   AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
   AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
+  AI_CHART_OPENAI_RESPONSE_INVALID,
+  AiChartOpenAiError,
   type AiChartOpenAiStructuredRequest,
   type AiChartOpenAiStructuredResult,
   type AiChartOpenAiUsage,
@@ -91,6 +100,12 @@ function disabled(): never {
   )
 }
 
+function notReady(): never {
+  throw new AiChartD1P1PreviewGateError(
+    AI_CHART_D1_P1_PREVIEW_GATE_NOT_READY,
+  )
+}
+
 function productionForbidden(): never {
   throw new AiChartD1P1PreviewGateError(
     AI_CHART_D1_P1_PREVIEW_GATE_PRODUCTION_FORBIDDEN,
@@ -99,7 +114,20 @@ function productionForbidden(): never {
 
 function rethrowGateInvalid(error: unknown): never {
   if (error instanceof AiChartD1P1PreviewGateError) throw error
+  if (
+    error instanceof AiChartD1P1AdapterBridgeNotReadyError ||
+    error instanceof AiChartD1P1ModelInputNotReadyError
+  ) {
+    notReady()
+  }
   invalid()
+}
+
+function responseInvalid(): never {
+  throw new AiChartOpenAiError(
+    AI_CHART_OPENAI_RESPONSE_INVALID,
+    false,
+  )
 }
 
 function parseTargetPalaceId(value: unknown): AiChartD1PalaceId {
@@ -157,6 +185,48 @@ function createPlan(
   })
 }
 
+function assertReadyTargetModelInput(
+  catalogValue: unknown,
+  structuralInputValues: unknown,
+  knowledgeBundleValues: unknown,
+  modelInputValues: unknown,
+  targetPalaceId: AiChartD1PalaceId,
+): void {
+  if (
+    !Array.isArray(structuralInputValues) ||
+    structuralInputValues.length !== 12 ||
+    !Array.isArray(knowledgeBundleValues) ||
+    knowledgeBundleValues.length !== 12 ||
+    !Array.isArray(modelInputValues) ||
+    modelInputValues.length !== 12
+  ) {
+    invalid()
+  }
+
+  const index = AI_CHART_D1_PALACE_IDENTITIES.findIndex(
+    (identity) => identity.palaceId === targetPalaceId,
+  )
+  if (index < 0) invalid()
+
+  const modelInput = parseAiChartD1P1ModelInput(
+    modelInputValues[index],
+    catalogValue,
+    structuralInputValues[index],
+    knowledgeBundleValues[index],
+  )
+  const target = modelInput.structuralContext.targetPalace
+  const effectiveMajorStars = (
+    target.borrowStatus === 'eligible_and_borrowed'
+      ? target.borrowedMajorStars
+      : target.canonicalMajorStars
+  ).map((star) => star.name)
+
+  if (effectiveMajorStars.length === 0) notReady()
+  if (new Set(effectiveMajorStars).size !== effectiveMajorStars.length) {
+    invalid()
+  }
+}
+
 function buildAuthenticatedPlan(
   planValue: unknown | undefined,
   catalogValue: unknown,
@@ -181,6 +251,13 @@ function buildAuthenticatedPlan(
     if (bridges.length !== 12 || matches.length !== 1) invalid()
 
     const bridge = matches[0]
+    assertReadyTargetModelInput(
+      catalogValue,
+      structuralInputValues,
+      knowledgeBundleValues,
+      modelInputValues,
+      targetPalaceId,
+    )
     const expected = createPlan(bridge)
     if (planValue === undefined) {
       return freezeAiChartD1Value({ plan: expected, bridge })
@@ -352,6 +429,59 @@ function assertEnvironmentPolicy(
   })
 }
 
+const PREVIEW_RESPONSE_FIELDS = Object.freeze(['data', 'usage'] as const)
+const USAGE_FIELDS = Object.freeze([
+  'inputTokens',
+  'outputTokens',
+  'reasoningTokens',
+  'totalTokens',
+] as const)
+
+function parseUsage(value: unknown): AiChartOpenAiUsage | null {
+  if (value === null) return null
+  try {
+    const record = requireAiChartD1ExactObject(value, USAGE_FIELDS)
+    const parsed = Object.fromEntries(
+      USAGE_FIELDS.map((field) => {
+        const tokenCount = record[field]
+        if (
+          typeof tokenCount !== 'number' ||
+          !Number.isFinite(tokenCount) ||
+          !Number.isInteger(tokenCount) ||
+          tokenCount < 0
+        ) {
+          responseInvalid()
+        }
+        return [field, tokenCount]
+      }),
+    ) as unknown as AiChartOpenAiUsage
+    return freezeAiChartD1Value(parsed)
+  } catch (error) {
+    if (error instanceof AiChartOpenAiError) throw error
+    responseInvalid()
+  }
+}
+
+function parseAiChartD1P1PreviewExecutionResponse(
+  value: unknown,
+  bridge: AiChartD1P1AdapterBridge,
+): Readonly<{
+  data: AiChartD1P1Result
+  usage: AiChartOpenAiUsage | null
+}> {
+  let record: Record<string, unknown>
+  try {
+    assertAiChartD1SafeGraph(value)
+    record = requireAiChartD1ExactObject(value, PREVIEW_RESPONSE_FIELDS)
+  } catch {
+    responseInvalid()
+  }
+
+  const data = bridge.request.parseResult(record.data)
+  const usage = parseUsage(record.usage)
+  return freezeAiChartD1Value({ data, usage })
+}
+
 export async function executeAiChartD1P1PreviewRequest(
   planValue: unknown,
   authorizationValue: unknown,
@@ -385,16 +515,17 @@ export async function executeAiChartD1P1PreviewRequest(
     invalid()
   }
 
-  const response = await environment.requestImplementation(
+  const responseValue = await environment.requestImplementation(
     authenticated.bridge.request,
+  )
+  const response = parseAiChartD1P1PreviewExecutionResponse(
+    responseValue,
+    authenticated.bridge,
   )
   return freezeAiChartD1Value({
     plan: authenticated.plan,
     data: response.data,
-    usage:
-      response.usage === null
-        ? null
-        : structuredClone(response.usage),
+    usage: response.usage,
     executedRequests: 1 as const,
   })
 }

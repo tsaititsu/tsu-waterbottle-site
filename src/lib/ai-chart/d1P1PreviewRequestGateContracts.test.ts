@@ -18,6 +18,7 @@ import {
   AI_CHART_D1_P1_PREVIEW_GATE_FIELDS,
   AI_CHART_D1_P1_PREVIEW_GATE_INTERNAL_JSON_SCHEMA,
   AI_CHART_D1_P1_PREVIEW_GATE_INVALID,
+  AI_CHART_D1_P1_PREVIEW_GATE_NOT_READY,
   AI_CHART_D1_P1_PREVIEW_GATE_PRODUCTION_FORBIDDEN,
   AI_CHART_D1_P1_PREVIEW_GATE_REQUEST_MODE,
   AI_CHART_D1_P1_PREVIEW_GATE_SCHEMA_NAME,
@@ -140,6 +141,7 @@ function run() {
     ['Gate task', AI_CHART_D1_P1_PREVIEW_GATE_TASK, 'D1_P1_PREVIEW_REQUEST'],
     ['Gate request mode', AI_CHART_D1_P1_PREVIEW_GATE_REQUEST_MODE, 'single_palace_single_request'],
     ['Gate invalid code', AI_CHART_D1_P1_PREVIEW_GATE_INVALID, 'ai_chart_d1_p1_preview_gate_invalid'],
+    ['Gate not-ready code', AI_CHART_D1_P1_PREVIEW_GATE_NOT_READY, 'ai_chart_d1_p1_preview_gate_not_ready'],
     ['Gate disabled code', AI_CHART_D1_P1_PREVIEW_GATE_DISABLED, 'ai_chart_d1_p1_preview_gate_disabled'],
     ['Gate production code', AI_CHART_D1_P1_PREVIEW_GATE_PRODUCTION_FORBIDDEN, 'ai_chart_d1_p1_preview_gate_production_forbidden'],
     ['Authorization version', AI_CHART_D1_P1_PREVIEW_AUTHORIZATION_VERSION, 'ai-chart-d1-p1-preview-authorization/v1'],
@@ -151,6 +153,7 @@ function run() {
 
   for (const code of [
     AI_CHART_D1_P1_PREVIEW_GATE_INVALID,
+    AI_CHART_D1_P1_PREVIEW_GATE_NOT_READY,
     AI_CHART_D1_P1_PREVIEW_GATE_DISABLED,
     AI_CHART_D1_P1_PREVIEW_GATE_PRODUCTION_FORBIDDEN,
   ] as const) {

@@ -665,7 +665,8 @@ async function run() {
           !path.endsWith('d1P1PromptPackageBuilder.test.ts') &&
           !path.endsWith('d1P1PromptPackageTestSupport.ts') &&
           !path.endsWith('d1P1AdapterBridge.test.ts') &&
-          !path.endsWith('d1P1AdapterBridgeTestSupport.ts'),
+          !path.endsWith('d1P1AdapterBridgeTestSupport.ts') &&
+          !path.endsWith('d1P1PreviewRequestGate.server.test.ts'),
       )
     assert.deepEqual(consumers, [
       'src/lib/ai-chart/d1P1AdapterBridge.ts',

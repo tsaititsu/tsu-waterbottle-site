@@ -3,15 +3,31 @@ import { readdirSync, readFileSync } from 'node:fs'
 import Module, { createRequire } from 'node:module'
 import { join, relative } from 'node:path'
 import {
+  buildAiChartD1P1AdapterBridges,
+} from './d1P1AdapterBridge'
+import {
+  AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID,
+} from './d1P1AdapterBridgeContracts'
+import {
   createValidAiChartD1P1Result,
   createAdapterBridgeFixture,
   type AdapterBridgeFixture,
   type Mutable,
 } from './d1P1AdapterBridgeTestSupport'
+import { buildAiChartD1P1PromptPackages } from './d1P1PromptPackageBuilder'
+import { buildAiChartD1K0P1KnowledgeBundles } from './d1K0Selection'
+import {
+  bundleIds,
+  completeModelInputSnapshot,
+  createStructuralInputs,
+  createModelInputFixture,
+  type MutableRecord,
+} from './d1P1ModelInputTestSupport'
 import {
   AI_CHART_D1_P1_PREVIEW_AUTHORIZATION_ACKNOWLEDGEMENT,
   AI_CHART_D1_P1_PREVIEW_GATE_DISABLED,
   AI_CHART_D1_P1_PREVIEW_GATE_INVALID,
+  AI_CHART_D1_P1_PREVIEW_GATE_NOT_READY,
   AI_CHART_D1_P1_PREVIEW_GATE_PRODUCTION_FORBIDDEN,
   createAiChartD1P1PreviewAuthorization,
   createAiChartD1P1PreviewRequestPlanFingerprint,
@@ -178,6 +194,27 @@ function buildPlan(
     promptPackages,
     targetPalaceId,
   )
+}
+
+async function createCustomFixture(
+  identity: string,
+  snapshot: MutableRecord,
+): Promise<AdapterBridgeFixture> {
+  const modelFixture = await createModelInputFixture(identity, snapshot)
+  const promptPackages = buildAiChartD1P1PromptPackages(
+    modelFixture.catalog,
+    modelFixture.structuralInputs,
+    modelFixture.bundles,
+    modelFixture.modelInputs,
+  )
+  const bridges = buildAiChartD1P1AdapterBridges(
+    modelFixture.catalog,
+    modelFixture.structuralInputs,
+    modelFixture.bundles,
+    modelFixture.modelInputs,
+    promptPackages,
+  )
+  return { ...modelFixture, promptPackages, bridges }
 }
 
 function execute(
@@ -354,13 +391,153 @@ async function run() {
       )
     })
 
+    const blockedSnapshot = completeModelInputSnapshot()
+    const blockedPalaces = blockedSnapshot.palaces as MutableRecord[]
+    blockedPalaces[0].majorStars = []
+    blockedPalaces[0].minorStars = [
+      { name: '文昌', type: 'soft', scope: 'origin' },
+    ]
+    const blockedFixture = await createCustomFixture(
+      'preview-gate-blocked-target',
+      blockedSnapshot,
+    )
+    const blockedTargetPalaceId = blockedFixture.modelInputs[0].targetPalaceId
+    check('blocked_by_local_star target is authenticated but not Preview-ready', () => {
+      assert.equal(
+        blockedFixture.modelInputs[0].structuralContext.targetPalace.borrowStatus,
+        'blocked_by_local_star',
+      )
+      assert.equal(blockedFixture.bridges.length, 12)
+    })
+    check('blocked_by_local_star target Plan builder returns not-ready', () => {
+      assert.throws(
+        () => buildPlan(blockedFixture, blockedTargetPalaceId),
+        { message: AI_CHART_D1_P1_PREVIEW_GATE_NOT_READY },
+      )
+    })
+    check('blocked target Plan parser returns not-ready before accepting a Plan', () => {
+      assert.throws(
+        () =>
+          parseAiChartD1P1PreviewRequestPlan(
+            plan,
+            blockedFixture.catalog,
+            blockedFixture.structuralInputs,
+            blockedFixture.bundles,
+            blockedFixture.modelInputs,
+            blockedFixture.promptPackages,
+            blockedTargetPalaceId,
+          ),
+        { message: AI_CHART_D1_P1_PREVIEW_GATE_NOT_READY },
+      )
+    })
+    await asyncCheck('blocked target execution rejects before its request implementation', async () => {
+      let requestCount = 0
+      await assert.rejects(
+        () =>
+          execute(
+            blockedFixture,
+            plan,
+            authorization,
+            environmentFor(plan),
+            async () => {
+              requestCount += 1
+              throw new Error('request_must_not_run')
+            },
+            blockedTargetPalaceId,
+          ),
+        { message: AI_CHART_D1_P1_PREVIEW_GATE_NOT_READY },
+      )
+      assert.equal(requestCount, 0)
+    })
+    check('blocked target not-ready error exposes no target metadata', () => {
+      assert.throws(
+        () => buildPlan(blockedFixture, blockedTargetPalaceId),
+        (error) => {
+          assert.equal(
+            (error as Error).message,
+            AI_CHART_D1_P1_PREVIEW_GATE_NOT_READY,
+          )
+          assert.doesNotMatch(
+            String(error),
+            /chart:|call:|palace:|文昌|[a-f0-9]{64}/u,
+          )
+          return true
+        },
+      )
+    })
+    check('a valid sibling target remains Preview-ready in the blocked chart', () => {
+      const siblingPlan = buildPlan(
+        blockedFixture,
+        blockedFixture.modelInputs[1].targetPalaceId,
+      )
+      assert.equal(
+        siblingPlan.targetPalaceId,
+        blockedFixture.modelInputs[1].targetPalaceId,
+      )
+    })
+
+    const borrowedSnapshot = completeModelInputSnapshot()
+    const borrowedPalaces = borrowedSnapshot.palaces as MutableRecord[]
+    borrowedPalaces[0].majorStars = []
+    borrowedPalaces[0].minorStars = []
+    const borrowedFixture = await createCustomFixture(
+      'preview-gate-borrowed-target',
+      borrowedSnapshot,
+    )
+    check('eligible_and_borrowed target with effective stars is Preview-ready', () => {
+      assert.equal(
+        borrowedFixture.modelInputs[0].structuralContext.targetPalace.borrowStatus,
+        'eligible_and_borrowed',
+      )
+      assert.doesNotThrow(() => buildPlan(borrowedFixture))
+    })
+    check('canonical nonempty target remains Preview-ready', () => {
+      assert.equal(
+        fixture.modelInputs[0].structuralContext.targetPalace.canonicalMajorStars
+          .length > 0,
+        true,
+      )
+      assert.doesNotThrow(() => buildPlan(fixture))
+    })
+
+    const oppositeEmptySnapshot = completeModelInputSnapshot()
+    const oppositeEmptyPalaces = oppositeEmptySnapshot.palaces as MutableRecord[]
+    oppositeEmptyPalaces[0].majorStars = []
+    oppositeEmptyPalaces[0].minorStars = []
+    oppositeEmptyPalaces[6].majorStars = []
+    const oppositeEmptyStructures = createStructuralInputs(
+      oppositeEmptySnapshot,
+      'preview-gate-opposite-empty',
+    )
+    const oppositeEmptyBundles = buildAiChartD1K0P1KnowledgeBundles(
+      fixture.catalog,
+      oppositeEmptyStructures,
+      { bundleIds: bundleIds('preview-gate-opposite-empty') },
+    )
+    check('opposite_empty upstream remains Preview not-ready', () => {
+      assert.equal(
+        oppositeEmptyStructures[0].targetPalace.borrowStatus,
+        'opposite_empty',
+      )
+      assert.throws(
+        () =>
+          buildAiChartD1P1PreviewRequestPlan(
+            fixture.catalog,
+            oppositeEmptyStructures,
+            oppositeEmptyBundles,
+            fixture.modelInputs,
+            fixture.promptPackages,
+            oppositeEmptyStructures[0].targetPalace.palaceId,
+          ),
+        { message: AI_CHART_D1_P1_PREVIEW_GATE_NOT_READY },
+      )
+    })
+
     let successCount = 0
-    const successRequest: RequestImplementation = async (request) => {
+    const successRequest: RequestImplementation = async () => {
       successCount += 1
       return {
-        data: request.parseResult(
-          createValidAiChartD1P1Result(fixture.modelInputs[0]),
-        ),
+        data: createValidAiChartD1P1Result(fixture.modelInputs[0]),
         usage: {
           inputTokens: 101,
           outputTokens: 202,
@@ -441,6 +618,236 @@ async function run() {
       }
       assert.equal(globalFetchCount, 0)
     })
+
+    const assertResponseRejectedOnce = async (
+      name: string,
+      responseFactory: () => unknown,
+      expectedMessage: string,
+    ) => {
+      await asyncCheck(name, async () => {
+        let requestCount = 0
+        await assert.rejects(
+          () =>
+            execute(
+              fixture,
+              plan,
+              authorization,
+              environmentFor(plan),
+              async () => {
+                requestCount += 1
+                return responseFactory() as never
+              },
+            ),
+          { message: expectedMessage },
+        )
+        assert.equal(requestCount, 1)
+      })
+    }
+
+    for (const [name, mutate] of [
+      [
+        'Gate rejects raw mock data with a wrong callId after one request',
+        (value: Mutable<AiChartD1P1Result>) => {
+          value.callId = 'call:synthetic-wrong-response'
+        },
+      ],
+      [
+        'Gate rejects raw mock data with a wrong palace after one request',
+        (value: Mutable<AiChartD1P1Result>) => {
+          value.palaceId = fixture.modelInputs[1].targetPalaceId
+          value.palace =
+            fixture.modelInputs[1].structuralContext.targetPalace.canonicalName
+        },
+      ],
+      [
+        'Gate rejects raw mock data with a wrong primary major core after one request',
+        (value: Mutable<AiChartD1P1Result>) => {
+          value.primaryAxis.majorStarCore = ['紫微']
+        },
+      ],
+      [
+        'Gate rejects raw mock data with an unknown primary Rule after one request',
+        (value: Mutable<AiChartD1P1Result>) => {
+          value.primaryAxis.usedRuleIds = ['rule:unknown']
+        },
+      ],
+    ] as const) {
+      await assertResponseRejectedOnce(
+        name,
+        () => {
+          const data = createValidAiChartD1P1Result(fixture.modelInputs[0])
+          mutate(data)
+          return { data, usage: null }
+        },
+        AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID,
+      )
+    }
+    await assertResponseRejectedOnce(
+      'Gate rejects arbitrary casted mock data after one request',
+      () => ({ data: { arbitrary: true }, usage: null }),
+      AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID,
+    )
+
+    await assertResponseRejectedOnce(
+      'Response wrapper extra field is rejected after one request',
+      () => ({
+        data: createValidAiChartD1P1Result(fixture.modelInputs[0]),
+        usage: null,
+        rawResponse: 'forbidden',
+      }),
+      AI_CHART_OPENAI_RESPONSE_INVALID,
+    )
+    let responseGetterCalls = 0
+    await assertResponseRejectedOnce(
+      'Response wrapper accessor is rejected without execution',
+      () => {
+        const value: Record<string, unknown> = { usage: null }
+        Object.defineProperty(value, 'data', {
+          enumerable: true,
+          get() {
+            responseGetterCalls += 1
+            return createValidAiChartD1P1Result(fixture.modelInputs[0])
+          },
+        })
+        return value
+      },
+      AI_CHART_OPENAI_RESPONSE_INVALID,
+    )
+    check('Response wrapper accessor getter was never executed', () => {
+      assert.equal(responseGetterCalls, 0)
+    })
+    await assertResponseRejectedOnce(
+      'Response wrapper symbol key is rejected after one request',
+      () => {
+        const value: Record<PropertyKey, unknown> = {
+          data: createValidAiChartD1P1Result(fixture.modelInputs[0]),
+          usage: null,
+        }
+        value[Symbol('forbidden')] = true
+        return value
+      },
+      AI_CHART_OPENAI_RESPONSE_INVALID,
+    )
+    await assertResponseRejectedOnce(
+      'Response wrapper cycle is rejected after one request',
+      () => {
+        const value: Record<string, unknown> = {
+          data: createValidAiChartD1P1Result(fixture.modelInputs[0]),
+          usage: null,
+        }
+        value.loop = value
+        return value
+      },
+      AI_CHART_OPENAI_RESPONSE_INVALID,
+    )
+    await assertResponseRejectedOnce(
+      'Response wrapper missing usage is rejected after one request',
+      () => ({ data: createValidAiChartD1P1Result(fixture.modelInputs[0]) }),
+      AI_CHART_OPENAI_RESPONSE_INVALID,
+    )
+    await assertResponseRejectedOnce(
+      'Null response wrapper is rejected after one request',
+      () => null,
+      AI_CHART_OPENAI_RESPONSE_INVALID,
+    )
+
+    await asyncCheck('Usage null is accepted and remains null', async () => {
+      let requestCount = 0
+      const result = await execute(
+        fixture,
+        plan,
+        authorization,
+        environmentFor(plan),
+        async () => {
+          requestCount += 1
+          return {
+            data: createValidAiChartD1P1Result(fixture.modelInputs[0]),
+            usage: null,
+          }
+        },
+      )
+      assert.equal(requestCount, 1)
+      assert.equal(result.usage, null)
+    })
+
+    for (const [name, usage] of [
+      ['negative token', { inputTokens: -1, outputTokens: 2, reasoningTokens: 3, totalTokens: 4 }],
+      ['fractional token', { inputTokens: 1.5, outputTokens: 2, reasoningTokens: 3, totalTokens: 4 }],
+      ['NaN token', { inputTokens: Number.NaN, outputTokens: 2, reasoningTokens: 3, totalTokens: 4 }],
+      ['infinite token', { inputTokens: 1, outputTokens: Number.POSITIVE_INFINITY, reasoningTokens: 3, totalTokens: 4 }],
+      ['missing token field', { inputTokens: 1, outputTokens: 2, totalTokens: 4 }],
+      ['extra token field', { inputTokens: 1, outputTokens: 2, reasoningTokens: 3, totalTokens: 4, cachedTokens: 1 }],
+    ] as const) {
+      await assertResponseRejectedOnce(
+        `Usage ${name} is rejected after one request`,
+        () => ({
+          data: createValidAiChartD1P1Result(fixture.modelInputs[0]),
+          usage,
+        }),
+        AI_CHART_OPENAI_RESPONSE_INVALID,
+      )
+    }
+
+    let usageGetterCalls = 0
+    await assertResponseRejectedOnce(
+      'Usage accessor is rejected without execution',
+      () => {
+        const usage: Record<string, unknown> = {
+          outputTokens: 2,
+          reasoningTokens: 3,
+          totalTokens: 4,
+        }
+        Object.defineProperty(usage, 'inputTokens', {
+          enumerable: true,
+          get() {
+            usageGetterCalls += 1
+            return 1
+          },
+        })
+        return {
+          data: createValidAiChartD1P1Result(fixture.modelInputs[0]),
+          usage,
+        }
+      },
+      AI_CHART_OPENAI_RESPONSE_INVALID,
+    )
+    check('Usage accessor getter was never executed', () => {
+      assert.equal(usageGetterCalls, 0)
+    })
+    await assertResponseRejectedOnce(
+      'Usage symbol key is rejected after one request',
+      () => {
+        const usage: Record<PropertyKey, unknown> = {
+          inputTokens: 1,
+          outputTokens: 2,
+          reasoningTokens: 3,
+          totalTokens: 4,
+        }
+        usage[Symbol('forbidden')] = true
+        return {
+          data: createValidAiChartD1P1Result(fixture.modelInputs[0]),
+          usage,
+        }
+      },
+      AI_CHART_OPENAI_RESPONSE_INVALID,
+    )
+    await assertResponseRejectedOnce(
+      'Usage cycle is rejected after one request',
+      () => {
+        const usage: Record<string, unknown> = {
+          inputTokens: 1,
+          outputTokens: 2,
+          reasoningTokens: 3,
+          totalTokens: 4,
+        }
+        usage.loop = usage
+        return {
+          data: createValidAiChartD1P1Result(fixture.modelInputs[0]),
+          usage,
+        }
+      },
+      AI_CHART_OPENAI_RESPONSE_INVALID,
+    )
 
     for (const [name, environment, expectedError] of [
       ['production', environmentFor(plan, { NODE_ENV: 'production' }), AI_CHART_D1_P1_PREVIEW_GATE_PRODUCTION_FORBIDDEN],
@@ -543,14 +950,14 @@ async function run() {
             plan,
             authorization,
             environmentFor(plan),
-            async (request) => {
+            async () => {
               requestCount += 1
               const result = createValidAiChartD1P1Result(fixture.modelInputs[0])
               result.primaryAxis.majorStarCore = ['紫微']
-              return { data: request.parseResult(result), usage: null }
+              return { data: result, usage: null }
             },
           ),
-        { message: 'ai_chart_d1_p1_adapter_bridge_result_invalid' },
+        { message: AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID },
       )
       assert.equal(requestCount, 1)
     })

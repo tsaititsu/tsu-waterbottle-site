@@ -68,8 +68,9 @@ P1 Model Input Contract 與固定 12 份 builder 已完成；P1 Prompt Package
 Contract 與固定 12 份 builder 也已完成；P1 Adapter Bridge Contract 與
 固定 12 份 Runtime Bridges 已完成；Primary Axis source binding、P1 Preview
 Request Plan Contract、Preview Authorization Contract、本機單宮 request gate
-與 mock request execution 也已完成。本版本沒有發送任何 OpenAI network
-request。
+與 mock request execution 也已完成。Gate 會先驗證所選宮位具有非空且不重複的
+effective major stars；`blocked_by_local_star` 與其他不可驗收 target 不會建立可執行
+Plan。本版本沒有發送任何 OpenAI network request。
 
 K0 compiler 只在 Server 端讀取內部固定的九份白名單素材，呼叫端不能傳入
 路徑或自訂 allowlist；逐檔驗證 Manifest、
@@ -82,7 +83,9 @@ P1 Adapter Bridge 只引用 Responses adapter core，不引用 Server request；
 development，且每次只允許一宮一請求；沒有 retry、Route、正式 Runtime 或
 持久化。CI、Vercel 與 Production 一律拒絕。Gate 不直接讀 API key、不直接
 使用 fetch，也不自行建立 Responses body。測試只使用 mock request，沒有
-測試會呼叫 OpenAI；目前也不會傳送本目錄的 D1 素材。所有
+測試會呼叫 OpenAI。Gate 會在自己的 trust boundary 驗證 response wrapper 與
+usage，並再次使用 authenticated Bridge parser 驗證 raw result data；mock 無法
+繞過 source binding。目前也不會傳送本目錄的 D1 素材。所有
 `runtimeEnabled` 仍為 `false`。
 
 Adapter 使用原生 REST fetch 解析原始 `output` array，不依賴 SDK-only
@@ -99,8 +102,10 @@ Route／Runtime 維持 0，Production 維持停用。
 
 P1 Result 的 Primary Axis 現在會依 target palace 的 canonical／borrowed
 狀態驗證有效主星集合、authenticated double-star core 與 target-role Rule
-completeness；對宮、暗合與三方專屬 Rule 不得冒充本宮主軸來源。F1 仍固定
-維持 `F1_BLOCKED_BY_MISSING_FLYING_TRANSFORM_SOURCE`。
+completeness；對宮、暗合與三方專屬 Rule 不得冒充本宮主軸來源。Primary Axis
+statement 與 double-star core 也會拒絕完整的 authenticated identity、fingerprint、
+Rule trace 與 structural metadata。F1 仍固定維持
+`F1_BLOCKED_BY_MISSING_FLYING_TRANSFORM_SOURCE`。
 
 ## N0 與 P1 Structural Input 邊界
 

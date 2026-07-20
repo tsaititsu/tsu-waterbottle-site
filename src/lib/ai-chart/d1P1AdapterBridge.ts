@@ -433,6 +433,15 @@ function assertPrimaryAxisSourceBinding(
       : [result.primaryAxis.doubleStarCore]),
   ]
   const forbiddenMetadata = [
+    modelInput.chartId,
+    modelInput.runId,
+    modelInput.callId,
+    modelInput.targetPalaceId,
+    modelInput.bundleId,
+    modelInput.catalogId,
+    modelInput.catalogFingerprint,
+    modelInput.sourceManifestSha256,
+    modelInput.inputFingerprint,
     ...modelInput.knowledgeContext.rules.flatMap((rule) => [
       rule.ruleId,
       rule.contentSha256,
@@ -835,6 +844,9 @@ function assertWarningTraceability(
 function semanticText(result: AiChartD1P1Result): readonly string[] {
   return [
     result.primaryAxis.statement,
+    ...(result.primaryAxis.doubleStarCore === null
+      ? []
+      : [result.primaryAxis.doubleStarCore]),
     ...allCandidates(result).flatMap((candidate) => [
       candidate.statement,
       ...candidate.lifeExamples,

@@ -1161,9 +1161,87 @@ async function run() {
       trace.palaceRole === 'target' && trace.reason === 'double_star_present',
   )
   assert.ok(doubleRuleTrace)
+  const doubleRule = doubleInput.knowledgeContext.rules.find(
+    (rule) => rule.ruleId === doubleRuleTrace.ruleId,
+  )
+  const doublePlacementId =
+    doubleInput.structuralContext.targetPalace.canonicalMajorStars[0]
+      .placementId
+  const doublePromptPackage = doubleFixture.promptPackages[0]
+  assert.ok(doubleRule)
   check('authenticated double-star core passes', () => {
     const value = createValidAiChartD1P1Result(doubleInput)
     assert.doesNotThrow(() => parseResult(doubleBridge, value))
+  })
+  for (const [name, metadata] of [
+    ['package fingerprint', doublePromptPackage.packageFingerprint],
+    ['Model Input fingerprint', doubleInput.inputFingerprint],
+    ['Catalog fingerprint', doubleInput.catalogFingerprint],
+    ['instructions SHA', doublePromptPackage.instructionsSha256],
+    ['output Schema SHA', doublePromptPackage.outputSchemaSha256],
+    ['Rule content SHA', doubleRule.contentSha256],
+    ['placement id', doublePlacementId],
+    ['call id', doubleInput.callId],
+  ] as const) {
+    check(`doubleStarCore rejects authenticated ${name}`, () => {
+      const value = createValidAiChartD1P1Result(doubleInput)
+      value.primaryAxis.doubleStarCore =
+        `${value.primaryAxis.doubleStarCore} ${metadata}`
+      assertResultInvalid(() => parseResult(doubleBridge, value))
+    })
+  }
+  for (const [name, metadata] of [
+    ['package fingerprint', doublePromptPackage.packageFingerprint],
+    ['call id', doubleInput.callId],
+  ] as const) {
+    check(`primaryAxis statement rejects authenticated ${name}`, () => {
+      const value = createValidAiChartD1P1Result(doubleInput)
+      value.primaryAxis.statement = `${value.primaryAxis.statement} ${metadata}`
+      assertResultInvalid(() => parseResult(doubleBridge, value))
+    })
+  }
+  check('Primary Axis metadata error exposes only fixed result-invalid', () => {
+    const value = createValidAiChartD1P1Result(doubleInput)
+    value.primaryAxis.doubleStarCore =
+      `${value.primaryAxis.doubleStarCore} ${doublePromptPackage.packageFingerprint}`
+    assert.throws(
+      () => parseResult(doubleBridge, value),
+      (error) => {
+        assert.equal(
+          (error as Error).message,
+          AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID,
+        )
+        assert.doesNotMatch(
+          String(error),
+          new RegExp(doublePromptPackage.packageFingerprint, 'u'),
+        )
+        return true
+      },
+    )
+  })
+  check('metadata isolation preserves exact effective major-star binding', () => {
+    const parsed = parseResult(
+      doubleBridge,
+      createValidAiChartD1P1Result(doubleInput),
+    )
+    assert.deepEqual(
+      new Set(parsed.primaryAxis.majorStarCore),
+      new Set(
+        doubleInput.structuralContext.targetPalace.canonicalMajorStars.map(
+          (star) => star.name,
+        ),
+      ),
+    )
+  })
+  check('metadata isolation preserves authenticated double-star semantics', () => {
+    const parsed = parseResult(
+      doubleBridge,
+      createValidAiChartD1P1Result(doubleInput),
+    )
+    assert.ok(parsed.primaryAxis.doubleStarCore)
+    for (const star of parsed.primaryAxis.majorStarCore) {
+      assert.match(parsed.primaryAxis.doubleStarCore, new RegExp(star, 'u'))
+    }
   })
   check('primaryAxis rejects a missing effective major star', () => {
     const value = createValidAiChartD1P1Result(doubleInput)
@@ -1913,7 +1991,8 @@ async function run() {
           !path.endsWith('d1P1PromptPackageBuilder.test.ts') &&
           !path.endsWith('d1P1PromptPackageTestSupport.ts') &&
           !path.endsWith('d1P1AdapterBridge.test.ts') &&
-          !path.endsWith('d1P1AdapterBridgeTestSupport.ts'),
+          !path.endsWith('d1P1AdapterBridgeTestSupport.ts') &&
+          !path.endsWith('d1P1PreviewRequestGate.server.test.ts'),
       )
     assert.deepEqual(consumers, ['src/lib/ai-chart/d1P1AdapterBridge.ts'])
   })
