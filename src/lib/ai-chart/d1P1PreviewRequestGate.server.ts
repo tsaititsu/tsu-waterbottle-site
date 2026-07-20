@@ -12,6 +12,7 @@ import {
 } from './d1N0Constants'
 import {
   buildAiChartD1P1AdapterBridges,
+  buildAiChartD1P1LocalPreviewAdapterBridges,
   type AiChartD1P1AdapterBridge,
 } from './d1P1AdapterBridge'
 import {
@@ -50,6 +51,11 @@ import {
   type AiChartD1P1Result,
 } from './d1P1F1Contracts'
 import {
+  AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+  AI_CHART_D1_P1_PREVIEW_TIMEOUT_ENVIRONMENT_VARIABLE,
+  type AiChartD1P1PreviewTimeoutMs,
+} from './d1P1PreviewTimeoutContracts'
+import {
   AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
   AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
   AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
@@ -67,10 +73,14 @@ type AiChartD1P1PreviewRequestImplementation = (
   request: AiChartOpenAiStructuredRequest<AiChartD1P1Result>,
 ) => Promise<AiChartOpenAiStructuredResult<AiChartD1P1Result>>
 
-type AiChartD1P1PreviewRequestGateDependencies = Readonly<{
+type AiChartD1P1PreviewRequestGateEnvironmentDependencies = Readonly<{
   environment: Readonly<Record<string, string | undefined>>
-  requestImplementation: AiChartD1P1PreviewRequestImplementation
 }>
+
+type AiChartD1P1PreviewRequestGateDependencies =
+  AiChartD1P1PreviewRequestGateEnvironmentDependencies & Readonly<{
+    requestImplementation: AiChartD1P1PreviewRequestImplementation
+  }>
 
 export type AiChartD1P1PreviewExecutionResult = Readonly<{
   plan: AiChartD1P1PreviewRequestPlan
@@ -161,7 +171,7 @@ function planWithoutFingerprint(
     outputSchemaSha256: AI_CHART_D1_P1_OUTPUT_SCHEMA_SHA256,
     modelTarget: AI_CHART_D1_MODEL_TARGET,
     reasoningEffort: AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
-    timeoutMs: AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
+    timeoutMs: descriptor.timeoutMs,
     maxOutputTokens: AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
     maxRequests: 1,
     serverOnly: true,
@@ -235,16 +245,26 @@ function buildAuthenticatedPlan(
   modelInputValues: unknown,
   promptPackageValues: unknown,
   targetPalaceIdValue: unknown,
+  timeoutMs: AiChartD1P1PreviewTimeoutMs,
 ): AuthenticatedPlan {
   try {
     const targetPalaceId = parseTargetPalaceId(targetPalaceIdValue)
-    const bridges = buildAiChartD1P1AdapterBridges(
-      catalogValue,
-      structuralInputValues,
-      knowledgeBundleValues,
-      modelInputValues,
-      promptPackageValues,
-    )
+    const bridges =
+      timeoutMs === AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS
+        ? buildAiChartD1P1LocalPreviewAdapterBridges(
+            catalogValue,
+            structuralInputValues,
+            knowledgeBundleValues,
+            modelInputValues,
+            promptPackageValues,
+          )
+        : buildAiChartD1P1AdapterBridges(
+            catalogValue,
+            structuralInputValues,
+            knowledgeBundleValues,
+            modelInputValues,
+            promptPackageValues,
+          )
     const matches = bridges.filter(
       (bridge) => bridge.descriptor.targetPalaceId === targetPalaceId,
     )
@@ -292,7 +312,14 @@ export function buildAiChartD1P1PreviewRequestPlan(
   modelInputValues: unknown,
   promptPackageValues: unknown,
   targetPalaceId: unknown,
+  dependencies?: AiChartD1P1PreviewRequestGateEnvironmentDependencies,
 ): AiChartD1P1PreviewRequestPlan {
+  const parsedTargetPalaceId = parseTargetPalaceId(targetPalaceId)
+  const environment = previewEnvironment(dependencies)
+  const timeoutMs = resolvePreviewTimeout(
+    environment,
+    parsedTargetPalaceId,
+  )
   return buildAuthenticatedPlan(
     undefined,
     catalogValue,
@@ -300,7 +327,8 @@ export function buildAiChartD1P1PreviewRequestPlan(
     knowledgeBundleValues,
     modelInputValues,
     promptPackageValues,
-    targetPalaceId,
+    parsedTargetPalaceId,
+    timeoutMs,
   ).plan
 }
 
@@ -312,7 +340,14 @@ export function parseAiChartD1P1PreviewRequestPlan(
   modelInputValues: unknown,
   promptPackageValues: unknown,
   targetPalaceId: unknown,
+  dependencies?: AiChartD1P1PreviewRequestGateEnvironmentDependencies,
 ): AiChartD1P1PreviewRequestPlan {
+  const parsedTargetPalaceId = parseTargetPalaceId(targetPalaceId)
+  const environment = previewEnvironment(dependencies)
+  const timeoutMs = resolvePreviewTimeout(
+    environment,
+    parsedTargetPalaceId,
+  )
   return buildAuthenticatedPlan(
     planValue,
     catalogValue,
@@ -320,7 +355,8 @@ export function parseAiChartD1P1PreviewRequestPlan(
     knowledgeBundleValues,
     modelInputValues,
     promptPackageValues,
-    targetPalaceId,
+    parsedTargetPalaceId,
+    timeoutMs,
   ).plan
 }
 
@@ -333,6 +369,73 @@ function ownDataValue(
     invalid()
   }
   return descriptor.value
+}
+
+function parseEnvironmentRecord(
+  value: unknown,
+): Readonly<Record<string, string | undefined>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    invalid()
+  }
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== 'string') invalid()
+    const entry = ownDataValue(value, key)
+    if (entry !== undefined && typeof entry !== 'string') invalid()
+  }
+  return value as Readonly<Record<string, string | undefined>>
+}
+
+function validateTestEnvironmentDependencies(
+  value: AiChartD1P1PreviewRequestGateEnvironmentDependencies | undefined,
+): AiChartD1P1PreviewRequestGateEnvironmentDependencies | undefined {
+  if (value === undefined) return undefined
+  if (process.env.NODE_ENV !== 'test') invalid()
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    invalid()
+  }
+  const keys = Reflect.ownKeys(value)
+  if (keys.length !== 1 || keys[0] !== 'environment') invalid()
+  return Object.freeze({
+    environment: parseEnvironmentRecord(ownDataValue(value, 'environment')),
+  })
+}
+
+function previewEnvironment(
+  dependencies: AiChartD1P1PreviewRequestGateEnvironmentDependencies | undefined,
+): Readonly<Record<string, string | undefined>> {
+  return validateTestEnvironmentDependencies(dependencies)?.environment ??
+    process.env
+}
+
+function resolvePreviewTimeout(
+  environment: Readonly<Record<string, string | undefined>>,
+  targetPalaceId: string,
+): AiChartD1P1PreviewTimeoutMs {
+  const configuredTimeout =
+    environment[AI_CHART_D1_P1_PREVIEW_TIMEOUT_ENVIRONMENT_VARIABLE]
+  if (configuredTimeout === undefined) {
+    return AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS
+  }
+
+  if (
+    environment.NODE_ENV === 'production' ||
+    environment.CI !== undefined ||
+    environment.VERCEL !== undefined ||
+    environment.VERCEL_ENV !== undefined
+  ) {
+    productionForbidden()
+  }
+  if (
+    environment.NODE_ENV !== 'development' ||
+    environment.AI_CHART_D1_P1_PREVIEW_ENABLED !== '1' ||
+    environment.AI_CHART_D1_P1_PREVIEW_TARGET_PALACE_ID !== targetPalaceId
+  ) {
+    disabled()
+  }
+  if (configuredTimeout !== String(AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS)) {
+    invalid()
+  }
+  return AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS
 }
 
 function environmentBindings(planValue: unknown): Readonly<{
@@ -372,22 +475,18 @@ function validateTestDependencies(
   ) {
     invalid()
   }
-  const environment = ownDataValue(value, 'environment')
+  const environment = parseEnvironmentRecord(
+    ownDataValue(value, 'environment'),
+  )
   const requestImplementation = ownDataValue(value, 'requestImplementation')
-  if (
-    typeof environment !== 'object' ||
-    environment === null ||
-    Array.isArray(environment) ||
-    typeof requestImplementation !== 'function'
-  ) {
+  if (typeof requestImplementation !== 'function') {
     invalid()
   }
-  for (const key of Reflect.ownKeys(environment)) {
-    if (typeof key !== 'string') invalid()
-    const entry = ownDataValue(environment, key)
-    if (entry !== undefined && typeof entry !== 'string') invalid()
-  }
-  return value
+  return Object.freeze({
+    environment,
+    requestImplementation:
+      requestImplementation as AiChartD1P1PreviewRequestImplementation,
+  })
 }
 
 function assertEnvironmentPolicy(
@@ -395,6 +494,7 @@ function assertEnvironmentPolicy(
   dependencies: AiChartD1P1PreviewRequestGateDependencies | undefined,
 ): Readonly<{
   requestImplementation: AiChartD1P1PreviewRequestImplementation
+  timeoutMs: AiChartD1P1PreviewTimeoutMs
 }> {
   const bindings = environmentBindings(planValue)
   const testDependencies = validateTestDependencies(dependencies)
@@ -422,10 +522,16 @@ function assertEnvironmentPolicy(
     disabled()
   }
 
+  const timeoutMs = resolvePreviewTimeout(
+    environment,
+    bindings.targetPalaceId,
+  )
+
   return Object.freeze({
     requestImplementation:
       testDependencies?.requestImplementation ??
       requestAiChartOpenAiStructuredResponse,
+    timeoutMs,
   })
 }
 
@@ -502,6 +608,7 @@ export async function executeAiChartD1P1PreviewRequest(
     modelInputValues,
     promptPackageValues,
     targetPalaceId,
+    environment.timeoutMs,
   )
   const authorization: AiChartD1P1PreviewAuthorization =
     parseAiChartD1P1PreviewAuthorization(

@@ -118,6 +118,17 @@ usage，並再次使用 authenticated Bridge parser 驗證 raw result data；moc
 繞過 source binding。目前也不會傳送本目錄的 D1 素材。所有
 `runtimeEnabled` 仍為 `false`。
 
+Local Preview timeout 預設仍為 `120000`。只有在
+`AI_CHART_D1_P1_PREVIEW_TIMEOUT_MS=300000`、`NODE_ENV=development`、
+Preview Gate 已啟用且 target binding 正確，並且 `CI`、`VERCEL`、
+`VERCEL_ENV` 都不存在時，才會建立 300 秒 Plan。其他值一律 fail closed。
+有效 timeout 會同時寫入 Bridge descriptor、validated request 與 Preview Plan，
+並參與 Bridge／Plan fingerprint；Authorization 仍綁定完整 Plan fingerprint。
+Evidence 必須使用 `createAiChartD1P1PreviewEvidenceContractSummary` 記錄有效
+`timeoutMs`、`maxRequests=1` 與 `productionCallable=false`。正式 Route、網站
+Runtime 與 Production request 不讀取這個 override；沒有 retry、fallback model、
+第二次 request、background、streaming 或 polling。
+
 Adapter 使用原生 REST fetch 解析原始 `output` array，不依賴 SDK-only
 的頂層 `output_text`。既有 Adapter 只正式處理 P1／F1 Output Contract；
 本次另建立的 P1 Structural Input 尚不是完整模型輸入。P1 Model Input 仍固定

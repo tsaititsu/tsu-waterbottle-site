@@ -56,6 +56,10 @@ import {
   type AiChartD1P1Result,
 } from './d1P1F1Contracts'
 import {
+  AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+  type AiChartD1P1PreviewTimeoutMs,
+} from './d1P1PreviewTimeoutContracts'
+import {
   AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
   AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
   AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
@@ -159,6 +163,7 @@ function rethrowBuildError(error: unknown): never {
 function descriptorWithoutFingerprint(
   modelInput: AiChartD1P1ModelInput,
   promptPackage: AiChartD1P1PromptPackage,
+  timeoutMs: AiChartD1P1PreviewTimeoutMs,
 ): AiChartD1P1AdapterBridgeDescriptorWithoutFingerprint {
   if (
     promptPackage.chartId !== modelInput.chartId ||
@@ -191,7 +196,7 @@ function descriptorWithoutFingerprint(
     userInputSha256: promptPackage.userInputSha256,
     description: AI_CHART_D1_P1_ADAPTER_BRIDGE_DESCRIPTION,
     reasoningEffort: AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
-    timeoutMs: AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
+    timeoutMs,
     maxOutputTokens: AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
     requestStatus: 'ready',
     runtimeStatus: 'runtime_wiring_required',
@@ -202,10 +207,12 @@ function descriptorWithoutFingerprint(
 function buildDescriptor(
   modelInput: AiChartD1P1ModelInput,
   promptPackage: AiChartD1P1PromptPackage,
+  timeoutMs: AiChartD1P1PreviewTimeoutMs,
 ): AiChartD1P1AdapterBridgeDescriptor {
   const withoutFingerprint = descriptorWithoutFingerprint(
     modelInput,
     promptPackage,
+    timeoutMs,
   )
   return freezeAiChartD1Value({
     ...withoutFingerprint,
@@ -923,11 +930,12 @@ function createAiChartD1P1SourceBoundResultParser(
 function buildOne(
   modelInput: AiChartD1P1ModelInput,
   promptPackage: AiChartD1P1PromptPackage,
+  timeoutMs: AiChartD1P1PreviewTimeoutMs,
 ): AiChartD1P1AdapterBridge {
   if (modelInput.structuralContext.targetPalace.borrowStatus === 'opposite_empty') {
     notReady()
   }
-  const descriptor = buildDescriptor(modelInput, promptPackage)
+  const descriptor = buildDescriptor(modelInput, promptPackage, timeoutMs)
   const request = validateAiChartOpenAiStructuredRequest<AiChartD1P1Result>({
     instructions: promptPackage.instructions,
     userInput: promptPackage.userInput,
@@ -939,7 +947,7 @@ function buildOne(
       promptPackage,
     ),
     reasoningEffort: AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
-    timeoutMs: AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
+    timeoutMs,
     maxOutputTokens: AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
   })
   return Object.freeze({ descriptor, request })
@@ -963,6 +971,7 @@ function assertFixedBridgeInvariants(
   bridges: readonly AiChartD1P1AdapterBridge[],
   modelInputs: readonly AiChartD1P1ModelInput[],
   promptPackages: readonly AiChartD1P1PromptPackage[],
+  timeoutMs: AiChartD1P1PreviewTimeoutMs,
 ): void {
   if (
     bridges.length !== 12 ||
@@ -1008,12 +1017,13 @@ function assertFixedBridgeInvariants(
       descriptor.outputSchemaSha256 !== AI_CHART_D1_P1_OUTPUT_SCHEMA_SHA256 ||
       descriptor.instructionsSha256 !==
         AI_CHART_D1_P1_PROMPT_INSTRUCTIONS_SHA256 ||
+      descriptor.timeoutMs !== timeoutMs ||
       request.instructions !== promptPackage.instructions ||
       request.userInput !== promptPackage.userInput ||
       request.schemaName !== promptPackage.outputSchemaName ||
       request.description !== AI_CHART_D1_P1_ADAPTER_BRIDGE_DESCRIPTION ||
       request.reasoningEffort !== AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT ||
-      request.timeoutMs !== AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS ||
+      request.timeoutMs !== timeoutMs ||
       request.maxOutputTokens !==
         AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS ||
       typeof request.parseResult !== 'function' ||
@@ -1053,18 +1063,23 @@ export function buildAiChartD1P1AdapterBridge(
       knowledgeBundleValue,
       modelInputValue,
     )
-    return buildOne(modelInput, promptPackage)
+    return buildOne(
+      modelInput,
+      promptPackage,
+      AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
+    )
   } catch (error) {
     rethrowBuildError(error)
   }
 }
 
-export function buildAiChartD1P1AdapterBridges(
+function buildAiChartD1P1AdapterBridgesWithTimeout(
   catalogValue: unknown,
   structuralInputValues: unknown,
   knowledgeBundleValues: unknown,
   modelInputValues: unknown,
   promptPackageValues: unknown,
+  timeoutMs: AiChartD1P1PreviewTimeoutMs,
 ): readonly AiChartD1P1AdapterBridge[] {
   try {
     assertAiChartD1SafeGraph(catalogValue)
@@ -1123,18 +1138,53 @@ export function buildAiChartD1P1AdapterBridges(
 
     const bridges = Object.freeze(
       expectedPromptPackages.map((promptPackage, index) =>
-        buildOne(modelInputs[index], promptPackage),
+        buildOne(modelInputs[index], promptPackage, timeoutMs),
       ),
     )
     assertFixedBridgeInvariants(
       bridges,
       modelInputs,
       expectedPromptPackages,
+      timeoutMs,
     )
     return bridges
   } catch (error) {
     rethrowBuildError(error)
   }
+}
+
+export function buildAiChartD1P1AdapterBridges(
+  catalogValue: unknown,
+  structuralInputValues: unknown,
+  knowledgeBundleValues: unknown,
+  modelInputValues: unknown,
+  promptPackageValues: unknown,
+): readonly AiChartD1P1AdapterBridge[] {
+  return buildAiChartD1P1AdapterBridgesWithTimeout(
+    catalogValue,
+    structuralInputValues,
+    knowledgeBundleValues,
+    modelInputValues,
+    promptPackageValues,
+    AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
+  )
+}
+
+export function buildAiChartD1P1LocalPreviewAdapterBridges(
+  catalogValue: unknown,
+  structuralInputValues: unknown,
+  knowledgeBundleValues: unknown,
+  modelInputValues: unknown,
+  promptPackageValues: unknown,
+): readonly AiChartD1P1AdapterBridge[] {
+  return buildAiChartD1P1AdapterBridgesWithTimeout(
+    catalogValue,
+    structuralInputValues,
+    knowledgeBundleValues,
+    modelInputValues,
+    promptPackageValues,
+    AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+  )
 }
 
 export function parseAiChartD1P1AdapterBridgeDescriptor(
@@ -1159,7 +1209,11 @@ export function parseAiChartD1P1AdapterBridgeDescriptor(
       knowledgeBundleValue,
       modelInputValue,
     )
-    const expected = buildDescriptor(modelInput, promptPackage)
+    const expected = buildDescriptor(
+      modelInput,
+      promptPackage,
+      AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
+    )
     const supplied = parseAiChartD1P1AdapterBridgeDescriptorShape(
       descriptorValue,
     )

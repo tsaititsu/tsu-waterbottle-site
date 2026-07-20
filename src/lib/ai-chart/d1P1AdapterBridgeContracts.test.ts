@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import {
   buildAiChartD1P1AdapterBridges,
+  buildAiChartD1P1LocalPreviewAdapterBridges,
   parseAiChartD1P1AdapterBridgeDescriptor,
 } from './d1P1AdapterBridge'
 import {
@@ -30,6 +31,10 @@ import {
   AI_CHART_D1_P1_PROMPT_VERSION,
 } from './d1P1PromptPackageContracts'
 import { AI_CHART_D1_P1_SCHEMA_NAME } from './d1P1F1Contracts'
+import {
+  AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+  AI_CHART_D1_P1_PREVIEW_TIMEOUT_VALUES,
+} from './d1P1PreviewTimeoutContracts'
 import {
   AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
   AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
@@ -82,6 +87,13 @@ function collectKeys(value: unknown, output = new Set<string>()): Set<string> {
 async function run() {
   const fixture = await createAdapterBridgeFixture('bridge-contract')
   const descriptor = fixture.bridges[0].descriptor
+  const localPreviewDescriptor = buildAiChartD1P1LocalPreviewAdapterBridges(
+    fixture.catalog,
+    fixture.structuralInputs,
+    fixture.bundles,
+    fixture.modelInputs,
+    fixture.promptPackages,
+  )[0].descriptor
   const secondDescriptor = fixture.bridges[1].descriptor
   const schema = AI_CHART_D1_P1_ADAPTER_BRIDGE_INTERNAL_JSON_SCHEMA as Record<
     string,
@@ -211,6 +223,29 @@ async function run() {
   })
   check('Descriptor timeout uses the Adapter default', () => {
     assert.equal(descriptor.timeoutMs, AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS)
+  })
+  check('Local Preview Descriptor uses the explicit 300 second timeout', () => {
+    assert.equal(
+      localPreviewDescriptor.timeoutMs,
+      AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+    )
+    assert.equal(
+      parseAiChartD1P1AdapterBridgeDescriptorShape(localPreviewDescriptor)
+        .timeoutMs,
+      AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+    )
+  })
+  check('Local Preview timeout changes the Bridge fingerprint', () => {
+    assert.notEqual(
+      localPreviewDescriptor.bridgeFingerprint,
+      descriptor.bridgeFingerprint,
+    )
+    const defaultPayload = fingerprintPayload(descriptor)
+    const localPayload = fingerprintPayload(localPreviewDescriptor)
+    assert.deepEqual(
+      { ...localPayload, timeoutMs: defaultPayload.timeoutMs },
+      defaultPayload,
+    )
   })
   check('Descriptor output budget uses the Adapter default', () => {
     assert.equal(
@@ -486,7 +521,10 @@ async function run() {
       properties.reasoningEffort.const,
       AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
     )
-    assert.equal(properties.timeoutMs.const, AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS)
+    assert.deepEqual(
+      properties.timeoutMs.enum,
+      AI_CHART_D1_P1_PREVIEW_TIMEOUT_VALUES,
+    )
     assert.equal(
       properties.maxOutputTokens.const,
       AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
