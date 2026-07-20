@@ -3,6 +3,56 @@
 
 begin;
 
+-- This migration is the first and only creator of the public LINE Pay RPCs
+-- below. Any pre-existing same-name function (including an otherwise-looking
+-- compatible signature) is an unknown overload and must be reviewed instead
+-- of being replaced or left callable.
+do $$
+declare
+  v_unexpected_inventory text;
+begin
+  select pg_catalog.string_agg(
+    pg_catalog.format(
+      '%I(%s)|owner=%I|security_definer=%s|config=%s|acl=%s',
+      procedure.proname,
+      pg_catalog.pg_get_function_identity_arguments(procedure.oid),
+      owner.rolname,
+      procedure.prosecdef,
+      coalesce(procedure.proconfig::text, 'null'),
+      coalesce(procedure.proacl::text, 'default')
+    ),
+    ';' order by procedure.proname, procedure.proargtypes::text
+  )
+  into v_unexpected_inventory
+  from pg_catalog.pg_proc as procedure
+  join pg_catalog.pg_namespace as namespace
+    on namespace.oid = procedure.pronamespace
+  join pg_catalog.pg_roles as owner
+    on owner.oid = procedure.proowner
+  where namespace.nspname = 'public'
+    and procedure.proname = any (array[
+      'claim_product_order_line_pay_request',
+      'record_product_order_line_pay_request_success',
+      'record_product_order_line_pay_request_failure',
+      'mark_product_order_line_pay_request_unknown',
+      'read_product_order_line_pay_request_result',
+      'claim_line_pay_callback_capability',
+      'claim_product_order_line_pay_confirmation',
+      'record_product_order_line_pay_confirmation_evidence',
+      'complete_product_order_line_pay_confirmation',
+      'cancel_product_order_line_pay_payment',
+      'mark_product_order_line_pay_reconciliation'
+    ]::text[]);
+
+  if v_unexpected_inventory is not null then
+    raise exception using
+      errcode = '42710',
+      message = 'line_pay_sensitive_rpc_preexisting_overload',
+      detail = v_unexpected_inventory;
+  end if;
+end
+$$;
+
 do $$
 begin
   if to_regclass('public.payments') is null then
@@ -16,6 +66,80 @@ begin
       errcode = '42P01',
       message = 'line_pay_contracts_missing_product_orders_table';
   end if;
+end
+$$;
+
+-- The legacy constraint definition is taken from the reviewed base schema.
+-- pg_get_constraintdef provides a canonical deparse; whitespace and case are
+-- normalized deterministically before an exact allowlist comparison.
+do $$
+declare
+  v_constraint_definition text;
+  v_normalized_definition text;
+begin
+  select pg_catalog.pg_get_constraintdef(constraint_row.oid, false)
+  into v_constraint_definition
+  from pg_catalog.pg_constraint as constraint_row
+  join pg_catalog.pg_class as relation
+    on relation.oid = constraint_row.conrelid
+  join pg_catalog.pg_namespace as namespace
+    on namespace.oid = relation.relnamespace
+  where namespace.nspname = 'public'
+    and relation.relname = 'product_orders'
+    and constraint_row.conname = 'product_orders_payment_method_check'
+    and constraint_row.contype = 'c';
+
+  if v_constraint_definition is not null then
+    v_normalized_definition := pg_catalog.lower(
+      pg_catalog.regexp_replace(
+        pg_catalog.btrim(v_constraint_definition),
+        '[[:space:]]+',
+        '',
+        'g'
+      )
+    );
+
+    if v_normalized_definition <> 'check((payment_method=any(array[''bank_transfer''::text,''newebpay''::text])))'
+       and v_normalized_definition <> 'check((payment_method=any(array[''bank_transfer''::text,''newebpay''::text,''line_pay''::text])))' then
+      raise exception using
+        errcode = '23514',
+        message = 'product_orders_payment_method_constraint_definition_conflict',
+        detail = v_normalized_definition;
+    end if;
+  end if;
+end
+$$;
+
+-- Default ACLs must be rejected before this migration creates any object;
+-- otherwise they could materialize as relation/function grants and obscure the
+-- original privilege conflict before the complete role inventory runs.
+do $$
+declare
+  v_role_name text;
+  v_role_oid oid;
+begin
+  foreach v_role_name in array array[
+    'line_pay_payment_executor',
+    'line_pay_payment_function_owner'
+  ]::text[] loop
+    select role.oid into v_role_oid
+    from pg_catalog.pg_roles as role
+    where role.rolname = v_role_name;
+
+    if v_role_oid is not null and exists (
+      select 1
+      from pg_catalog.pg_default_acl as default_acl
+      where default_acl.defaclrole = v_role_oid
+         or exists (
+           select 1
+           from pg_catalog.aclexplode(default_acl.defaclacl) as acl
+           where acl.grantee = v_role_oid
+         )
+    ) then
+      raise exception using errcode = '42501',
+        message = v_role_name || '_default_privilege_conflict';
+    end if;
+  end loop;
 end
 $$;
 
@@ -77,7 +201,7 @@ as $$
     p_payload is not null
     and pg_catalog.jsonb_typeof(p_payload) = 'object'
     and pg_catalog.octet_length(p_payload::text) <= 4096
-    and p_payload::text !~* '(authorization|signature|secret|channel[^[:alnum:]]*id|gateway[^[:alnum:]]*key|cookie|token|email|phone|address|card|trade[^[:alnum:]]*(info|sha)|hash[^[:alnum:]]*(key|iv)|callback|capability|request[^[:alnum:]]*body|response[^[:alnum:]]*body|payment[^[:alnum:]]*url|fake_test_token_do_not_use|fake_test_signature_do_not_use|fake_test_authorization_do_not_use)'
+    and p_payload::text !~* '(authorization|signature|secret|channel[^[:alnum:]]*id|gateway[^[:alnum:]]*key|cookie|token|email|phone|address|card|trade[^[:alnum:]]*(info|sha)|hash[^[:alnum:]]*(key|iv)|request[^[:alnum:]]*body|response[^[:alnum:]]*body|payment[^[:alnum:]]*url|fake_test_token_do_not_use|fake_test_signature_do_not_use|fake_test_authorization_do_not_use)'
     and (
       not (p_payload ? 'result_code')
       or (
@@ -134,13 +258,83 @@ as $$
     )
     and not exists (
       select 1
+      from pg_catalog.jsonb_each_text(p_payload) as identifier(key, value)
+      where identifier.key = any (array[
+        'payment_id',
+        'product_order_id',
+        'checkout_attempt_id',
+        'callback_event_id',
+        'capability_id'
+      ]::text[])
+        and identifier.value !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    )
+    and (
+      not (p_payload ? 'environment')
+      or p_payload ->> 'environment' = any (array['sandbox', 'production']::text[])
+    )
+    and (
+      not (p_payload ? 'merchant_order_no')
+      or p_payload ->> 'merchant_order_no' ~ '^[A-Za-z0-9_:-]{1,100}$'
+    )
+    and (
+      not (p_payload ? 'transaction_id')
+      or p_payload ->> 'transaction_id' ~ '^[A-Za-z0-9_:-]{1,128}$'
+    )
+    and (
+      not (p_payload ? 'amount_twd')
+      or p_payload ->> 'amount_twd' ~ '^[1-9][0-9]*$'
+    )
+    and (
+      not (p_payload ? 'currency')
+      or p_payload ->> 'currency' = 'TWD'
+    )
+    and (
+      not (p_payload ? 'event_type')
+      or p_payload ->> 'event_type' = any (array[
+        'cancel_after_paid',
+        'payment_canceled',
+        'reconciliation_required'
+      ]::text[])
+    )
+    and not exists (
+      select 1
+      from pg_catalog.jsonb_each_text(p_payload) as state_value(key, value)
+      where state_value.key = any (array['from_state', 'to_state', 'request_state']::text[])
+        and state_value.value !~ '^[a-z0-9_:-]{1,64}$'
+    )
+    and (
+      not (p_payload ? 'reconciliation_required')
+      or p_payload ->> 'reconciliation_required' = any (array['true', 'false']::text[])
+    )
+    and (
+      not (p_payload ? 'event_timestamp')
+      or p_payload ->> 'event_timestamp' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:.+-]+$'
+    )
+    and not exists (
+      select 1
       from pg_catalog.jsonb_each(p_payload) as entry(key, value)
       where not (entry.key = any (array[
         'result_code',
         'provider_status',
         'evidence_sha256',
         'result_sha256',
-        'reason_code'
+        'reason_code',
+        'payment_id',
+        'product_order_id',
+        'checkout_attempt_id',
+        'callback_event_id',
+        'capability_id',
+        'environment',
+        'merchant_order_no',
+        'transaction_id',
+        'amount_twd',
+        'currency',
+        'event_type',
+        'from_state',
+        'to_state',
+        'request_state',
+        'reconciliation_required',
+        'event_timestamp'
       ]::text[]))
         or pg_catalog.jsonb_typeof(entry.value) <> 'string'
     );
@@ -943,18 +1137,9 @@ begin
     return new;
   end if;
 
-  if old.request_state = 'paid' and (
-    new.user_id is distinct from old.user_id
-    or new.product_order_id is distinct from old.product_order_id
-    or new.payment_id is distinct from old.payment_id
-    or new.provider is distinct from old.provider
-    or new.environment is distinct from old.environment
-    or new.upstream_transaction_id is distinct from old.upstream_transaction_id
-    or new.merchant_order_no is distinct from old.merchant_order_no
-    or new.amount_twd is distinct from old.amount_twd
-    or new.currency is distinct from old.currency
-    or new.completed_at is distinct from old.completed_at
-  ) then
+  if old.request_state = 'paid'
+     and (pg_catalog.to_jsonb(new) - 'updated_at')
+       is distinct from (pg_catalog.to_jsonb(old) - 'updated_at') then
     raise exception using
       errcode = '23514',
       message = 'line_pay_paid_attempt_evidence_is_immutable';
@@ -1330,13 +1515,9 @@ begin
       message = 'line_pay_callback_capability_binding_is_immutable';
   end if;
 
-  if old.consumed_at is not null and (
-    new.consumed_at is distinct from old.consumed_at
-    or new.revoked_at is distinct from old.revoked_at
-    or new.claim_id is distinct from old.claim_id
-    or new.claimed_at is distinct from old.claimed_at
-    or new.claim_expires_at is distinct from old.claim_expires_at
-  ) then
+  if old.consumed_at is not null
+     and (pg_catalog.to_jsonb(new) - 'updated_at')
+       is distinct from (pg_catalog.to_jsonb(old) - 'updated_at') then
     raise exception using
       errcode = '23514',
       message = 'line_pay_consumed_callback_capability_is_immutable';
@@ -1384,15 +1565,9 @@ begin
       message = 'line_pay_callback_event_binding_is_immutable';
   end if;
 
-  if old.state = 'completed' and (
-    new.state is distinct from old.state
-    or new.provider_result_sha256 is distinct from old.provider_result_sha256
-    or new.safe_result_code is distinct from old.safe_result_code
-    or new.completed_at is distinct from old.completed_at
-    or new.claim_id is distinct from old.claim_id
-    or new.claimed_at is distinct from old.claimed_at
-    or new.claim_expires_at is distinct from old.claim_expires_at
-  ) then
+  if old.state = 'completed'
+     and (pg_catalog.to_jsonb(new) - 'updated_at')
+       is distinct from (pg_catalog.to_jsonb(old) - 'updated_at') then
     raise exception using
       errcode = '23514',
       message = 'line_pay_completed_callback_event_is_immutable';
@@ -1518,7 +1693,7 @@ grant select, insert, update on table public.line_pay_checkout_attempts to servi
 grant select, insert, update on table public.line_pay_request_outbox to service_role;
 grant select, insert, update on table public.line_pay_callback_capabilities to service_role;
 grant select, insert, update on table public.line_pay_callback_events to service_role;
-grant select, insert on table public.line_pay_payment_audit_events to service_role;
+revoke all on table public.line_pay_payment_audit_events from service_role;
 
 revoke execute on function public.line_pay_sanitized_result_is_valid(jsonb)
 from public, anon, authenticated;
@@ -1558,7 +1733,7 @@ returns table (
   attempt_count integer
 )
 language plpgsql
-security invoker
+security definer
 set search_path = ''
 as $$
 declare
@@ -1870,7 +2045,7 @@ returns table (
   upstream_transaction_id text
 )
 language plpgsql
-security invoker
+security definer
 set search_path = ''
 as $$
 declare
@@ -2081,7 +2256,7 @@ returns table (
   request_state text
 )
 language plpgsql
-security invoker
+security definer
 set search_path = ''
 as $$
 declare
@@ -2266,7 +2441,7 @@ returns table (
   request_state text
 )
 language plpgsql
-security invoker
+security definer
 set search_path = ''
 as $$
 declare
@@ -2667,7 +2842,7 @@ returns table (
   request_state text
 )
 language plpgsql
-security invoker
+security definer
 set search_path = ''
 as $$
 declare
@@ -3372,7 +3547,7 @@ create or replace function public.cancel_product_order_line_pay_payment(
   p_callback_event_id uuid,
   p_callback_claim_id uuid,
   p_request_id text,
-  p_audit_evidence jsonb
+  p_reason_code text
 )
 returns table (
   result_code text,
@@ -3381,7 +3556,7 @@ returns table (
   request_state text
 )
 language plpgsql
-security invoker
+security definer
 set search_path = ''
 as $$
 declare
@@ -3403,7 +3578,9 @@ begin
      or p_callback_claim_id is null
      or p_request_id is null
      or p_request_id !~ '^[A-Za-z0-9_.:-]{1,128}$'
-     or not public.line_pay_audit_evidence_is_valid(p_audit_evidence) then
+     or p_reason_code is null
+     or p_reason_code !~ '^[a-z0-9_:-]{1,64}$'
+     or p_reason_code ~ '^fake_test_(token|signature|authorization)_do_not_use$' then
     raise exception using
       errcode = '22023',
       message = 'line_pay_cancel_invalid_input';
@@ -3460,6 +3637,13 @@ begin
     raise exception using
       errcode = '23514',
       message = 'line_pay_cancel_contract_mismatch';
+  end if;
+
+  if (v_payment.status = 'paid' and p_reason_code <> 'cancel_after_paid')
+     or (v_payment.status <> 'paid' and p_reason_code <> 'payment_canceled') then
+    raise exception using
+      errcode = '22023',
+      message = 'line_pay_cancel_reason_state_mismatch';
   end if;
 
   if v_capability.consumed_at is not null then
@@ -3552,7 +3736,30 @@ begin
       'paid',
       'paid',
       p_request_id,
-      p_audit_evidence
+      pg_catalog.jsonb_build_object(
+        'result_code', 'cancel_after_paid',
+        'payment_id', v_payment.id::text,
+        'product_order_id', v_order.id::text,
+        'checkout_attempt_id', v_attempt.id::text,
+        'callback_event_id', v_callback_event.id::text,
+        'capability_id', v_capability.id::text,
+        'environment', p_environment,
+        'merchant_order_no', v_payment.merchant_order_no,
+        'amount_twd', v_payment.amount_twd::text,
+        'currency', v_payment.currency,
+        'event_type', 'cancel_after_paid',
+        'from_state', 'paid',
+        'to_state', 'paid',
+        'request_state', v_payment.request_state,
+        'reason_code', p_reason_code,
+        'reconciliation_required', v_payment.reconciliation_required::text,
+        'event_timestamp', v_now::text
+      ) || case
+        when v_payment.line_pay_transaction_id is null then '{}'::jsonb
+        else pg_catalog.jsonb_build_object(
+          'transaction_id', v_payment.line_pay_transaction_id
+        )
+      end
     );
 
     return query select
@@ -3666,7 +3873,30 @@ begin
     v_payment.request_state,
     'canceled',
     p_request_id,
-    p_audit_evidence
+    pg_catalog.jsonb_build_object(
+      'result_code', 'canceled',
+      'payment_id', v_payment.id::text,
+      'product_order_id', v_order.id::text,
+      'checkout_attempt_id', v_attempt.id::text,
+      'callback_event_id', v_callback_event.id::text,
+      'capability_id', v_capability.id::text,
+      'environment', p_environment,
+      'merchant_order_no', v_payment.merchant_order_no,
+      'amount_twd', v_payment.amount_twd::text,
+      'currency', v_payment.currency,
+      'event_type', 'payment_canceled',
+      'from_state', v_payment.request_state,
+      'to_state', 'canceled',
+      'request_state', 'canceled',
+      'reason_code', p_reason_code,
+      'reconciliation_required', 'false',
+      'event_timestamp', v_now::text
+    ) || case
+      when v_payment.line_pay_transaction_id is null then '{}'::jsonb
+      else pg_catalog.jsonb_build_object(
+        'transaction_id', v_payment.line_pay_transaction_id
+      )
+    end
   );
 
   return query select
@@ -3688,8 +3918,7 @@ create or replace function public.mark_product_order_line_pay_reconciliation(
   p_product_order_id uuid,
   p_attempt_id uuid,
   p_reason_code text,
-  p_request_id text,
-  p_audit_evidence jsonb
+  p_request_id text
 )
 returns table (
   result_code text,
@@ -3698,14 +3927,18 @@ returns table (
   request_state text
 )
 language plpgsql
-security invoker
+security definer
 set search_path = ''
 as $$
 declare
   v_payment public.payments%rowtype;
   v_order public.product_orders%rowtype;
   v_attempt public.line_pay_checkout_attempts%rowtype;
+  v_callback_event public.line_pay_callback_events%rowtype;
+  v_capability public.line_pay_callback_capabilities%rowtype;
   v_target_state text;
+  v_row_count integer;
+  v_now timestamptz := pg_catalog.clock_timestamp();
 begin
   if p_environment is null
      or p_environment not in ('sandbox', 'production')
@@ -3716,8 +3949,7 @@ begin
      or p_reason_code !~ '^[a-z0-9_:-]{1,64}$'
      or p_reason_code ~ '^fake_test_(token|signature|authorization)_do_not_use$'
      or p_request_id is null
-     or p_request_id !~ '^[A-Za-z0-9_.:-]{1,128}$'
-     or not public.line_pay_audit_evidence_is_valid(p_audit_evidence) then
+     or p_request_id !~ '^[A-Za-z0-9_.:-]{1,128}$' then
     raise exception using
       errcode = '22023',
       message = 'line_pay_reconciliation_invalid_input';
@@ -3772,33 +4004,69 @@ begin
     v_target_state := 'reconciliation_required';
   end if;
 
-  update public.payments
+  select callback_event.* into v_callback_event
+  from public.line_pay_callback_events as callback_event
+  where callback_event.checkout_attempt_id = v_attempt.id
+    and callback_event.state in ('claimed', 'provider_verified')
+  order by callback_event.created_at, callback_event.id
+  limit 1
+  for update;
+
+  if v_callback_event.id is not null then
+    select capability.* into strict v_capability
+    from public.line_pay_callback_capabilities as capability
+    where capability.id = v_callback_event.capability_id
+    for update;
+  end if;
+
+  update public.payments as payment
   set request_state = case
-        when request_state in ('paid', 'canceled') then request_state
+        when payment.request_state in ('paid', 'canceled') then payment.request_state
         else 'reconciliation_required'
       end,
       reconciliation_required = true
-  where id = v_payment.id;
+  where payment.id = v_payment.id;
 
-  update public.product_orders
+  get diagnostics v_row_count = row_count;
+  if v_row_count <> 1 then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_reconciliation_payment_update_failed';
+  end if;
+
+  update public.product_orders as product_order
   set payment_request_state = case
-        when payment_request_state in ('paid', 'canceled') then payment_request_state
+        when product_order.payment_request_state in ('paid', 'canceled') then product_order.payment_request_state
         else 'reconciliation_required'
       end,
       reconciliation_required = true
-  where id = v_order.id;
+  where product_order.id = v_order.id;
 
-  update public.line_pay_checkout_attempts
+  get diagnostics v_row_count = row_count;
+  if v_row_count <> 1 then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_reconciliation_order_update_failed';
+  end if;
+
+  update public.line_pay_checkout_attempts as checkout_attempt
   set request_state = v_target_state,
       reconciliation_required = true,
       last_error_code = p_reason_code
-  where id = v_attempt.id;
+  where checkout_attempt.id = v_attempt.id;
 
-  update public.line_pay_callback_events
+  get diagnostics v_row_count = row_count;
+  if v_row_count <> 1 then
+    raise exception using
+      errcode = 'P0001',
+      message = 'line_pay_reconciliation_attempt_update_failed';
+  end if;
+
+  update public.line_pay_callback_events as callback_event
   set state = 'reconciliation_required',
       last_error_code = p_reason_code
-  where checkout_attempt_id = v_attempt.id
-    and state in ('claimed', 'provider_verified');
+  where callback_event.checkout_attempt_id = v_attempt.id
+    and callback_event.state in ('claimed', 'provider_verified');
 
   insert into public.line_pay_payment_audit_events (
     payment_id,
@@ -3821,7 +4089,37 @@ begin
     v_target_state,
     p_reason_code,
     p_request_id,
-    p_audit_evidence
+    pg_catalog.jsonb_build_object(
+      'result_code', 'reconciliation_required',
+      'provider_status', 'reconciliation_required',
+      'payment_id', v_payment.id::text,
+      'product_order_id', v_order.id::text,
+      'checkout_attempt_id', v_attempt.id::text,
+      'environment', p_environment,
+      'merchant_order_no', v_payment.merchant_order_no,
+      'amount_twd', v_payment.amount_twd::text,
+      'currency', v_payment.currency,
+      'event_type', 'reconciliation_required',
+      'from_state', v_attempt.request_state,
+      'to_state', v_target_state,
+      'request_state', v_target_state,
+      'reason_code', p_reason_code,
+      'reconciliation_required', 'true',
+      'event_timestamp', v_now::text
+    )
+      || case
+        when v_payment.line_pay_transaction_id is null then '{}'::jsonb
+        else pg_catalog.jsonb_build_object(
+          'transaction_id', v_payment.line_pay_transaction_id
+        )
+      end
+      || case
+        when v_callback_event.id is null then '{}'::jsonb
+        else pg_catalog.jsonb_build_object(
+          'callback_event_id', v_callback_event.id::text,
+          'capability_id', v_capability.id::text
+        )
+      end
   );
 
   return query select
@@ -3837,9 +4135,189 @@ exception
 end;
 $$;
 
--- Paid completion is isolated from the generic service_role. The callable
--- executor has no table DML; the function owner has only the exact privileges
--- required by the two provider-evidence/finalize RPCs.
+-- Dedicated roles are accepted only when absent or at an exact zero-extra-
+-- privilege baseline. Normal cluster-wide PUBLIC defaults are not role-owned
+-- privileges; memberships and every explicit ACL/ownership category are
+-- checked before the roles are used for any owner or grant operation.
+do $$
+declare
+  v_role_name text;
+  v_role_oid oid;
+begin
+  foreach v_role_name in array array[
+    'line_pay_payment_executor',
+    'line_pay_payment_function_owner'
+  ]::text[] loop
+    select role.oid into v_role_oid
+    from pg_catalog.pg_roles as role
+    where role.rolname = v_role_name;
+
+    if v_role_oid is null then
+      continue;
+    end if;
+
+    -- line_pay_role_guard:attributes
+    if exists (
+      select 1
+      from pg_catalog.pg_roles as role
+      where role.oid = v_role_oid
+        and (
+          role.rolcanlogin
+          or role.rolinherit
+          or role.rolsuper
+          or role.rolcreatedb
+          or role.rolcreaterole
+          or role.rolreplication
+          or role.rolbypassrls
+          or role.rolconnlimit <> -1
+          or role.rolconfig is not null
+          or role.rolvaliduntil is not null
+        )
+    ) then
+      raise exception using errcode = '42501',
+        message = v_role_name || '_role_attribute_conflict';
+    end if;
+
+    -- line_pay_role_guard:membership
+    if exists (
+      select 1
+      from pg_catalog.pg_auth_members as membership
+      where membership.roleid = v_role_oid
+         or membership.member = v_role_oid
+    ) then
+      raise exception using errcode = '42501',
+        message = v_role_name || '_role_membership_conflict';
+    end if;
+
+    -- line_pay_role_guard:database
+    if exists (
+      select 1
+      from pg_catalog.pg_database as database
+      where database.datdba = v_role_oid
+         or exists (
+           select 1
+           from pg_catalog.aclexplode(database.datacl) as acl
+           where acl.grantee = v_role_oid
+         )
+    ) then
+      raise exception using errcode = '42501',
+        message = v_role_name || '_database_privilege_conflict';
+    end if;
+
+    -- line_pay_role_guard:schema
+    if exists (
+      select 1
+      from pg_catalog.pg_namespace as namespace
+      where namespace.nspowner = v_role_oid
+         or exists (
+           select 1
+           from pg_catalog.aclexplode(namespace.nspacl) as acl
+           where acl.grantee = v_role_oid
+         )
+    ) then
+      raise exception using errcode = '42501',
+        message = v_role_name || '_schema_privilege_conflict';
+    end if;
+
+    -- line_pay_role_guard:relation
+    if exists (
+      select 1
+      from pg_catalog.pg_class as relation
+      where relation.relkind in ('r', 'p', 'v', 'm', 'f')
+        and (
+          relation.relowner = v_role_oid
+          or exists (
+            select 1
+            from pg_catalog.aclexplode(relation.relacl) as acl
+            where acl.grantee = v_role_oid
+          )
+          or exists (
+            select 1
+            from pg_catalog.pg_attribute as attribute
+            cross join lateral pg_catalog.aclexplode(attribute.attacl) as acl
+            where attribute.attrelid = relation.oid
+              and attribute.attnum > 0
+              and not attribute.attisdropped
+              and acl.grantee = v_role_oid
+          )
+        )
+    ) then
+      raise exception using errcode = '42501',
+        message = v_role_name || '_relation_privilege_conflict';
+    end if;
+
+    -- line_pay_role_guard:sequence
+    if exists (
+      select 1
+      from pg_catalog.pg_class as sequence
+      where sequence.relkind = 'S'
+        and (
+          sequence.relowner = v_role_oid
+          or exists (
+            select 1
+            from pg_catalog.aclexplode(sequence.relacl) as acl
+            where acl.grantee = v_role_oid
+          )
+        )
+    ) then
+      raise exception using errcode = '42501',
+        message = v_role_name || '_sequence_privilege_conflict';
+    end if;
+
+    -- line_pay_role_guard:function
+    if exists (
+      select 1
+      from pg_catalog.pg_proc as procedure
+      where procedure.prokind in ('f', 'p')
+        and (
+          procedure.proowner = v_role_oid
+          or exists (
+            select 1
+            from pg_catalog.aclexplode(procedure.proacl) as acl
+            where acl.grantee = v_role_oid
+          )
+        )
+    ) then
+      raise exception using errcode = '42501',
+        message = v_role_name || '_function_privilege_conflict';
+    end if;
+
+    -- line_pay_role_guard:type
+    if exists (
+      select 1
+      from pg_catalog.pg_type as type_row
+      where type_row.typtype in ('b', 'c', 'd', 'e', 'r', 'm')
+        and (
+          type_row.typowner = v_role_oid
+          or exists (
+            select 1
+            from pg_catalog.aclexplode(type_row.typacl) as acl
+            where acl.grantee = v_role_oid
+          )
+        )
+    ) then
+      raise exception using errcode = '42501',
+        message = v_role_name || '_type_privilege_conflict';
+    end if;
+
+    -- line_pay_role_guard:default_acl
+    if exists (
+      select 1
+      from pg_catalog.pg_default_acl as default_acl
+      where default_acl.defaclrole = v_role_oid
+         or exists (
+           select 1
+           from pg_catalog.aclexplode(default_acl.defaclacl) as acl
+           where acl.grantee = v_role_oid
+         )
+    ) then
+      raise exception using errcode = '42501',
+        message = v_role_name || '_default_privilege_conflict';
+    end if;
+  end loop;
+end
+$$;
+
 do $$
 begin
   if not exists (
@@ -3847,15 +4325,6 @@ begin
   ) then
     create role line_pay_payment_executor
       nologin noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
-  elsif exists (
-    select 1
-    from pg_catalog.pg_roles
-    where rolname = 'line_pay_payment_executor'
-      and (rolcanlogin or rolinherit or rolsuper or rolcreatedb or rolcreaterole or rolreplication or rolbypassrls)
-  ) then
-    raise exception using
-      errcode = '42501',
-      message = 'line_pay_payment_executor_role_contract_mismatch';
   end if;
 
   if not exists (
@@ -3863,36 +4332,6 @@ begin
   ) then
     create role line_pay_payment_function_owner
       nologin noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
-  elsif exists (
-    select 1
-    from pg_catalog.pg_roles
-    where rolname = 'line_pay_payment_function_owner'
-      and (rolcanlogin or rolinherit or rolsuper or rolcreatedb or rolcreaterole or rolreplication or rolbypassrls)
-  ) then
-    raise exception using
-      errcode = '42501',
-      message = 'line_pay_payment_function_owner_role_contract_mismatch';
-  end if;
-
-  if exists (
-    select 1
-    from pg_catalog.pg_auth_members as membership
-    join pg_catalog.pg_roles as granted_role
-      on granted_role.oid = membership.roleid
-    join pg_catalog.pg_roles as member_role
-      on member_role.oid = membership.member
-    where granted_role.rolname in (
-      'line_pay_payment_executor',
-      'line_pay_payment_function_owner'
-    )
-       or member_role.rolname in (
-         'line_pay_payment_executor',
-         'line_pay_payment_function_owner'
-       )
-  ) then
-    raise exception using
-      errcode = '42501',
-      message = 'line_pay_payment_role_membership_contract_mismatch';
   end if;
 end
 $$;
@@ -4057,17 +4496,47 @@ grant select on table
   public.payments,
   public.product_orders,
   public.line_pay_checkout_attempts,
+  public.line_pay_request_outbox,
   public.line_pay_callback_capabilities,
   public.line_pay_callback_events,
   public.line_pay_payment_audit_events
 to line_pay_payment_function_owner;
 
-grant update (status, request_state, provider_trade_no, paid_at, reconciliation_required)
+grant update (
+  status,
+  request_state,
+  provider_trade_no,
+  paid_at,
+  reconciliation_required,
+  line_pay_transaction_id,
+  failure_reason
+)
 on table public.payments to line_pay_payment_function_owner;
 grant update (payment_status, order_status, payment_request_state, reconciliation_required)
 on table public.product_orders to line_pay_payment_function_owner;
-grant update (request_state, reconciliation_required, completed_at)
+grant update (
+  request_state,
+  attempt_count,
+  claim_id,
+  claimed_at,
+  claim_expires_at,
+  upstream_transaction_id,
+  sanitized_result,
+  last_error_code,
+  reconciliation_required,
+  completed_at
+)
 on table public.line_pay_checkout_attempts to line_pay_payment_function_owner;
+grant update (
+  state,
+  attempt_count,
+  claim_id,
+  claimed_at,
+  claim_expires_at,
+  last_error_code,
+  completed_at
+)
+on table public.line_pay_request_outbox to line_pay_payment_function_owner;
 grant update (consumed_at)
 on table public.line_pay_callback_capabilities to line_pay_payment_function_owner;
 grant update (state, provider_result_sha256, safe_result_code, last_error_code, completed_at)
@@ -4095,31 +4564,82 @@ using (provider = 'line_pay');
 create policy line_pay_payment_function_owner_attempts_update
 on public.line_pay_checkout_attempts for update to line_pay_payment_function_owner
 using (provider = 'line_pay') with check (provider = 'line_pay');
+create policy line_pay_payment_function_owner_outbox_select
+on public.line_pay_request_outbox for select to line_pay_payment_function_owner
+using (provider = 'line_pay');
+create policy line_pay_payment_function_owner_outbox_update
+on public.line_pay_request_outbox for update to line_pay_payment_function_owner
+using (provider = 'line_pay') with check (provider = 'line_pay');
 create policy line_pay_payment_function_owner_capabilities_select
 on public.line_pay_callback_capabilities for select to line_pay_payment_function_owner
-using (purpose = 'confirm');
+using (purpose in ('confirm', 'cancel'));
 create policy line_pay_payment_function_owner_capabilities_update
 on public.line_pay_callback_capabilities for update to line_pay_payment_function_owner
-using (purpose = 'confirm') with check (purpose = 'confirm');
+using (purpose in ('confirm', 'cancel')) with check (purpose in ('confirm', 'cancel'));
 create policy line_pay_payment_function_owner_events_select
 on public.line_pay_callback_events for select to line_pay_payment_function_owner
-using (purpose = 'confirm');
+using (purpose in ('confirm', 'cancel'));
 create policy line_pay_payment_function_owner_events_update
 on public.line_pay_callback_events for update to line_pay_payment_function_owner
-using (purpose = 'confirm') with check (purpose = 'confirm');
+using (purpose in ('confirm', 'cancel')) with check (purpose in ('confirm', 'cancel'));
 create policy line_pay_payment_function_owner_audit_select
 on public.line_pay_payment_audit_events for select to line_pay_payment_function_owner
-using (event_type in ('confirmation_evidence_recorded', 'confirmation_completed'));
+using (event_type in (
+  'request_claim_expired',
+  'request_claimed',
+  'request_succeeded',
+  'request_failed',
+  'request_unknown',
+  'confirmation_claimed',
+  'confirmation_evidence_recorded',
+  'confirmation_completed',
+  'cancel_after_paid',
+  'payment_canceled',
+  'reconciliation_required'
+));
 create policy line_pay_payment_function_owner_audit_insert
 on public.line_pay_payment_audit_events for insert to line_pay_payment_function_owner
-with check (event_type in ('confirmation_evidence_recorded', 'confirmation_completed'));
+with check (event_type in (
+  'request_claim_expired',
+  'request_claimed',
+  'request_succeeded',
+  'request_failed',
+  'request_unknown',
+  'confirmation_claimed',
+  'confirmation_evidence_recorded',
+  'confirmation_completed',
+  'cancel_after_paid',
+  'payment_canceled',
+  'reconciliation_required'
+));
 
 grant create on schema public to line_pay_payment_function_owner;
+alter function public.claim_product_order_line_pay_request(
+  uuid, text, text, text, uuid, timestamptz
+) owner to line_pay_payment_function_owner;
+alter function public.record_product_order_line_pay_request_success(
+  uuid, text, text, text, uuid, text, text, jsonb, text
+) owner to line_pay_payment_function_owner;
+alter function public.record_product_order_line_pay_request_failure(
+  uuid, text, text, text, uuid, text, text
+) owner to line_pay_payment_function_owner;
+alter function public.mark_product_order_line_pay_request_unknown(
+  uuid, text, text, text, uuid, text, text
+) owner to line_pay_payment_function_owner;
+alter function public.claim_product_order_line_pay_confirmation(
+  text, uuid, uuid, uuid, uuid, uuid, uuid, text, text
+) owner to line_pay_payment_function_owner;
 alter function public.record_product_order_line_pay_confirmation_evidence(
   text, uuid, uuid, text, text, text
 ) owner to line_pay_payment_function_owner;
 alter function public.complete_product_order_line_pay_confirmation(
   text, uuid, uuid, uuid, text, text, integer, text, uuid, uuid, uuid, text, text, jsonb, timestamptz
+) owner to line_pay_payment_function_owner;
+alter function public.cancel_product_order_line_pay_payment(
+  text, uuid, uuid, uuid, uuid, uuid, uuid, text, text
+) owner to line_pay_payment_function_owner;
+alter function public.mark_product_order_line_pay_reconciliation(
+  text, uuid, uuid, uuid, text, text
 ) owner to line_pay_payment_function_owner;
 revoke create on schema public from line_pay_payment_function_owner;
 
@@ -4156,10 +4676,10 @@ revoke execute on function public.complete_product_order_line_pay_confirmation(
   text, uuid, uuid, uuid, text, text, integer, text, uuid, uuid, uuid, text, text, jsonb, timestamptz
 ) from public, anon, authenticated, service_role;
 revoke execute on function public.cancel_product_order_line_pay_payment(
-  text, uuid, uuid, uuid, uuid, uuid, uuid, text, jsonb
+  text, uuid, uuid, uuid, uuid, uuid, uuid, text, text
 ) from public, anon, authenticated;
 revoke execute on function public.mark_product_order_line_pay_reconciliation(
-  text, uuid, uuid, uuid, text, text, jsonb
+  text, uuid, uuid, uuid, text, text
 ) from public, anon, authenticated;
 
 grant execute on function public.claim_product_order_line_pay_request(
@@ -4190,10 +4710,260 @@ grant execute on function public.complete_product_order_line_pay_confirmation(
   text, uuid, uuid, uuid, text, text, integer, text, uuid, uuid, uuid, text, text, jsonb, timestamptz
 ) to line_pay_payment_executor;
 grant execute on function public.cancel_product_order_line_pay_payment(
-  text, uuid, uuid, uuid, uuid, uuid, uuid, text, jsonb
+  text, uuid, uuid, uuid, uuid, uuid, uuid, text, text
 ) to service_role;
 grant execute on function public.mark_product_order_line_pay_reconciliation(
-  text, uuid, uuid, uuid, text, text, jsonb
+  text, uuid, uuid, uuid, text, text
 ) to service_role;
+
+-- Exact postcondition: one reviewed signature per sensitive name, fixed owner,
+-- fixed SECURITY DEFINER boundary, empty search_path, and no unexpected caller.
+do $$
+declare
+  v_expected_count integer;
+  v_actual_count integer;
+begin
+  with expected(
+    function_name,
+    argument_types,
+    owner_name,
+    security_definer,
+    caller_name
+  ) as (
+    values
+      ('claim_product_order_line_pay_request', 'uuid, text, text, text, uuid, timestamp with time zone', 'line_pay_payment_function_owner', true, 'service_role'),
+      ('record_product_order_line_pay_request_success', 'uuid, text, text, text, uuid, text, text, jsonb, text', 'line_pay_payment_function_owner', true, 'service_role'),
+      ('record_product_order_line_pay_request_failure', 'uuid, text, text, text, uuid, text, text', 'line_pay_payment_function_owner', true, 'service_role'),
+      ('mark_product_order_line_pay_request_unknown', 'uuid, text, text, text, uuid, text, text', 'line_pay_payment_function_owner', true, 'service_role'),
+      ('read_product_order_line_pay_request_result', 'uuid, text, text, text', current_user, false, 'service_role'),
+      ('claim_line_pay_callback_capability', 'text, text, text, uuid, uuid, uuid, uuid, timestamp with time zone', current_user, false, 'service_role'),
+      ('claim_product_order_line_pay_confirmation', 'text, uuid, uuid, uuid, uuid, uuid, uuid, text, text', 'line_pay_payment_function_owner', true, 'service_role'),
+      ('record_product_order_line_pay_confirmation_evidence', 'text, uuid, uuid, text, text, text', 'line_pay_payment_function_owner', true, 'line_pay_payment_executor'),
+      ('complete_product_order_line_pay_confirmation', 'text, uuid, uuid, uuid, text, text, integer, text, uuid, uuid, uuid, text, text, jsonb, timestamp with time zone', 'line_pay_payment_function_owner', true, 'line_pay_payment_executor'),
+      ('cancel_product_order_line_pay_payment', 'text, uuid, uuid, uuid, uuid, uuid, uuid, text, text', 'line_pay_payment_function_owner', true, 'service_role'),
+      ('mark_product_order_line_pay_reconciliation', 'text, uuid, uuid, uuid, text, text', 'line_pay_payment_function_owner', true, 'service_role')
+  ), actual as (
+    select
+      procedure.oid,
+      procedure.proname as function_name,
+      pg_catalog.oidvectortypes(procedure.proargtypes) as argument_types,
+      owner.rolname as owner_name,
+      procedure.prosecdef as security_definer,
+      procedure.proconfig,
+      procedure.proacl
+    from pg_catalog.pg_proc as procedure
+    join pg_catalog.pg_namespace as namespace
+      on namespace.oid = procedure.pronamespace
+    join pg_catalog.pg_roles as owner
+      on owner.oid = procedure.proowner
+    where namespace.nspname = 'public'
+      and procedure.proname in (select expected.function_name from expected)
+  )
+  select
+    (select pg_catalog.count(*) from expected),
+    (select pg_catalog.count(*) from actual)
+  into v_expected_count, v_actual_count;
+
+  if v_actual_count <> v_expected_count then
+    raise exception using errcode = '42710',
+      message = 'line_pay_sensitive_rpc_overload_postcondition_failed';
+  end if;
+
+  if exists (
+    with expected(
+      function_name,
+      argument_types,
+      owner_name,
+      security_definer,
+      caller_name
+    ) as (
+      values
+        ('claim_product_order_line_pay_request', 'uuid, text, text, text, uuid, timestamp with time zone', 'line_pay_payment_function_owner', true, 'service_role'),
+        ('record_product_order_line_pay_request_success', 'uuid, text, text, text, uuid, text, text, jsonb, text', 'line_pay_payment_function_owner', true, 'service_role'),
+        ('record_product_order_line_pay_request_failure', 'uuid, text, text, text, uuid, text, text', 'line_pay_payment_function_owner', true, 'service_role'),
+        ('mark_product_order_line_pay_request_unknown', 'uuid, text, text, text, uuid, text, text', 'line_pay_payment_function_owner', true, 'service_role'),
+        ('read_product_order_line_pay_request_result', 'uuid, text, text, text', current_user, false, 'service_role'),
+        ('claim_line_pay_callback_capability', 'text, text, text, uuid, uuid, uuid, uuid, timestamp with time zone', current_user, false, 'service_role'),
+        ('claim_product_order_line_pay_confirmation', 'text, uuid, uuid, uuid, uuid, uuid, uuid, text, text', 'line_pay_payment_function_owner', true, 'service_role'),
+        ('record_product_order_line_pay_confirmation_evidence', 'text, uuid, uuid, text, text, text', 'line_pay_payment_function_owner', true, 'line_pay_payment_executor'),
+        ('complete_product_order_line_pay_confirmation', 'text, uuid, uuid, uuid, text, text, integer, text, uuid, uuid, uuid, text, text, jsonb, timestamp with time zone', 'line_pay_payment_function_owner', true, 'line_pay_payment_executor'),
+        ('cancel_product_order_line_pay_payment', 'text, uuid, uuid, uuid, uuid, uuid, uuid, text, text', 'line_pay_payment_function_owner', true, 'service_role'),
+        ('mark_product_order_line_pay_reconciliation', 'text, uuid, uuid, uuid, text, text', 'line_pay_payment_function_owner', true, 'service_role')
+    )
+    select 1
+    from expected
+    left join pg_catalog.pg_proc as procedure
+      on procedure.proname = expected.function_name
+     and pg_catalog.oidvectortypes(procedure.proargtypes) = expected.argument_types
+    left join pg_catalog.pg_namespace as namespace
+      on namespace.oid = procedure.pronamespace
+     and namespace.nspname = 'public'
+    left join pg_catalog.pg_roles as owner
+      on owner.oid = procedure.proowner
+    where procedure.oid is null
+       or namespace.oid is null
+       or owner.rolname <> expected.owner_name
+       or procedure.prosecdef <> expected.security_definer
+       or procedure.proconfig is null
+       or not ('search_path=""' = any (procedure.proconfig))
+       or exists (
+         select 1
+         from pg_catalog.aclexplode(procedure.proacl) as public_acl
+         where public_acl.grantee = 0
+           and public_acl.privilege_type = 'EXECUTE'
+       )
+       or pg_catalog.has_function_privilege('anon', procedure.oid, 'execute')
+       or pg_catalog.has_function_privilege('authenticated', procedure.oid, 'execute')
+       or not pg_catalog.has_function_privilege(expected.caller_name, procedure.oid, 'execute')
+       or (
+         expected.caller_name <> 'service_role'
+         and pg_catalog.has_function_privilege('service_role', procedure.oid, 'execute')
+       )
+       or (
+         expected.caller_name <> 'line_pay_payment_executor'
+         and pg_catalog.has_function_privilege('line_pay_payment_executor', procedure.oid, 'execute')
+       )
+       or exists (
+         select 1
+         from pg_catalog.aclexplode(procedure.proacl) as acl
+         where acl.privilege_type = 'EXECUTE'
+           and acl.grantee not in (
+             procedure.proowner,
+             (select role.oid from pg_catalog.pg_roles as role where role.rolname = expected.caller_name)
+           )
+       )
+  ) then
+    raise exception using errcode = '42501',
+      message = 'line_pay_sensitive_rpc_security_postcondition_failed';
+  end if;
+end
+$$;
+
+-- Exact role postcondition for the sensitive boundary.
+do $$
+begin
+  if exists (
+    select 1
+    from pg_catalog.pg_roles as role
+    where role.rolname in ('line_pay_payment_executor', 'line_pay_payment_function_owner')
+      and (
+        role.rolcanlogin
+        or role.rolinherit
+        or role.rolsuper
+        or role.rolcreatedb
+        or role.rolcreaterole
+        or role.rolreplication
+        or role.rolbypassrls
+        or role.rolconnlimit <> -1
+        or role.rolconfig is not null
+        or role.rolvaliduntil is not null
+      )
+  ) then
+    raise exception using errcode = '42501',
+      message = 'line_pay_dedicated_role_attribute_postcondition_failed';
+  end if;
+
+  if exists (
+    select 1
+    from pg_catalog.pg_auth_members as membership
+    join pg_catalog.pg_roles as granted_role on granted_role.oid = membership.roleid
+    join pg_catalog.pg_roles as member_role on member_role.oid = membership.member
+    where granted_role.rolname in ('line_pay_payment_executor', 'line_pay_payment_function_owner')
+       or member_role.rolname in ('line_pay_payment_executor', 'line_pay_payment_function_owner')
+  ) then
+    raise exception using errcode = '42501',
+      message = 'line_pay_dedicated_role_membership_postcondition_failed';
+  end if;
+
+  if exists (
+    select 1
+    from pg_catalog.pg_class as relation
+    join pg_catalog.pg_roles as owner on owner.oid = relation.relowner
+    where owner.rolname = 'line_pay_payment_executor'
+  ) or exists (
+    select 1
+    from pg_catalog.pg_class as relation
+    cross join lateral pg_catalog.aclexplode(relation.relacl) as acl
+    join pg_catalog.pg_roles as grantee on grantee.oid = acl.grantee
+    where grantee.rolname = 'line_pay_payment_executor'
+  ) or exists (
+    select 1
+    from pg_catalog.pg_attribute as attribute
+    cross join lateral pg_catalog.aclexplode(attribute.attacl) as acl
+    join pg_catalog.pg_roles as grantee on grantee.oid = acl.grantee
+    where grantee.rolname = 'line_pay_payment_executor'
+  ) then
+    raise exception using errcode = '42501',
+      message = 'line_pay_executor_relation_privilege_postcondition_failed';
+  end if;
+
+  if pg_catalog.has_schema_privilege('line_pay_payment_executor', 'public', 'create')
+     or pg_catalog.has_schema_privilege('line_pay_payment_executor', 'line_pay_private', 'usage')
+     or not pg_catalog.has_schema_privilege('line_pay_payment_executor', 'public', 'usage') then
+    raise exception using errcode = '42501',
+      message = 'line_pay_executor_schema_privilege_postcondition_failed';
+  end if;
+
+  if (
+    select pg_catalog.count(*)
+    from pg_catalog.pg_proc as procedure
+    join pg_catalog.pg_namespace as namespace on namespace.oid = procedure.pronamespace
+    where namespace.nspname = 'public'
+      and procedure.proname in (
+        'claim_product_order_line_pay_request',
+        'record_product_order_line_pay_request_success',
+        'record_product_order_line_pay_request_failure',
+        'mark_product_order_line_pay_request_unknown',
+        'read_product_order_line_pay_request_result',
+        'claim_line_pay_callback_capability',
+        'claim_product_order_line_pay_confirmation',
+        'record_product_order_line_pay_confirmation_evidence',
+        'complete_product_order_line_pay_confirmation',
+        'cancel_product_order_line_pay_payment',
+        'mark_product_order_line_pay_reconciliation'
+      )
+      and pg_catalog.has_function_privilege('line_pay_payment_executor', procedure.oid, 'execute')
+  ) <> 2 then
+    raise exception using errcode = '42501',
+      message = 'line_pay_executor_rpc_allowlist_postcondition_failed';
+  end if;
+
+  if exists (
+    select 1
+    from pg_catalog.pg_namespace as namespace
+    join pg_catalog.pg_roles as owner on owner.oid = namespace.nspowner
+    where owner.rolname = 'line_pay_payment_function_owner'
+      and namespace.nspname <> 'line_pay_private'
+  ) or exists (
+    select 1
+    from pg_catalog.pg_class as relation
+    join pg_catalog.pg_namespace as namespace on namespace.oid = relation.relnamespace
+    join pg_catalog.pg_roles as owner on owner.oid = relation.relowner
+    where owner.rolname = 'line_pay_payment_function_owner'
+      and relation.relkind in ('r', 'p', 'v', 'm', 'f', 'S')
+      and not (
+        namespace.nspname = 'line_pay_private'
+        and relation.relname = 'line_pay_completion_proofs'
+      )
+  ) then
+    raise exception using errcode = '42501',
+      message = 'line_pay_function_owner_object_allowlist_postcondition_failed';
+  end if;
+
+  if pg_catalog.has_table_privilege(
+       'service_role',
+       'public.line_pay_payment_audit_events',
+       'select,insert,update,delete,truncate,references,trigger'
+     )
+     or pg_catalog.has_table_privilege(
+       'line_pay_payment_executor',
+       'public.payments',
+       'select,insert,update,delete,truncate,references,trigger'
+     ) then
+    raise exception using errcode = '42501',
+      message = 'line_pay_audit_or_executor_dml_postcondition_failed';
+  end if;
+end
+$$;
 
 commit;

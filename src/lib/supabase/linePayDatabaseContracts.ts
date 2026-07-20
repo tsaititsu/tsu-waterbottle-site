@@ -131,3 +131,31 @@ export type CompleteProductOrderLinePayConfirmationResult = {
   product_order_id: string
   transaction_id: string
 }
+
+export type CancelProductOrderLinePayPaymentInput = {
+  p_environment: LinePayDatabaseEnvironment
+  p_payment_id: string
+  p_product_order_id: string
+  p_attempt_id: string
+  p_capability_id: string
+  p_callback_event_id: string
+  p_callback_claim_id: string
+  p_request_id: string
+  p_reason_code: 'payment_canceled' | 'cancel_after_paid'
+}
+
+export type MarkProductOrderLinePayReconciliationInput = {
+  p_environment: LinePayDatabaseEnvironment
+  p_payment_id: string
+  p_product_order_id: string
+  p_attempt_id: string
+  p_reason_code: string
+  p_request_id: string
+}
+
+export type ProductOrderLinePayStateTransitionResult = {
+  result_code: string
+  payment_id: string
+  product_order_id: string
+  request_state: LinePayRequestState
+}
