@@ -21,6 +21,47 @@ npm run build
 - 不可刪除測試來讓流程通過。
 - 不可關閉 TypeScript 或 Lint 規則來掩蓋問題。
 
+### AI 命盤 canonical tests
+
+AI 命盤 assertion tests 的唯一正式指令是：
+
+```bash
+npm run test:ai-chart
+```
+
+此指令固定使用 Node `24.16.0` 與 exact `tsx@4.23.1`，由
+`scripts/ai-chart/run-tests.mjs` 遞迴發現 `src/lib/ai-chart/**/*.test.ts`。
+Runner 只接受 regular file、拒絕 symlink，以 Repository-relative path 做
+deterministic 排序與去重，逐檔循序執行並 fail fast。Runner contract 目前固定
+驗證 Repository 應發現 26 個測試檔；新增或移除測試時必須明確更新 contract，
+不得在 Workflow 另建人工檔案清單。
+
+每個測試 child process 固定使用 `NODE_ENV=test`，並移除以下環境變數：
+
+- `OPENAI_API_KEY`
+- `OPENAI_AI_CHART_MODEL`
+- `OPENAI_BASE_URL`
+- `OPENAI_ORG_ID`
+- `OPENAI_PROJECT_ID`
+- `AI_CHART_D1_P1_PREVIEW_ENABLED`
+- `AI_CHART_D1_P1_PREVIEW_TARGET_PALACE_ID`
+- `AI_CHART_D1_P1_PREVIEW_PLAN_FINGERPRINT`
+- `AI_CHART_D1_P1_PREVIEW_CONFIRM`
+- `VERCEL`
+- `VERCEL_ENV`
+
+Runner 亦移除 Supabase 連線相關環境變數。測試只可使用 synthetic fixture、
+mock request 或 mock fetch，不得發送 OpenAI request、連接 Supabase 或使用真實
+客戶資料。Runner 不輸出被移除環境變數的值、長度、hash、prefix、suffix 或
+masked value。
+
+Assertion tests 與 TypeScript typecheck 是不同檢查，交付前必須分別執行：
+
+```bash
+npm run test:ai-chart
+npm run typecheck -- --incremental false
+```
+
 ## 2. 功能測試
 
 說明：
