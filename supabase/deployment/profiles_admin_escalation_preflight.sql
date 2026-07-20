@@ -17,9 +17,13 @@ target_policy_rows as (
     pg_catalog.pg_get_expr(p.polqual, p.polrelid) as using_expression,
     pg_catalog.pg_get_expr(p.polwithcheck, p.polrelid) as with_check_expression,
     array(
-      select case when role_oid = 0 then 'public' else r.rolname end
+      select case
+        when role_oid = 0 then 'public'::text
+        else r.rolname::text
+      end
       from unnest(p.polroles) as policy_roles(role_oid)
-      left join pg_catalog.pg_roles as r on r.oid = policy_roles.role_oid
+      left join pg_catalog.pg_roles as r
+        on r.oid = policy_roles.role_oid
       order by 1
     ) as roles
   from pg_catalog.pg_policy as p
@@ -32,7 +36,10 @@ target_policy as (
     max(command) as command,
     max(using_expression) as using_expression,
     max(with_check_expression) as with_check_expression,
-    case when count(*) = 1 then (array_agg(roles))[1] else array[]::text[] end as roles
+    coalesce(
+      (select roles from target_policy_rows limit 1),
+      array[]::text[]
+    ) as roles
   from target_policy_rows
 ),
 profiles_facts as (
@@ -181,7 +188,7 @@ function_contract as (
     and identity_arguments = ''
     and return_type = 'boolean'
     and language = 'sql'
-    and owner = 'postgres'
+    and function_facts.owner = 'postgres'
     and security_definer
     and volatility = 'STABLE'
     and parallel = 'UNSAFE'
