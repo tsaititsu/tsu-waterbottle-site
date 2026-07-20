@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { LINE_PAY_POSTGRES_IMAGE } from './line_pay_postgres_image.mjs'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const root = resolve(scriptDirectory, '../..')
@@ -10,7 +11,7 @@ const containerName = `line-pay-remediation-db-${randomBytes(6).toString('hex')}
 const networkName = `${containerName}-network`
 const volumeName = `${containerName}-data`
 const localPostgresPassword = randomBytes(32).toString('base64url')
-const image = 'postgres:17-alpine'
+const image = LINE_PAY_POSTGRES_IMAGE
 const fakeMarkers = [
   'fake_test_token_do_not_use',
   'fake_test_signature_do_not_use',
@@ -293,6 +294,31 @@ function testRoleAccess(database) {
 }
 
 async function main() {
+  runDocker(['pull', image])
+
+  const repositoryDigests = JSON.parse(
+    runDocker(['image', 'inspect', '--format', '{{json .RepoDigests}}', image]),
+  )
+  if (
+    !Array.isArray(repositoryDigests)
+    || !repositoryDigests.includes(LINE_PAY_POSTGRES_IMAGE)
+  ) {
+    throw new Error('POSTGRES_IMAGE_REPOSITORY_DIGEST_MISMATCH')
+  }
+
+  const postgresVersion = runDocker([
+    'run',
+    '--rm',
+    '--network',
+    'none',
+    image,
+    'postgres',
+    '--version',
+  ])
+  if (!/^postgres \(PostgreSQL\) 17(?:\.|$)/.test(postgresVersion)) {
+    throw new Error(`POSTGRES_IMAGE_MAJOR_VERSION_MISMATCH: ${postgresVersion}`)
+  }
+
   runDocker(['volume', 'create', '--label', 'task=line-pay-remediation-pr1', volumeName])
   runDocker([
     'network',
@@ -345,6 +371,7 @@ async function main() {
   psqlFile('line_pay_clean', 'supabase/tests/line_pay_remediation_contracts.sql')
   psqlFile('line_pay_clean', 'supabase/tests/line_pay_paid_security_invariants.sql')
   psqlFile('line_pay_clean', 'supabase/tests/line_pay_request_outcomes.sql')
+  psqlFile('line_pay_clean', 'supabase/tests/line_pay_second_remediation_invariants.sql')
   await testConcurrentClaim('line_pay_clean')
   testRoleAccess('line_pay_clean')
 

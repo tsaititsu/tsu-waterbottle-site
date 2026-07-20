@@ -18,7 +18,10 @@ const sourceMigration = join(
   'supabase/migrations/20260719033404_line_pay_remediation_contracts.sql',
 )
 const contractRunner = join(root, 'supabase/tests/run_line_pay_remediation_db_contracts.mjs')
+const conflictRunner = join(root, 'supabase/tests/run_line_pay_second_remediation_conflicts.mjs')
+const postgresImageContract = join(root, 'supabase/tests/line_pay_postgres_image.mjs')
 const source = readFileSync(sourceMigration, 'utf8')
+const selectedMutation = process.env.LINE_PAY_MUTATION_SCENARIO ?? null
 const tempDirectory = mkdtempSync(join(tmpdir(), 'line-pay-remediation-mutations-'))
 const tempFiles = []
 
@@ -36,7 +39,187 @@ function removeMatchingLines(input, patterns, label) {
   return output
 }
 
+function replaceInFunction(input, functionName, transform, label) {
+  const marker = `create or replace function public.${functionName}(`
+  const start = input.indexOf(marker)
+  if (start < 0) throw new Error(`MUTATION_ANCHOR_NOT_FOUND: ${label}`)
+  const end = input.indexOf('\n$$;', start)
+  if (end < 0) throw new Error(`MUTATION_ANCHOR_NOT_FOUND: ${label}`)
+  const section = input.slice(start, end + 4)
+  const mutatedSection = transform(section)
+  if (mutatedSection === section) throw new Error(`MUTATION_ANCHOR_NOT_FOUND: ${label}`)
+  return input.slice(0, start) + mutatedSection + input.slice(end + 4)
+}
+
+function allowTerminalField(input, functionName, fieldName, label) {
+  return replaceInFunction(
+    input,
+    functionName,
+    (section) => section.replaceAll(
+      "(pg_catalog.to_jsonb(new) - 'updated_at')",
+      `(pg_catalog.to_jsonb(new) - array['updated_at', '${fieldName}']::text[])`,
+    ).replaceAll(
+      "(pg_catalog.to_jsonb(old) - 'updated_at')",
+      `(pg_catalog.to_jsonb(old) - array['updated_at', '${fieldName}']::text[])`,
+    ),
+    label,
+  )
+}
+
+function removeRoleGuard(input, guardName, label) {
+  const marker = `    -- line_pay_role_guard:${guardName}`
+  const start = input.indexOf(marker)
+  if (start < 0) throw new Error(`MUTATION_ANCHOR_NOT_FOUND: ${label}`)
+  const nextGuard = input.indexOf('    -- line_pay_role_guard:', start + marker.length)
+  const loopEnd = input.indexOf('  end loop;', start)
+  const end = nextGuard >= 0 && nextGuard < loopEnd ? nextGuard : loopEnd
+  if (end < 0) throw new Error(`MUTATION_ANCHOR_NOT_FOUND: ${label}`)
+  let output = input.slice(0, start) + input.slice(end)
+  if (guardName === 'default_acl') {
+    output = replaceRequired(
+      output,
+      /-- Default ACLs must be rejected before[\s\S]*?\n\$\$;\n\n(?=create or replace function public\.line_pay_sanitized_result_is_valid)/,
+      '',
+      label,
+    )
+  }
+  return output
+}
+
 const mutations = [
+  {
+    name: 'reconciliation_qualified_request_state',
+    apply(input) {
+      return replaceInFunction(
+        input,
+        'mark_product_order_line_pay_reconciliation',
+        (section) => replaceRequired(
+          section,
+          "when payment.request_state in ('paid', 'canceled') then payment.request_state",
+          "when request_state in ('paid', 'canceled') then request_state",
+          this.name,
+        ),
+        this.name,
+      )
+    },
+  },
+  {
+    name: 'paid_attempt_idempotency_key_freeze',
+    apply(input) {
+      return allowTerminalField(input, 'line_pay_enforce_attempt_transition', 'idempotency_key', this.name)
+    },
+  },
+  {
+    name: 'paid_attempt_request_body_sha256_freeze',
+    apply(input) {
+      return allowTerminalField(input, 'line_pay_enforce_attempt_transition', 'request_body_sha256', this.name)
+    },
+  },
+  {
+    name: 'paid_attempt_sanitized_result_freeze',
+    apply(input) {
+      return allowTerminalField(input, 'line_pay_enforce_attempt_transition', 'sanitized_result', this.name)
+    },
+  },
+  {
+    name: 'completed_callback_last_error_code_freeze',
+    apply(input) {
+      return allowTerminalField(input, 'line_pay_enforce_callback_event_transition', 'last_error_code', this.name)
+    },
+  },
+  {
+    name: 'consumed_capability_expires_at_freeze',
+    apply(input) {
+      return allowTerminalField(input, 'line_pay_enforce_callback_capability_transition', 'expires_at', this.name)
+    },
+  },
+  {
+    name: 'service_role_audit_direct_write_revoke',
+    apply(input) {
+      return replaceRequired(
+        input,
+        'revoke all on table public.line_pay_payment_audit_events from service_role;',
+        'grant select, insert, update, delete on table public.line_pay_payment_audit_events to service_role;',
+        this.name,
+      )
+    },
+  },
+  {
+    name: 'cancel_db_built_audit_evidence',
+    apply(input) {
+      return replaceInFunction(
+        input,
+        'cancel_product_order_line_pay_payment',
+        (section) => replaceRequired(
+          section,
+          /      pg_catalog\.jsonb_build_object\(\n        'result_code', 'cancel_after_paid',[\s\S]*?      end\n(?=    \);)/,
+          "      pg_catalog.jsonb_build_object(\n        'result_code', p_reason_code,\n        'reason_code', p_reason_code\n      )\n",
+          this.name,
+        ),
+        this.name,
+      )
+    },
+  },
+  {
+    name: 'reconciliation_db_built_audit_evidence',
+    apply(input) {
+      return replaceInFunction(
+        input,
+        'mark_product_order_line_pay_reconciliation',
+        (section) => replaceRequired(
+          section,
+          /    pg_catalog\.jsonb_build_object\(\n      'result_code', 'reconciliation_required',[\s\S]*?      end\n(?=  \);)/,
+          "    pg_catalog.jsonb_build_object(\n      'result_code', 'reconciliation_required',\n      'reason_code', p_reason_code\n    )\n",
+          this.name,
+        ),
+        this.name,
+      )
+    },
+  },
+  {
+    name: 'sensitive_rpc_overload_inventory',
+    runner: 'conflict',
+    scenario: 'unexpected-overload',
+    apply(input) {
+      return replaceRequired(
+        input,
+        /-- This migration is the first and only creator[\s\S]*?\n\$\$;\n\n(?=do \$\$)/,
+        '',
+        this.name,
+      )
+    },
+  },
+  ...[
+    ['attributes', 'executor-attributes'],
+    ['membership', 'executor-outbound-membership'],
+    ['database', 'executor-database-privilege'],
+    ['schema', 'executor-schema-usage'],
+    ['relation', 'owner-table-select'],
+    ['sequence', 'executor-sequence-privilege'],
+    ['function', 'owner-function-ownership'],
+    ['type', 'executor-type-privilege'],
+    ['default_acl', 'executor-default-privilege'],
+  ].map(([guardName, scenario]) => ({
+    name: `role_${guardName}_baseline_guard`,
+    runner: 'conflict',
+    scenario,
+    apply(input) {
+      return removeRoleGuard(input, guardName, this.name)
+    },
+  })),
+  {
+    name: 'payment_method_constraint_semantic_guard',
+    runner: 'conflict',
+    scenario: 'constraint-unknown-value',
+    apply(input) {
+      return replaceRequired(
+        input,
+        /-- The legacy constraint definition is taken[\s\S]*?\n\$\$;\n\n(?=create or replace function public\.line_pay_sanitized_result_is_valid)/,
+        '',
+        this.name,
+      )
+    },
+  },
   {
     name: 'provider_success_check',
     apply(input) {
@@ -204,17 +387,20 @@ const caught = []
 
 try {
   for (const mutation of mutations) {
+    if (selectedMutation !== null && selectedMutation !== mutation.name) continue
     const mutated = mutation.apply(source)
     const mutationFile = join(tempDirectory, `${mutation.name}.sql`)
     tempFiles.push(mutationFile)
     writeFileSync(mutationFile, mutated, { encoding: 'utf8', mode: 0o600 })
 
-    const result = spawnSync(process.execPath, [contractRunner], {
+    const selectedRunner = mutation.runner === 'conflict' ? conflictRunner : contractRunner
+    const result = spawnSync(process.execPath, [selectedRunner], {
       cwd: root,
       encoding: 'utf8',
       env: {
         ...process.env,
         LINE_PAY_MIGRATION_UNDER_TEST: mutationFile,
+        ...(mutation.scenario ? { LINE_PAY_CONFLICT_SCENARIO: mutation.scenario } : {}),
       },
       maxBuffer: 16 * 1024 * 1024,
     })
@@ -223,12 +409,35 @@ try {
     else caught.push(mutation.name)
   }
 
+  if (selectedMutation === null || selectedMutation === 'postgres_mutable_tag') {
+    const mutableImageMutation = readFileSync(postgresImageContract, 'utf8').replace(
+      'postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193',
+      'postgres:17-alpine',
+    )
+    if (mutableImageMutation === readFileSync(postgresImageContract, 'utf8')) {
+      throw new Error('MUTATION_ANCHOR_NOT_FOUND: postgres_mutable_tag')
+    }
+    const mutableImageFile = join(tempDirectory, 'postgres_mutable_tag.mjs')
+    tempFiles.push(mutableImageFile)
+    writeFileSync(mutableImageFile, mutableImageMutation, { encoding: 'utf8', mode: 0o600 })
+    const mutableImageResult = spawnSync(process.execPath, [mutableImageFile], {
+      cwd: root,
+      encoding: 'utf8',
+    })
+    if (mutableImageResult.status === 0) uncaught.push('postgres_mutable_tag')
+    else caught.push('postgres_mutable_tag')
+  }
+
+  if (selectedMutation !== null && caught.length + uncaught.length !== 1) {
+    throw new Error(`UNKNOWN_LINE_PAY_MUTATION_SCENARIO: ${selectedMutation}`)
+  }
+
   if (uncaught.length > 0) {
     throw new Error(`UNCAUGHT_LINE_PAY_MUTATIONS: ${uncaught.join(',')}`)
   }
 
   process.stdout.write(
-    `line_pay_remediation_mutations: PASS (${caught.length}/${mutations.length} caught)\n`,
+    `line_pay_remediation_mutations: PASS (${caught.length}/${selectedMutation === null ? mutations.length + 1 : 1} caught)\n`,
   )
 } finally {
   for (const file of tempFiles) {

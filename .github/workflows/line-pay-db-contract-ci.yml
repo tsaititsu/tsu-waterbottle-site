@@ -12,6 +12,7 @@ on:
       - "supabase/migrations/20260719033404_line_pay_remediation_contracts.sql"
       - "supabase/tests/line_pay_*.sql"
       - "supabase/tests/run_line_pay_remediation_*.mjs"
+      - "supabase/tests/run_line_pay_second_remediation_conflicts.mjs"
 
 permissions:
   contents: read
@@ -49,6 +50,9 @@ jobs:
 
       - name: Run disposable PostgreSQL contract suite
         run: node supabase/tests/run_line_pay_remediation_db_contracts.mjs
+
+      - name: Run fail-closed conflict fixtures
+        run: node supabase/tests/run_line_pay_second_remediation_conflicts.mjs
 
       - name: Run database mutation coverage
         run: node supabase/tests/run_line_pay_remediation_mutations.mjs

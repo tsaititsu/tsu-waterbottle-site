@@ -542,7 +542,7 @@ begin
     v_cancel_event_id,
     'a0000000-0000-4000-8000-000000000003',
     'cancel-after-paid-1',
-    '{"result_code":"cancel_after_paid"}'::jsonb
+    'cancel_after_paid'
   ) as canceled;
 
   if v_result <> 'already_paid' then
@@ -1214,7 +1214,23 @@ begin
          or not pg_catalog.has_function_privilege('line_pay_payment_executor', v_function, 'execute') then
         raise exception 'dedicated_executor_function_privilege_contract_failed_%', v_name;
       end if;
+    else
+      if not pg_catalog.has_function_privilege('service_role', v_function, 'execute') then
+        raise exception 'service_role_function_execute_missing_%', v_name;
+      end if;
+    end if;
 
+    if v_name in (
+      'claim_product_order_line_pay_request',
+      'record_product_order_line_pay_request_success',
+      'record_product_order_line_pay_request_failure',
+      'mark_product_order_line_pay_request_unknown',
+      'claim_product_order_line_pay_confirmation',
+      'record_product_order_line_pay_confirmation_evidence',
+      'complete_product_order_line_pay_confirmation',
+      'cancel_product_order_line_pay_payment',
+      'mark_product_order_line_pay_reconciliation'
+    ) then
       if exists (
         select 1
         from pg_catalog.pg_proc as procedure
@@ -1235,40 +1251,34 @@ begin
             )
           )
       ) then
-        raise exception 'dedicated_executor_rpc_security_contract_failed_%', v_name;
+        raise exception 'db_owned_transition_rpc_security_contract_failed_%', v_name;
       end if;
-    else
-      if not pg_catalog.has_function_privilege('service_role', v_function, 'execute') then
-        raise exception 'service_role_function_execute_missing_%', v_name;
-      end if;
-
-      if exists (
-        select 1
-        from pg_catalog.pg_proc as procedure
-        where procedure.oid = v_function
-          and (
-            procedure.prosecdef
-            or procedure.proowner <> (
-              select role.oid from pg_catalog.pg_roles as role where role.rolname = 'postgres'
-            )
-            or (
-              procedure.proname = 'read_product_order_line_pay_request_result'
-              and procedure.provolatile <> 's'
-            )
-            or (
-              procedure.proname <> 'read_product_order_line_pay_request_result'
-              and procedure.provolatile <> 'v'
-            )
-            or procedure.proconfig is null
-            or not exists (
-              select 1
-              from unnest(procedure.proconfig) as setting
-              where setting = 'search_path=""'
-            )
+    elsif exists (
+      select 1
+      from pg_catalog.pg_proc as procedure
+      where procedure.oid = v_function
+        and (
+          procedure.prosecdef
+          or procedure.proowner <> (
+            select role.oid from pg_catalog.pg_roles as role where role.rolname = 'postgres'
           )
-      ) then
-        raise exception 'rpc_security_or_search_path_contract_failed_%', v_name;
-      end if;
+          or (
+            procedure.proname = 'read_product_order_line_pay_request_result'
+            and procedure.provolatile <> 's'
+          )
+          or (
+            procedure.proname <> 'read_product_order_line_pay_request_result'
+            and procedure.provolatile <> 'v'
+          )
+          or procedure.proconfig is null
+          or not exists (
+            select 1
+            from unnest(procedure.proconfig) as setting
+            where setting = 'search_path=""'
+          )
+        )
+    ) then
+      raise exception 'rpc_security_or_search_path_contract_failed_%', v_name;
     end if;
   end loop;
 end

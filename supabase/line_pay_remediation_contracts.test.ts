@@ -11,6 +11,14 @@ assert.deepEqual(migrationNames, ['20260719033404_line_pay_remediation_contracts
 
 const migration = readFileSync(join(root, 'supabase/migrations', migrationNames[0]), 'utf8')
 const normalized = migration.toLowerCase()
+const postgresImageContract = readFileSync(
+  join(root, 'supabase/tests/line_pay_postgres_image.mjs'),
+  'utf8',
+)
+const postgresRunner = readFileSync(
+  join(root, 'supabase/tests/run_line_pay_remediation_db_contracts.mjs'),
+  'utf8',
+)
 const functionNames = [
   'claim_product_order_line_pay_request',
   'record_product_order_line_pay_request_success',
@@ -42,10 +50,18 @@ const preambleWithoutComments = migration.slice(0, beginIndex).replace(/^--.*$/g
 assert.equal(preambleWithoutComments, '')
 assert.ok(normalized.lastIndexOf('commit;') > beginIndex)
 assert.doesNotMatch(migration, /\bdrop\s+(?:table|schema|column)\b/i)
-assert.doesNotMatch(migration, /\btruncate\b/i)
+assert.doesNotMatch(migration, /\btruncate\s+(?:table\s+)?(?:only\s+)?[A-Za-z_"]/i)
 assert.doesNotMatch(migration, /\bdelete\s+from\b/i)
 assert.doesNotMatch(migration, /https?:\/\//i)
 assert.doesNotMatch(migration, /\b(?:curl|fetch|http_request|net\.http)\b/i)
+assert.match(
+  postgresImageContract,
+  /postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193/,
+)
+assert.doesNotMatch(postgresImageContract, /postgres:17-alpine/)
+assert.doesNotMatch(postgresImageContract, /process\.env|github\.event|workflow_dispatch/i)
+assert.match(postgresRunner, /const image = LINE_PAY_POSTGRES_IMAGE/)
+assert.doesNotMatch(postgresRunner, /process\.env\.[A-Z0-9_]*POSTGRES[A-Z0-9_]*IMAGE/i)
 
 for (const table of newTables) {
   assert.match(migration, new RegExp(`create\\s+table\\s+public\\.${table}\\b`, 'i'))
