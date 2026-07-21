@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 type AuditResult = {
@@ -23,6 +25,11 @@ type ValidatorModule = {
   EXPECTED_PSQL_MAJOR: number
   MIGRATION_FILE: string
   PSQL_BINARY: string
+  RETIRED_WORKFLOW_FILE: string
+  assertEmergencyWorkflowRetired: (
+    root?: string,
+    lstatImplementation?: (path: string) => unknown,
+  ) => true
   assertMetadataSqlStaticSafety: (sql: string) => true
   assertMigrationStaticSafety: (sql: string) => true
   normalizeFunctionDefinition: (definition: string) => string
@@ -47,7 +54,6 @@ type ValidatorModule = {
 
 const root = process.cwd()
 const paths = {
-  workflow: '.github/workflows/supabase-emergency-profiles-acl.yml',
   validator: 'scripts/supabase/validate-profiles-admin-deployment.mjs',
   runner: 'scripts/supabase/run-fixed-psql.mjs',
   preflight: 'supabase/deployment/profiles_admin_escalation_preflight.sql',
@@ -63,16 +69,7 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
-function section(source: string, start: string, end?: string) {
-  const startIndex = source.indexOf(start)
-  assert.notEqual(startIndex, -1, `missing section: ${start}`)
-  const endIndex = end ? source.indexOf(end, startIndex + start.length) : source.length
-  assert.notEqual(endIndex, -1, `missing end section: ${end}`)
-  return source.slice(startIndex, endIndex)
-}
-
 async function main() {
-  const workflow = read(paths.workflow)
   const validatorSource = read(paths.validator)
   const runnerSource = read(paths.runner)
   const preflight = read(paths.preflight)
@@ -87,112 +84,83 @@ async function main() {
     return name
   }
 
-  const onSection = section(workflow, 'on:\n', '\npermissions:')
-  const permissionsSection = section(workflow, 'permissions:\n', '\nconcurrency:')
-  const jobsSection = section(workflow, 'jobs:\n')
-  const sourceJob = section(jobsSection, '  source-validation:\n', '  deploy-production:\n')
-  const deployJob = section(jobsSection, '  deploy-production:\n')
+  contract('retired workflow path is fixed and absent from the repository', () => {
+    assert.equal(
+      validator.RETIRED_WORKFLOW_FILE,
+      '.github/workflows/supabase-emergency-profiles-acl.yml',
+    )
+    assert.equal(validator.assertEmergencyWorkflowRetired(root), true)
+  })
+  contract('source validation enforces the workflow retirement guard', () => {
+    assert.match(validatorSource, /assertEmergencyWorkflowRetired\(root\)/)
+    assert.doesNotMatch(validatorSource, /export const WORKFLOW_FILE\b/)
+  })
 
-  contract('run name uses only actor and source SHA', () => {
-    assert.match(workflow, /run-name: .*github[.]actor.*github[.]sha/)
-    assert.doesNotMatch(workflow.split('\n')[1] ?? '', /secrets[.]|inputs[.]/)
-  })
-  contract('manual dispatch is the only trigger', () => {
-    assert.match(onSection, /^\s{2}workflow_dispatch:\s*$/m)
-    assert.doesNotMatch(onSection, /^\s{2}(push|pull_request|schedule|workflow_call|repository_dispatch):/m)
-  })
-  contract('dispatch has only approved inputs', () => {
-    const inputs = [...onSection.matchAll(/^\s{6}([a-z][a-z0-9_]*):\s*$/gm)].map((match) => match[1]).sort()
-    assert.deepEqual(inputs, ['confirmation', 'expected_main_sha'])
-  })
-  contract('workflow permissions are read only', () => {
-    assert.equal(permissionsSection.trim(), 'permissions:\n  contents: read')
-    assert.doesNotMatch(workflow, /^\s+[a-z-]+:\s*write\s*$/m)
-  })
-  contract('production concurrency is fixed and non-cancelling', () => {
-    assert.match(workflow, /group: supabase-production-migrations/)
-    assert.match(workflow, /cancel-in-progress: false/)
-  })
-  contract('workflow has only source and deployment jobs', () => {
-    const jobs = [...jobsSection.matchAll(/^\s{2}([a-z][a-z0-9-]+):\s*$/gm)].map((match) => match[1])
-    assert.deepEqual(jobs, ['source-validation', 'deploy-production'])
-  })
-  contract('both jobs use fixed ubuntu 24.04', () => {
-    assert.equal((workflow.match(/runs-on: ubuntu-24[.]04/g) ?? []).length, 2)
-    assert.doesNotMatch(workflow, /ubuntu-latest|self-hosted/)
-  })
-  contract('deployment waits for source validation', () => {
-    assert.match(deployJob, /needs:\n\s+- source-validation/)
-  })
-  contract('production environment applies only to deployment job', () => {
-    assert.match(deployJob, /environment:\n\s+name: supabase-production/)
-    assert.doesNotMatch(sourceJob, /\benvironment:/)
-  })
-  contract('all Actions are pinned to full SHAs', () => {
-    const actions = [...workflow.matchAll(/uses:\s*([^\s]+)/g)].map((match) => match[1])
-    assert.equal(actions.length, 4)
-    assert.ok(actions.every((action) => /@[0-9a-f]{40}$/.test(action)))
-  })
-  contract('checkout never persists credentials', () => {
-    assert.equal((workflow.match(/persist-credentials: false/g) ?? []).length, 2)
-    assert.equal((workflow.match(/fetch-depth: 1/g) ?? []).length, 2)
-  })
-  contract('checkout uses the dispatch source SHA', () => {
-    assert.equal((workflow.match(/ref: \$\{\{ github[.]sha \}\}/g) ?? []).length, 2)
-  })
-  contract('Node 24 setup is fixed', () => {
-    assert.equal((workflow.match(/node-version: '24'/g) ?? []).length, 2)
-  })
-  contract('workflow performs no runtime installation', () => {
-    assert.doesNotMatch(workflow, /\b(apt-get|apt|curl|wget|npm\s+(?:install|ci)|npx)\b/)
-  })
-  contract('workflow never invokes Supabase CLI database commands', () => {
-    assert.doesNotMatch(workflow, /supabase\s+(?:db|migration|link|login)\b/)
-  })
-  contract('workflow never uses db-url argv', () => {
-    assert.doesNotMatch(workflow, /--db-url/)
-  })
-  contract('workflow never uses PGPASSWORD', () => {
-    assert.doesNotMatch(workflow, /PGPASSWORD/)
-  })
-  contract('source job is secret-free', () => {
-    assert.doesNotMatch(sourceJob, /secrets[.]|SUPABASE_DB_URL|SUPABASE_PROJECT_ID/)
-  })
-  contract('only two approved secret names appear', () => {
-    const secrets = [...new Set([...workflow.matchAll(/secrets[.]([A-Z0-9_]+)/g)].map((match) => match[1]))].sort()
-    assert.deepEqual(secrets, ['SUPABASE_DB_URL', 'SUPABASE_PROJECT_ID'])
-  })
-  contract('database URL is scoped to three database steps', () => {
-    assert.equal((workflow.match(/SUPABASE_DB_URL: \$\{\{ secrets[.]SUPABASE_DB_URL \}\}/g) ?? []).length, 3)
-  })
-  contract('project id is scoped to three database steps', () => {
-    assert.equal((workflow.match(/SUPABASE_PROJECT_ID: \$\{\{ secrets[.]SUPABASE_PROJECT_ID \}\}/g) ?? []).length, 3)
-  })
-  contract('source validator runs before every deployment context', () => {
-    assert.equal((workflow.match(/validate-profiles-admin-deployment[.]mjs source/g) ?? []).length, 2)
-  })
-  contract('psql major is validated before database phases', () => {
-    const psqlIndex = deployJob.indexOf('validate-profiles-admin-deployment.mjs psql')
-    const preflightIndex = deployJob.indexOf('run-fixed-psql.mjs preflight')
-    assert.ok(psqlIndex >= 0 && psqlIndex < preflightIndex)
-  })
-  contract('only the three fixed runner phases execute', () => {
-    const phases = [...workflow.matchAll(/run-fixed-psql[.]mjs ([a-z]+)/g)].map((match) => match[1])
-    assert.deepEqual(phases, ['preflight', 'migration', 'postflight'])
-  })
-  contract('workflow does not export database results', () => {
-    assert.doesNotMatch(workflow, /GITHUB_OUTPUT|GITHUB_ENV|upload-artifact|cache/)
-  })
-  contract('every run block fails closed', () => {
-    assert.equal((workflow.match(/run: \|/g) ?? []).length, (workflow.match(/set -euo pipefail/g) ?? []).length)
-  })
-  contract('workflow never echoes secrets', () => {
-    assert.doesNotMatch(workflow, /^\s*(echo|printf).*(SUPABASE_DB_URL|SUPABASE_PROJECT_ID|secrets[.])/m)
-    assert.doesNotMatch(workflow, /\bset\s+-x\b/)
-  })
-  contract('runner and validator paths are fixed literals', () => {
-    assert.doesNotMatch(workflow, /run-fixed-psql[.]mjs\s+\$|validate-profiles-admin-deployment[.]mjs\s+\$/)
-  })
+  const retirementFixtureRoot = await mkdtemp(
+    join(tmpdir(), 'profiles-admin-workflow-retirement-'),
+  )
+  const retiredWorkflowPath = join(
+    retirementFixtureRoot,
+    validator.RETIRED_WORKFLOW_FILE,
+  )
+  try {
+    contract('missing retired workflow path passes', () => {
+      assert.equal(
+        validator.assertEmergencyWorkflowRetired(retirementFixtureRoot),
+        true,
+      )
+    })
+
+    await mkdir(dirname(retiredWorkflowPath), { recursive: true })
+    await writeFile(retiredWorkflowPath, 'retired workflow fixture\n', 'utf8')
+    contract('regular file at retired workflow path fails closed', () => {
+      assert.throws(
+        () => validator.assertEmergencyWorkflowRetired(retirementFixtureRoot),
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message === 'EMERGENCY_WORKFLOW_PRESENT',
+      )
+    })
+
+    await rm(retiredWorkflowPath)
+    const symlinkTarget = join(retirementFixtureRoot, 'workflow-target.yml')
+    await writeFile(symlinkTarget, 'retired workflow symlink target\n', 'utf8')
+    await symlink(symlinkTarget, retiredWorkflowPath)
+    contract('symlink at retired workflow path fails closed', () => {
+      assert.throws(
+        () => validator.assertEmergencyWorkflowRetired(retirementFixtureRoot),
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message === 'EMERGENCY_WORKFLOW_PRESENT',
+      )
+    })
+
+    await rm(retiredWorkflowPath)
+    await mkdir(retiredWorkflowPath)
+    contract('directory at retired workflow path fails closed', () => {
+      assert.throws(
+        () => validator.assertEmergencyWorkflowRetired(retirementFixtureRoot),
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message === 'EMERGENCY_WORKFLOW_PRESENT',
+      )
+    })
+
+    contract('indeterminate filesystem state exposes only the fixed error', () => {
+      assert.throws(
+        () => validator.assertEmergencyWorkflowRetired(
+          retirementFixtureRoot,
+          () => { throw new Error('sensitive filesystem detail') },
+        ),
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message === 'EMERGENCY_WORKFLOW_PRESENT' &&
+          !error.message.includes('sensitive filesystem detail'),
+      )
+    })
+  } finally {
+    await rm(retirementFixtureRoot, { recursive: true, force: true })
+  }
 
   const forbiddenMetadataSql = /\b(do|call|copy|create|alter|drop|grant|revoke|insert|update|delete|truncate|set\s+role)\b/i
   for (const [phase, sql] of [['preflight', preflight], ['postflight', postflight]] as const) {
@@ -541,7 +509,7 @@ async function main() {
     assert.equal(validator.parseAndValidateAuditOutput(`${JSON.stringify(auditFixture('postflight'))}\n`, 'postflight'), 'SECURE_EXPECTED')
   })
 
-  console.log(`✓ ${passed} profiles admin deployment workflow contracts passed`)
+  console.log(`✓ ${passed} retired deployment contracts passed`)
 }
 
 main().catch((error) => {

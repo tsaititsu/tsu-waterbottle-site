@@ -16,7 +16,7 @@ export const PREFLIGHT_FILE =
 export const POSTFLIGHT_FILE =
   'supabase/deployment/profiles_admin_escalation_postflight.sql'
 export const RUNNER_FILE = 'scripts/supabase/run-fixed-psql.mjs'
-export const WORKFLOW_FILE =
+export const RETIRED_WORKFLOW_FILE =
   '.github/workflows/supabase-emergency-profiles-acl.yml'
 export const EXPECTED_MIGRATION_SHA256 =
   'f7f2207135ffaf1dd3476108a38ffb95184410ad0fad962f4d0e71e9e9613e7d'
@@ -460,6 +460,26 @@ function readFixedFile(root, relativePath) {
   try { return readFileSync(filePath, 'utf8') } catch { fail('SOURCE_VALIDATION_FAILED') }
 }
 
+export function assertEmergencyWorkflowRetired(
+  root = process.cwd(),
+  lstatImplementation = lstatSync,
+) {
+  try {
+    lstatImplementation(join(root, RETIRED_WORKFLOW_FILE))
+  } catch (error) {
+    if (
+      error !== null &&
+      typeof error === 'object' &&
+      'code' in error &&
+      error.code === 'ENOENT'
+    ) {
+      return true
+    }
+    fail('EMERGENCY_WORKFLOW_PRESENT')
+  }
+  fail('EMERGENCY_WORKFLOW_PRESENT')
+}
+
 export function validateSource(environment = process.env, root = process.cwd()) {
   if (environment.GITHUB_REPOSITORY !== EXPECTED_REPOSITORY || environment.GITHUB_EVENT_NAME !== EXPECTED_EVENT || environment.GITHUB_REF !== EXPECTED_REF) {
     fail('SOURCE_CONTEXT_INVALID')
@@ -468,7 +488,8 @@ export function validateSource(environment = process.env, root = process.cwd()) 
   const githubSha = validateFullSha(environment.GITHUB_SHA)
   if (expectedMainSha !== githubSha) fail('SOURCE_CONTEXT_INVALID')
   validateConfirmation(environment.DEPLOY_CONFIRMATION)
-  const fixedFiles = [MIGRATION_FILE, PREFLIGHT_FILE, POSTFLIGHT_FILE, RUNNER_FILE, WORKFLOW_FILE]
+  assertEmergencyWorkflowRetired(root)
+  const fixedFiles = [MIGRATION_FILE, PREFLIGHT_FILE, POSTFLIGHT_FILE, RUNNER_FILE]
   const fileContents = new Map()
   for (const relativePath of fixedFiles) {
     fileContents.set(relativePath, readFixedFile(root, relativePath))
@@ -503,6 +524,7 @@ const SAFE_ERROR_CODES = new Set([
   'UNSAFE_METADATA_SQL', 'INVALID_SQL_SYNTAX', 'PSQL_VERSION_CHECK_FAILED',
   'UNSUPPORTED_PSQL_VERSION',
   'RUNNER_HASH_MISMATCH',
+  'EMERGENCY_WORKFLOW_PRESENT',
 ])
 
 async function main() {
