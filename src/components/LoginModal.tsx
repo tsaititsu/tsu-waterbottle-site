@@ -9,9 +9,10 @@ type LoginModalProps = {
   open: boolean
   onClose: () => void
   onSuccess?: () => void
+  returnTo?: string
 }
 
-export function LoginModal({ open, onClose, onSuccess }: LoginModalProps) {
+export function LoginModal({ open, onClose, onSuccess, returnTo }: LoginModalProps) {
   const [error, setError] = useState('')
   const [loadingProvider, setLoadingProvider] = useState<'line' | 'google' | ''>('')
 
@@ -21,7 +22,7 @@ export function LoginModal({ open, onClose, onSuccess }: LoginModalProps) {
     setError('')
     setLoadingProvider(provider)
     try {
-      await loginWithProvider(provider)
+      await loginWithProvider(provider, returnTo)
       onSuccess?.()
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : '登入失敗，請稍後再試。')

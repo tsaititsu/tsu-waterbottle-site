@@ -200,8 +200,14 @@ test('admin layout guards the UI behind the server-side admin session check', ()
   )
   assert.match(
     clientSource,
-    /if \(accessState === 'unauthenticated'\) \{\s*router\.replace\('\/'\)\s*}/,
-    '未登入時應重新導向首頁',
+    /if \(accessState === 'unauthenticated'\) \{[\s\S]*請先登入管理員帳號[\s\S]*<LoginModal[\s\S]*returnTo=\{returnTo\}/,
+    '未登入時應顯示可保留目前路徑的登入入口',
+  )
+  assert.equal(clientSource.includes("router.replace('/')"), false, '未登入時不得離開目前 admin 頁面')
+  assert.match(
+    clientSource,
+    /setReturnTo\(sanitizeAuthReturnPath\(`\$\{pathname\}\$\{window\.location\.search\}`\)\)/,
+    'admin 登入 returnTo 應取自目前 pathname 與 search',
   )
   assert.match(
     clientSource,

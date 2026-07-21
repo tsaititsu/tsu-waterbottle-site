@@ -3,6 +3,7 @@ import 'server-only'
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto'
 import type { User } from '@supabase/supabase-js'
 import type { UserProfile } from './types'
+import { sanitizeAuthReturnPath } from './returnTo'
 import { getSupabaseAdmin } from '../supabase/admin'
 
 export const LINE_STATE_COOKIE = 'waterbottle_line_state'
@@ -74,21 +75,6 @@ function getLineSessionSecret() {
   ])
 }
 
-export function sanitizeNextPath(next: string | null | undefined) {
-  if (!next) return '/account'
-
-  let decoded: string
-  try {
-    decoded = decodeURIComponent(next)
-  } catch {
-    return '/account'
-  }
-
-  if (!decoded.startsWith('/') || decoded.startsWith('//')) return '/account'
-
-  return decoded
-}
-
 function makeRandomToken() {
   return randomBytes(24).toString('hex')
 }
@@ -116,7 +102,7 @@ export function buildLineAuthorizeUrl({
     url: `${LINE_AUTHORIZE_URL}?${params.toString()}`,
     state,
     nonce,
-    next: sanitizeNextPath(next),
+    next: sanitizeAuthReturnPath(next),
   }
 }
 
