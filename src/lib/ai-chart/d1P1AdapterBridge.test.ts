@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import ts from 'typescript'
 import { AI_CHART_D1_MODEL_TARGET } from './d1Assets'
 import {
   assertAiChartD1P1CandidateRuleAuthority,
@@ -1352,7 +1353,10 @@ async function run() {
   check('null doubleStarCore with an authenticated double Rule is rejected', () => {
     const value = createValidAiChartD1P1Result(doubleInput)
     value.primaryAxis.doubleStarCore = null
-    assertResultInvalid(() => parseResult(doubleBridge, value))
+    assertResultInvalid(
+      () => parseResult(doubleBridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.PRIMARY_AXIS_DOUBLE_STAR_BINDING_MISMATCH,
+    )
   })
   check('doubleStarCore missing one effective star name is rejected', () => {
     const value = createValidAiChartD1P1Result(doubleInput)
@@ -1377,7 +1381,10 @@ async function run() {
     const value = createValidAiChartD1P1Result(modelInput)
     value.primaryAxis.statement =
       `leak ${modelInput.knowledgeContext.rules[0].ruleId}`
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.PRIMARY_AXIS_FORBIDDEN_METADATA,
+    )
   })
   check('Catalog Rule not selected for this call is rejected', () => {
     const selected = new Set(
@@ -1866,7 +1873,10 @@ async function run() {
     const value = createValidAiChartD1P1Result(partialInput)
     value.warnings = []
     value.coverage.omittedItems = [{ item: 'known gap', reason: 'known gap' }]
-    assertResultInvalid(() => parseResult(partialBridge, value))
+    assertResultInvalid(
+      () => parseResult(partialBridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.OTHER_SOURCE_BOUND_BINDING_MISMATCH,
+    )
   })
   check('missing one of multiple upstream warning codes is rejected', () => {
     assert.equal(partialInput.warnings.length >= 2, true)
@@ -2058,9 +2068,63 @@ async function run() {
     'utf8',
   )
   check('every resultInvalid call site supplies a fixed reason code', () => {
-    assert.doesNotMatch(bridgeSource, /resultInvalid\(\s*\)/u)
-    const callSites = bridgeSource.match(/\bresultInvalid\(/gu) ?? []
-    assert.equal(callSites.length > 1, true)
+    const sourceFile = ts.createSourceFile(
+      'src/lib/ai-chart/d1P1AdapterBridge.ts',
+      bridgeSource,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    )
+    const callSites: ts.CallExpression[] = []
+
+    function visit(node: ts.Node): void {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === 'resultInvalid'
+      ) {
+        callSites.push(node)
+      }
+      ts.forEachChild(node, visit)
+    }
+
+    visit(sourceFile)
+    assert.equal(callSites.length, 32)
+
+    const allowedReasonNames = new Set(
+      Object.keys(AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS),
+    )
+    for (const [index, callSite] of callSites.entries()) {
+      assert.equal(
+        callSite.arguments.length,
+        1,
+        `resultInvalid call ${index + 1} must have exactly one argument`,
+      )
+      const argument = callSite.arguments[0]
+      assert.equal(
+        ts.isPropertyAccessExpression(argument),
+        true,
+        `resultInvalid call ${index + 1} has argument kind ${ts.SyntaxKind[argument.kind]}`,
+      )
+      if (!ts.isPropertyAccessExpression(argument)) continue
+      assert.equal(
+        ts.isIdentifier(argument.expression) &&
+          argument.expression.text ===
+            'AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS',
+        true,
+        `resultInvalid call ${index + 1} must use the fixed reason constants`,
+      )
+      assert.equal(
+        ts.isIdentifier(argument.name),
+        true,
+        `resultInvalid call ${index + 1} must use a reason identifier`,
+      )
+      assert.equal(
+        allowedReasonNames.has(argument.name.text),
+        true,
+        `resultInvalid call ${index + 1} has unknown reason ${argument.name.text}`,
+      )
+    }
   })
   check('Adapter Bridge production consumer is only Preview Gate', () => {
     const consumers = sourceFiles
