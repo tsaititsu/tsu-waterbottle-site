@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import ts from 'typescript'
 import { AI_CHART_D1_MODEL_TARGET } from './d1Assets'
 import {
   assertAiChartD1P1CandidateRuleAuthority,
@@ -16,6 +17,9 @@ import {
   AI_CHART_D1_P1_ADAPTER_BRIDGE_INVALID,
   AI_CHART_D1_P1_ADAPTER_BRIDGE_NOT_READY,
   AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID,
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS,
+  AiChartD1P1AdapterBridgeResultInvalidError,
+  type AiChartD1P1SourceBoundValidationReasonCode,
 } from './d1P1AdapterBridgeContracts'
 import {
   createAdapterBridgeFixture,
@@ -91,10 +95,27 @@ function assertNotReady(run: () => unknown): void {
   assert.throws(run, { message: AI_CHART_D1_P1_ADAPTER_BRIDGE_NOT_READY })
 }
 
-function assertResultInvalid(run: () => unknown): void {
-  assert.throws(run, {
-    message: AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID,
-  })
+function assertResultInvalid(
+  run: () => unknown,
+  expectedReasonCode?: AiChartD1P1SourceBoundValidationReasonCode,
+): AiChartD1P1AdapterBridgeResultInvalidError {
+  try {
+    run()
+    assert.fail('expected source-bound result invalid')
+  } catch (error) {
+    assert.equal(
+      error instanceof AiChartD1P1AdapterBridgeResultInvalidError,
+      true,
+    )
+    if (!(error instanceof AiChartD1P1AdapterBridgeResultInvalidError)) {
+      assert.fail('expected AiChartD1P1AdapterBridgeResultInvalidError')
+    }
+    assert.equal(error.message, AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID)
+    if (expectedReasonCode !== undefined) {
+      assert.equal(error.reasonCode, expectedReasonCode)
+    }
+    return error
+  }
 }
 
 function assertNoFetch(run: () => void): void {
@@ -630,7 +651,21 @@ async function run() {
   check('status invalid is rejected', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.status = 'invalid'
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.IDENTITY_OR_STATUS_MISMATCH,
+    )
+  })
+  check('invalid Result shape has a fixed safe reason', () => {
+    const value = createValidAiChartD1P1Result(modelInput) as unknown as Record<
+      string,
+      unknown
+    >
+    value.primaryAxis = null
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID,
+    )
   })
   check('complete Result with omitted items is rejected', () => {
     const value = createValidAiChartD1P1Result(modelInput)
@@ -727,7 +762,10 @@ async function run() {
   check('invented meaningId is rejected from direct coverage', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.coverage.directMeaningsConsidered = ['meaning:invented']
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+    )
   })
   check('opposite meaningId is rejected from direct coverage', () => {
     const value = createValidAiChartD1P1Result(modelInput)
@@ -1044,7 +1082,10 @@ async function run() {
   check('eligible borrowed source rejects none mode', () => {
     const value = createValidAiChartD1P1Result(borrowInput)
     value.primaryAxis.borrowedStarMode = 'none'
-    assertResultInvalid(() => parseResult(borrowBridge, value))
+    assertResultInvalid(
+      () => parseResult(borrowBridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.BORROWED_STAR_BINDING_MISMATCH,
+    )
   })
   check('non-empty source rejects borrowed mode', () => {
     const value = createValidAiChartD1P1Result(modelInput)
@@ -1079,7 +1120,10 @@ async function run() {
   check('primaryAxis rejects an unknown Rule ID', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.primaryAxis.usedRuleIds = ['rule:unknown']
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.PRIMARY_AXIS_RULE_BINDING_MISMATCH,
+    )
   })
   check('primaryAxis rejects empty Rule IDs', () => {
     const value = createValidAiChartD1P1Result(modelInput)
@@ -1104,7 +1148,10 @@ async function run() {
   check('primaryAxis rejects an empty majorStarCore', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.primaryAxis.majorStarCore = []
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.PRIMARY_AXIS_MAJOR_STAR_BINDING_MISMATCH,
+    )
   })
   check('primaryAxis rejects an extra major star', () => {
     const value = createValidAiChartD1P1Result(modelInput)
@@ -1161,7 +1208,10 @@ async function run() {
   check('missing one target primary star Rule is rejected', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.primaryAxis.usedRuleIds = value.primaryAxis.usedRuleIds.slice(1)
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.PRIMARY_AXIS_RULE_BINDING_MISMATCH,
+    )
   })
   for (const role of ['opposite', 'hidden_combination', 'trine_1'] as const) {
     check(`${role} Rule is rejected from primaryAxis`, () => {
@@ -1171,7 +1221,10 @@ async function run() {
       assert.ok(trace)
       const value = createValidAiChartD1P1Result(modelInput)
       value.primaryAxis.usedRuleIds.push(trace.ruleId)
-      assertResultInvalid(() => parseResult(bridge, value))
+      assertResultInvalid(
+        () => parseResult(bridge, value),
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RULE_PALACE_STAR_BINDING_MISMATCH,
+      )
     })
   }
   check('common Rule may coexist with target primary Rules', () => {
@@ -1300,7 +1353,10 @@ async function run() {
   check('null doubleStarCore with an authenticated double Rule is rejected', () => {
     const value = createValidAiChartD1P1Result(doubleInput)
     value.primaryAxis.doubleStarCore = null
-    assertResultInvalid(() => parseResult(doubleBridge, value))
+    assertResultInvalid(
+      () => parseResult(doubleBridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.PRIMARY_AXIS_DOUBLE_STAR_BINDING_MISMATCH,
+    )
   })
   check('doubleStarCore missing one effective star name is rejected', () => {
     const value = createValidAiChartD1P1Result(doubleInput)
@@ -1325,7 +1381,10 @@ async function run() {
     const value = createValidAiChartD1P1Result(modelInput)
     value.primaryAxis.statement =
       `leak ${modelInput.knowledgeContext.rules[0].ruleId}`
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.PRIMARY_AXIS_FORBIDDEN_METADATA,
+    )
   })
   check('Catalog Rule not selected for this call is rejected', () => {
     const selected = new Set(
@@ -1382,7 +1441,10 @@ async function run() {
     const value = createValidAiChartD1P1Result(modelInput)
     value.directCandidates[0].usedRuleIds = [teacherRule.ruleId]
     value.directCandidates[0].ruleStatus = 'working_inference'
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.CANDIDATE_RULE_AUTHORITY_MISMATCH,
+    )
   })
   check('lecture-only Candidate with lecture status passes', () => {
     const value = createValidAiChartD1P1Result(modelInput)
@@ -1525,7 +1587,10 @@ async function run() {
     check(`directCandidates rejects ${role} palaceId`, () => {
       const value = createValidAiChartD1P1Result(modelInput)
       value.directCandidates[0].palaceIds = [palace.palaceId]
-      assertResultInvalid(() => parseResult(bridge, value))
+      assertResultInvalid(
+        () => parseResult(bridge, value),
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.CANDIDATE_SOURCE_BINDING_MISMATCH,
+      )
     })
   }
   for (const [role, palace] of [
@@ -1551,7 +1616,10 @@ async function run() {
   check('directCandidates requires target palaceId', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.directCandidates[0].palaceIds = []
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID,
+    )
   })
   check('directCandidates requires 本宮 basis', () => {
     const value = createValidAiChartD1P1Result(modelInput)
@@ -1805,7 +1873,10 @@ async function run() {
     const value = createValidAiChartD1P1Result(partialInput)
     value.warnings = []
     value.coverage.omittedItems = [{ item: 'known gap', reason: 'known gap' }]
-    assertResultInvalid(() => parseResult(partialBridge, value))
+    assertResultInvalid(
+      () => parseResult(partialBridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.OTHER_SOURCE_BOUND_BINDING_MISMATCH,
+    )
   })
   check('missing one of multiple upstream warning codes is rejected', () => {
     assert.equal(partialInput.warnings.length >= 2, true)
@@ -1996,6 +2067,65 @@ async function run() {
     join(repositoryRoot, 'src/lib/ai-chart/d1P1AdapterBridge.ts'),
     'utf8',
   )
+  check('every resultInvalid call site supplies a fixed reason code', () => {
+    const sourceFile = ts.createSourceFile(
+      'src/lib/ai-chart/d1P1AdapterBridge.ts',
+      bridgeSource,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    )
+    const callSites: ts.CallExpression[] = []
+
+    function visit(node: ts.Node): void {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === 'resultInvalid'
+      ) {
+        callSites.push(node)
+      }
+      ts.forEachChild(node, visit)
+    }
+
+    visit(sourceFile)
+    assert.equal(callSites.length, 32)
+
+    const allowedReasonNames = new Set(
+      Object.keys(AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS),
+    )
+    for (const [index, callSite] of callSites.entries()) {
+      assert.equal(
+        callSite.arguments.length,
+        1,
+        `resultInvalid call ${index + 1} must have exactly one argument`,
+      )
+      const argument = callSite.arguments[0]
+      assert.equal(
+        ts.isPropertyAccessExpression(argument),
+        true,
+        `resultInvalid call ${index + 1} has argument kind ${ts.SyntaxKind[argument.kind]}`,
+      )
+      if (!ts.isPropertyAccessExpression(argument)) continue
+      assert.equal(
+        ts.isIdentifier(argument.expression) &&
+          argument.expression.text ===
+            'AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS',
+        true,
+        `resultInvalid call ${index + 1} must use the fixed reason constants`,
+      )
+      assert.equal(
+        ts.isIdentifier(argument.name),
+        true,
+        `resultInvalid call ${index + 1} must use a reason identifier`,
+      )
+      assert.equal(
+        allowedReasonNames.has(argument.name.text),
+        true,
+        `resultInvalid call ${index + 1} has unknown reason ${argument.name.text}`,
+      )
+    }
+  })
   check('Adapter Bridge production consumer is only Preview Gate', () => {
     const consumers = sourceFiles
       .filter((path) => path.endsWith('.ts') || path.endsWith('.tsx'))

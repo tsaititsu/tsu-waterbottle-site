@@ -23,6 +23,7 @@ import {
   type AiChartOpenAiStructuredRequest,
 } from './openAiResponses'
 import {
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS,
   AiChartD1P1AdapterBridgeResultInvalidError,
 } from './d1P1AdapterBridgeContracts'
 
@@ -549,6 +550,7 @@ test('raw output array JSON is parsed successfully', () => {
       score: 7,
     },
   })
+  assert.equal(Object.hasOwn(result, 'diagnostic'), false)
 })
 
 test('completed reasoning item before message is safely ignored', () => {
@@ -858,6 +860,7 @@ for (const incompleteReason of ['max_output_tokens', 'content_filter']) {
       'contentItemTypes',
       'incompleteReason',
       'outputItemTypes',
+      'outputSchemaValidationCode',
       'outputTextCount',
       'responseErrorCode',
       'responseStatus',
@@ -1067,16 +1070,42 @@ test('invalid output JSON is rejected', () => {
 })
 
 test('valid JSON rejected by the source-bound parser is schema invalid', () => {
-  expectResponseError(
+  const error = expectResponseError(
     () =>
       parseAiChartOpenAiStructuredResponse(
         responseFixture(),
         () => {
-          throw new AiChartD1P1AdapterBridgeResultInvalidError()
+          throw new AiChartD1P1AdapterBridgeResultInvalidError(
+            AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.CANDIDATE_SOURCE_BINDING_MISMATCH,
+          )
         },
       ),
     AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID,
   )
+  assert.equal(
+    error.diagnostic?.outputSchemaValidationCode,
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.CANDIDATE_SOURCE_BINDING_MISMATCH,
+  )
+  assert.equal(Object.isFrozen(error.diagnostic), true)
+  assert.equal(
+    JSON.stringify(error).includes('CANDIDATE_SOURCE_BINDING_MISMATCH'),
+    true,
+  )
+})
+
+test('unknown parser errors remain schema invalid without leaking messages', () => {
+  const sensitiveParserMessage = 'synthetic-model-text-must-not-leak'
+  const error = expectResponseError(
+    () =>
+      parseAiChartOpenAiStructuredResponse(responseFixture(), () => {
+        throw new Error(sensitiveParserMessage)
+      }),
+    AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID,
+    [sensitiveParserMessage],
+  )
+
+  assert.equal(error.diagnostic?.outputSchemaValidationCode, null)
+  assert.equal(JSON.stringify(error).includes(sensitiveParserMessage), false)
 })
 
 test('usage is normalized to safe non-negative integers', () => {

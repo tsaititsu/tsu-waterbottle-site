@@ -14,12 +14,14 @@ import {
   AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID,
   AI_CHART_D1_P1_ADAPTER_BRIDGE_SCHEMA_NAME,
   AI_CHART_D1_P1_ADAPTER_BRIDGE_TASK,
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS,
   AiChartD1P1AdapterBridgeError,
   AiChartD1P1AdapterBridgeNotReadyError,
   AiChartD1P1AdapterBridgeResultInvalidError,
   createAiChartD1P1AdapterBridgeFingerprint,
   parseAiChartD1P1AdapterBridgeDescriptorShape,
   stableAiChartD1P1AdapterBridgeDescriptorEqual,
+  type AiChartD1P1SourceBoundValidationReasonCode,
   type AiChartD1P1AdapterBridgeDescriptor,
   type AiChartD1P1AdapterBridgeDescriptorWithoutFingerprint,
 } from './d1P1AdapterBridgeContracts'
@@ -162,9 +164,54 @@ async function run() {
     assert.equal(error.message, AI_CHART_D1_P1_ADAPTER_BRIDGE_NOT_READY)
   })
   check('result-invalid class exposes only the safe code', () => {
-    const error = new AiChartD1P1AdapterBridgeResultInvalidError()
+    const error = new AiChartD1P1AdapterBridgeResultInvalidError(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID,
+    )
     assert.equal(error.name, 'AiChartD1P1AdapterBridgeResultInvalidError')
     assert.equal(error.message, AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID)
+    assert.equal(error.code, AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID)
+    assert.equal(
+      error.reasonCode,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID,
+    )
+    assert.equal(Object.isFrozen(error), true)
+    assert.equal(
+      Object.getOwnPropertyDescriptor(error, 'reasonCode')?.writable,
+      false,
+    )
+  })
+  check('source-bound validation reasons are a closed frozen allowlist', () => {
+    assert.equal(
+      Object.isFrozen(AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS),
+      true,
+    )
+    assert.deepEqual(
+      Object.values(AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS),
+      [
+        'RESULT_SHAPE_INVALID',
+        'IDENTITY_OR_STATUS_MISMATCH',
+        'BORROWED_STAR_BINDING_MISMATCH',
+        'PRIMARY_AXIS_MAJOR_STAR_BINDING_MISMATCH',
+        'PRIMARY_AXIS_RULE_BINDING_MISMATCH',
+        'PRIMARY_AXIS_DOUBLE_STAR_BINDING_MISMATCH',
+        'PRIMARY_AXIS_FORBIDDEN_METADATA',
+        'CANDIDATE_SOURCE_BINDING_MISMATCH',
+        'CANDIDATE_RULE_AUTHORITY_MISMATCH',
+        'RULE_PALACE_STAR_BINDING_MISMATCH',
+        'COVERAGE_BINDING_MISMATCH',
+        'OTHER_SOURCE_BOUND_BINDING_MISMATCH',
+      ],
+    )
+  })
+  check('result-invalid class rejects an injected reason value', () => {
+    const sensitiveValue = 'synthetic-model-value-must-not-be-saved'
+    assert.throws(
+      () =>
+        new AiChartD1P1AdapterBridgeResultInvalidError(
+          sensitiveValue as AiChartD1P1SourceBoundValidationReasonCode,
+        ),
+      { message: AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID },
+    )
   })
 
   check('Descriptor has exactly the locked fields', () => {
