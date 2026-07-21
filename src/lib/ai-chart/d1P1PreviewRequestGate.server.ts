@@ -17,6 +17,7 @@ import {
 } from './d1P1AdapterBridge'
 import {
   AI_CHART_D1_P1_ADAPTER_BRIDGE_CONTRACT_VERSION,
+  AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
   AiChartD1P1AdapterBridgeNotReadyError,
 } from './d1P1AdapterBridgeContracts'
 import { parseAiChartD1P1ModelInput } from './d1P1ModelInputBindings'
@@ -56,7 +57,6 @@ import {
   type AiChartD1P1PreviewTimeoutMs,
 } from './d1P1PreviewTimeoutContracts'
 import {
-  AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
   AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
   AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
   AI_CHART_OPENAI_RESPONSE_INVALID,
@@ -151,6 +151,13 @@ function planWithoutFingerprint(
   bridge: AiChartD1P1AdapterBridge,
 ): AiChartD1P1PreviewRequestPlanWithoutFingerprint {
   const descriptor = bridge.descriptor
+  if (
+    descriptor.maxOutputTokens !== AI_CHART_D1_P1_MAX_OUTPUT_TOKENS ||
+    bridge.request.maxOutputTokens !== AI_CHART_D1_P1_MAX_OUTPUT_TOKENS ||
+    descriptor.maxOutputTokens !== bridge.request.maxOutputTokens
+  ) {
+    invalid()
+  }
   return {
     contractVersion: AI_CHART_D1_P1_PREVIEW_GATE_CONTRACT_VERSION,
     task: AI_CHART_D1_P1_PREVIEW_GATE_TASK,
@@ -172,7 +179,7 @@ function planWithoutFingerprint(
     modelTarget: AI_CHART_D1_MODEL_TARGET,
     reasoningEffort: AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
     timeoutMs: descriptor.timeoutMs,
-    maxOutputTokens: AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
+    maxOutputTokens: descriptor.maxOutputTokens,
     maxRequests: 1,
     serverOnly: true,
     environmentPolicy: 'local_development_only',
@@ -618,6 +625,20 @@ export async function executeAiChartD1P1PreviewRequest(
   if (
     authorization.targetPalaceId !== authenticated.plan.targetPalaceId ||
     authorization.planFingerprint !== authenticated.plan.planFingerprint
+  ) {
+    invalid()
+  }
+  if (
+    authenticated.plan.maxOutputTokens !==
+      AI_CHART_D1_P1_MAX_OUTPUT_TOKENS ||
+    authenticated.bridge.descriptor.maxOutputTokens !==
+      AI_CHART_D1_P1_MAX_OUTPUT_TOKENS ||
+    authenticated.bridge.request.maxOutputTokens !==
+      AI_CHART_D1_P1_MAX_OUTPUT_TOKENS ||
+    authenticated.plan.maxOutputTokens !==
+      authenticated.bridge.descriptor.maxOutputTokens ||
+    authenticated.plan.maxOutputTokens !==
+      authenticated.bridge.request.maxOutputTokens
   ) {
     invalid()
   }

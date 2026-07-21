@@ -7,6 +7,7 @@ import {
 } from './d1P1AdapterBridge'
 import {
   AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID,
+  AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
 } from './d1P1AdapterBridgeContracts'
 import {
   createValidAiChartD1P1Result,
@@ -42,6 +43,7 @@ import {
   AI_CHART_D1_P1_PREVIEW_TIMEOUT_ENVIRONMENT_VARIABLE,
 } from './d1P1PreviewTimeoutContracts'
 import {
+  AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
   AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
   AI_CHART_OPENAI_REQUEST_FAILED,
   AI_CHART_OPENAI_RESPONSE_INVALID,
@@ -306,6 +308,20 @@ async function run() {
       assert.equal(fixture.bridges.length, 12)
       assert.equal(plan.targetPalaceId, fixture.bridges[0].descriptor.targetPalaceId)
     })
+    check('Default Plan binds the descriptor and request to 16384 tokens', () => {
+      const bridge = fixture.bridges[0]
+      assert.equal(plan.maxOutputTokens, AI_CHART_D1_P1_MAX_OUTPUT_TOKENS)
+      assert.equal(
+        bridge.descriptor.maxOutputTokens,
+        AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
+      )
+      assert.equal(
+        bridge.request.maxOutputTokens,
+        AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
+      )
+      assert.equal(plan.maxOutputTokens, bridge.descriptor.maxOutputTokens)
+      assert.equal(plan.maxOutputTokens, bridge.request.maxOutputTokens)
+    })
     check('Default Plan timeout remains 120 seconds', () => {
       assert.equal(plan.timeoutMs, AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS)
       assert.equal(plan.maxRequests, 1)
@@ -318,6 +334,10 @@ async function run() {
       )
       assert.equal(localPreviewPlan.maxRequests, 1)
       assert.equal(localPreviewPlan.productionCallable, false)
+      assert.equal(
+        localPreviewPlan.maxOutputTokens,
+        AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
+      )
       assert.notEqual(
         localPreviewPlan.bridgeFingerprint,
         plan.bridgeFingerprint,
@@ -423,6 +443,58 @@ async function run() {
         plan,
       )
     })
+    await asyncCheck(
+      'Legacy 8192 Plan fails before request execution with matching bindings',
+      async () => {
+        let requestCount = 0
+        let globalFetchCount = 0
+        const legacyPlanRecord = structuredClone(plan) as unknown as Record<
+          string,
+          unknown
+        >
+        legacyPlanRecord.maxOutputTokens =
+          AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS
+        const legacyPlan = legacyPlanRecord as unknown as Mutable<
+          AiChartD1P1PreviewRequestPlan
+        >
+        recalculatePlanFingerprint(legacyPlan)
+        const legacyAuthorization = {
+          ...authorization,
+          planFingerprint: legacyPlan.planFingerprint,
+        } as AiChartD1P1PreviewAuthorization
+        const originalFetch = globalThis.fetch
+        globalThis.fetch = (async () => {
+          globalFetchCount += 1
+          throw new Error('network_forbidden')
+        }) as typeof fetch
+        try {
+          await assert.rejects(
+            () =>
+              execute(
+                fixture,
+                legacyPlan,
+                legacyAuthorization,
+                environmentFor(legacyPlan),
+                async () => {
+                  requestCount += 1
+                  return {
+                    data: createValidAiChartD1P1Result(
+                      fixture.modelInputs[0],
+                    ),
+                    usage: null,
+                  }
+                },
+              ),
+            { message: AI_CHART_D1_P1_PREVIEW_GATE_INVALID },
+          )
+        } finally {
+          globalThis.fetch = originalFetch
+        }
+        assert.notEqual(legacyPlan.planFingerprint, plan.planFingerprint)
+        assert.equal(requestCount, 0)
+        assert.equal(globalFetchCount, 0)
+      },
+    )
     check('Local Preview Plan is rejected when the override is not present', () => {
       assert.throws(
         () =>
@@ -735,8 +807,10 @@ async function run() {
     })
 
     let successCount = 0
-    const successRequest: RequestImplementation = async () => {
+    let successRequestMaxOutputTokens: number | undefined
+    const successRequest: RequestImplementation = async (request) => {
       successCount += 1
+      successRequestMaxOutputTokens = request.maxOutputTokens
       return {
         data: createValidAiChartD1P1Result(fixture.modelInputs[0]),
         usage: {
@@ -756,6 +830,7 @@ async function run() {
     )
     let localPreviewRequestCount = 0
     let localPreviewRequestTimeoutMs: number | undefined
+    let localPreviewRequestMaxOutputTokens: number | undefined
     const localPreviewSuccess = await execute(
       fixture,
       localPreviewPlan,
@@ -764,6 +839,7 @@ async function run() {
       async (request) => {
         localPreviewRequestCount += 1
         localPreviewRequestTimeoutMs = request.timeoutMs
+        localPreviewRequestMaxOutputTokens = request.maxOutputTokens
         return {
           data: createValidAiChartD1P1Result(fixture.modelInputs[0]),
           usage: null,
@@ -780,12 +856,25 @@ async function run() {
         localPreviewRequestTimeoutMs,
         AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
       )
+      assert.equal(
+        localPreviewRequestMaxOutputTokens,
+        AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
+      )
+      assert.equal(
+        localPreviewSuccess.plan.maxOutputTokens,
+        localPreviewRequestMaxOutputTokens,
+      )
       assert.equal(localPreviewSuccess.executedRequests, 1)
       assert.equal(localPreviewSuccess.plan.maxRequests, 1)
     })
     check('Development policy with explicit authorization executes one mock request', () => {
       assert.equal(successCount, 1)
       assert.equal(success.executedRequests, 1)
+      assert.equal(
+        successRequestMaxOutputTokens,
+        AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
+      )
+      assert.equal(success.plan.maxOutputTokens, successRequestMaxOutputTokens)
     })
     check('Successful mock returns parsed source-bound P1 data', () => {
       assert.equal(success.data.callId, plan.callId)
