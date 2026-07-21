@@ -5,6 +5,7 @@ import { RefreshCw, Search, ShieldCheck } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getAuthAccessToken } from '@/lib/mockAuth'
 import type { AdminBookingListItem } from '@/lib/supabase/adminBookings'
+import { classifyAdminBookingStatus } from './bookingStatus'
 
 type StatusFilter = 'all' | 'pending' | 'paid' | 'cancelled' | 'failed'
 type TimeFilter = 'all' | 'future' | 'past'
@@ -67,12 +68,7 @@ function bookingIdSuffix(id: string) {
 
 function matchesStatus(booking: AdminBookingListItem, filter: StatusFilter) {
   if (filter === 'all') return true
-  if (filter === 'pending') return booking.status === 'pending_payment' || booking.paymentStatus === 'pending'
-  if (filter === 'paid') {
-    return ['paid', 'confirmed'].includes(booking.status) || booking.paymentStatus === 'paid'
-  }
-  if (filter === 'cancelled') return booking.status === 'cancelled'
-  return booking.status === 'failed' || booking.paymentStatus === 'failed'
+  return classifyAdminBookingStatus(booking) === filter
 }
 
 function matchesTime(booking: AdminBookingListItem, filter: TimeFilter, now: number) {
@@ -162,15 +158,21 @@ export default function AdminBookingsPage() {
     void loadBookings()
   }, [loadBookings])
 
-  const summary = useMemo(
-    () => ({
-      loaded: bookings.length,
-      pending: bookings.filter((booking) => matchesStatus(booking, 'pending')).length,
-      paid: bookings.filter((booking) => matchesStatus(booking, 'paid')).length,
-      cancelled: bookings.filter((booking) => matchesStatus(booking, 'cancelled')).length,
-    }),
-    [bookings],
-  )
+  const summary = useMemo(() => {
+    return bookings.reduce(
+      (counts, booking) => {
+        const bucket = classifyAdminBookingStatus(booking)
+        counts.loaded += 1
+
+        if (bucket === 'pending' || bucket === 'paid' || bucket === 'cancelled') {
+          counts[bucket] += 1
+        }
+
+        return counts
+      },
+      { loaded: 0, pending: 0, paid: 0, cancelled: 0 },
+    )
+  }, [bookings])
 
   const visibleBookings = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLocaleLowerCase('zh-TW')
