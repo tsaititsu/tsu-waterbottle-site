@@ -119,7 +119,12 @@ export default function AdminLayoutClient({ children }: { children: ReactNode })
             </div>
           </div>
         </div>
-        <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} returnTo={returnTo} />
+        <LoginModal
+          open={loginOpen}
+          onClose={() => setLoginOpen(false)}
+          returnTo={returnTo}
+          mode="admin"
+        />
       </main>
     )
   }

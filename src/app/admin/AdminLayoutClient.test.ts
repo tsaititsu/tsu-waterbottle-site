@@ -18,7 +18,10 @@ assert.equal(source.match(/<>{children}<\/>/g)?.length, 1)
 assert.match(source, /if \(accessState === 'unauthenticated'\)/)
 assert.match(source, /請先登入管理員帳號/)
 assert.match(source, /登入完成後會返回目前的後台頁面/)
-assert.match(source, /<LoginModal open=\{loginOpen\}[\s\S]*returnTo=\{returnTo\}/)
+assert.match(
+  source,
+  /<LoginModal[\s\S]*open=\{loginOpen\}[\s\S]*returnTo=\{returnTo\}[\s\S]*mode="admin"/,
+)
 assert.match(source, /sanitizeAuthReturnPath\(`\$\{pathname\}\$\{window\.location\.search\}`\)/)
 assert.doesNotMatch(source, /router\.replace\('\/'\)/)
 assert.match(source, /if \(accessState === 'forbidden'\)[\s\S]*沒有管理權限/)

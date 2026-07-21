@@ -200,8 +200,8 @@ test('admin layout guards the UI behind the server-side admin session check', ()
   )
   assert.match(
     clientSource,
-    /if \(accessState === 'unauthenticated'\) \{[\s\S]*請先登入管理員帳號[\s\S]*<LoginModal[\s\S]*returnTo=\{returnTo\}/,
-    '未登入時應顯示可保留目前路徑的登入入口',
+    /if \(accessState === 'unauthenticated'\) \{[\s\S]*請先登入管理員帳號[\s\S]*<LoginModal[\s\S]*returnTo=\{returnTo\}[\s\S]*mode="admin"/,
+    '未登入時應顯示只允許 Google 且保留目前路徑的管理員登入入口',
   )
   assert.equal(clientSource.includes("router.replace('/')"), false, '未登入時不得離開目前 admin 頁面')
   assert.match(
