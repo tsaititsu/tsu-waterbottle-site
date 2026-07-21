@@ -38,6 +38,7 @@ import {
 import {
   AI_CHART_D1_P1_ADAPTER_BRIDGE_CONTRACT_VERSION,
   AI_CHART_D1_P1_ADAPTER_BRIDGE_DESCRIPTION,
+  AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
   AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS,
   AI_CHART_D1_P1_ADAPTER_BRIDGE_TASK,
   AiChartD1P1AdapterBridgeError,
@@ -62,7 +63,6 @@ import {
   type AiChartD1P1PreviewTimeoutMs,
 } from './d1P1PreviewTimeoutContracts'
 import {
-  AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
   AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
   AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
   validateAiChartOpenAiStructuredRequest,
@@ -201,7 +201,7 @@ function descriptorWithoutFingerprint(
     description: AI_CHART_D1_P1_ADAPTER_BRIDGE_DESCRIPTION,
     reasoningEffort: AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
     timeoutMs,
-    maxOutputTokens: AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
+    maxOutputTokens: AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
     requestStatus: 'ready',
     runtimeStatus: 'runtime_wiring_required',
     openAiCallable: false,
@@ -1040,7 +1040,7 @@ function buildOne(
     ),
     reasoningEffort: AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
     timeoutMs,
-    maxOutputTokens: AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
+    maxOutputTokens: AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
   })
   return Object.freeze({ descriptor, request })
 }
@@ -1088,7 +1088,11 @@ function assertFixedBridgeInvariants(
     new Set(bridges.map((bridge) => bridge.request.reasoningEffort)).size !==
       1 ||
     new Set(bridges.map((bridge) => bridge.request.timeoutMs)).size !== 1 ||
-    new Set(bridges.map((bridge) => bridge.request.maxOutputTokens)).size !== 1
+    new Set(bridges.map((bridge) => bridge.request.maxOutputTokens)).size !==
+      1 ||
+    new Set(
+      bridges.map((bridge) => bridge.descriptor.maxOutputTokens),
+    ).size !== 1
   ) {
     invalid()
   }
@@ -1110,14 +1114,15 @@ function assertFixedBridgeInvariants(
       descriptor.instructionsSha256 !==
         AI_CHART_D1_P1_PROMPT_INSTRUCTIONS_SHA256 ||
       descriptor.timeoutMs !== timeoutMs ||
+      descriptor.maxOutputTokens !== AI_CHART_D1_P1_MAX_OUTPUT_TOKENS ||
       request.instructions !== promptPackage.instructions ||
       request.userInput !== promptPackage.userInput ||
       request.schemaName !== promptPackage.outputSchemaName ||
       request.description !== AI_CHART_D1_P1_ADAPTER_BRIDGE_DESCRIPTION ||
       request.reasoningEffort !== AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT ||
       request.timeoutMs !== timeoutMs ||
-      request.maxOutputTokens !==
-        AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS ||
+      request.maxOutputTokens !== AI_CHART_D1_P1_MAX_OUTPUT_TOKENS ||
+      request.maxOutputTokens !== descriptor.maxOutputTokens ||
       typeof request.parseResult !== 'function' ||
       !stableAiChartD1P1AdapterBridgeDescriptorEqual(
         request.schema,

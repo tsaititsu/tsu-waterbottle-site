@@ -17,6 +17,7 @@ import {
   AI_CHART_D1_P1_ADAPTER_BRIDGE_INVALID,
   AI_CHART_D1_P1_ADAPTER_BRIDGE_NOT_READY,
   AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID,
+  AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
   AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS,
   AiChartD1P1AdapterBridgeResultInvalidError,
   type AiChartD1P1SourceBoundValidationReasonCode,
@@ -66,6 +67,7 @@ import {
   AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
   AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
   AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
+  AI_CHART_OPENAI_MAX_OUTPUT_TOKENS,
   buildAiChartOpenAiResponsesBody,
 } from './openAiResponses'
 
@@ -299,6 +301,25 @@ async function run() {
       1,
     )
   })
+  check('all 12 Bridges use the dedicated D1 P1 output budget', () => {
+    assert.equal(AI_CHART_D1_P1_MAX_OUTPUT_TOKENS, 16_384)
+    assert.equal(AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS, 8_192)
+    assert.equal(AI_CHART_OPENAI_MAX_OUTPUT_TOKENS, 32_768)
+    for (const entry of bridges) {
+      assert.equal(
+        entry.descriptor.maxOutputTokens,
+        AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
+      )
+      assert.equal(
+        entry.request.maxOutputTokens,
+        AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
+      )
+      assert.equal(
+        entry.request.maxOutputTokens,
+        entry.descriptor.maxOutputTokens,
+      )
+    }
+  })
   check('all requests share the formal P1 schema name', () => {
     assert.deepEqual(
       [...new Set(bridges.map((entry) => entry.request.schemaName))],
@@ -363,10 +384,10 @@ async function run() {
       )
     })
   })
-  check('request token budget uses the Adapter default', () => {
+  check('request token budget uses the D1 P1 policy', () => {
     assert.equal(
       bridge.request.maxOutputTokens,
-      AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
+      AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
     )
   })
   check('validated request is frozen', () => {
@@ -440,7 +461,7 @@ async function run() {
   check('Responses body token budget is exact', () => {
     assert.equal(
       body.max_output_tokens,
-      AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
+      AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
     )
   })
   check('Responses body instructions are exact', () => {
@@ -596,7 +617,10 @@ async function run() {
     assert.equal(built[0].request.userInput, promptPackages[0].userInput)
     assert.equal(built[0].request.reasoningEffort, 'medium')
     assert.equal(built[0].request.timeoutMs, 120_000)
-    assert.equal(built[0].request.maxOutputTokens, 8_192)
+    assert.equal(
+      built[0].request.maxOutputTokens,
+      AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
+    )
   })
 
   const validResult = createValidAiChartD1P1Result(modelInput)
