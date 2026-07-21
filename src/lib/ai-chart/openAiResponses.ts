@@ -281,6 +281,7 @@ function normalizeUsageInteger(value: unknown): number {
 const SAFE_RESPONSE_METADATA_TOKEN = /^[A-Za-z0-9_.:-]{1,80}$/u
 const SAFE_OUTPUT_ITEM_TYPES = new Set<unknown>(['reasoning', 'message'])
 const SAFE_CONTENT_ITEM_TYPES = new Set<unknown>(['output_text', 'refusal'])
+const AI_CHART_OPENAI_DIAGNOSTIC_ITEM_TYPE_LIMIT = 32
 
 function sanitizeResponseMetadataToken(value: unknown): string | null {
   return typeof value === 'string' && SAFE_RESPONSE_METADATA_TOKEN.test(value)
@@ -295,6 +296,12 @@ function sanitizeResponseItemType(
   return allowedTypes.has(value) && typeof value === 'string'
     ? value
     : 'invalid'
+}
+
+function appendDiagnosticItemType(target: string[], normalizedType: string) {
+  if (target.length < AI_CHART_OPENAI_DIAGNOSTIC_ITEM_TYPE_LIMIT) {
+    target.push(normalizedType)
+  }
 }
 
 function parseUsageMetadata(value: unknown): Readonly<{
@@ -334,7 +341,8 @@ function buildResponseDiagnostic(
   if (Array.isArray(value.output)) {
     for (const outputItem of value.output) {
       const outputRecord = isPlainObject(outputItem) ? outputItem : null
-      outputItemTypes.push(
+      appendDiagnosticItemType(
+        outputItemTypes,
         sanitizeResponseItemType(outputRecord?.type, SAFE_OUTPUT_ITEM_TYPES),
       )
       if (!Array.isArray(outputRecord?.content)) continue
@@ -345,7 +353,7 @@ function buildResponseDiagnostic(
           contentRecord?.type,
           SAFE_CONTENT_ITEM_TYPES,
         )
-        contentItemTypes.push(contentType)
+        appendDiagnosticItemType(contentItemTypes, contentType)
         if (contentType === 'output_text') outputTextCount += 1
       }
     }

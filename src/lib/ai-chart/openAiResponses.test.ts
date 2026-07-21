@@ -938,6 +938,85 @@ test('unknown output item type is rejected', () => {
   assert.deepEqual(error.diagnostic?.outputItemTypes, ['invalid'])
 })
 
+test('output item diagnostics are capped while a later refusal is still found', () => {
+  const unknownOutputType = 'synthetic-sensitive-output-type-before-limit'
+  const refusalText = 'synthetic-sensitive-refusal-after-output-limit'
+  const output = Array.from({ length: 32 }, (_, index) =>
+    index % 2 === 0
+      ? reasoningOutputFixture({ id: `synthetic-reasoning-${index}` })
+      : { type: unknownOutputType },
+  )
+  output.push(
+    { type: 'message', status: 'completed', content: [] },
+    {
+      type: 'message',
+      status: 'completed',
+      content: [{ type: 'refusal', refusal: refusalText }],
+    },
+  )
+
+  const error = expectResponseError(
+    () =>
+      parseAiChartOpenAiStructuredResponse(
+        responseFixture({ output }),
+        parseResult,
+      ),
+    AI_CHART_OPENAI_RESPONSE_REFUSED,
+    [unknownOutputType, refusalText],
+  )
+
+  assert.equal(error.diagnostic?.outputItemTypes.length, 32)
+  assert.equal(error.diagnostic?.outputItemTypes.includes('message'), false)
+  assert.equal(
+    error.diagnostic?.outputItemTypes.every(
+      (itemType) => itemType === 'reasoning' || itemType === 'invalid',
+    ),
+    true,
+  )
+  assert.deepEqual(error.diagnostic?.contentItemTypes, ['refusal'])
+  assert.equal(Object.isFrozen(error.diagnostic), true)
+  assert.equal(Object.isFrozen(error.diagnostic?.outputItemTypes), true)
+  assert.equal(Object.isFrozen(error.diagnostic?.contentItemTypes), true)
+})
+
+test('content item diagnostics are capped while later output text is still counted', () => {
+  const unknownContentType = 'synthetic-sensitive-content-type-before-limit'
+  const firstOutputText = 'synthetic-sensitive-first-output-after-limit'
+  const secondOutputText = 'synthetic-sensitive-second-output-after-limit'
+  const content = Array.from({ length: 32 }, () => ({
+    type: unknownContentType,
+    text: '{}',
+  }))
+  content.push(
+    { type: 'output_text', text: firstOutputText },
+    { type: 'output_text', text: secondOutputText },
+  )
+
+  const error = expectResponseInvalid(
+    () =>
+      parseAiChartOpenAiStructuredResponse(
+        responseFixture({
+          output: [{ type: 'message', status: 'completed', content }],
+        }),
+        parseResult,
+      ),
+    [unknownContentType, firstOutputText, secondOutputText],
+  )
+
+  assert.equal(error.diagnostic?.contentItemTypes.length, 32)
+  assert.equal(
+    error.diagnostic?.contentItemTypes.every(
+      (itemType) => itemType === 'invalid',
+    ),
+    true,
+  )
+  assert.equal(error.diagnostic?.outputTextCount, 2)
+  assert.deepEqual(error.diagnostic?.outputItemTypes, ['message'])
+  assert.equal(Object.isFrozen(error.diagnostic), true)
+  assert.equal(Object.isFrozen(error.diagnostic?.outputItemTypes), true)
+  assert.equal(Object.isFrozen(error.diagnostic?.contentItemTypes), true)
+})
+
 test('multiple output_text items are rejected', () => {
   expectResponseInvalid(() =>
     parseAiChartOpenAiStructuredResponse(
