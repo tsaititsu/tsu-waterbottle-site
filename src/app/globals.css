@@ -74,9 +74,9 @@ body {
 }
 
 .floating-line-button {
-  right: 16px;
+  right: 14px;
   bottom: calc(
-    var(--mobile-bottom-nav-height) + env(safe-area-inset-bottom, 0px) + 16px
+    var(--mobile-bottom-nav-height) + env(safe-area-inset-bottom, 0px) + 12px
   );
 }
 

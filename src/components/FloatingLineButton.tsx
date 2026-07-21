@@ -204,7 +204,7 @@ export function FloatingLineButton() {
       onClick={handleClick}
       data-draggable={isDesktop ? 'true' : 'false'}
       data-mobile-hidden={hideOnMobileInteractionPage ? 'true' : 'false'}
-      className={`floating-line-button touch-manipulation fixed z-30 flex h-14 w-14 items-center justify-center rounded-full bg-[#06c755] text-sm font-black text-white shadow-[0_12px_30px_rgba(6,199,85,0.35)] transition hover:scale-105 hover:shadow-[0_16px_36px_rgba(6,199,85,0.45)] md:touch-none md:z-50 md:h-16 md:w-16 ${
+      className={`floating-line-button touch-manipulation fixed z-30 flex h-12 w-12 items-center justify-center rounded-full bg-[#06c755] text-xs font-black text-white shadow-[0_12px_30px_rgba(6,199,85,0.35)] transition hover:scale-105 hover:shadow-[0_16px_36px_rgba(6,199,85,0.45)] md:touch-none md:z-50 md:h-16 md:w-16 md:text-sm ${
         hideOnMobileInteractionPage ? 'floating-line-button--mobile-hidden' : ''
       } ${
         isDesktop ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-pointer'
