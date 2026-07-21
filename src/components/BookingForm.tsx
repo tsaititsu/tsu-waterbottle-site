@@ -1,6 +1,6 @@
 'use client'
 
-import { CalendarDays, CheckCircle2, MessageCircle } from 'lucide-react'
+import { CalendarDays, CheckCircle2 } from 'lucide-react'
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ActionButton } from './ActionButton'
@@ -9,7 +9,6 @@ import { getAuthAccessToken, getMockUser } from '@/lib/mockAuth'
 import { savePendingBooking, type BookingFormInput } from '@/lib/mockBooking'
 
 const officialLineUrl = 'https://lin.ee/6Tpje1P'
-const bankAccountLast5Pattern = /^\d{5}$/
 
 function padDatePart(value: string) {
   return value.padStart(2, '0')
@@ -24,14 +23,6 @@ type PublicBookingSlot = {
 
 type BookingFormProps = {
   resetKey?: string
-}
-
-type BookingPaymentMethod = 'bank-transfer' | 'newebpay-credit'
-
-const BANK_TRANSFER_REMINDER_ERROR = '請先勾選確認已了解郵局匯款後的聯絡與預約確認流程。'
-
-function getBankTransferReminderError(paymentMethod: BookingPaymentMethod, hasAcceptedReminder: boolean) {
-  return paymentMethod === 'bank-transfer' && !hasAcceptedReminder ? BANK_TRANSFER_REMINDER_ERROR : ''
 }
 
 function getBirthDateParts(value: string) {
@@ -121,15 +112,11 @@ function submitNewebPayForm(action: string, fields: Extract<NewebPayCreateRespon
 
 export function BookingForm({ resetKey = '' }: BookingFormProps) {
   const [planId, setPlanId] = useState(bookingPlans[0].id)
-  const [paymentMethod, setPaymentMethod] = useState<BookingPaymentMethod>('bank-transfer')
   const [bookingSlots, setBookingSlots] = useState<PublicBookingSlot[]>([])
   const [selectedBookingDate, setSelectedBookingDate] = useState('')
   const [selectedSlotId, setSelectedSlotId] = useState('')
   const [bookingSlotsLoading, setBookingSlotsLoading] = useState(true)
   const [bookingSlotsError, setBookingSlotsError] = useState('')
-  const [bankTransferPhone, setBankTransferPhone] = useState('')
-  const [bankTransferLast5, setBankTransferLast5] = useState('')
-  const [bankTransferFallbackUrl, setBankTransferFallbackUrl] = useState('')
   const [customerName, setCustomerName] = useState('')
   const [customerEmail, setCustomerEmail] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
@@ -144,20 +131,15 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
   const [question, setQuestion] = useState('')
   const [note, setNote] = useState('')
   const [hasAcceptedNotice, setHasAcceptedNotice] = useState(false)
-  const [hasAcceptedBankTransferReminder, setHasAcceptedBankTransferReminder] = useState(false)
   const [formError, setFormError] = useState('')
   const [formStatus, setFormStatus] = useState('')
   const [createdBookingId, setCreatedBookingId] = useState('')
   const [createdBookingSignature, setCreatedBookingSignature] = useState('')
   const resetFormToBlank = useCallback(() => {
     setPlanId(bookingPlans[0].id)
-    setPaymentMethod('bank-transfer')
     setSelectedBookingDate('')
     setSelectedSlotId('')
     setBookingSlotsError('')
-    setBankTransferPhone('')
-    setBankTransferLast5('')
-    setBankTransferFallbackUrl('')
     setCustomerName('')
     setCustomerEmail('')
     setCustomerPhone('')
@@ -172,7 +154,6 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
     setQuestion('')
     setNote('')
     setHasAcceptedNotice(false)
-    setHasAcceptedBankTransferReminder(false)
     setFormError('')
     setFormStatus('')
     setCreatedBookingId('')
@@ -293,23 +274,9 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
     if (!input) return false
 
     setFormStatus('')
-    const payerPhone = bankTransferPhone.trim() || customerPhone.trim()
-    if (paymentMethod === 'bank-transfer') {
-      const bankTransferReminderError = getBankTransferReminderError(paymentMethod, hasAcceptedBankTransferReminder)
-      if (bankTransferReminderError) {
-        setFormError(bankTransferReminderError)
-        return false
-      }
-
-      if (!payerPhone) {
-        setFormError('請填寫郵局匯款聯絡電話。')
-        return false
-      }
-
-      if (!bankAccountLast5Pattern.test(bankTransferLast5.trim())) {
-        setFormError('匯款帳號後五碼必須是 5 碼數字。')
-        return false
-      }
+    if (!isNewebPayEnabled) {
+      setFormError('目前暫時無法使用線上付款，請稍後再試或聯繫客服。')
+      return false
     }
 
     const bookingSignature = JSON.stringify(input)
@@ -317,7 +284,6 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
 
     if (!bookingId) {
       try {
-        setBankTransferFallbackUrl('')
         const accessToken = await getAuthAccessToken()
         const response = await fetch('/api/bookings/create', {
           method: 'POST',
@@ -349,86 +315,36 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
       return false
     }
 
-    if (paymentMethod === 'newebpay-credit') {
-      if (!isNewebPayEnabled) {
-        setFormError('信用卡線上付款測試中，請先使用郵局匯款。')
-        return false
-      }
-
-      try {
-        setFormError('')
-        setFormStatus('正在前往藍新金流付款頁，請稍候。')
-        const accessToken = await getAuthAccessToken()
-        const response = await fetch('/api/payments/newebpay/create', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
-          },
-          body: JSON.stringify({
-            itemKey: 'booking_consultation_60',
-            source: 'booking',
-            paymentMode: 'credit',
-            bookingId
-          })
-        })
-        const data = (await response.json().catch(() => null)) as NewebPayCreateResponse | null
-
-        if (!response.ok || !data || data.ok !== true) {
-          throw new Error(data?.ok === false ? data.error || '建立線上付款資料失敗' : '建立線上付款資料失敗')
-        }
-
-        submitNewebPayForm(data.action, data.fields)
-      } catch {
-        setFormStatus('')
-        setFormError('預約已建立，但線上付款資料建立失敗。請改用匯款或聯繫客服協助處理。')
-      }
-
-      return false
-    }
-
-    if (paymentMethod === 'bank-transfer') {
-      const fallbackUrl = `/bank-transfer/submit?itemType=booking&itemId=${encodeURIComponent(bookingId ?? '')}&itemName=${encodeURIComponent(selectedPlan.name)}&amountTwd=${encodeURIComponent(String(selectedPlan.price))}`
-
-      try {
-        const accessToken = await getAuthAccessToken()
-        const response = await fetch('/api/bank-transfer/submit', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
-          },
-          body: JSON.stringify({
-            itemType: 'booking',
-            itemId: bookingId,
-            itemName: selectedPlan.name,
-            amountTwd: selectedPlan.price,
-            payerName: customerName.trim(),
-            payerPhone,
-            payerEmail: customerEmail.trim(),
-            lineDisplayName: lineDisplayName.trim() || undefined,
-            bankAccountLast5: bankTransferLast5.trim(),
-            note: '真人論命銀行匯款回報'
-          })
-        })
-        const data = await response.json().catch(() => ({}))
-
-        if (!response.ok || data.ok === false) {
-          throw new Error(data.message || '匯款回報送出失敗')
-        }
-      } catch {
-        setBankTransferFallbackUrl(fallbackUrl)
-        setFormError('預約已建立，但匯款回報送出失敗。請前往匯款回報頁補填資料，或聯繫客服協助。')
-        return false
-      }
-
+    try {
       setFormError('')
-      window.location.href = '/account/bookings?bankTransferSubmitted=1'
-      return false
+      setFormStatus('正在前往藍新金流付款頁，請稍候。')
+      const accessToken = await getAuthAccessToken()
+      const response = await fetch('/api/payments/newebpay/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
+        },
+        body: JSON.stringify({
+          itemKey: 'booking_consultation_60',
+          source: 'booking',
+          paymentMode: 'credit',
+          bookingId
+        })
+      })
+      const data = (await response.json().catch(() => null)) as NewebPayCreateResponse | null
+
+      if (!response.ok || !data || data.ok !== true) {
+        throw new Error(data?.ok === false ? data.error || '建立線上付款資料失敗' : '建立線上付款資料失敗')
+      }
+
+      submitNewebPayForm(data.action, data.fields)
+    } catch {
+      setFormStatus('')
+      setFormError('預約已建立，但付款頁建立失敗。請稍後重試；如仍無法付款，請聯繫客服，勿重複建立預約。')
     }
 
-    setFormError('')
-    return true
+    return false
   }
 
   const updateBirthDateFromPicker = (value: string) => {
@@ -656,113 +572,19 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
           <textarea className="focus-ring min-h-20 rounded-lg border border-borderSoft px-4 py-3" onChange={(event) => setNote(event.target.value)} value={note} />
         </label>
 
-        <div className="rounded-2xl border border-borderSoft bg-softPurple p-5">
-          <label className="grid gap-2">
-            <span className="text-sm font-semibold text-deepPurple">選擇付款方式</span>
-            <select
-              className="focus-ring w-full rounded-lg border border-borderSoft bg-white px-4 py-3 font-semibold text-deepPurple"
-              onChange={(event) => setPaymentMethod(event.target.value as typeof paymentMethod)}
-              value={paymentMethod}
-            >
-              <option value="bank-transfer">郵局匯款｜需至水瓶先生官方 LINE 核對開通</option>
-              <option disabled={!isNewebPayEnabled} value="newebpay-credit">
-                {isNewebPayEnabled ? '信用卡線上付款｜藍新金流' : '信用卡線上付款｜線上付款測試中'}
-              </option>
-            </select>
-          </label>
-          <div className="mt-4 grid gap-3">
-            {paymentMethod === 'bank-transfer' ? (
-              <>
-                <div className="rounded-xl border border-borderSoft bg-white p-4 text-sm leading-6 text-textDark">
-                  <div className="flex min-h-11 items-start gap-3">
-                    <input
-                      id="booking-bank-transfer-reminder"
-                      aria-label="我已了解完成郵局匯款、填寫聯絡電話與匯款帳號後五碼後，需透過水瓶先生官方 LINE 聯絡並等待客服確認預約"
-                      checked={hasAcceptedBankTransferReminder}
-                      className="mt-1 h-6 w-6 shrink-0 accent-deepPurple md:h-5 md:w-5"
-                      onChange={(event) => setHasAcceptedBankTransferReminder(event.target.checked)}
-                      type="checkbox"
-                    />
-                    <p className="min-w-0 text-pretty">
-                      <label className="cursor-pointer" htmlFor="booking-bank-transfer-reminder">
-                        我已了解：請先完成郵局匯款，並填寫聯絡電話與匯款帳號後五碼。完成後，需透過
-                      </label>{' '}
-                      <a
-                        className="inline-flex items-center gap-1 whitespace-nowrap font-semibold text-[#07883b] underline underline-offset-4"
-                        href={officialLineUrl}
-                        rel="noopener noreferrer"
-                        target="_blank"
-                      >
-                        <MessageCircle aria-hidden="true" size={20} />
-                        水瓶先生官方 LINE
-                      </a>{' '}
-                      <label className="cursor-pointer" htmlFor="booking-bank-transfer-reminder">
-                        回覆『已匯款＋姓名＋預約項目』，待客服核對款項後，才完成預約確認。
-                      </label>
-                    </p>
-                  </div>
-                  {formError === BANK_TRANSFER_REMINDER_ERROR ? (
-                    <p className="mt-2 font-semibold text-deepPurple">{BANK_TRANSFER_REMINDER_ERROR}</p>
-                  ) : null}
-                </div>
-
-                <div className="rounded-xl border border-deepPurple/15 bg-white p-4 shadow-soft">
-                  <p className="text-sm font-semibold text-darkGold">郵局匯款資訊</p>
-                  <div className="mt-3 grid gap-2 text-sm leading-6 text-textMuted sm:grid-cols-2">
-                    <p>銀行名稱：中華郵政</p>
-                    <p>銀行代碼：700</p>
-                    <p>分行／郵局：田尾郵局</p>
-                    <p>戶名：蔡題簇</p>
-                    <p>局號：0081359</p>
-                    <p>帳號：0146512</p>
-                    <p className="font-semibold text-deepPurple sm:col-span-2">轉帳帳號：00813590146512</p>
-                  </div>
-                  <p className="mt-3 rounded-lg bg-softPurple px-3 py-2 text-xs leading-5 text-textMuted">
-                    郵局帳號為「局號＋帳號」，轉帳時請輸入完整 14 碼：00813590146512。
-                  </p>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <label className="grid gap-3 rounded-xl border border-borderSoft bg-white p-4">
-                    <span className="text-sm font-semibold text-textDark">聯絡電話 *</span>
-                    <input
-                      className="focus-ring rounded-lg border border-borderSoft px-4 py-3"
-                      onChange={(event) => setBankTransferPhone(event.target.value)}
-                      placeholder="請填寫客服可聯繫的電話"
-                      value={bankTransferPhone || customerPhone}
-                    />
-                    <span className="text-xs leading-5 text-textMuted">若需要核對款項或預約資訊，客服會以此電話聯繫。</span>
-                  </label>
-                  <label className="grid gap-3 rounded-xl border border-borderSoft bg-white p-4">
-                    <span className="text-sm font-semibold text-textDark">匯款帳號後五碼 *</span>
-                    <input
-                      className="focus-ring rounded-lg border border-borderSoft px-4 py-3"
-                      inputMode="numeric"
-                      maxLength={5}
-                      onChange={(event) => setBankTransferLast5(event.target.value.replace(/\D/g, '').slice(0, 5))}
-                      placeholder="請填寫您的匯款帳號後五碼"
-                      value={bankTransferLast5}
-                    />
-                    <span className="text-xs leading-5 text-textMuted">請填「您的匯款帳號後五碼」，不是本工作室收款帳號後五碼。</span>
-                  </label>
-                </div>
-              </>
-            ) : null}
-
-            {paymentMethod === 'newebpay-credit' ? (
-              <div className="rounded-xl border border-borderSoft bg-white p-4 text-sm leading-6 text-textMuted">
-                <p>
-                  送出後會先建立預約，再前往藍新金流信用卡一次付清頁。實際付款狀態會以藍新背景通知為準，付款完成後系統會自動確認預約。
-                </p>
-              </div>
-            ) : null}
-
-            {!isNewebPayEnabled ? (
-              <p className="rounded-xl border border-borderSoft bg-white p-4 text-sm leading-6 text-textMuted">
-                信用卡線上付款測試中，請先使用郵局匯款。
-              </p>
-            ) : null}
+        <div className="grid gap-3 rounded-2xl border border-borderSoft bg-softPurple p-5">
+          <p className="text-sm font-semibold text-deepPurple">付款方式</p>
+          <div className="rounded-xl border border-borderSoft bg-white p-4">
+            <p className="font-semibold text-deepPurple">信用卡線上付款｜藍新金流</p>
+            <p className="mt-2 text-sm leading-6 text-textMuted">
+              送出後先建立預約，再前往藍新金流信用卡一次付清頁；付款狀態以金流背景通知為準。
+            </p>
           </div>
+          {!isNewebPayEnabled ? (
+            <p className="rounded-xl border border-borderSoft bg-white p-4 text-sm font-semibold leading-6 text-deepPurple">
+              目前暫時無法使用線上付款，請稍後再試或聯繫客服。
+            </p>
+          ) : null}
         </div>
 
         <div className="rounded-2xl border border-borderSoft bg-softPurple p-5">
@@ -776,7 +598,7 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-darkGold">SERVICE NOTICE</p>
               <h3 className="text-lg font-semibold text-deepPurple">真人論命服務說明</h3>
               <p>水瓶先生論命為一對一線上紫微斗數諮詢，服務時間為 60 分鐘，費用為 NT$3,600／1 小時。諮詢方式以 LINE 通話或 Zoom 為主。</p>
-              <p>可預約未來 90 天內的諮詢時段。完成付款或匯款回報後，將由客服協助確認預約資訊與後續安排。本服務不是訂閱制，也不是儲值制。</p>
+              <p>可預約未來 90 天內的諮詢時段。完成付款後，將由客服協助確認預約資訊與後續安排。本服務不是訂閱制，也不是儲值制。</p>
 
               <div>
                 <h4 className="font-semibold text-textDark">◆ 關於改期或取消</h4>
@@ -853,16 +675,7 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
           </div>
         </div>
 
-        {formError && formError !== BANK_TRANSFER_REMINDER_ERROR && (
-          <div className="grid gap-2 text-sm font-semibold text-deepPurple">
-            <p>{formError}</p>
-            {bankTransferFallbackUrl ? (
-              <Link className="underline underline-offset-4" href={bankTransferFallbackUrl}>
-                前往匯款回報頁補填資料
-              </Link>
-            ) : null}
-          </div>
-        )}
+        {formError ? <p className="text-sm font-semibold text-deepPurple">{formError}</p> : null}
 
         {formStatus && !formError ? (
           <div className="rounded-xl border border-borderSoft bg-softPurple px-4 py-3 text-sm font-semibold text-deepPurple">
@@ -878,7 +691,7 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
           itemType="booking"
           loadingText="送出中..."
         >
-          {paymentMethod === 'bank-transfer' ? '建立預約並送出匯款回報' : `前往付款 NT${selectedPlan.price.toLocaleString()}`}
+          前往信用卡付款 NT${selectedPlan.price.toLocaleString()}
         </ActionButton>
       </form>
     </div>
