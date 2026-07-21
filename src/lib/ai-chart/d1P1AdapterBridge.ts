@@ -38,6 +38,7 @@ import {
 import {
   AI_CHART_D1_P1_ADAPTER_BRIDGE_CONTRACT_VERSION,
   AI_CHART_D1_P1_ADAPTER_BRIDGE_DESCRIPTION,
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS,
   AI_CHART_D1_P1_ADAPTER_BRIDGE_TASK,
   AiChartD1P1AdapterBridgeError,
   AiChartD1P1AdapterBridgeNotReadyError,
@@ -47,6 +48,7 @@ import {
   stableAiChartD1P1AdapterBridgeDescriptorEqual,
   type AiChartD1P1AdapterBridgeDescriptor,
   type AiChartD1P1AdapterBridgeDescriptorWithoutFingerprint,
+  type AiChartD1P1SourceBoundValidationReasonCode,
 } from './d1P1AdapterBridgeContracts'
 import {
   AI_CHART_D1_P1_OUTPUT_SCHEMA,
@@ -145,8 +147,10 @@ function notReady(): never {
   throw new AiChartD1P1AdapterBridgeNotReadyError()
 }
 
-function resultInvalid(): never {
-  throw new AiChartD1P1AdapterBridgeResultInvalidError()
+function resultInvalid(
+  reasonCode: AiChartD1P1SourceBoundValidationReasonCode,
+): never {
+  throw new AiChartD1P1AdapterBridgeResultInvalidError(reasonCode)
 }
 
 function rethrowBuildError(error: unknown): never {
@@ -237,7 +241,9 @@ export function deriveAiChartD1P1CandidateRuleStatus(
     hasDuplicates(usedRuleIds) ||
     usedRuleIds.some((ruleId) => !ruleStatusById.has(ruleId))
   ) {
-    resultInvalid()
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.CANDIDATE_RULE_AUTHORITY_MISMATCH,
+    )
   }
   return usedRuleIds
     .map((ruleId) => ruleStatusById.get(ruleId) as AiChartD1RuleStatus)
@@ -256,7 +262,9 @@ export function assertAiChartD1P1CandidateRuleAuthority(
     candidate.ruleStatus !==
     deriveAiChartD1P1CandidateRuleStatus(candidate.usedRuleIds, rules)
   ) {
-    resultInvalid()
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.CANDIDATE_RULE_AUTHORITY_MISMATCH,
+    )
   }
 }
 
@@ -291,7 +299,9 @@ function assertCandidateSourceBinding(
       policy.forbiddenStructureBasis?.has(structure),
     )
   ) {
-    resultInvalid()
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.CANDIDATE_SOURCE_BINDING_MISMATCH,
+    )
   }
 
   assertAiChartD1P1CandidateRuleAuthority(
@@ -318,14 +328,18 @@ function assertIdentityAndStatus(
       modelInput.structuralContext.targetPalace.canonicalName ||
     result.status === 'invalid'
   ) {
-    resultInvalid()
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.IDENTITY_OR_STATUS_MISMATCH,
+    )
   }
 
   if (
     modelInput.structuralStatus === 'partial' &&
     result.status !== 'partial'
   ) {
-    resultInvalid()
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.IDENTITY_OR_STATUS_MISMATCH,
+    )
   }
 
 }
@@ -335,10 +349,18 @@ function assertBorrowedStarBinding(
   modelInput: AiChartD1P1ModelInput,
 ): void {
   const borrowStatus = modelInput.structuralContext.targetPalace.borrowStatus
-  if (borrowStatus === 'opposite_empty') resultInvalid()
+  if (borrowStatus === 'opposite_empty') {
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.BORROWED_STAR_BINDING_MISMATCH,
+    )
+  }
   const expectedMode =
     borrowStatus === 'eligible_and_borrowed' ? 'borrowed' : 'none'
-  if (result.primaryAxis.borrowedStarMode !== expectedMode) resultInvalid()
+  if (result.primaryAxis.borrowedStarMode !== expectedMode) {
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.BORROWED_STAR_BINDING_MISMATCH,
+    )
+  }
 }
 
 function effectiveTargetMajorStarNames(
@@ -384,13 +406,27 @@ function assertPrimaryAxisSourceBinding(
     hasDuplicates(effectiveMajorStars) ||
     actualMajorStars.length === 0 ||
     hasDuplicates(actualMajorStars) ||
-    !setEquals(new Set(actualMajorStars), new Set(effectiveMajorStars)) ||
+    !setEquals(new Set(actualMajorStars), new Set(effectiveMajorStars))
+  ) {
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.PRIMARY_AXIS_MAJOR_STAR_BINDING_MISMATCH,
+    )
+  }
+
+  if (
     result.primaryAxis.usedRuleIds.length === 0 ||
     hasDuplicates(result.primaryAxis.usedRuleIds) ||
+    result.primaryAxis.usedRuleIds.some((ruleId) => !rulesById.has(ruleId))
+  ) {
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.PRIMARY_AXIS_RULE_BINDING_MISMATCH,
+    )
+  }
+
+  if (
     result.primaryAxis.usedRuleIds.some((ruleId) => {
       const trace = tracesByRuleId.get(ruleId)
       return (
-        !rulesById.has(ruleId) ||
         !trace ||
         (trace.palaceRole !== null && trace.palaceRole !== 'target')
       )
@@ -399,7 +435,9 @@ function assertPrimaryAxisSourceBinding(
       (ruleId) => !result.primaryAxis.usedRuleIds.includes(ruleId),
     )
   ) {
-    resultInvalid()
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RULE_PALACE_STAR_BINDING_MISMATCH,
+    )
   }
 
   const authenticatedTargetDoubleRules = modelInput.knowledgeContext.selectionTrace
@@ -412,7 +450,11 @@ function assertPrimaryAxisSourceBinding(
     .map((trace) => trace.ruleId)
 
   if (authenticatedTargetDoubleRules.length === 0) {
-    if (result.primaryAxis.doubleStarCore !== null) resultInvalid()
+    if (result.primaryAxis.doubleStarCore !== null) {
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.PRIMARY_AXIS_DOUBLE_STAR_BINDING_MISMATCH,
+      )
+    }
   } else {
     const doubleStarCore = result.primaryAxis.doubleStarCore
     if (
@@ -429,7 +471,9 @@ function assertPrimaryAxisSourceBinding(
           doubleStarCore.includes(starName),
       )
     ) {
-      resultInvalid()
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.PRIMARY_AXIS_DOUBLE_STAR_BINDING_MISMATCH,
+      )
     }
   }
 
@@ -463,7 +507,9 @@ function assertPrimaryAxisSourceBinding(
       primaryAxisText.some((text) => text.includes(metadata)),
     )
   ) {
-    resultInvalid()
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.PRIMARY_AXIS_FORBIDDEN_METADATA,
+    )
   }
 }
 
@@ -564,7 +610,9 @@ function assertRulePalaceAndStarBindings(
       (ruleId) => !ruleStatusById.has(ruleId),
     )
   ) {
-    resultInvalid()
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.PRIMARY_AXIS_RULE_BINDING_MISMATCH,
+    )
   }
 
   for (const field of P1_CANDIDATE_COLLECTION_FIELDS) {
@@ -593,7 +641,9 @@ function assertStringCoverageSubset(
   expected: ReadonlySet<string>,
 ): ReadonlySet<string> {
   if (hasDuplicates(values) || values.some((value) => !expected.has(value))) {
-    resultInvalid()
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+    )
   }
   return new Set(values)
 }
@@ -665,7 +715,11 @@ function representedMutagenPairs(
   values: readonly string[],
   expectedPairs: readonly ExpectedMutagenPair[],
 ): ReadonlySet<string> {
-  if (hasDuplicates(values)) resultInvalid()
+  if (hasDuplicates(values)) {
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+    )
+  }
   const represented = new Set<string>()
   for (const value of values) {
     const matches = expectedPairs.filter(
@@ -687,9 +741,15 @@ function representedMutagenPairs(
           value.includes(type) && !matchedMutagenTypes.has(type),
       )
     ) {
-      resultInvalid()
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+      )
     }
-    if (matches.some((pair) => represented.has(pair.key))) resultInvalid()
+    if (matches.some((pair) => represented.has(pair.key))) {
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+      )
+    }
     matches.forEach((pair) => represented.add(pair.key))
   }
   return represented
@@ -700,7 +760,11 @@ function representedMaleficTypes(
   expectedTypes: ReadonlySet<string>,
   opaqueIds: ReadonlySet<string>,
 ): ReadonlySet<string> {
-  if (hasDuplicates(values)) resultInvalid()
+  if (hasDuplicates(values)) {
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+    )
+  }
   const represented = new Set<string>()
   for (const value of values) {
     const matches = [...expectedTypes].filter((type) => value.includes(type))
@@ -711,9 +775,15 @@ function representedMaleficTypes(
         (type) => value.includes(type) && !expectedTypes.has(type),
       )
     ) {
-      resultInvalid()
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+      )
     }
-    if (matches.some((type) => represented.has(type))) resultInvalid()
+    if (matches.some((type) => represented.has(type))) {
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+      )
+    }
     matches.forEach((type) => represented.add(type))
   }
   return represented
@@ -780,7 +850,9 @@ function assertCoverageSourceBinding(
       result.coverage.omittedItems.length !== 0 ||
       result.warnings.length !== 0
     ) {
-      resultInvalid()
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+      )
     }
     return
   }
@@ -789,23 +861,31 @@ function assertCoverageSourceBinding(
     (result.status !== 'partial' && result.status !== 'incomplete') ||
     result.coverage.omittedItems.length === 0
   ) {
-    resultInvalid()
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+    )
   }
 
   const omissions = omissionTexts(result.coverage)
   for (const meaningId of expected.targetMeaningIds) {
     if (!directMeanings.has(meaningId) && !hasOmissionTrace(omissions, meaningId)) {
-      resultInvalid()
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+      )
     }
   }
   for (const starName of expected.targetMajorStars) {
     if (!majorStars.has(starName) && !hasOmissionTrace(omissions, starName)) {
-      resultInvalid()
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+      )
     }
   }
   for (const starName of expected.targetMinorStars) {
     if (!minorStars.has(starName) && !hasOmissionTrace(omissions, starName)) {
-      resultInvalid()
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+      )
     }
   }
   for (const pair of expected.targetMutagenPairs) {
@@ -813,7 +893,9 @@ function assertCoverageSourceBinding(
       !mutagenPairs.has(pair.key) &&
       !hasOmissionTrace(omissions, pair.starName, pair.mutagenType)
     ) {
-      resultInvalid()
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+      )
     }
   }
   for (const signalType of expected.relevantMaleficTypes) {
@@ -821,12 +903,16 @@ function assertCoverageSourceBinding(
       !maleficTypes.has(signalType) &&
       !hasOmissionTrace(omissions, signalType)
     ) {
-      resultInvalid()
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+      )
     }
   }
   for (const starName of expected.targetNobleStars) {
     if (!nobleStars.has(starName) && !hasOmissionTrace(omissions, starName)) {
-      resultInvalid()
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+      )
     }
   }
 }
@@ -844,7 +930,9 @@ function assertWarningTraceability(
       (warning) => !traceText.some((text) => text.includes(warning.code)),
     )
   ) {
-    resultInvalid()
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.OTHER_SOURCE_BOUND_BINDING_MISMATCH,
+    )
   }
 }
 
@@ -899,7 +987,9 @@ function assertMetadataIsolation(
       text.some((semanticValue) => semanticValue.includes(auditValue)),
     )
   ) {
-    resultInvalid()
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.OTHER_SOURCE_BOUND_BINDING_MISMATCH,
+    )
   }
 }
 
@@ -922,7 +1012,9 @@ function createAiChartD1P1SourceBoundResultParser(
       if (error instanceof AiChartD1P1AdapterBridgeResultInvalidError) {
         throw error
       }
-      resultInvalid()
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID,
+      )
     }
   }
 }

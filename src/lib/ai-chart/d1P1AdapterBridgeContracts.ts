@@ -41,8 +41,14 @@ export const AI_CHART_D1_P1_ADAPTER_BRIDGE_INVALID =
   'ai_chart_d1_p1_adapter_bridge_invalid' as const
 export const AI_CHART_D1_P1_ADAPTER_BRIDGE_NOT_READY =
   'ai_chart_d1_p1_adapter_bridge_not_ready' as const
-export const AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID =
-  'ai_chart_d1_p1_adapter_bridge_result_invalid' as const
+
+export {
+  AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID,
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS,
+  AiChartD1P1AdapterBridgeResultInvalidError,
+  isAiChartD1P1SourceBoundValidationReasonCode,
+} from './d1P1SourceBoundDiagnostics'
+export type { AiChartD1P1SourceBoundValidationReasonCode } from './d1P1SourceBoundDiagnostics'
 
 export type AiChartD1P1AdapterBridgeDescriptor = Readonly<{
   contractVersion: typeof AI_CHART_D1_P1_ADAPTER_BRIDGE_CONTRACT_VERSION
@@ -90,15 +96,6 @@ export class AiChartD1P1AdapterBridgeNotReadyError extends Error {
   constructor() {
     super(AI_CHART_D1_P1_ADAPTER_BRIDGE_NOT_READY)
     this.name = 'AiChartD1P1AdapterBridgeNotReadyError'
-  }
-}
-
-export class AiChartD1P1AdapterBridgeResultInvalidError extends Error {
-  readonly code = AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID
-
-  constructor() {
-    super(AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID)
-    this.name = 'AiChartD1P1AdapterBridgeResultInvalidError'
   }
 }
 
