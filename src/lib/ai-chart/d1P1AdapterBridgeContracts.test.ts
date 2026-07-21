@@ -14,6 +14,7 @@ import {
   AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID,
   AI_CHART_D1_P1_ADAPTER_BRIDGE_SCHEMA_NAME,
   AI_CHART_D1_P1_ADAPTER_BRIDGE_TASK,
+  AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
   AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS,
   AiChartD1P1AdapterBridgeError,
   AiChartD1P1AdapterBridgeNotReadyError,
@@ -39,6 +40,7 @@ import {
 } from './d1P1PreviewTimeoutContracts'
 import {
   AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
+  AI_CHART_OPENAI_MAX_OUTPUT_TOKENS,
   AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
   AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
 } from './openAiResponses'
@@ -294,10 +296,30 @@ async function run() {
       defaultPayload,
     )
   })
-  check('Descriptor output budget uses the Adapter default', () => {
+  check('D1 P1 output budget is dedicated and within the generic range', () => {
+    assert.equal(AI_CHART_D1_P1_MAX_OUTPUT_TOKENS, 16_384)
+    assert.equal(AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS, 8_192)
+    assert.equal(AI_CHART_OPENAI_MAX_OUTPUT_TOKENS, 32_768)
+  })
+  check('Descriptor output budget uses the D1 P1 policy', () => {
     assert.equal(
       descriptor.maxOutputTokens,
-      AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
+      AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
+    )
+  })
+  check('D1 P1 output budget participates in the Bridge fingerprint', () => {
+    const currentPayload = fingerprintPayload(descriptor)
+    const legacyPayload = {
+      ...currentPayload,
+      maxOutputTokens: AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
+    } as unknown as AiChartD1P1AdapterBridgeDescriptorWithoutFingerprint
+    assert.equal(
+      createAiChartD1P1AdapterBridgeFingerprint(currentPayload),
+      descriptor.bridgeFingerprint,
+    )
+    assert.notEqual(
+      createAiChartD1P1AdapterBridgeFingerprint(legacyPayload),
+      descriptor.bridgeFingerprint,
     )
   })
   check('Descriptor request status is ready', () => {
@@ -574,7 +596,7 @@ async function run() {
     )
     assert.equal(
       properties.maxOutputTokens.const,
-      AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
+      AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
     )
   })
   check('internal Schema has no uniqueItems keyword', () => {

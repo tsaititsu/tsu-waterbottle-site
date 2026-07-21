@@ -25,7 +25,6 @@ import {
   type AiChartD1P1PreviewTimeoutMs,
 } from './d1P1PreviewTimeoutContracts'
 import {
-  AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
   AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
 } from './openAiResponses'
 
@@ -41,6 +40,7 @@ export const AI_CHART_D1_P1_ADAPTER_BRIDGE_INVALID =
   'ai_chart_d1_p1_adapter_bridge_invalid' as const
 export const AI_CHART_D1_P1_ADAPTER_BRIDGE_NOT_READY =
   'ai_chart_d1_p1_adapter_bridge_not_ready' as const
+export const AI_CHART_D1_P1_MAX_OUTPUT_TOKENS = 16_384 as const
 
 export {
   AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID,
@@ -69,7 +69,7 @@ export type AiChartD1P1AdapterBridgeDescriptor = Readonly<{
   description: typeof AI_CHART_D1_P1_ADAPTER_BRIDGE_DESCRIPTION
   reasoningEffort: typeof AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT
   timeoutMs: AiChartD1P1PreviewTimeoutMs
-  maxOutputTokens: typeof AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS
+  maxOutputTokens: typeof AI_CHART_D1_P1_MAX_OUTPUT_TOKENS
   requestStatus: 'ready'
   runtimeStatus: 'runtime_wiring_required'
   openAiCallable: false
@@ -194,8 +194,7 @@ export function parseAiChartD1P1AdapterBridgeDescriptorShape(
       record.reasoningEffort !==
         AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT ||
       !isAiChartD1P1PreviewTimeoutMs(record.timeoutMs) ||
-      record.maxOutputTokens !==
-        AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS ||
+      record.maxOutputTokens !== AI_CHART_D1_P1_MAX_OUTPUT_TOKENS ||
       record.requestStatus !== 'ready' ||
       record.runtimeStatus !== 'runtime_wiring_required' ||
       record.openAiCallable !== false
@@ -226,7 +225,7 @@ export function parseAiChartD1P1AdapterBridgeDescriptorShape(
       description: AI_CHART_D1_P1_ADAPTER_BRIDGE_DESCRIPTION,
       reasoningEffort: AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
       timeoutMs: parsePreviewTimeout(record.timeoutMs),
-      maxOutputTokens: AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
+      maxOutputTokens: AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
       requestStatus: 'ready' as const,
       runtimeStatus: 'runtime_wiring_required' as const,
       openAiCallable: false as const,
@@ -297,7 +296,7 @@ export const AI_CHART_D1_P1_ADAPTER_BRIDGE_INTERNAL_JSON_SCHEMA: AiChartD1JsonSc
       enum: AI_CHART_D1_P1_PREVIEW_TIMEOUT_VALUES,
     }),
     maxOutputTokens: freezeAiChartD1Value({
-      const: AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
+      const: AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
     }),
     requestStatus: freezeAiChartD1Value({ const: 'ready' }),
     runtimeStatus: freezeAiChartD1Value({
