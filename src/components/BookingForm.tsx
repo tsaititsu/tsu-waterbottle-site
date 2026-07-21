@@ -673,28 +673,22 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
           <div className="mt-4 grid gap-3">
             {paymentMethod === 'bank-transfer' ? (
               <>
-                <div className="rounded-xl border border-borderSoft bg-white p-4 text-sm leading-6 text-textMuted">
-                  <p>
-                    請先完成郵局匯款，並填寫聯絡電話與您的匯款帳號後五碼。完成後請至水瓶先生官方 LINE 回覆「已匯款＋姓名＋購買項目」，客服核對款項後，將協助開通與確認預約。
-                  </p>
-                </div>
-
                 <div className="rounded-xl border border-borderSoft bg-white p-4 text-sm leading-6 text-textDark">
                   <div className="flex min-h-11 items-start gap-3">
                     <input
                       id="booking-bank-transfer-reminder"
-                      aria-label="我已了解完成郵局匯款後需透過水瓶先生官方 LINE 聯絡並等待客服確認預約"
+                      aria-label="我已了解完成郵局匯款、填寫聯絡電話與匯款帳號後五碼後，需透過水瓶先生官方 LINE 聯絡並等待客服確認預約"
                       checked={hasAcceptedBankTransferReminder}
                       className="mt-1 h-6 w-6 shrink-0 accent-deepPurple md:h-5 md:w-5"
                       onChange={(event) => setHasAcceptedBankTransferReminder(event.target.checked)}
                       type="checkbox"
                     />
-                    <p>
+                    <p className="min-w-0 text-pretty">
                       <label className="cursor-pointer" htmlFor="booking-bank-transfer-reminder">
-                        我已了解：完成郵局匯款後，需透過
+                        我已了解：請先完成郵局匯款，並填寫聯絡電話與匯款帳號後五碼。完成後，需透過
                       </label>{' '}
                       <a
-                        className="inline-flex items-center gap-1 font-semibold text-[#07883b] underline underline-offset-4"
+                        className="inline-flex items-center gap-1 whitespace-nowrap font-semibold text-[#07883b] underline underline-offset-4"
                         href={officialLineUrl}
                         rel="noopener noreferrer"
                         target="_blank"
@@ -703,7 +697,7 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
                         水瓶先生官方 LINE
                       </a>{' '}
                       <label className="cursor-pointer" htmlFor="booking-bank-transfer-reminder">
-                        主動回覆「已匯款＋姓名＋預約項目」，待客服核對款項後，才完成預約確認。
+                        回覆『已匯款＋姓名＋預約項目』，待客服核對款項後，才完成預約確認。
                       </label>
                     </p>
                   </div>

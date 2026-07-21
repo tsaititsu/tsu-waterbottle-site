@@ -48,6 +48,27 @@ assert.equal(bookingFormSource.includes("const officialLineUrl = 'https://lin.ee
 assert.equal(bookingFormSource.includes('formError === BANK_TRANSFER_REMINDER_ERROR'), true)
 assert.equal(bookingFormSource.includes('id="booking-bank-transfer-reminder"'), true)
 assert.equal(bookingFormSource.includes('id="booking-terms-consent"'), true)
+assert.equal(
+  bookingFormSource.includes(
+    '請先完成郵局匯款，並填寫聯絡電話與您的匯款帳號後五碼。完成後請至水瓶先生官方 LINE',
+  ),
+  false,
+)
+assert.equal(
+  bookingFormSource.includes(
+    '我已了解：請先完成郵局匯款，並填寫聯絡電話與匯款帳號後五碼。完成後，需透過',
+  ),
+  true,
+)
+assert.equal(
+  bookingFormSource.includes('回覆『已匯款＋姓名＋預約項目』，待客服核對款項後，才完成預約確認。'),
+  true,
+)
+assert.equal(bookingFormSource.includes('inline-flex items-center gap-1 whitespace-nowrap'), true)
+assert.equal(
+  bookingFormSource.indexOf('id="booking-bank-transfer-reminder"') < bookingFormSource.indexOf('郵局匯款資訊'),
+  true,
+)
 
 // 出生日期仍拆成年、月、日，月份與日期不強制保留前導零。
 assert.equal(bookingFormSource.includes("const [year, month, day] = value.split('-')"), true)
