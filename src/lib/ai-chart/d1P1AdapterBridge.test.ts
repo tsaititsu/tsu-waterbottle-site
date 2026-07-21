@@ -694,7 +694,10 @@ async function run() {
   check('complete Result with omitted items is rejected', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.coverage.omittedItems.push({ item: 'missing', reason: 'missing' })
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_STATUS_OMISSIONS_MISMATCH,
+    )
   })
   for (const field of [
     'oppositeProcessed',
@@ -704,18 +707,27 @@ async function run() {
     check(`complete Result requires ${field}`, () => {
       const value = createValidAiChartD1P1Result(modelInput)
       value.coverage[field] = false
-      assertResultInvalid(() => parseResult(bridge, value))
+      assertResultInvalid(
+        () => parseResult(bridge, value),
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_PROCESSING_FLAGS_MISMATCH,
+      )
     })
   }
   check('complete Result with warnings is rejected', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.warnings.push('synthetic warning')
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_STATUS_OMISSIONS_MISMATCH,
+    )
   })
   check('incomplete Result without omissions is rejected', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.status = 'incomplete'
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_STATUS_OMISSIONS_MISMATCH,
+    )
   })
   check('incomplete Result with omissions passes', () => {
     const value = createValidAiChartD1P1Result(modelInput)
@@ -726,7 +738,10 @@ async function run() {
   check('partial Result without omissions is rejected', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.status = 'partial'
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_STATUS_OMISSIONS_MISMATCH,
+    )
   })
   check('ready input may return partial with explicit omissions', () => {
     const value = createValidAiChartD1P1Result(modelInput)
@@ -752,31 +767,51 @@ async function run() {
     value.coverage.noblesCovered.reverse()
     assert.doesNotThrow(() => parseResult(bridge, value))
   })
-  for (const [name, field] of [
-    ['target meanings', 'directMeaningsConsidered'],
-    ['target major stars', 'majorStarsCovered'],
-    ['target supporting stars', 'minorStarsCovered'],
-    ['target natal mutagens', 'mutagensCovered'],
-    ['relevant malefic signals', 'maleficsCovered'],
+  for (const [name, field, reasonCode] of [
+    [
+      'target meanings',
+      'directMeaningsConsidered',
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+    ],
+    [
+      'target major stars',
+      'majorStarsCovered',
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
+    ],
+    [
+      'target supporting stars',
+      'minorStarsCovered',
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
+    ],
+    [
+      'target natal mutagens',
+      'mutagensCovered',
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
+    ],
+    [
+      'relevant malefic signals',
+      'maleficsCovered',
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
+    ],
   ] as const) {
     check(`complete Result rejects empty ${name}`, () => {
       const value = createValidAiChartD1P1Result(modelInput)
       assert.equal(value.coverage[field].length > 0, true)
       value.coverage[field] = []
-      assertResultInvalid(() => parseResult(bridge, value))
+      assertResultInvalid(() => parseResult(bridge, value), reasonCode)
     })
     check(`complete Result rejects one missing ${name} source`, () => {
       const value = createValidAiChartD1P1Result(modelInput)
       assert.equal(value.coverage[field].length > 0, true)
       value.coverage[field] = value.coverage[field].slice(1)
-      assertResultInvalid(() => parseResult(bridge, value))
+      assertResultInvalid(() => parseResult(bridge, value), reasonCode)
     })
     check(`${name} rejects duplicate entries`, () => {
       const value = createValidAiChartD1P1Result(modelInput)
       const first = value.coverage[field][0]
       assert.ok(first)
       value.coverage[field] = [...value.coverage[field], first]
-      assertResultInvalid(() => parseResult(bridge, value))
+      assertResultInvalid(() => parseResult(bridge, value), reasonCode)
     })
   }
   const oppositeMeaning = modelInput.knowledgeContext.meanings.find(
@@ -788,13 +823,16 @@ async function run() {
     value.coverage.directMeaningsConsidered = ['meaning:invented']
     assertResultInvalid(
       () => parseResult(bridge, value),
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
     )
   })
   check('opposite meaningId is rejected from direct coverage', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.coverage.directMeaningsConsidered = [oppositeMeaning.meaningId]
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+    )
   })
   const otherMajorStar = modelInputs[1].structuralContext.targetPalace
     .canonicalMajorStars[0]
@@ -802,12 +840,18 @@ async function run() {
   check('another palace major star is rejected from coverage', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.coverage.majorStarsCovered = [otherMajorStar.name]
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
+    )
   })
   check('an unseen major star is rejected from coverage', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.coverage.majorStarsCovered = ['紫微']
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
+    )
   })
   const otherSupportingStar = modelInputs[1].structuralContext.targetPalace
     .modeledSupportingStars[0]
@@ -815,12 +859,18 @@ async function run() {
   check('another palace supporting star is rejected from coverage', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.coverage.minorStarsCovered = [otherSupportingStar.name]
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
+    )
   })
   check('an unseen supporting star is rejected from coverage', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.coverage.minorStarsCovered = ['天刑']
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
+    )
   })
   check('an actual natal-mutagen pair may use descriptive wording', () => {
     const value = createValidAiChartD1P1Result(modelInput)
@@ -838,7 +888,10 @@ async function run() {
       .canonicalMajorStars[0]
     assert.ok(targetStar)
     value.coverage.mutagensCovered = [`${targetStar.name} 化權`]
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
+    )
   })
   check('another palace natal-mutagen pair is rejected', () => {
     const value = createValidAiChartD1P1Result(modelInput)
@@ -848,7 +901,10 @@ async function run() {
     value.coverage.mutagensCovered = [
       `${otherStar.name} ${otherStar.natalMutagen}`,
     ]
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
+    )
   })
   check('valid natal-mutagen wording cannot append another palace pair', () => {
     const value = createValidAiChartD1P1Result(modelInput)
@@ -860,14 +916,20 @@ async function run() {
     value.coverage.mutagensCovered = [
       `${targetPair}；${otherStar.name} ${otherStar.natalMutagen}`,
     ]
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
+    )
   })
   check('two wordings cannot duplicate one natal-mutagen source', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     const pair = value.coverage.mutagensCovered[0]
     assert.ok(pair)
     value.coverage.mutagensCovered = [pair, `已覆蓋 ${pair}`]
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
+    )
   })
   check('actual malefic signal types may use descriptive wording', () => {
     const value = createValidAiChartD1P1Result(modelInput)
@@ -884,7 +946,10 @@ async function run() {
     )
     assert.ok(unobserved)
     value.coverage.maleficsCovered = [unobserved]
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
+    )
   })
   check('valid malefic wording cannot append an unobserved signal type', () => {
     const value = createValidAiChartD1P1Result(modelInput)
@@ -899,7 +964,10 @@ async function run() {
       `${observed} 並誤列 ${unobserved}`,
       ...value.coverage.maleficsCovered.slice(1),
     ]
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
+    )
   })
   check('two wordings cannot duplicate one malefic source', () => {
     const value = createValidAiChartD1P1Result(modelInput)
@@ -910,7 +978,10 @@ async function run() {
       `已覆蓋 ${first}`,
       ...value.coverage.maleficsCovered.slice(1),
     ]
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
+    )
   })
   check('a signal placementId cannot replace malefic coverage semantics', () => {
     const value = createValidAiChartD1P1Result(modelInput)
@@ -922,7 +993,10 @@ async function run() {
     ][0]
     assert.ok(signal)
     value.coverage.maleficsCovered = [signal.starPlacementId]
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
+    )
   })
   check('a signalId cannot replace malefic coverage semantics', () => {
     const value = createValidAiChartD1P1Result(modelInput)
@@ -934,7 +1008,10 @@ async function run() {
     ][0]
     assert.ok(signal)
     value.coverage.maleficsCovered = [signal.signalId]
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
+    )
   })
 
   const nobleIndex = modelInputs.findIndex(
@@ -953,7 +1030,10 @@ async function run() {
     const value = createValidAiChartD1P1Result(nobleInput)
     assert.equal(value.coverage.noblesCovered.length > 0, true)
     value.coverage.noblesCovered = []
-    assertResultInvalid(() => parseResult(nobleBridge, value))
+    assertResultInvalid(
+      () => parseResult(nobleBridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_NOBLES_MISMATCH,
+    )
   })
   check('noble coverage rejects a noble absent from the target palace', () => {
     const value = createValidAiChartD1P1Result(nobleInput)
@@ -962,15 +1042,128 @@ async function run() {
     )
     assert.ok(unexpected)
     value.coverage.noblesCovered = [unexpected]
-    assertResultInvalid(() => parseResult(nobleBridge, value))
+    assertResultInvalid(
+      () => parseResult(nobleBridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_NOBLES_MISMATCH,
+    )
   })
   check('noble coverage rejects duplicate entries', () => {
     const value = createValidAiChartD1P1Result(nobleInput)
     const noble = value.coverage.noblesCovered[0]
     assert.ok(noble)
     value.coverage.noblesCovered = [noble, noble]
-    assertResultInvalid(() => parseResult(nobleBridge, value))
+    assertResultInvalid(
+      () => parseResult(nobleBridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_NOBLES_MISMATCH,
+    )
   })
+
+  const coverageDiagnosticMutationMatrix = [
+    [
+      'direct meanings',
+      bridge,
+      modelInput,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+      (value: Mutable<AiChartD1P1Result>) => {
+        const first = value.coverage.directMeaningsConsidered[0]
+        assert.ok(first)
+        value.coverage.directMeaningsConsidered.push(first)
+      },
+    ],
+    [
+      'major stars',
+      bridge,
+      modelInput,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
+      (value: Mutable<AiChartD1P1Result>) => {
+        const first = value.coverage.majorStarsCovered[0]
+        assert.ok(first)
+        value.coverage.majorStarsCovered.push(first)
+      },
+    ],
+    [
+      'minor stars',
+      bridge,
+      modelInput,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
+      (value: Mutable<AiChartD1P1Result>) => {
+        const first = value.coverage.minorStarsCovered[0]
+        assert.ok(first)
+        value.coverage.minorStarsCovered.push(first)
+      },
+    ],
+    [
+      'mutagens',
+      bridge,
+      modelInput,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
+      (value: Mutable<AiChartD1P1Result>) => {
+        const first = value.coverage.mutagensCovered[0]
+        assert.ok(first)
+        value.coverage.mutagensCovered.push(first)
+      },
+    ],
+    [
+      'malefics',
+      bridge,
+      modelInput,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
+      (value: Mutable<AiChartD1P1Result>) => {
+        const first = value.coverage.maleficsCovered[0]
+        assert.ok(first)
+        value.coverage.maleficsCovered.push(first)
+      },
+    ],
+    [
+      'nobles',
+      nobleBridge,
+      nobleInput,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_NOBLES_MISMATCH,
+      (value: Mutable<AiChartD1P1Result>) => {
+        const first = value.coverage.noblesCovered[0]
+        assert.ok(first)
+        value.coverage.noblesCovered.push(first)
+      },
+    ],
+    [
+      'processing flags',
+      bridge,
+      modelInput,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_PROCESSING_FLAGS_MISMATCH,
+      (value: Mutable<AiChartD1P1Result>) => {
+        value.coverage.oppositeProcessed = false
+      },
+    ],
+    [
+      'status and omissions',
+      bridge,
+      modelInput,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_STATUS_OMISSIONS_MISMATCH,
+      (value: Mutable<AiChartD1P1Result>) => {
+        value.coverage.omittedItems.push({
+          item: 'synthetic-gap',
+          reason: 'synthetic-gap',
+        })
+      },
+    ],
+  ] as const
+
+  for (const [
+    name,
+    matrixBridge,
+    matrixInput,
+    expectedReasonCode,
+    mutate,
+  ] of coverageDiagnosticMutationMatrix) {
+    check(`coverage diagnostic matrix maps ${name}`, () => {
+      const value = createValidAiChartD1P1Result(matrixInput)
+      mutate(value)
+      assertResultInvalid(
+        () => parseResult(matrixBridge, value),
+        expectedReasonCode,
+      )
+    })
+  }
 
   const coverageInput = modelInputs[2]
   const coverageBridge = bridges[2]
@@ -1022,19 +1215,28 @@ async function run() {
     check(`${status} subset rejects a missing meaning omission trace`, () => {
       const value = createSubsetResult(status)
       value.coverage.omittedItems = value.coverage.omittedItems.slice(1)
-      assertResultInvalid(() => parseResult(coverageBridge, value))
+      assertResultInvalid(
+        () => parseResult(coverageBridge, value),
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+      )
     })
     check(`${status} subset rejects a missing mutagen omission trace`, () => {
       const value = createSubsetResult(status)
       value.coverage.omittedItems = value.coverage.omittedItems.filter(
         (item) => !item.reason.includes('natal mutagen'),
       )
-      assertResultInvalid(() => parseResult(coverageBridge, value))
+      assertResultInvalid(
+        () => parseResult(coverageBridge, value),
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
+      )
     })
     check(`${status} coverage rejects an extra unknown source`, () => {
       const value = createSubsetResult(status)
       value.coverage.majorStarsCovered.push('紫微')
-      assertResultInvalid(() => parseResult(coverageBridge, value))
+      assertResultInvalid(
+        () => parseResult(coverageBridge, value),
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
+      )
     })
   }
   check('partial coverage cannot omit a source without naming it', () => {
@@ -1042,7 +1244,10 @@ async function run() {
     value.status = 'partial'
     value.coverage.directMeaningsConsidered.shift()
     value.coverage.omittedItems = [{ item: 'known gap', reason: 'not processed' }]
-    assertResultInvalid(() => parseResult(coverageBridge, value))
+    assertResultInvalid(
+      () => parseResult(coverageBridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+    )
   })
   check('complete Result cannot use empty coverage and empty omissions', () => {
     const value = createValidAiChartD1P1Result(modelInput)
@@ -1053,7 +1258,10 @@ async function run() {
     value.coverage.maleficsCovered = []
     value.coverage.noblesCovered = []
     value.coverage.omittedItems = []
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+    )
   })
 
   const partialSnapshot = completeModelInputSnapshot()
@@ -2091,7 +2299,7 @@ async function run() {
     join(repositoryRoot, 'src/lib/ai-chart/d1P1AdapterBridge.ts'),
     'utf8',
   )
-  check('every resultInvalid call site supplies a fixed reason code', () => {
+  check('every resultInvalid call site uses a fixed or controlled reason code', () => {
     const sourceFile = ts.createSourceFile(
       'src/lib/ai-chart/d1P1AdapterBridge.ts',
       bridgeSource,
@@ -2100,6 +2308,7 @@ async function run() {
       ts.ScriptKind.TS,
     )
     const callSites: ts.CallExpression[] = []
+    const stringCoverageCallSites: ts.CallExpression[] = []
 
     function visit(node: ts.Node): void {
       if (
@@ -2109,15 +2318,24 @@ async function run() {
       ) {
         callSites.push(node)
       }
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === 'assertStringCoverageSubset'
+      ) {
+        stringCoverageCallSites.push(node)
+      }
       ts.forEachChild(node, visit)
     }
 
     visit(sourceFile)
-    assert.equal(callSites.length, 32)
+    assert.equal(callSites.length, 45)
 
     const allowedReasonNames = new Set(
       Object.keys(AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS),
     )
+    let controlledHelperReasons = 0
+    let directFixedReasons = 0
     for (const [index, callSite] of callSites.entries()) {
       assert.equal(
         callSite.arguments.length,
@@ -2125,12 +2343,29 @@ async function run() {
         `resultInvalid call ${index + 1} must have exactly one argument`,
       )
       const argument = callSite.arguments[0]
+      if (ts.isIdentifier(argument)) {
+        let ancestor: ts.Node | undefined = callSite.parent
+        while (ancestor !== undefined && !ts.isFunctionDeclaration(ancestor)) {
+          ancestor = ancestor.parent
+        }
+        assert.equal(
+          argument.text === 'reasonCode' &&
+            ancestor !== undefined &&
+            ts.isFunctionDeclaration(ancestor) &&
+            ancestor.name?.text === 'assertStringCoverageSubset',
+          true,
+          `resultInvalid call ${index + 1} has uncontrolled reason identifier ${argument.text}`,
+        )
+        controlledHelperReasons += 1
+        continue
+      }
       assert.equal(
         ts.isPropertyAccessExpression(argument),
         true,
         `resultInvalid call ${index + 1} has argument kind ${ts.SyntaxKind[argument.kind]}`,
       )
       if (!ts.isPropertyAccessExpression(argument)) continue
+      directFixedReasons += 1
       assert.equal(
         ts.isIdentifier(argument.expression) &&
           argument.expression.text ===
@@ -2149,6 +2384,35 @@ async function run() {
         `resultInvalid call ${index + 1} has unknown reason ${argument.name.text}`,
       )
     }
+    assert.equal(controlledHelperReasons, 1)
+    assert.equal(directFixedReasons, 44)
+
+    assert.equal(stringCoverageCallSites.length, 4)
+    assert.deepEqual(
+      new Set(
+        stringCoverageCallSites.map((callSite, index) => {
+          assert.equal(
+            callSite.arguments.length,
+            3,
+            `assertStringCoverageSubset call ${index + 1} must have three arguments`,
+          )
+          const reasonArgument = callSite.arguments[2]
+          assert.equal(
+            ts.isPropertyAccessExpression(reasonArgument),
+            true,
+            `assertStringCoverageSubset call ${index + 1} must use a fixed reason constant`,
+          )
+          if (!ts.isPropertyAccessExpression(reasonArgument)) return ''
+          return reasonArgument.name.text
+        }),
+      ),
+      new Set([
+        'COVERAGE_DIRECT_MEANINGS_MISMATCH',
+        'COVERAGE_MAJOR_STARS_MISMATCH',
+        'COVERAGE_MINOR_STARS_MISMATCH',
+        'COVERAGE_NOBLES_MISMATCH',
+      ]),
+    )
   })
   check('Adapter Bridge production consumer is only Preview Gate', () => {
     const consumers = sourceFiles

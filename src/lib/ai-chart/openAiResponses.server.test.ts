@@ -45,6 +45,19 @@ const SYNTHETIC_API_KEY = 'synthetic-api-key-value'
 const SYNTHETIC_PROMPT = 'synthetic-private-prompt-value'
 const SYNTHETIC_RESPONSE_BODY = 'synthetic-raw-api-error-body-value'
 const SYNTHETIC_REASONING_MARKER = 'synthetic-private-reasoning-marker'
+const SYNTHETIC_SOURCE_BOUND_SENSITIVE_MESSAGE =
+  'synthetic-output_text-prompt-model-input-starName-palaceId-ruleId-meaningId-omission-detail'
+
+const COVERAGE_DETAIL_REASON_CODES = Object.freeze([
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_NOBLES_MISMATCH,
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_PROCESSING_FLAGS_MISMATCH,
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_STATUS_OMISSIONS_MISMATCH,
+] as const)
 
 const moduleInternals = Module as unknown as NodeModuleInternals
 const originalResolveFilename = moduleInternals._resolveFilename
@@ -857,6 +870,49 @@ async function run() {
       )
     },
   )
+
+  for (const reasonCode of COVERAGE_DETAIL_REASON_CODES) {
+    await asyncTest(
+      `source-bound ${reasonCode} remains a safe server diagnostic`,
+      async () => {
+        const error = await captureSafeError(
+          () =>
+            requestAiChartOpenAiStructuredResponse(
+              requestFixture({
+                parseResult: () => {
+                  throw new AiChartD1P1AdapterBridgeResultInvalidError(
+                    reasonCode,
+                  )
+                },
+              }),
+              {
+                env: syntheticEnv(),
+                fetchImpl: mockFetch(
+                  async () =>
+                    new Response(JSON.stringify(rawResponseFixture()), {
+                      status: 200,
+                    }),
+                ),
+              },
+            ),
+          AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID,
+          false,
+          [
+            SYNTHETIC_SOURCE_BOUND_SENSITIVE_MESSAGE,
+            SYNTHETIC_RESPONSE_BODY,
+          ],
+        )
+        assert.equal(error.diagnostic?.outputSchemaValidationCode, reasonCode)
+        assert.equal(Object.isFrozen(error.diagnostic), true)
+        assert.equal(
+          JSON.stringify(error).includes(
+            SYNTHETIC_SOURCE_BOUND_SENSITIVE_MESSAGE,
+          ),
+          false,
+        )
+      },
+    )
+  }
 
   await asyncTest('malformed Structured Output is rejected', async () => {
     await captureSafeError(

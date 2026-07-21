@@ -153,6 +153,60 @@ function resultInvalid(
   throw new AiChartD1P1AdapterBridgeResultInvalidError(reasonCode)
 }
 
+function hasStringArrayDuplicates(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.every((item) => typeof item === 'string') &&
+    new Set(value).size !== value.length
+  )
+}
+
+function assertCoverageDuplicateDiagnostics(value: unknown): void {
+  assertAiChartD1SafeGraph(value)
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return
+  }
+  const coverage = (value as Record<string, unknown>).coverage
+  if (
+    typeof coverage !== 'object' ||
+    coverage === null ||
+    Array.isArray(coverage)
+  ) {
+    return
+  }
+  const coverageRecord = coverage as Record<string, unknown>
+  if (hasStringArrayDuplicates(coverageRecord.directMeaningsConsidered)) {
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+    )
+  }
+  if (hasStringArrayDuplicates(coverageRecord.majorStarsCovered)) {
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
+    )
+  }
+  if (hasStringArrayDuplicates(coverageRecord.minorStarsCovered)) {
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
+    )
+  }
+  if (hasStringArrayDuplicates(coverageRecord.mutagensCovered)) {
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
+    )
+  }
+  if (hasStringArrayDuplicates(coverageRecord.maleficsCovered)) {
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
+    )
+  }
+  if (hasStringArrayDuplicates(coverageRecord.noblesCovered)) {
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_NOBLES_MISMATCH,
+    )
+  }
+}
+
 function rethrowBuildError(error: unknown): never {
   if (error instanceof AiChartD1P1AdapterBridgeNotReadyError) throw error
   if (error instanceof AiChartD1P1AdapterBridgeError) throw error
@@ -636,14 +690,21 @@ function setEquals(
   )
 }
 
+type AiChartD1P1StringCoverageReasonCode =
+  (typeof AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS)[
+    | 'COVERAGE_DIRECT_MEANINGS_MISMATCH'
+    | 'COVERAGE_MAJOR_STARS_MISMATCH'
+    | 'COVERAGE_MINOR_STARS_MISMATCH'
+    | 'COVERAGE_NOBLES_MISMATCH'
+  ]
+
 function assertStringCoverageSubset(
   values: readonly string[],
   expected: ReadonlySet<string>,
+  reasonCode: AiChartD1P1StringCoverageReasonCode,
 ): ReadonlySet<string> {
   if (hasDuplicates(values) || values.some((value) => !expected.has(value))) {
-    resultInvalid(
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
-    )
+    resultInvalid(reasonCode)
   }
   return new Set(values)
 }
@@ -717,7 +778,7 @@ function representedMutagenPairs(
 ): ReadonlySet<string> {
   if (hasDuplicates(values)) {
     resultInvalid(
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
     )
   }
   const represented = new Set<string>()
@@ -742,12 +803,12 @@ function representedMutagenPairs(
       )
     ) {
       resultInvalid(
-        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
       )
     }
     if (matches.some((pair) => represented.has(pair.key))) {
       resultInvalid(
-        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
       )
     }
     matches.forEach((pair) => represented.add(pair.key))
@@ -762,7 +823,7 @@ function representedMaleficTypes(
 ): ReadonlySet<string> {
   if (hasDuplicates(values)) {
     resultInvalid(
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
     )
   }
   const represented = new Set<string>()
@@ -776,12 +837,12 @@ function representedMaleficTypes(
       )
     ) {
       resultInvalid(
-        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
       )
     }
     if (matches.some((type) => represented.has(type))) {
       resultInvalid(
-        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
       )
     }
     matches.forEach((type) => represented.add(type))
@@ -810,14 +871,17 @@ function assertCoverageSourceBinding(
   const directMeanings = assertStringCoverageSubset(
     result.coverage.directMeaningsConsidered,
     expected.targetMeaningIds,
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
   )
   const majorStars = assertStringCoverageSubset(
     result.coverage.majorStarsCovered,
     expected.targetMajorStars,
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
   )
   const minorStars = assertStringCoverageSubset(
     result.coverage.minorStarsCovered,
     expected.targetMinorStars,
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
   )
   const mutagenPairs = representedMutagenPairs(
     result.coverage.mutagensCovered,
@@ -831,27 +895,58 @@ function assertCoverageSourceBinding(
   const nobleStars = assertStringCoverageSubset(
     result.coverage.noblesCovered,
     expected.targetNobleStars,
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_NOBLES_MISMATCH,
   )
   const expectedMutagenPairKeys = new Set(
     expected.targetMutagenPairs.map((pair) => pair.key),
   )
 
   if (result.status === 'complete') {
+    if (!setEquals(directMeanings, expected.targetMeaningIds)) {
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+      )
+    }
+    if (!setEquals(majorStars, expected.targetMajorStars)) {
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
+      )
+    }
+    if (!setEquals(minorStars, expected.targetMinorStars)) {
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
+      )
+    }
+    if (!setEquals(mutagenPairs, expectedMutagenPairKeys)) {
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
+      )
+    }
+    if (!setEquals(maleficTypes, expected.relevantMaleficTypes)) {
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
+      )
+    }
+    if (!setEquals(nobleStars, expected.targetNobleStars)) {
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_NOBLES_MISMATCH,
+      )
+    }
     if (
-      !setEquals(directMeanings, expected.targetMeaningIds) ||
-      !setEquals(majorStars, expected.targetMajorStars) ||
-      !setEquals(minorStars, expected.targetMinorStars) ||
-      !setEquals(mutagenPairs, expectedMutagenPairKeys) ||
-      !setEquals(maleficTypes, expected.relevantMaleficTypes) ||
-      !setEquals(nobleStars, expected.targetNobleStars) ||
       !result.coverage.oppositeProcessed ||
       !result.coverage.hiddenCombinationProcessed ||
-      !result.coverage.trinesProcessed ||
+      !result.coverage.trinesProcessed
+    ) {
+      resultInvalid(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_PROCESSING_FLAGS_MISMATCH,
+      )
+    }
+    if (
       result.coverage.omittedItems.length !== 0 ||
       result.warnings.length !== 0
     ) {
       resultInvalid(
-        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_STATUS_OMISSIONS_MISMATCH,
       )
     }
     return
@@ -862,7 +957,7 @@ function assertCoverageSourceBinding(
     result.coverage.omittedItems.length === 0
   ) {
     resultInvalid(
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_STATUS_OMISSIONS_MISMATCH,
     )
   }
 
@@ -870,21 +965,21 @@ function assertCoverageSourceBinding(
   for (const meaningId of expected.targetMeaningIds) {
     if (!directMeanings.has(meaningId) && !hasOmissionTrace(omissions, meaningId)) {
       resultInvalid(
-        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
       )
     }
   }
   for (const starName of expected.targetMajorStars) {
     if (!majorStars.has(starName) && !hasOmissionTrace(omissions, starName)) {
       resultInvalid(
-        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
       )
     }
   }
   for (const starName of expected.targetMinorStars) {
     if (!minorStars.has(starName) && !hasOmissionTrace(omissions, starName)) {
       resultInvalid(
-        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
       )
     }
   }
@@ -894,7 +989,7 @@ function assertCoverageSourceBinding(
       !hasOmissionTrace(omissions, pair.starName, pair.mutagenType)
     ) {
       resultInvalid(
-        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
       )
     }
   }
@@ -904,14 +999,14 @@ function assertCoverageSourceBinding(
       !hasOmissionTrace(omissions, signalType)
     ) {
       resultInvalid(
-        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
       )
     }
   }
   for (const starName of expected.targetNobleStars) {
     if (!nobleStars.has(starName) && !hasOmissionTrace(omissions, starName)) {
       resultInvalid(
-        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_NOBLES_MISMATCH,
       )
     }
   }
@@ -999,6 +1094,7 @@ function createAiChartD1P1SourceBoundResultParser(
 ): (value: unknown) => AiChartD1P1Result {
   return (value: unknown) => {
     try {
+      assertCoverageDuplicateDiagnostics(value)
       const result = parseAiChartD1P1Result(value)
       assertIdentityAndStatus(result, modelInput)
       assertBorrowedStarBinding(result, modelInput)
