@@ -108,14 +108,10 @@ export async function requestAiChartOpenAiStructuredResponse<T>(
       throw new AiChartOpenAiError(AI_CHART_OPENAI_TIMEOUT, true)
     }
 
-    try {
-      return parseAiChartOpenAiStructuredResponse(
-        rawResponse,
-        validated.parseResult,
-      )
-    } catch {
-      responseInvalid()
-    }
+    return parseAiChartOpenAiStructuredResponse(
+      rawResponse,
+      validated.parseResult,
+    )
   } catch (error) {
     if (error instanceof AiChartOpenAiError) throw error
     if (timeoutTriggered) {
