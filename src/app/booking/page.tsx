@@ -1,7 +1,6 @@
 import type { Metadata } from 'next'
 import { BookingPageShell } from '@/components/BookingPageShell'
 import { PageHero } from '@/components/PageHero'
-import { AddConsultationToCartButton } from '@/components/AddConsultationToCartButton'
 import { shouldHideConsultationServices } from '@/lib/siteVisibility'
 import { redirect } from 'next/navigation'
 import { createPublicMetadata, PUBLIC_PAGE_METADATA } from '@/lib/seo/publicMetadata'
@@ -27,8 +26,7 @@ export default function BookingPage() {
         description="由老師一對一協助你看懂命盤、感情、事業、財運與流年方向。"
       />
       <section className="bg-white py-12 md:py-16">
-        <div className="section-shell grid gap-8">
-          <AddConsultationToCartButton />
+        <div className="section-shell">
           <BookingPageShell />
         </div>
       </section>
