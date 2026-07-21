@@ -1,8 +1,8 @@
 'use client'
 
-import { CalendarDays, CheckCircle2 } from 'lucide-react'
+import { CalendarDays, CheckCircle2, MessageCircle } from 'lucide-react'
 import Link from 'next/link'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ActionButton } from './ActionButton'
 import { bookingPlans, getBookingPlan } from '@/lib/bookingPlans'
 import { getAuthAccessToken, getMockUser } from '@/lib/mockAuth'
@@ -27,6 +27,21 @@ type BookingFormProps = {
 }
 
 type BookingPaymentMethod = 'bank-transfer' | 'newebpay-credit'
+
+const BANK_TRANSFER_REMINDER_ERROR = '請先勾選確認已了解郵局匯款後的聯絡與預約確認流程。'
+
+function getBankTransferReminderError(paymentMethod: BookingPaymentMethod, hasAcceptedReminder: boolean) {
+  return paymentMethod === 'bank-transfer' && !hasAcceptedReminder ? BANK_TRANSFER_REMINDER_ERROR : ''
+}
+
+function getBirthDateParts(value: string) {
+  const [year, month, day] = value.split('-')
+  return {
+    year: year ?? '',
+    month: month ? String(Number(month)) : '',
+    day: day ? String(Number(day)) : '',
+  }
+}
 
 type NewebPayCreateResponse =
   | {
@@ -129,12 +144,11 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
   const [question, setQuestion] = useState('')
   const [note, setNote] = useState('')
   const [hasAcceptedNotice, setHasAcceptedNotice] = useState(false)
+  const [hasAcceptedBankTransferReminder, setHasAcceptedBankTransferReminder] = useState(false)
   const [formError, setFormError] = useState('')
   const [formStatus, setFormStatus] = useState('')
   const [createdBookingId, setCreatedBookingId] = useState('')
   const [createdBookingSignature, setCreatedBookingSignature] = useState('')
-  const birthDateInputRef = useRef<HTMLInputElement | null>(null)
-
   const resetFormToBlank = useCallback(() => {
     setPlanId(bookingPlans[0].id)
     setPaymentMethod('bank-transfer')
@@ -158,6 +172,7 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
     setQuestion('')
     setNote('')
     setHasAcceptedNotice(false)
+    setHasAcceptedBankTransferReminder(false)
     setFormError('')
     setFormStatus('')
     setCreatedBookingId('')
@@ -280,6 +295,12 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
     setFormStatus('')
     const payerPhone = bankTransferPhone.trim() || customerPhone.trim()
     if (paymentMethod === 'bank-transfer') {
+      const bankTransferReminderError = getBankTransferReminderError(paymentMethod, hasAcceptedBankTransferReminder)
+      if (bankTransferReminderError) {
+        setFormError(bankTransferReminderError)
+        return false
+      }
+
       if (!payerPhone) {
         setFormError('請填寫郵局匯款聯絡電話。')
         return false
@@ -411,19 +432,10 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
   }
 
   const updateBirthDateFromPicker = (value: string) => {
-    const [year, month, day] = value.split('-')
-    setBirthYear(year ?? '')
-    setBirthMonth(month ? String(Number(month)) : '')
-    setBirthDay(day ? String(Number(day)) : '')
-  }
-
-  const openBirthDatePicker = () => {
-    if (!birthDateInputRef.current) return
-    if (typeof birthDateInputRef.current.showPicker === 'function') {
-      birthDateInputRef.current.showPicker()
-      return
-    }
-    birthDateInputRef.current.click()
+    const dateParts = getBirthDateParts(value)
+    setBirthYear(dateParts.year)
+    setBirthMonth(dateParts.month)
+    setBirthDay(dateParts.day)
   }
 
   return (
@@ -470,14 +482,25 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
           <div className="grid gap-3 md:grid-cols-2">
             <label className="grid w-full gap-2">
               <span className="text-sm font-semibold text-textDark">選擇日期</span>
-              <input
-                className="focus-ring h-14 w-full rounded-xl border border-borderSoft bg-white px-4 py-3 text-lg font-semibold text-textDark"
-                disabled={bookingSlotsLoading || bookingSlots.length === 0}
-                min={bookingDateOptions[0]?.value}
-                onChange={(event) => updateSelectedBookingDate(event.target.value)}
-                type="date"
-                value={selectedBookingDate}
-              />
+              <span
+                className={`relative flex h-12 w-full items-center rounded-xl border border-borderSoft bg-white px-4 md:h-14 ${
+                  bookingSlotsLoading || bookingSlots.length === 0 ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                }`}
+              >
+                <span aria-hidden="true" className="flex w-full items-center justify-between gap-3 text-base font-semibold text-textDark md:text-lg">
+                  <span>{selectedBookingDate ? getTaipeiDateLabel(selectedBookingDate) : '請選擇日期'}</span>
+                  <CalendarDays className="shrink-0 text-deepPurple" size={20} />
+                </span>
+                <input
+                  aria-label="選擇預約日期"
+                  className="focus-ring absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+                  disabled={bookingSlotsLoading || bookingSlots.length === 0}
+                  min={bookingDateOptions[0]?.value}
+                  onChange={(event) => updateSelectedBookingDate(event.target.value)}
+                  type="date"
+                  value={selectedBookingDate}
+                />
+              </span>
             </label>
             <label className="grid w-full gap-2">
               <span className="text-sm font-semibold text-textDark">選擇時間</span>
@@ -572,22 +595,16 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
                 value={birthDay}
               />
               <span className="font-semibold text-textMuted">日</span>
-              <button
-                aria-label="選擇出生年月日"
-                className="focus-ring flex h-14 w-16 items-center justify-center rounded-lg border border-borderSoft bg-white text-textDark"
-                onClick={openBirthDatePicker}
-                type="button"
-              >
-                <CalendarDays size={22} />
-              </button>
-              <input
-                ref={birthDateInputRef}
-                className="sr-only"
-                onChange={(event) => updateBirthDateFromPicker(event.target.value)}
-                tabIndex={-1}
-                type="date"
-                value={birthDate}
-              />
+              <span className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-borderSoft bg-white text-textDark md:h-14 md:w-16">
+                <CalendarDays aria-hidden="true" size={22} />
+                <input
+                  aria-label="選擇出生年月日"
+                  className="focus-ring absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                  onChange={(event) => updateBirthDateFromPicker(event.target.value)}
+                  type="date"
+                  value={birthDate}
+                />
+              </span>
             </div>
           </label>
           <label className="grid gap-2">
@@ -660,6 +677,39 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
                   <p>
                     請先完成郵局匯款，並填寫聯絡電話與您的匯款帳號後五碼。完成後請至水瓶先生官方 LINE 回覆「已匯款＋姓名＋購買項目」，客服核對款項後，將協助開通與確認預約。
                   </p>
+                </div>
+
+                <div className="rounded-xl border border-borderSoft bg-white p-4 text-sm leading-6 text-textDark">
+                  <div className="flex min-h-11 items-start gap-3">
+                    <input
+                      id="booking-bank-transfer-reminder"
+                      aria-label="我已了解完成郵局匯款後需透過水瓶先生官方 LINE 聯絡並等待客服確認預約"
+                      checked={hasAcceptedBankTransferReminder}
+                      className="mt-1 h-6 w-6 shrink-0 accent-deepPurple md:h-5 md:w-5"
+                      onChange={(event) => setHasAcceptedBankTransferReminder(event.target.checked)}
+                      type="checkbox"
+                    />
+                    <p>
+                      <label className="cursor-pointer" htmlFor="booking-bank-transfer-reminder">
+                        我已了解：完成郵局匯款後，需透過
+                      </label>{' '}
+                      <a
+                        className="inline-flex items-center gap-1 font-semibold text-[#07883b] underline underline-offset-4"
+                        href={officialLineUrl}
+                        rel="noopener noreferrer"
+                        target="_blank"
+                      >
+                        <MessageCircle aria-hidden="true" size={20} />
+                        水瓶先生官方 LINE
+                      </a>{' '}
+                      <label className="cursor-pointer" htmlFor="booking-bank-transfer-reminder">
+                        主動回覆「已匯款＋姓名＋預約項目」，待客服核對款項後，才完成預約確認。
+                      </label>
+                    </p>
+                  </div>
+                  {formError === BANK_TRANSFER_REMINDER_ERROR ? (
+                    <p className="mt-2 font-semibold text-deepPurple">{BANK_TRANSFER_REMINDER_ERROR}</p>
+                  ) : null}
                 </div>
 
                 <div className="rounded-xl border border-deepPurple/15 bg-white p-4 shadow-soft">
@@ -780,29 +830,36 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
             </div>
           </details>
 
-          <div className="mt-5 flex items-start gap-3 rounded-xl border border-borderSoft bg-white p-4 text-sm font-semibold leading-7 text-textDark">
+          <div className="mt-5 flex min-h-11 items-start gap-3 rounded-xl border border-borderSoft bg-white p-4 text-sm font-semibold leading-7 text-textDark">
             <input
               id="booking-terms-consent"
+              aria-label="我已閱讀並同意真人論命服務說明、退款政策、服務條款與預約規則"
               checked={hasAcceptedNotice}
-              className="mt-1 h-5 w-5 accent-deepPurple"
+              className="mt-1 h-6 w-6 shrink-0 accent-deepPurple md:h-5 md:w-5"
               onChange={(event) => setHasAcceptedNotice(event.target.checked)}
               type="checkbox"
             />
             <p>
-              我已詳細閱讀並同意《真人論命服務說明》、
+              <label className="cursor-pointer" htmlFor="booking-terms-consent">
+                我已詳細閱讀並同意《真人論命服務說明》、
+              </label>
               <Link className="text-deepPurple underline underline-offset-4" href="/refund-policy">
                 退款政策
               </Link>
-              、
+              <label className="cursor-pointer" htmlFor="booking-terms-consent">
+                、
+              </label>
               <Link className="text-deepPurple underline underline-offset-4" href="/terms">
                 服務條款
               </Link>
-              ，並了解預約、改期、取消與遲到規則。
+              <label className="cursor-pointer" htmlFor="booking-terms-consent">
+                ，並了解預約、改期、取消與遲到規則。
+              </label>
             </p>
           </div>
         </div>
 
-        {formError && (
+        {formError && formError !== BANK_TRANSFER_REMINDER_ERROR && (
           <div className="grid gap-2 text-sm font-semibold text-deepPurple">
             <p>{formError}</p>
             {bankTransferFallbackUrl ? (
