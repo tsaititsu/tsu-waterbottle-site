@@ -16,6 +16,7 @@ import {
   type AiChartOpenAiStructuredRequest,
 } from './openAiResponses'
 import {
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS,
   AiChartD1P1AdapterBridgeResultInvalidError,
 } from './d1P1AdapterBridgeContracts'
 
@@ -822,12 +823,14 @@ async function run() {
   await asyncTest(
     'source-bound parser rejection keeps schema invalid code',
     async () => {
-      await captureSafeError(
+      const error = await captureSafeError(
         () =>
           requestAiChartOpenAiStructuredResponse(
             requestFixture({
               parseResult: () => {
-                throw new AiChartD1P1AdapterBridgeResultInvalidError()
+                throw new AiChartD1P1AdapterBridgeResultInvalidError(
+                  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+                )
               },
             }),
             {
@@ -841,6 +844,15 @@ async function run() {
             },
           ),
         AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID,
+        false,
+      )
+      assert.equal(
+        error.diagnostic?.outputSchemaValidationCode,
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_BINDING_MISMATCH,
+      )
+      assert.equal(Object.isFrozen(error.diagnostic), true)
+      assert.equal(
+        JSON.stringify(error).includes(SYNTHETIC_RESPONSE_BODY),
         false,
       )
     },

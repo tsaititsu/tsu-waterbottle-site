@@ -2,6 +2,10 @@ import {
   AI_CHART_D1_MODEL_ENVIRONMENT_VARIABLE,
   AI_CHART_D1_MODEL_TARGET,
 } from './d1Assets'
+import {
+  getAiChartD1P1SourceBoundValidationReasonCode,
+  type AiChartD1P1SourceBoundValidationReasonCode,
+} from './d1P1SourceBoundDiagnostics'
 
 export const AI_CHART_OPENAI_RESPONSES_URL =
   'https://api.openai.com/v1/responses' as const
@@ -58,6 +62,7 @@ export type AiChartOpenAiResponseDiagnostic = Readonly<{
   outputItemTypes: readonly string[]
   contentItemTypes: readonly string[]
   outputTextCount: number
+  outputSchemaValidationCode: AiChartD1P1SourceBoundValidationReasonCode | null
   usage: AiChartOpenAiUsage | null
 }>
 
@@ -372,7 +377,19 @@ function buildResponseDiagnostic(
     outputItemTypes: Object.freeze(outputItemTypes),
     contentItemTypes: Object.freeze(contentItemTypes),
     outputTextCount,
+    outputSchemaValidationCode: null,
     usage,
+  })
+}
+
+function withOutputSchemaValidationCode(
+  diagnostic: AiChartOpenAiResponseDiagnostic,
+  error: unknown,
+): AiChartOpenAiResponseDiagnostic {
+  return Object.freeze({
+    ...diagnostic,
+    outputSchemaValidationCode:
+      getAiChartD1P1SourceBoundValidationReasonCode(error),
   })
 }
 
@@ -644,8 +661,11 @@ function parseAiChartOpenAiStructuredResponseInternal<T>(
   let parsed: T
   try {
     parsed = cloneAndFreezeResult(parseResult(decoded))
-  } catch {
-    responseFailure(AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID, diagnostic)
+  } catch (error) {
+    responseFailure(
+      AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID,
+      withOutputSchemaValidationCode(diagnostic, error),
+    )
   }
 
   const usageMetadata = parseUsageMetadata(value.usage)
