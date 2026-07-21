@@ -446,6 +446,17 @@ async function run() {
   check('source-aware parser accepts the exact Descriptor', () => {
     assert.deepEqual(parseDescriptor(descriptor), descriptor)
   })
+  check('strict shape parser rejects the legacy 8192 Descriptor', () => {
+    const legacyDescriptor = cloneDescriptor(descriptor) as unknown as Record<
+      string,
+      unknown
+    >
+    legacyDescriptor.maxOutputTokens =
+      AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS
+    assertInvalid(() =>
+      parseAiChartD1P1AdapterBridgeDescriptorShape(legacyDescriptor),
+    )
+  })
   check('source-aware parser rejects another palace Descriptor', () => {
     assertInvalid(() => parseDescriptor(secondDescriptor))
   })

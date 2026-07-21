@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import { AI_CHART_D1_P1_F1_CONTRACT_VERSION } from './d1CommonContracts'
 import { AI_CHART_D1_MODEL_TARGET } from './d1Assets'
-import { AI_CHART_D1_P1_ADAPTER_BRIDGE_CONTRACT_VERSION } from './d1P1AdapterBridgeContracts'
+import {
+  AI_CHART_D1_P1_ADAPTER_BRIDGE_CONTRACT_VERSION,
+  AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
+} from './d1P1AdapterBridgeContracts'
 import {
   AI_CHART_D1_P1_OUTPUT_SCHEMA_SHA256,
   AI_CHART_D1_P1_PROMPT_INSTRUCTIONS_SHA256,
@@ -44,6 +47,7 @@ import {
   AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
   AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
   AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS,
+  AI_CHART_OPENAI_MAX_OUTPUT_TOKENS,
 } from './openAiResponses'
 
 type Mutable<T> = {
@@ -100,7 +104,7 @@ function planFixture(
     modelTarget: AI_CHART_D1_MODEL_TARGET,
     reasoningEffort: AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
     timeoutMs,
-    maxOutputTokens: AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
+    maxOutputTokens: AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
     maxRequests: 1,
     serverOnly: true,
     environmentPolicy: 'local_development_only',
@@ -196,11 +200,14 @@ function run() {
       assert.equal(plan[field], expected)
     })
   }
-  check('Plan uses the locked model and reasoning policy', () => {
+  check('Plan uses the locked model, reasoning and D1 P1 token policy', () => {
     assert.equal(plan.modelTarget, AI_CHART_D1_MODEL_TARGET)
     assert.equal(plan.reasoningEffort, AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT)
     assert.equal(plan.timeoutMs, AI_CHART_OPENAI_DEFAULT_TIMEOUT_MS)
-    assert.equal(plan.maxOutputTokens, AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS)
+    assert.equal(plan.maxOutputTokens, AI_CHART_D1_P1_MAX_OUTPUT_TOKENS)
+    assert.equal(AI_CHART_D1_P1_MAX_OUTPUT_TOKENS, 16_384)
+    assert.equal(AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS, 8_192)
+    assert.equal(AI_CHART_OPENAI_MAX_OUTPUT_TOKENS, 32_768)
   })
   check('Plan timeout contract allows only default and Local Preview values', () => {
     assert.deepEqual(AI_CHART_D1_P1_PREVIEW_TIMEOUT_VALUES, [
@@ -249,6 +256,29 @@ function run() {
       plan.planFingerprint,
     )
     assert.equal(planFixture().planFingerprint, plan.planFingerprint)
+  })
+  check('Shape parser accepts the 16384 Plan', () => {
+    assert.deepEqual(parseAiChartD1P1PreviewRequestPlanShape(plan), plan)
+  })
+  check('Shape parser rejects a legacy 8192 Plan after fingerprint recomputation', () => {
+    const legacyPlan = structuredClone(plan) as unknown as Record<
+      string,
+      unknown
+    >
+    legacyPlan.maxOutputTokens = AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS
+    const legacyPayload = structuredClone(legacyPlan)
+    delete legacyPayload.planFingerprint
+    legacyPlan.planFingerprint = createAiChartD1P1PreviewRequestPlanFingerprint(
+      legacyPayload as unknown as AiChartD1P1PreviewRequestPlanWithoutFingerprint,
+    )
+    assert.notEqual(legacyPlan.planFingerprint, plan.planFingerprint)
+    assert.equal(
+      legacyPlan.planFingerprint,
+      createAiChartD1P1PreviewRequestPlanFingerprint(
+        legacyPayload as unknown as AiChartD1P1PreviewRequestPlanWithoutFingerprint,
+      ),
+    )
+    assertInvalid(() => parseAiChartD1P1PreviewRequestPlanShape(legacyPlan))
   })
   check('Different target palace has a different call id', () => {
     assert.notEqual(otherPlan.callId, plan.callId)
@@ -345,6 +375,16 @@ function run() {
     assert.deepEqual(
       properties.timeoutMs.enum,
       AI_CHART_D1_P1_PREVIEW_TIMEOUT_VALUES,
+    )
+  })
+  check('Plan Schema locks the D1 P1 token budget to 16384', () => {
+    const properties = planSchema.properties as Record<
+      string,
+      Record<string, unknown>
+    >
+    assert.equal(
+      properties.maxOutputTokens.const,
+      AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
     )
   })
   check('Authorization Schema is strict and exact', () => {

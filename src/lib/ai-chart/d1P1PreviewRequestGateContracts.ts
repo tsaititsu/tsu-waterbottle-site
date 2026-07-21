@@ -17,6 +17,7 @@ import {
 } from './d1N0Constants'
 import {
   AI_CHART_D1_P1_ADAPTER_BRIDGE_CONTRACT_VERSION,
+  AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
 } from './d1P1AdapterBridgeContracts'
 import {
   AI_CHART_D1_P1_OUTPUT_SCHEMA_SHA256,
@@ -31,7 +32,6 @@ import {
   type AiChartD1P1PreviewTimeoutMs,
 } from './d1P1PreviewTimeoutContracts'
 import {
-  AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
   AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
 } from './openAiResponses'
 
@@ -95,7 +95,7 @@ export type AiChartD1P1PreviewRequestPlan = Readonly<{
   modelTarget: typeof AI_CHART_D1_MODEL_TARGET
   reasoningEffort: typeof AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT
   timeoutMs: AiChartD1P1PreviewTimeoutMs
-  maxOutputTokens: typeof AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS
+  maxOutputTokens: typeof AI_CHART_D1_P1_MAX_OUTPUT_TOKENS
   maxRequests: 1
   serverOnly: true
   environmentPolicy: 'local_development_only'
@@ -287,8 +287,8 @@ export function parseAiChartD1P1PreviewRequestPlanShape(
       timeoutMs: parsePreviewTimeout(record.timeoutMs),
       maxOutputTokens: parseFixedInteger(
         record.maxOutputTokens,
-        AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
-      ) as typeof AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
+        AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
+      ) as typeof AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
       maxRequests: parseFixedInteger(record.maxRequests, 1) as 1,
       serverOnly: true as const,
       environmentPolicy: 'local_development_only' as const,
@@ -424,9 +424,7 @@ export const AI_CHART_D1_P1_PREVIEW_GATE_INTERNAL_JSON_SCHEMA: AiChartD1JsonSche
       enum: AI_CHART_D1_P1_PREVIEW_TIMEOUT_VALUES,
     }),
     maxOutputTokens: freezeAiChartD1Value({
-      type: 'integer',
-      minimum: AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
-      maximum: AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
+      const: AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
     }),
     maxRequests: freezeAiChartD1Value({
       type: 'integer',
