@@ -33,6 +33,12 @@ const lineUser: UserProfile = {
   provider: 'line',
 }
 
+const linkedIdentityUser: UserProfile = {
+  ...lineUser,
+  id: 'linked-identity-user-1',
+  displayName: 'Synthetic Linked Identity Member',
+}
+
 type FetchCall = { input: string; init: RequestInit }
 
 function makeDeps(input: {
@@ -73,12 +79,39 @@ test('未登入時保持 idle，且不取得 token 或呼叫 admin session', asy
   assert.equal(context.calls.length, 0)
 })
 
-test('LINE 會員 fail closed，且不取得 token 或呼叫 admin session', async () => {
-  const context = makeDeps({ token: 'unused-token' })
+test('任一已登入 UserProfile 都先進入 checking，不以 provider 字串直接 denied', () => {
+  assert.equal(beginAdminMenuAccessCheck(googleUser, 1).state, 'checking')
+  assert.equal(beginAdminMenuAccessCheck(lineUser, 2).state, 'checking')
+})
+
+test('provider=line 且 token 缺失時 denied，且不呼叫 admin session', async () => {
+  const context = makeDeps({ token: null })
 
   assert.equal(await verifyAdminMenuAccess(lineUser, context.deps), 'denied')
-  assert.equal(context.getTokenCalls(), 0)
+  assert.equal(context.getTokenCalls(), 1)
   assert.equal(context.calls.length, 0)
+})
+
+test('provider=line 且 server 回 403 時 denied', async () => {
+  const context = makeDeps({
+    token: 'synthetic-line-access-token',
+    response: { ok: false, payload: { ok: false } },
+  })
+
+  assert.equal(await verifyAdminMenuAccess(lineUser, context.deps), 'denied')
+  assert.equal(context.getTokenCalls(), 1)
+  assert.equal(context.calls.length, 1)
+})
+
+test('provider=line 但 server 明確 authorized 時可顯示入口', async () => {
+  const context = makeDeps({
+    token: 'synthetic-linked-access-token',
+    response: { ok: true, payload: { ok: true, isAdmin: true } },
+  })
+
+  assert.equal(await verifyAdminMenuAccess(linkedIdentityUser, context.deps), 'authorized')
+  assert.equal(context.getTokenCalls(), 1)
+  assert.equal(context.calls.length, 1)
 })
 
 test('Google 會員使用 Bearer token 呼叫固定 admin session endpoint', async () => {

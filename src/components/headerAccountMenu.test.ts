@@ -58,6 +58,8 @@ assert.equal(adminAccessSource.includes("cache: 'no-store'"), true)
 assert.match(adminAccessSource, /Authorization: `Bearer \$\{accessToken\}`/)
 assert.equal(adminAccessSource.includes('localStorage'), false)
 assert.equal(adminAccessSource.includes('sessionStorage'), false)
+assert.doesNotMatch(adminAccessSource, /provider\s*(?:===|!==)\s*['"]google['"]/)
+assert.doesNotMatch(adminAccessSource, /googleEmail|user\.email/)
 
 // 9. 桌機入口位於一般會員功能後、登出前，且點擊會關閉帳號選單。
 const desktopMenuSource = source.slice(

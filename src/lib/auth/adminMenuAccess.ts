@@ -35,7 +35,6 @@ export function beginAdminMenuAccessCheck(
   const subjectKey = getAdminMenuSubjectKey(user)
 
   if (!user) return { state: 'idle', requestId, subjectKey }
-  if (user.provider !== 'google') return { state: 'denied', requestId, subjectKey }
 
   return { state: 'checking', requestId, subjectKey }
 }
@@ -72,7 +71,6 @@ export async function verifyAdminMenuAccess(
   deps: VerifyAdminMenuAccessDeps,
 ): Promise<Extract<AdminMenuAccessState, 'idle' | 'authorized' | 'denied'>> {
   if (!user) return 'idle'
-  if (user.provider !== 'google') return 'denied'
 
   try {
     const accessToken = await deps.getAccessToken()
