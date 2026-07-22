@@ -54,8 +54,10 @@ import {
 import {
   AI_CHART_D1_P1_OUTPUT_SCHEMA,
   AI_CHART_D1_P1_SCHEMA_NAME,
+  AiChartD1P1CoverageDuplicateError,
   parseAiChartD1P1Result,
   type AiChartD1P1Coverage,
+  type AiChartD1P1CoverageDuplicateField,
   type AiChartD1P1Result,
 } from './d1P1F1Contracts'
 import {
@@ -108,6 +110,34 @@ const P1_MALEFIC_SIGNAL_TYPES = Object.freeze([
   '生年化忌',
 ] as const)
 
+type AiChartD1P1CoverageDuplicateValidationReasonCode =
+  | (typeof AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS)['COVERAGE_DIRECT_MEANINGS_MISMATCH']
+  | (typeof AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS)['COVERAGE_MAJOR_STARS_MISMATCH']
+  | (typeof AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS)['COVERAGE_MINOR_STARS_MISMATCH']
+  | (typeof AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS)['COVERAGE_MUTAGENS_MISMATCH']
+  | (typeof AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS)['COVERAGE_MALEFICS_MISMATCH']
+  | (typeof AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS)['COVERAGE_NOBLES_MISMATCH']
+
+const P1_COVERAGE_DUPLICATE_REASON_BY_FIELD = Object.freeze({
+  directMeaningsConsidered:
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+  majorStarsCovered:
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
+  minorStarsCovered:
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
+  mutagensCovered:
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
+  maleficsCovered:
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
+  noblesCovered:
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_NOBLES_MISMATCH,
+} satisfies Readonly<
+  Record<
+    AiChartD1P1CoverageDuplicateField,
+    AiChartD1P1CoverageDuplicateValidationReasonCode
+  >
+>)
+
 const P1_RULE_STATUS_AUTHORITY = Object.freeze({
   teacher_confirmed: 0,
   lecture_backfill: 1,
@@ -151,60 +181,6 @@ function resultInvalid(
   reasonCode: AiChartD1P1SourceBoundValidationReasonCode,
 ): never {
   throw new AiChartD1P1AdapterBridgeResultInvalidError(reasonCode)
-}
-
-function hasStringArrayDuplicates(value: unknown): boolean {
-  return (
-    Array.isArray(value) &&
-    value.every((item) => typeof item === 'string') &&
-    new Set(value).size !== value.length
-  )
-}
-
-function assertCoverageDuplicateDiagnostics(value: unknown): void {
-  assertAiChartD1SafeGraph(value)
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return
-  }
-  const coverage = (value as Record<string, unknown>).coverage
-  if (
-    typeof coverage !== 'object' ||
-    coverage === null ||
-    Array.isArray(coverage)
-  ) {
-    return
-  }
-  const coverageRecord = coverage as Record<string, unknown>
-  if (hasStringArrayDuplicates(coverageRecord.directMeaningsConsidered)) {
-    resultInvalid(
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
-    )
-  }
-  if (hasStringArrayDuplicates(coverageRecord.majorStarsCovered)) {
-    resultInvalid(
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
-    )
-  }
-  if (hasStringArrayDuplicates(coverageRecord.minorStarsCovered)) {
-    resultInvalid(
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
-    )
-  }
-  if (hasStringArrayDuplicates(coverageRecord.mutagensCovered)) {
-    resultInvalid(
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
-    )
-  }
-  if (hasStringArrayDuplicates(coverageRecord.maleficsCovered)) {
-    resultInvalid(
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
-    )
-  }
-  if (hasStringArrayDuplicates(coverageRecord.noblesCovered)) {
-    resultInvalid(
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_NOBLES_MISMATCH,
-    )
-  }
 }
 
 function rethrowBuildError(error: unknown): never {
@@ -1094,7 +1070,6 @@ function createAiChartD1P1SourceBoundResultParser(
 ): (value: unknown) => AiChartD1P1Result {
   return (value: unknown) => {
     try {
-      assertCoverageDuplicateDiagnostics(value)
       const result = parseAiChartD1P1Result(value)
       assertIdentityAndStatus(result, modelInput)
       assertBorrowedStarBinding(result, modelInput)
@@ -1107,6 +1082,9 @@ function createAiChartD1P1SourceBoundResultParser(
     } catch (error) {
       if (error instanceof AiChartD1P1AdapterBridgeResultInvalidError) {
         throw error
+      }
+      if (error instanceof AiChartD1P1CoverageDuplicateError) {
+        resultInvalid(P1_COVERAGE_DUPLICATE_REASON_BY_FIELD[error.field])
       }
       resultInvalid(
         AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID,

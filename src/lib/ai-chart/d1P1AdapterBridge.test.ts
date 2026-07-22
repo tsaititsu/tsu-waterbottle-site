@@ -60,6 +60,7 @@ import {
 import {
   AI_CHART_D1_P1_OUTPUT_SCHEMA,
   AI_CHART_D1_P1_SCHEMA_NAME,
+  parseAiChartD1P1Result,
   type AiChartD1P1Result,
 } from './d1P1F1Contracts'
 import { AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS } from './d1P1PreviewTimeoutContracts'
@@ -117,6 +118,19 @@ function assertResultInvalid(
       assert.equal(error.reasonCode, expectedReasonCode)
     }
     return error
+  }
+}
+
+function assertSafeResultInvalid(
+  error: AiChartD1P1AdapterBridgeResultInvalidError,
+  markers: readonly string[],
+): void {
+  const serialized = JSON.stringify(error)
+  for (const marker of markers) {
+    assert.equal(error.message.includes(marker), false)
+    assert.equal(error.code.includes(marker), false)
+    assert.equal(error.reasonCode.includes(marker), false)
+    assert.equal(serialized.includes(marker), false)
   }
 }
 
@@ -691,6 +705,155 @@ async function run() {
       AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID,
     )
   })
+  const malformedDuplicateMarker = 'synthetic-malformed-duplicate-marker'
+  for (const [name, mutate] of [
+    [
+      'missing top-level field',
+      (value: Mutable<AiChartD1P1Result>) => {
+        delete (value as unknown as Record<string, unknown>).callId
+      },
+    ],
+    [
+      'missing coverage field',
+      (value: Mutable<AiChartD1P1Result>) => {
+        delete (value.coverage as unknown as Record<string, unknown>)
+          .noblesCovered
+      },
+    ],
+    [
+      'invalid primary axis',
+      (value: Mutable<AiChartD1P1Result>) => {
+        ;(value as unknown as Record<string, unknown>).primaryAxis = null
+      },
+    ],
+    [
+      'invalid candidate',
+      (value: Mutable<AiChartD1P1Result>) => {
+        value.directCandidates[0].candidateId = `${malformedDuplicateMarker} invalid`
+      },
+    ],
+    [
+      'invalid boundary',
+      (value: Mutable<AiChartD1P1Result>) => {
+        value.d2Boundaries.push({
+          boundaryId: `${malformedDuplicateMarker} invalid`,
+          topic: 'synthetic topic',
+          prohibitedD1Conclusion: 'synthetic prohibited conclusion',
+          allowedD1Wording: 'synthetic allowed wording',
+          reason: 'synthetic reason',
+        })
+      },
+    ],
+    [
+      'invalid warnings',
+      (value: Mutable<AiChartD1P1Result>) => {
+        value.warnings = [malformedDuplicateMarker, malformedDuplicateMarker]
+      },
+    ],
+  ] as const) {
+    check(`${name} takes precedence over coverage duplicates`, () => {
+      const value = createValidAiChartD1P1Result(modelInput)
+      value.coverage.majorStarsCovered = [
+        malformedDuplicateMarker,
+        malformedDuplicateMarker,
+      ]
+      mutate(value)
+      const error = assertResultInvalid(
+        () => parseResult(bridge, value),
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID,
+      )
+      assertSafeResultInvalid(error, [malformedDuplicateMarker])
+    })
+  }
+  check('mixed-type coverage duplicate remains a shape error', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    ;(value.coverage as unknown as Record<string, unknown>).majorStarsCovered = [
+      malformedDuplicateMarker,
+      malformedDuplicateMarker,
+      42,
+    ]
+    const error = assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID,
+    )
+    assertSafeResultInvalid(error, [malformedDuplicateMarker])
+  })
+  check('multiple coverage duplicates select the first fixed reason', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const firstMeaning = value.coverage.directMeaningsConsidered[0]
+    const firstMajor = value.coverage.majorStarsCovered[0]
+    assert.ok(firstMeaning)
+    assert.ok(firstMajor)
+    value.coverage.directMeaningsConsidered.push(firstMeaning)
+    value.coverage.majorStarsCovered.push(firstMajor)
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+    )
+  })
+  check('source-bound parser matches formal parser top-level traversal count', () => {
+    const formalValue = createValidAiChartD1P1Result(modelInput)
+    let formalOwnKeysCount = 0
+    const formalProxy = new Proxy(formalValue, {
+      ownKeys(target) {
+        formalOwnKeysCount += 1
+        if (formalOwnKeysCount > 2) throw new Error('unexpected traversal')
+        return Reflect.ownKeys(target)
+      },
+    })
+    assert.doesNotThrow(() => parseAiChartD1P1Result(formalProxy))
+
+    const sourceBoundValue = createValidAiChartD1P1Result(modelInput)
+    let sourceBoundOwnKeysCount = 0
+    const sourceBoundProxy = new Proxy(sourceBoundValue, {
+      ownKeys(target) {
+        sourceBoundOwnKeysCount += 1
+        if (sourceBoundOwnKeysCount > formalOwnKeysCount) {
+          throw new Error('unexpected traversal')
+        }
+        return Reflect.ownKeys(target)
+      },
+    })
+    assert.doesNotThrow(() => parseResult(bridge, sourceBoundProxy))
+    assert.equal(formalOwnKeysCount, 2)
+    assert.equal(sourceBoundOwnKeysCount, formalOwnKeysCount)
+  })
+  check('source-bound parser rejects an accessor without executing it', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    let accessorExecuted = false
+    Object.defineProperty(value, 'callId', {
+      enumerable: true,
+      configurable: true,
+      get() {
+        accessorExecuted = true
+        return malformedDuplicateMarker
+      },
+    })
+    const error = assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID,
+    )
+    assert.equal(accessorExecuted, false)
+    assertSafeResultInvalid(error, [malformedDuplicateMarker])
+  })
+  check('source-bound parser rejects a symbol key', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const marker = Symbol(malformedDuplicateMarker)
+    ;(value as unknown as Record<PropertyKey, unknown>)[marker] = true
+    const error = assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID,
+    )
+    assertSafeResultInvalid(error, [malformedDuplicateMarker])
+  })
+  check('source-bound parser rejects a cyclic result graph', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    ;(value.warnings as unknown[]).push(value)
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID,
+    )
+  })
   check('complete Result with omitted items is rejected', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.coverage.omittedItems.push({ item: 'missing', reason: 'missing' })
@@ -1238,6 +1401,83 @@ async function run() {
         AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
       )
     })
+  }
+  const omissionTraceMatrix = [
+    [
+      'direct meanings',
+      coverageBridge,
+      coverageInput,
+      'directMeaningsConsidered',
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+    ],
+    [
+      'major stars',
+      coverageBridge,
+      coverageInput,
+      'majorStarsCovered',
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
+    ],
+    [
+      'minor stars',
+      coverageBridge,
+      coverageInput,
+      'minorStarsCovered',
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
+    ],
+    [
+      'mutagens',
+      coverageBridge,
+      coverageInput,
+      'mutagensCovered',
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
+    ],
+    [
+      'malefics',
+      coverageBridge,
+      coverageInput,
+      'maleficsCovered',
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
+    ],
+    [
+      'nobles',
+      nobleBridge,
+      nobleInput,
+      'noblesCovered',
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_NOBLES_MISMATCH,
+    ],
+  ] as const
+  for (const status of ['partial', 'incomplete'] as const) {
+    for (const [
+      name,
+      matrixBridge,
+      matrixInput,
+      field,
+      expectedReasonCode,
+    ] of omissionTraceMatrix) {
+      check(`${status} ${name} require an exact omission trace`, () => {
+        const value = createValidAiChartD1P1Result(matrixInput)
+        assert.equal(value.coverage[field].length > 0, true)
+        const missingSource = value.coverage[field].shift()
+        assert.ok(missingSource)
+        value.status = status
+        value.coverage.omittedItems = [
+          {
+            item: 'synthetic unrelated omission',
+            reason: 'synthetic unrelated omission',
+          },
+        ]
+        assertResultInvalid(
+          () => parseResult(matrixBridge, value),
+          expectedReasonCode,
+        )
+
+        value.coverage.omittedItems.push({
+          item: missingSource,
+          reason: `omitted authenticated source ${missingSource}`,
+        })
+        assert.equal(parseResult(matrixBridge, value).status, status)
+      })
+    }
   }
   check('partial coverage cannot omit a source without naming it', () => {
     const value = createValidAiChartD1P1Result(coverageInput)
@@ -2329,12 +2569,13 @@ async function run() {
     }
 
     visit(sourceFile)
-    assert.equal(callSites.length, 45)
+    assert.equal(callSites.length, 40)
 
     const allowedReasonNames = new Set(
       Object.keys(AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS),
     )
     let controlledHelperReasons = 0
+    let controlledDuplicateMappingReasons = 0
     let directFixedReasons = 0
     for (const [index, callSite] of callSites.entries()) {
       assert.equal(
@@ -2357,6 +2598,25 @@ async function run() {
           `resultInvalid call ${index + 1} has uncontrolled reason identifier ${argument.text}`,
         )
         controlledHelperReasons += 1
+        continue
+      }
+      if (ts.isElementAccessExpression(argument)) {
+        assert.equal(
+          ts.isIdentifier(argument.expression) &&
+            argument.expression.text === 'P1_COVERAGE_DUPLICATE_REASON_BY_FIELD',
+          true,
+          `resultInvalid call ${index + 1} must use the fixed duplicate mapping`,
+        )
+        assert.equal(
+          argument.argumentExpression !== undefined &&
+            ts.isPropertyAccessExpression(argument.argumentExpression) &&
+            ts.isIdentifier(argument.argumentExpression.expression) &&
+            argument.argumentExpression.expression.text === 'error' &&
+            argument.argumentExpression.name.text === 'field',
+          true,
+          `resultInvalid call ${index + 1} must index the fixed mapping with error.field`,
+        )
+        controlledDuplicateMappingReasons += 1
         continue
       }
       assert.equal(
@@ -2385,7 +2645,8 @@ async function run() {
       )
     }
     assert.equal(controlledHelperReasons, 1)
-    assert.equal(directFixedReasons, 44)
+    assert.equal(controlledDuplicateMappingReasons, 1)
+    assert.equal(directFixedReasons, 38)
 
     assert.equal(stringCoverageCallSites.length, 4)
     assert.deepEqual(
