@@ -27,7 +27,7 @@ const typeLabel: Record<string, string> = {
 
 const postOfficeShippingStorageKey = 'waterbottle-post-office-shipping-info'
 
-type CartPaymentMethod = CartNewebPayPaymentMode | 'post_office'
+type CartPaymentMethod = CartNewebPayPaymentMode
 
 const cartPaymentMethodOptions: Array<{
   value: CartPaymentMethod
@@ -46,12 +46,6 @@ const cartPaymentMethodOptions: Array<{
     label: 'Apple Pay 付款（iPhone / Safari）',
     description: '前往藍新金流 Apple Pay 付款頁',
     ctaLabel: '前往 Apple Pay 付款',
-  },
-  {
-    value: 'post_office',
-    label: '郵局匯款',
-    description: '查看郵局匯款資訊，完成匯款後由人工確認',
-    ctaLabel: '郵局匯款',
   },
 ]
 
@@ -174,18 +168,6 @@ export default function CartPage() {
     } catch {
       // If local storage is unavailable, keep the current checkout path unchanged.
     }
-  }
-
-  const handleCheckoutClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (!hasSpiritualProduct) return
-
-    const shippingInfo = getValidatedShippingInfo()
-    if (!shippingInfo) {
-      event.preventDefault()
-      return
-    }
-
-    savePostOfficeShippingInfo(shippingInfo)
   }
 
   const handleNewebPayCheckoutClick = async (paymentMode: CartNewebPayPaymentMode = 'credit') => {
@@ -496,16 +478,7 @@ export default function CartPage() {
                     </div>
                   ) : null}
                   <div className="flex flex-wrap gap-3 sm:justify-end">
-                    {hasSpiritualProduct && selectedPaymentMethod === 'post_office' ? (
-                      <Link
-                        href="/bank-transfer"
-                        onClick={handleCheckoutClick}
-                        className="focus-ring rounded-xl bg-[#3d0d74] px-5 py-3 font-semibold text-white"
-                      >
-                        {selectedPaymentMethodOption.ctaLabel}
-                      </Link>
-                    ) : null}
-                    {hasSpiritualProduct && selectedPaymentMethod !== 'post_office' ? (
+                    {hasSpiritualProduct ? (
                       <button
                         aria-busy={isNewebPayCheckingOut}
                         className={`focus-ring rounded-xl px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70 ${

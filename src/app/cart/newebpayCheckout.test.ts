@@ -512,18 +512,27 @@ test('success result does not expose contact fields, secrets, or raw TradeInfo',
   }
 })
 
-test('cart page renders payment method selector with credit card, Apple Pay, and post office options', () => {
+test('cart page renders only credit card and Apple Pay payment options', () => {
   const source = readCartPageSource()
+  const optionsStart = source.indexOf('const cartPaymentMethodOptions')
+  const optionsEnd = source.indexOf('\n]\n\ntype PostOfficeShippingInfo', optionsStart)
+  const optionsSource = source.slice(optionsStart, optionsEnd)
 
   assert.equal(source.includes('cartPaymentMethodOptions'), true)
   assert.equal(source.includes('<select'), true)
   assert.equal(source.includes('付款方式'), true)
-  assert.equal(source.includes("label: '信用卡付款'"), true)
-  assert.equal(source.includes("label: 'Apple Pay 付款（iPhone / Safari）'"), true)
-  assert.equal(source.includes("label: '郵局匯款'"), true)
-  assert.equal(source.includes("ctaLabel: '前往信用卡付款'"), true)
-  assert.equal(source.includes("ctaLabel: '前往 Apple Pay 付款'"), true)
-  assert.equal(source.includes("ctaLabel: '郵局匯款'"), true)
+  assert.equal(optionsStart >= 0, true)
+  assert.equal(optionsEnd > optionsStart, true)
+  assert.equal(optionsSource.match(/    value: '/g)?.length, 2)
+  assert.equal(optionsSource.includes("value: 'credit'"), true)
+  assert.equal(optionsSource.includes("value: 'product_order_apple_pay'"), true)
+  assert.equal(optionsSource.includes("label: '信用卡付款'"), true)
+  assert.equal(optionsSource.includes("label: 'Apple Pay 付款（iPhone / Safari）'"), true)
+  assert.equal(optionsSource.includes('郵局匯款'), false)
+  assert.equal(optionsSource.includes("value: 'post_office'"), false)
+  assert.equal(optionsSource.includes("ctaLabel: '前往信用卡付款'"), true)
+  assert.equal(optionsSource.includes("ctaLabel: '前往 Apple Pay 付款'"), true)
+  assert.equal(source.includes('href="/bank-transfer"'), false)
   assert.equal(source.includes('前往結帳'), false)
   assert.equal(source.includes('前往付款'), false)
 })
@@ -532,7 +541,6 @@ test('cart page selector wires NewebPay choices to product order and NewebPay cr
   const source = readCartPageSource()
 
   assert.equal(source.includes('handleNewebPayCheckoutClick'), true)
-  assert.equal(source.includes("selectedPaymentMethod !== 'post_office'"), true)
   assert.equal(source.includes('selectedPaymentMethodOption.ctaLabel'), true)
   assert.equal(source.includes("fetch('/api/product-orders/create'"), true)
   assert.equal(source.includes("fetch('/api/payments/newebpay/create'"), true)
@@ -573,18 +581,24 @@ test('cart page prevents duplicate NewebPay checkout while loading', () => {
   assert.equal(source.includes('disabled={isNewebPayCheckingOut}'), true)
 })
 
-test('post office transfer option does not call NewebPay create API directly', () => {
+test('post office shipping data remains intact after transfer payment retirement', () => {
   const source = readCartPageSource()
-  const postOfficeStart = source.indexOf("selectedPaymentMethod === 'post_office'")
-  const postOfficeEnd = source.indexOf("selectedPaymentMethod !== 'post_office'")
-  const postOfficeBlock = source.slice(postOfficeStart, postOfficeEnd)
 
-  assert.ok(postOfficeStart >= 0)
-  assert.ok(postOfficeEnd > postOfficeStart)
-  assert.equal(postOfficeBlock.includes('/api/payments/newebpay/create'), false)
-  assert.equal(postOfficeBlock.includes("href=\"/bank-transfer\""), true)
-  assert.equal(postOfficeBlock.includes('LINEPAY=1'), false)
-  assert.equal(postOfficeBlock.includes('VACC=1'), false)
+  assert.equal(source.includes('type PostOfficeShippingInfo'), true)
+  assert.equal(source.includes('postOfficeShippingInfo'), true)
+  assert.equal(source.includes('postOfficeShippingStorageKey'), true)
+  assert.equal(source.includes('emptyPostOfficeShippingInfo'), true)
+  assert.equal(source.includes('getValidatedShippingInfo'), true)
+  assert.equal(source.includes('savePostOfficeShippingInfo'), true)
+  assert.equal(source.includes("shipping_method: 'post_office'"), true)
+  assert.equal(source.includes('郵局寄送資料'), true)
+  assert.equal(source.includes('收件人姓名'), true)
+  assert.equal(source.includes('收件人電話'), true)
+  assert.equal(source.includes('郵遞區號'), true)
+  assert.equal(source.includes('縣市'), true)
+  assert.equal(source.includes('區域'), true)
+  assert.equal(source.includes('詳細地址'), true)
+  assert.equal(source.includes('備註'), true)
 })
 
 runTests().catch((error) => {

@@ -30,8 +30,8 @@ function getSections() {
     {
       title: '退款申請方式',
       body: hideConsultationServices
-        ? '退款申請請透過客服信箱 water.bottle.fortune.teller@gmail.com 或客服 LINE https://lin.ee/6Tpje1P 聯繫我們。客服時間：09:00–18:00。請提供會員帳號、訂單編號、付款時間、服務名稱與申請原因。若選擇銀行匯款付款，請於匯款完成後填寫匯款回報表單，並加入水瓶先生官方 LINE 回覆「已匯款＋姓名＋購買項目」。客服確認款項後，將協助處理服務或付款查詢。'
-        : '退款或改期申請請透過客服信箱 water.bottle.fortune.teller@gmail.com 或客服 LINE https://lin.ee/6Tpje1P 聯繫我們。客服時間：09:00–18:00。請提供會員帳號、訂單編號、付款時間、服務名稱與申請原因。若選擇銀行匯款付款，請於匯款完成後填寫匯款回報表單，並加入水瓶先生官方 LINE 回覆「已匯款＋姓名＋購買項目」。客服確認款項後，將協助開通服務或確認預約。',
+        ? '退款申請請透過客服信箱 water.bottle.fortune.teller@gmail.com 或客服 LINE https://lin.ee/6Tpje1P 聯繫我們。客服時間：09:00–18:00。請提供會員帳號、訂單編號、付款時間、服務名稱與申請原因。客服受理後將協助確認付款與退款流程。'
+        : '退款或改期申請請透過客服信箱 water.bottle.fortune.teller@gmail.com 或客服 LINE https://lin.ee/6Tpje1P 聯繫我們。客服時間：09:00–18:00。請提供會員帳號、訂單編號、付款時間、服務名稱與申請原因。客服受理後將協助確認付款、退款或改期流程。',
     },
     {
       title: '退款處理時間',

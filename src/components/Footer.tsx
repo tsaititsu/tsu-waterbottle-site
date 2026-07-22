@@ -21,7 +21,6 @@ const consumerLinks = [
   { href: '/privacy', label: '隱私權政策' },
   { href: '/refund-policy', label: '退款政策' },
   { href: '/consumer-rights', label: '消費者權益' },
-  { href: '/bank-transfer', label: '銀行匯款說明' },
   { href: '/contact', label: '聯絡我們' },
 ]
 
