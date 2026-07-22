@@ -2,11 +2,19 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { BookOpen, CalendarCheck, FileText, LogOut, Menu, ScrollText, ShoppingCart, Sparkles, UserRound, X } from 'lucide-react'
+import { BookOpen, CalendarCheck, FileText, LogOut, Menu, ScrollText, ShieldCheck, ShoppingCart, Sparkles, UserRound, X } from 'lucide-react'
 import { type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { GoogleAnalyticsCtaDestination } from '@/lib/analytics/googleAnalytics'
 import {
+  beginAdminMenuAccessCheck,
+  canShowAdminMenu,
+  completeAdminMenuAccessCheck,
+  verifyAdminMenuAccess,
+  type AdminMenuAccessSnapshot,
+} from '@/lib/auth/adminMenuAccess'
+import {
+  getAuthAccessToken,
   getMockUser,
   loginWithProvider,
   logoutMockUser,
@@ -56,6 +64,10 @@ export function Header() {
   const [loginMessage, setLoginMessage] = useState('')
   const [loadingProvider, setLoadingProvider] = useState<'line' | 'google' | ''>('')
   const [user, setUser] = useState<UserProfile | null>(null)
+  const adminAccessRequestIdRef = useRef(0)
+  const [adminMenuAccess, setAdminMenuAccess] = useState<AdminMenuAccessSnapshot>(() =>
+    beginAdminMenuAccessCheck(null, 0),
+  )
   const { totalQuantity } = useCart()
   const hideAiDivinationServices = shouldHideAiDivinationServices()
   const hideConsultationServices = shouldHideConsultationServices()
@@ -66,6 +78,35 @@ export function Header() {
     sync()
     return subscribeAuthChange(sync)
   }, [])
+
+  useEffect(() => {
+    const requestId = adminAccessRequestIdRef.current + 1
+    adminAccessRequestIdRef.current = requestId
+    const startedAccess = beginAdminMenuAccessCheck(user, requestId)
+    setAdminMenuAccess(startedAccess)
+
+    if (startedAccess.state !== 'checking') return
+
+    let cancelled = false
+    const controller = new AbortController()
+
+    void verifyAdminMenuAccess(user, {
+      getAccessToken: getAuthAccessToken,
+      fetchSession: fetch,
+      signal: controller.signal,
+    }).then((result) => {
+      if (cancelled || result === 'idle') return
+
+      setAdminMenuAccess((current) =>
+        completeAdminMenuAccessCheck(current, requestId, result),
+      )
+    })
+
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [user])
 
   useEffect(() => {
     setMenuOpen(false)
@@ -119,11 +160,16 @@ export function Header() {
   }
 
   const handleLogout = () => {
+    const requestId = adminAccessRequestIdRef.current + 1
+    adminAccessRequestIdRef.current = requestId
+    setAdminMenuAccess(beginAdminMenuAccessCheck(null, requestId))
     logoutMockUser()
     setAccountMenuOpen(false)
     setMenuOpen(false)
     router.push('/')
   }
+
+  const showAdminMenu = canShowAdminMenu(adminMenuAccess, user)
 
   const accountMenu = user ? (
     <div className="absolute right-0 top-[calc(100%+14px)] z-50 w-[340px] overflow-hidden rounded-[20px] bg-[#050505] text-white shadow-2xl ring-1 ring-white/10">
@@ -163,6 +209,14 @@ export function Header() {
           </Link>
         ) : null}
       </nav>
+      {showAdminMenu ? (
+        <nav aria-label="管理員功能" className="grid border-t border-white/15 py-3 text-lg font-semibold">
+          <Link href="/admin" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
+            <ShieldCheck size={22} />
+            後台管理
+          </Link>
+        </nav>
+      ) : null}
       <button
         type="button"
         onClick={handleLogout}
@@ -215,6 +269,13 @@ export function Header() {
       <Link href="/account/divinations" onClick={() => setMenuOpen(false)} className="rounded-xl border border-[#e8dff2] px-4 py-3 text-center font-semibold">
         我的占卜紀錄
       </Link>
+      {showAdminMenu ? (
+        <div className="border-y border-[#e8dff2] py-3">
+          <Link href="/admin" onClick={() => setMenuOpen(false)} className="block rounded-xl border border-[#e8dff2] px-4 py-3 text-center font-semibold text-deepPurple">
+            後台管理
+          </Link>
+        </div>
+      ) : null}
       <button type="button" onClick={handleLogout} className="rounded-xl bg-[#3d0d74] px-4 py-3 font-semibold text-white">
         登出
       </button>
