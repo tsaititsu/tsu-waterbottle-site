@@ -8,10 +8,10 @@ import {
   LINE_SESSION_COOKIE,
   LINE_SESSION_MAX_AGE_SECONDS,
   LINE_STATE_COOKIE,
-  sanitizeNextPath,
   upsertLineSupabaseUser,
   verifyLineIdToken,
 } from '@/lib/auth/line'
+import { sanitizeAuthReturnPath } from '@/lib/auth/returnTo'
 
 export const runtime = 'nodejs'
 
@@ -31,7 +31,7 @@ function clearTransientCookies(response: NextResponse) {
 }
 
 export async function GET(request: NextRequest) {
-  const nextPath = sanitizeNextPath(request.cookies.get(LINE_NEXT_COOKIE)?.value || '/account')
+  const nextPath = sanitizeAuthReturnPath(request.cookies.get(LINE_NEXT_COOKIE)?.value)
   const redirectUri = `${siteOrigin(request)}/api/auth/line/callback`
 
   try {

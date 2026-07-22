@@ -16,7 +16,7 @@ function validBody(overrides: Record<string, unknown> = {}) {
     customerName: '測試客人',
     customerEmail: 'test@example.com',
     customerPhone: '0900000000',
-    paymentMethod: 'bank_transfer',
+    paymentMethod: 'newebpay',
     items: [
       {
         productSlug: 'ren-yuan-fu',
@@ -60,7 +60,7 @@ function assertNoUnsafeSerializedKeys(value: unknown) {
   assert.equal(serialized.includes('raw_payload'), false)
 }
 
-test('creates a bank transfer product order from server product data', async () => {
+test('creates a NewebPay product order from server product data', async () => {
   const calls: Record<string, unknown>[] = []
   const response = await handleCreateProductOrderRequest(
     validBody({
@@ -93,13 +93,13 @@ test('creates a bank transfer product order from server product data', async () 
     orderId: 'order-1',
     orderNo: 'PO20260707143022A1B2',
     totalAmountTwd: 3000,
-    paymentMethod: 'bank_transfer',
+    paymentMethod: 'newebpay',
     paymentStatus: 'pending',
     orderStatus: 'pending_payment',
     shippingStatus: 'not_shipped',
   })
   assert.equal(calls.length, 1)
-  assert.equal(calls[0].paymentMethod, 'bank_transfer')
+  assert.equal(calls[0].paymentMethod, 'newebpay')
   assert.equal((calls[0].items as Array<Record<string, unknown>>)[0].productSlug, 'ren-yuan-fu')
   assert.equal((calls[0].items as Array<Record<string, unknown>>)[0].productName, '人緣符')
   assert.equal((calls[0].items as Array<Record<string, unknown>>)[0].unitPriceTwd, 1500)
@@ -109,6 +109,26 @@ test('creates a bank transfer product order from server product data', async () 
   assert.equal('shipments' in calls[0], false)
   assertNoUnsafeSerializedKeys(calls)
   assertNoUnsafeResponseKeys(json)
+})
+
+test('rejects retired bank transfer product orders before any write', async () => {
+  let createOrderCalls = 0
+  const response = await handleCreateProductOrderRequest(
+    validBody({ paymentMethod: 'bank_transfer' }),
+    {
+      createProductOrder: async () => {
+        createOrderCalls += 1
+        throw new Error('must_not_write')
+      },
+    },
+  )
+
+  assert.equal(response.status, 400)
+  assert.deepEqual(await readJson(response), {
+    ok: false,
+    error: 'invalid_product_payment_method',
+  })
+  assert.equal(createOrderCalls, 0)
 })
 
 test('creates a newebpay product order without creating a payment', async () => {
