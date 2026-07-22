@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import type { User } from '@supabase/supabase-js'
+import { buildSameOriginReturnUrl } from '@/lib/auth/returnTo'
 import { getSupabaseAdmin, hasSupabaseAdminConfig } from '@/lib/supabase/admin'
 
 export const runtime = 'nodejs'
@@ -8,6 +9,7 @@ export const runtime = 'nodejs'
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const LINE_PKCE_COOKIE = 'waterbottle_line_pkce_code_verifier'
+const GENERIC_AUTH_ERROR = '登入失敗，請重新登入。'
 
 type MetadataRecord = Record<string, unknown>
 
@@ -66,20 +68,6 @@ function getCallbackSupabaseClient(request: NextRequest, response: NextResponse)
       },
     },
   })
-}
-
-function sanitizeNextPath(next: string | null | undefined) {
-  if (!next) return '/account'
-
-  let decoded: string
-  try {
-    decoded = decodeURIComponent(next)
-  } catch {
-    return '/account'
-  }
-
-  if (!decoded.startsWith('/') || decoded.startsWith('//')) return '/account'
-  return decoded
 }
 
 function metadataText(metadata: MetadataRecord | null | undefined, keys: string[]) {
@@ -169,14 +157,18 @@ function redirectWithError(request: NextRequest, message: string) {
 
 export async function GET(request: NextRequest) {
   const oauthError = request.nextUrl.searchParams.get('error_description') || request.nextUrl.searchParams.get('error')
-  if (oauthError) return redirectWithError(request, oauthError)
+  if (oauthError) return redirectWithError(request, GENERIC_AUTH_ERROR)
 
   const code = request.nextUrl.searchParams.get('code')
   if (!code) return redirectWithError(request, '登入連結已失效，請重新登入。')
 
   try {
-    const nextPath = sanitizeNextPath(request.nextUrl.searchParams.get('next'))
-    const response = NextResponse.redirect(new URL(nextPath, request.nextUrl.origin))
+    const response = NextResponse.redirect(
+      buildSameOriginReturnUrl(
+        request.nextUrl.origin,
+        request.nextUrl.searchParams.get('next'),
+      ),
+    )
     response.cookies.set(LINE_PKCE_COOKIE, '', { path: '/', maxAge: 0 })
 
     const supabase = getCallbackSupabaseClient(request, response)
@@ -189,8 +181,7 @@ export async function GET(request: NextRequest) {
     await syncProfile(user)
 
     return response
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '登入失敗，請重新登入。'
-    return redirectWithError(request, message)
+  } catch {
+    return redirectWithError(request, GENERIC_AUTH_ERROR)
   }
 }

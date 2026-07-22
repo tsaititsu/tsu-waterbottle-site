@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { UserProfile } from './types'
 import {
+  buildLineAuthorizeUrl,
   createLineSessionCookieValue,
   LINE_SESSION_MAX_AGE_SECONDS,
   readLineSessionCookieValue,
@@ -44,8 +45,25 @@ function readIssuedAt(cookie: string) {
 
 async function run() {
   process.env.LINE_SESSION_SECRET = TEST_SESSION_SECRET
+  process.env.LINE_LOGIN_CHANNEL_ID = 'test-line-channel-id'
+  process.env.LINE_LOGIN_CHANNEL_SECRET = 'test-line-channel-secret'
 
   try {
+    assert.equal(
+      buildLineAuthorizeUrl({
+        redirectUri: 'https://example.test/api/auth/line/callback',
+        next: '/admin/bookings?status=paid',
+      }).next,
+      '/admin/bookings?status=paid',
+    )
+    assert.equal(
+      buildLineAuthorizeUrl({
+        redirectUri: 'https://example.test/api/auth/line/callback',
+        next: '%252F%252Fevil.example',
+      }).next,
+      '/account',
+    )
+
     const validCookie = createLineSessionCookieValue(user, NOW)
     assert.equal(readIssuedAt(validCookie), NOW_SECONDS)
     assert.deepEqual(readLineSessionCookieValue(validCookie, NOW), user)
@@ -107,6 +125,8 @@ async function run() {
     console.log('LINE session tests passed')
   } finally {
     delete process.env.LINE_SESSION_SECRET
+    delete process.env.LINE_LOGIN_CHANNEL_ID
+    delete process.env.LINE_LOGIN_CHANNEL_SECRET
   }
 }
 
