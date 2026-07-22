@@ -8,8 +8,12 @@ on:
       - "package-lock.json"
       - "src/lib/supabase/linePayDatabaseContracts.ts"
       - "src/lib/supabase/linePayDatabaseContracts.test.ts"
+      - "supabase/bank_transfer_submissions_patch.sql"
+      - "supabase/bank_transfer_submissions_readonly_fence.test.ts"
       - "supabase/line_pay_remediation_contracts.test.ts"
+      - "supabase/migrations/*_retire_bank_transfer_submissions_writes.sql"
       - "supabase/migrations/20260719033404_line_pay_remediation_contracts.sql"
+      - "supabase/tests/run_bank_transfer_submissions_readonly_fence.mjs"
       - "supabase/tests/line_pay_*.sql"
       - "supabase/tests/run_line_pay_remediation_*.mjs"
       - "supabase/tests/run_line_pay_second_remediation_conflicts.mjs"
@@ -45,8 +49,12 @@ jobs:
 
       - name: Run static database contract tests
         run: |
+          node --test supabase/bank_transfer_submissions_readonly_fence.test.ts
           node --test supabase/line_pay_remediation_contracts.test.ts
           node --test src/lib/supabase/linePayDatabaseContracts.test.ts
+
+      - name: Run bank transfer read-only fence contracts
+        run: node supabase/tests/run_bank_transfer_submissions_readonly_fence.mjs
 
       - name: Run disposable PostgreSQL contract suite
         run: node supabase/tests/run_line_pay_remediation_db_contracts.mjs
@@ -67,4 +75,10 @@ jobs:
           docker volume ls -q --filter label=task=line-pay-remediation-pr1 |
             xargs -r docker volume rm
           docker network ls -q --filter label=task=line-pay-remediation-pr1 |
+            xargs -r docker network rm
+          docker ps -aq --filter label=task=bank-transfer-db-readonly-fence |
+            xargs -r docker rm --force
+          docker volume ls -q --filter label=task=bank-transfer-db-readonly-fence |
+            xargs -r docker volume rm
+          docker network ls -q --filter label=task=bank-transfer-db-readonly-fence |
             xargs -r docker network rm
