@@ -1,0 +1,641 @@
+import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { EventEmitter } from 'node:events'
+import { readFileSync } from 'node:fs'
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { PassThrough } from 'node:stream'
+import test from 'node:test'
+import { pathToFileURL } from 'node:url'
+
+const root = process.cwd()
+const writableTestRoot = process.env.LINE_PAY_TEST_TMPDIR ?? root
+const validatorPath = join(
+  root,
+  'scripts/supabase/validate-line-pay-production-deployment.mjs',
+)
+const runnerPath = join(
+  root,
+  'scripts/supabase/run-line-pay-production-exact-file.mjs',
+)
+
+test('validator fixes the complete Production deployment identity', async () => {
+  const validator = await import(pathToFileURL(validatorPath).href)
+  const migration = readFileSync(join(root, validator.MIGRATION_FILE))
+  const fence = readFileSync(join(root, validator.FENCE_MIGRATION_FILE))
+
+  assert.equal(validator.EXPECTED_REPOSITORY, 'tsaititsu/tsu-waterbottle-site')
+  assert.equal(validator.EXPECTED_PROJECT_REF, 'ndbqoznvobmpkgxkiezz')
+  assert.equal(validator.EXPECTED_EVENT, 'workflow_dispatch')
+  assert.equal(validator.EXPECTED_REF, 'refs/heads/main')
+  assert.equal(
+    validator.EXPECTED_CONFIRMATION,
+    'DEPLOY_LINE_PAY_REMEDIATION_EXACT_FILE_ONCE',
+  )
+  assert.equal(
+    validator.MIGRATION_FILE,
+    'supabase/migrations/20260719033404_line_pay_remediation_contracts.sql',
+  )
+  assert.equal(
+    validator.FENCE_MIGRATION_FILE,
+    'supabase/migrations/20260722065311_retire_bank_transfer_submissions_writes.sql',
+  )
+  assert.equal(
+    createHash('sha256').update(migration).digest('hex'),
+    '370984c499d93f602b3dccf876becd030085e88ccd9a17106fee8b0009d84046',
+  )
+  assert.equal(
+    createHash('sha256').update(fence).digest('hex'),
+    '2f43979b1f4ff88243296f0a389c146b879652715d40d23bdb7ce1d6785407d7',
+  )
+})
+
+test('validator rejects identity mutations and unsupported PostgreSQL clients', async () => {
+  const validator = await import(pathToFileURL(validatorPath).href)
+
+  assert.equal(validator.validateFullSha('a'.repeat(40)), 'a'.repeat(40))
+  assert.throws(() => validator.validateFullSha('abc'), /INVALID_MAIN_SHA/)
+  assert.equal(
+    validator.validateConfirmation(
+      'DEPLOY_LINE_PAY_REMEDIATION_EXACT_FILE_ONCE',
+    ),
+    true,
+  )
+  assert.throws(
+    () => validator.validateConfirmation('DEPLOY'),
+    /INVALID_DEPLOYMENT_CONFIRMATION/,
+  )
+  assert.equal(validator.validateProjectRef('ndbqoznvobmpkgxkiezz'), true)
+  assert.throws(
+    () => validator.validateProjectRef('aaaaaaaaaaaaaaaaaaaa'),
+    /PROJECT_REF_MISMATCH/,
+  )
+  assert.equal(
+    validator.validateMigrationHash(
+      '370984c499d93f602b3dccf876becd030085e88ccd9a17106fee8b0009d84046',
+    ),
+    true,
+  )
+  assert.throws(
+    () => validator.validateMigrationHash('0'.repeat(64)),
+    /MIGRATION_HASH_MISMATCH/,
+  )
+  assert.equal(
+    validator.validateFenceHash(
+      '2f43979b1f4ff88243296f0a389c146b879652715d40d23bdb7ce1d6785407d7',
+    ),
+    true,
+  )
+  assert.throws(
+    () => validator.validateFenceHash('0'.repeat(64)),
+    /FENCE_HASH_MISMATCH/,
+  )
+  for (const output of [
+    'psql (PostgreSQL) 17',
+    'psql (PostgreSQL) 17.6',
+    'psql (PostgreSQL) 17.6 (Ubuntu 17.6-1.pgdg24.04+1)',
+  ]) {
+    assert.equal(validator.validatePsqlVersionOutput(`${output}\n`), true)
+  }
+  for (const output of [
+    'psql (PostgreSQL) 16.9',
+    'psql (PostgreSQL) 18',
+    'psql (PostgreSQL) 17.6\nunsafe',
+    'psql (PostgreSQL) 017.6',
+  ]) {
+    assert.throws(
+      () => validator.validatePsqlVersionOutput(output),
+      /UNSUPPORTED_PSQL_VERSION/,
+    )
+  }
+})
+
+test('source context and Environment channel gates fail closed', async () => {
+  const validator = await import(pathToFileURL(validatorPath).href)
+  const sha = 'a'.repeat(40)
+  const valid = {
+    GITHUB_REPOSITORY: 'tsaititsu/tsu-waterbottle-site',
+    GITHUB_EVENT_NAME: 'workflow_dispatch',
+    GITHUB_REF: 'refs/heads/main',
+    GITHUB_SHA: sha,
+    AUTHORIZED_COMMIT: sha,
+    PROJECT_REF_INPUT: 'ndbqoznvobmpkgxkiezz',
+    MIGRATION_SHA256_INPUT:
+      '370984c499d93f602b3dccf876becd030085e88ccd9a17106fee8b0009d84046',
+    DEPLOY_CONFIRMATION: 'DEPLOY_LINE_PAY_REMEDIATION_EXACT_FILE_ONCE',
+  }
+  assert.equal(validator.validateWorkflowContext(valid), true)
+  for (const [key, value] of [
+    ['GITHUB_REF', 'refs/heads/codex/test'],
+    ['GITHUB_SHA', 'b'.repeat(40)],
+    ['PROJECT_REF_INPUT', 'aaaaaaaaaaaaaaaaaaaa'],
+    ['MIGRATION_SHA256_INPUT', '0'.repeat(64)],
+    ['DEPLOY_CONFIRMATION', 'DEPLOY'],
+  ]) {
+    assert.throws(
+      () => validator.validateWorkflowContext({ ...valid, [key]: value }),
+      /SOURCE_CONTEXT_INVALID|PROJECT_REF_MISMATCH|MIGRATION_HASH_MISMATCH|INVALID_DEPLOYMENT_CONFIRMATION/,
+    )
+  }
+  assert.equal(
+    validator.validateProductionChannel({
+      SUPABASE_PRODUCTION_CHANNEL_READY: 'true',
+      SUPABASE_PRODUCTION_DB_URL:
+        'postgresql://postgres:synthetic@db.ndbqoznvobmpkgxkiezz.supabase.co:5432/postgres?sslmode=require',
+      SUPABASE_PROJECT_ID: 'ndbqoznvobmpkgxkiezz',
+    }),
+    true,
+  )
+  for (const environment of [
+    {},
+    { SUPABASE_PRODUCTION_CHANNEL_READY: 'false' },
+    {
+      SUPABASE_PRODUCTION_CHANNEL_READY: 'true',
+      SUPABASE_PROJECT_ID: 'ndbqoznvobmpkgxkiezz',
+    },
+  ]) {
+    assert.throws(
+      () => validator.validateProductionChannel(environment),
+      /PRODUCTION_CHANNEL_NOT_READY/,
+    )
+  }
+})
+
+test('fixed-file validation rejects symlinks, traversal, and hash mutations', async () => {
+  const validator = await import(pathToFileURL(validatorPath).href)
+  const testTempRoot = join(writableTestRoot, '.line-pay-production-test-tmp')
+  await mkdir(testTempRoot, { recursive: true })
+  const fixtureRoot = await mkdtemp(
+    join(testTempRoot, 'line-pay-exact-file-fixture-'),
+  )
+  try {
+    await mkdir(join(fixtureRoot, 'supabase/migrations'), { recursive: true })
+    await writeFile(
+      join(fixtureRoot, 'supabase/migrations/fixed.sql'),
+      'select 1;\n',
+      'utf8',
+    )
+    const hash = createHash('sha256').update('select 1;\n').digest('hex')
+    assert.equal(
+      validator.readAndValidateFixedFile(
+        fixtureRoot,
+        'supabase/migrations/fixed.sql',
+        hash,
+      ),
+      'select 1;\n',
+    )
+    assert.throws(
+      () =>
+        validator.readAndValidateFixedFile(
+          fixtureRoot,
+          '../outside.sql',
+          hash,
+        ),
+      /FIXED_FILE_INVALID/,
+    )
+    await symlink(
+      join(fixtureRoot, 'supabase/migrations/fixed.sql'),
+      join(fixtureRoot, 'supabase/migrations/link.sql'),
+    )
+    assert.throws(
+      () =>
+        validator.readAndValidateFixedFile(
+          fixtureRoot,
+          'supabase/migrations/link.sql',
+          hash,
+        ),
+      /FIXED_FILE_INVALID/,
+    )
+    assert.throws(
+      () =>
+        validator.readAndValidateFixedFile(
+          fixtureRoot,
+          'supabase/migrations/fixed.sql',
+          '0'.repeat(64),
+        ),
+      /FIXED_FILE_HASH_MISMATCH/,
+    )
+  } finally {
+    await rm(fixtureRoot, { recursive: true })
+    await rm(testTempRoot, { recursive: true })
+  }
+})
+
+test('preflight and postflight SQL are fixed read-only single-statement queries', async () => {
+  const validator = await import(pathToFileURL(validatorPath).href)
+  for (const relativePath of [
+    validator.PREFLIGHT_FILE,
+    validator.POSTFLIGHT_FILE,
+  ]) {
+    const sql = readFileSync(join(root, relativePath), 'utf8')
+    assert.equal(validator.assertReadOnlyAuditSql(sql), true)
+  }
+  for (const sql of [
+    'insert into public.x values (1);',
+    'with x as (select 1) update public.x set y = 1;',
+    'begin; select 1; commit;',
+    'select pg_cancel_backend(1);',
+    'copy public.x to stdout;',
+  ]) {
+    assert.throws(() => validator.assertReadOnlyAuditSql(sql), /UNSAFE_AUDIT_SQL/)
+  }
+})
+
+test('audit parser requires one JSON row and fixed safe statuses', async () => {
+  const validator = await import(pathToFileURL(validatorPath).href)
+  const preflight = validator.buildExpectedAuditFixture('preflight')
+  const postflight = validator.buildExpectedAuditFixture('postflight')
+
+  assert.equal(
+    validator.parseAndValidateAuditOutput(
+      `${JSON.stringify(preflight)}\n`,
+      'preflight',
+    ),
+    'READY_EXPECTED',
+  )
+  assert.equal(
+    validator.parseAndValidateAuditOutput(
+      `${JSON.stringify(postflight)}\n`,
+      'postflight',
+    ),
+    'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED',
+  )
+  assert.throws(
+    () =>
+      validator.parseAndValidateAuditOutput(
+        `${JSON.stringify(preflight)}\n${JSON.stringify(preflight)}\n`,
+        'preflight',
+      ),
+    /DATABASE_OUTPUT_INVALID/,
+  )
+  const drift = structuredClone(preflight)
+  drift.historical.payments.rows = 19
+  assert.throws(
+    () =>
+      validator.parseAndValidateAuditOutput(
+        JSON.stringify(drift),
+        'preflight',
+      ),
+    /PRODUCTION_DATA_DRIFT/,
+  )
+
+  for (const status of [
+    'ALREADY_APPLIED',
+    'PARTIAL_APPLICATION',
+    'SCHEMA_DRIFT',
+    'FENCE_REGRESSION',
+    'PRODUCTION_DATA_DRIFT',
+    'BLOCKED_BY_DATABASE_LOCK_RISK',
+  ]) {
+    assert.throws(
+      () =>
+        validator.parseAndValidateAuditOutput(
+          JSON.stringify({ ...preflight, status }),
+          'preflight',
+        ),
+      new RegExp(status),
+    )
+  }
+
+  const lockRisk = structuredClone(preflight)
+  lockRisk.locks.payments_blocking = 1
+  assert.throws(
+    () =>
+      validator.parseAndValidateAuditOutput(
+        JSON.stringify(lockRisk),
+        'preflight',
+      ),
+    /BLOCKED_BY_DATABASE_LOCK_RISK/,
+  )
+
+  const catalogDrift = structuredClone(postflight)
+  catalogDrift.line_pay.catalog_fingerprints.functions.digest =
+    '0'.repeat(64)
+  assert.throws(
+    () =>
+      validator.parseAndValidateAuditOutput(
+        JSON.stringify(catalogDrift),
+        'postflight',
+      ),
+    /POSTFLIGHT_CONTRACT_FAILED/,
+  )
+})
+
+test('runner accepts only the three fixed phases and strict Supabase URLs', async () => {
+  const runner = await import(pathToFileURL(runnerPath).href)
+  assert.deepEqual(Object.keys(runner.PHASE_FILES).sort(), [
+    'migration',
+    'postflight',
+    'preflight',
+  ])
+  for (const phase of ['preflight', 'migration', 'postflight']) {
+    assert.equal(runner.validatePhase(phase), phase)
+    const args = runner.buildPsqlArgs(phase)
+    assert.deepEqual(args.slice(0, 4), [
+      '--no-psqlrc',
+      '--set=ON_ERROR_STOP=1',
+      '--no-align',
+      '--tuples-only',
+    ])
+    assert.equal(args.length, 5)
+    assert.match(args[4], /^--file=/)
+  }
+  for (const phase of ['', 'sql', '../x', 'migration extra']) {
+    assert.throws(() => runner.validatePhase(phase), /UNSUPPORTED_DATABASE_PHASE/)
+  }
+
+  const direct = runner.parseDatabaseUrl(
+    'postgresql://postgres:synthetic@db.ndbqoznvobmpkgxkiezz.supabase.co:5432/postgres?sslmode=require',
+    'ndbqoznvobmpkgxkiezz',
+  )
+  assert.equal(direct.mode, 'direct')
+  const session = runner.parseDatabaseUrl(
+    'postgresql://postgres.ndbqoznvobmpkgxkiezz:synthetic@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=verify-full',
+    'ndbqoznvobmpkgxkiezz',
+  )
+  assert.equal(session.mode, 'supavisor_session')
+
+  for (const url of [
+    'postgresql://postgres:synthetic@db.aaaaaaaaaaaaaaaaaaaa.supabase.co:5432/postgres',
+    'postgresql://postgres:synthetic@db.ndbqoznvobmpkgxkiezz.supabase.co:5433/postgres',
+    'postgresql://postgres:synthetic@db.ndbqoznvobmpkgxkiezz.supabase.co:5432/other',
+    'postgresql://postgres:synthetic@db.ndbqoznvobmpkgxkiezz.supabase.co:5432/postgres?target_session_attrs=read-write',
+    'postgresql://postgres:bad%0Avalue@db.ndbqoznvobmpkgxkiezz.supabase.co:5432/postgres',
+    'postgresql://postgres.aaaaaaaaaaaaaaaaaaaa:synthetic@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres',
+  ]) {
+    assert.throws(
+      () => runner.parseDatabaseUrl(url, 'ndbqoznvobmpkgxkiezz'),
+      /DATABASE_URL_INVALID|DATABASE_TARGET_MISMATCH/,
+    )
+  }
+})
+
+test('runner uses shell=false, stdin=ignore, capped output, and fixed redaction', async () => {
+  const runner = await import(pathToFileURL(runnerPath).href)
+  const connection = runner.parseDatabaseUrl(
+    'postgresql://postgres:synthetic-secret@db.ndbqoznvobmpkgxkiezz.supabase.co:5432/postgres?sslmode=require',
+    'ndbqoznvobmpkgxkiezz',
+  )
+  const childEnvironment = runner.buildChildEnvironment(
+    connection,
+    '/tmp/synthetic-pgpass',
+  )
+  assert.equal(
+    childEnvironment.PGAPPNAME,
+    'line-pay-production-exact-file-migration',
+  )
+  assert.equal(childEnvironment.PGPASSFILE, '/tmp/synthetic-pgpass')
+  assert.equal('PGPASSWORD' in childEnvironment, false)
+  assert.equal(
+    runner.redactSensitiveText(
+      `unsafe ${connection.databaseUrl} synthetic-secret`,
+      connection,
+    ).includes('synthetic-secret'),
+    false,
+  )
+
+  const calls: Array<Record<string, unknown>> = []
+  const fakeSpawn = (
+    binary: string,
+    args: string[],
+    options: Record<string, unknown>,
+  ) => {
+    calls.push({ binary, args, options })
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: PassThrough
+      stderr: PassThrough
+      kill: () => boolean
+    }
+    child.stdout = new PassThrough()
+    child.stderr = new PassThrough()
+    child.kill = () => true
+    queueMicrotask(() => {
+      child.stdout.end('ok\n')
+      child.stderr.end()
+      child.emit('close', 0, null)
+    })
+    return child
+  }
+  const result = await runner.spawnCaptured(
+    '/fixed/psql',
+    ['--version'],
+    { cwd: root, env: {} },
+    fakeSpawn,
+  )
+  assert.equal(result.code, 0)
+  assert.deepEqual(calls[0]?.options, {
+    cwd: root,
+    env: {},
+    shell: false,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+})
+
+test('temporary pgpass is mode 0600 and always cleanable', async () => {
+  const runner = await import(pathToFileURL(runnerPath).href)
+  const testTempRoot = join(writableTestRoot, '.line-pay-production-test-tmp')
+  await mkdir(testTempRoot, { recursive: true })
+  const runnerTemp = await mkdtemp(join(testTempRoot, 'line-pay-runner-temp-'))
+  const connection = runner.parseDatabaseUrl(
+    'postgresql://postgres:synthetic@db.ndbqoznvobmpkgxkiezz.supabase.co:5432/postgres',
+    'ndbqoznvobmpkgxkiezz',
+  )
+  try {
+    const credentials = await runner.createCredentialFile(runnerTemp, connection)
+    assert.equal((await lstat(credentials.pgpassFile)).mode & 0o777, 0o600)
+    assert.equal((await readFile(credentials.pgpassFile, 'utf8')).endsWith('\n'), true)
+    assert.equal(await runner.cleanupCredentialFile(credentials), true)
+    assert.deepEqual(await (await import('node:fs/promises')).readdir(runnerTemp), [])
+  } finally {
+    await rm(runnerTemp, { recursive: true })
+    await rm(testTempRoot, { recursive: true })
+  }
+})
+
+test('runner executes one fixed phase and cleans credentials on success and failure', async () => {
+  const runner = await import(pathToFileURL(runnerPath).href)
+  const validator = await import(pathToFileURL(validatorPath).href)
+  const testTempRoot = join(writableTestRoot, '.line-pay-production-test-tmp')
+  await mkdir(testTempRoot, { recursive: true })
+  const runnerTemp = await mkdtemp(join(testTempRoot, 'line-pay-phase-temp-'))
+  const environment = {
+    RUNNER_TEMP: runnerTemp,
+    SUPABASE_PRODUCTION_CHANNEL_READY: 'true',
+    SUPABASE_PRODUCTION_DB_URL:
+      'postgresql://postgres:synthetic@db.ndbqoznvobmpkgxkiezz.supabase.co:5432/postgres?sslmode=require',
+    SUPABASE_PROJECT_ID: 'ndbqoznvobmpkgxkiezz',
+  }
+
+  const makeSpawn = (phaseExitCode: number) => {
+    const calls: Array<{ args: string[]; options: Record<string, unknown> }> = []
+    const fakeSpawn = (
+      _binary: string,
+      args: string[],
+      options: Record<string, unknown>,
+    ) => {
+      calls.push({ args, options })
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: PassThrough
+        stderr: PassThrough
+        kill: () => boolean
+      }
+      child.stdout = new PassThrough()
+      child.stderr = new PassThrough()
+      child.kill = () => true
+      queueMicrotask(() => {
+        if (args[0] === '--version') {
+          child.stdout.end('psql (PostgreSQL) 17.10\n')
+          child.stderr.end()
+          child.emit('close', 0, null)
+          return
+        }
+        child.stdout.end(
+          `${JSON.stringify(
+            validator.buildExpectedAuditFixture('preflight'),
+          )}\n`,
+        )
+        child.stderr.end('synthetic failure detail\n')
+        child.emit('close', phaseExitCode, null)
+      })
+      return child
+    }
+    return { calls, fakeSpawn }
+  }
+
+  try {
+    const success = makeSpawn(0)
+    assert.equal(
+      await runner.runDatabasePhase('preflight', {
+        environment,
+        spawnImplementation: success.fakeSpawn,
+      }),
+      'PREFLIGHT_VALIDATED',
+    )
+    assert.equal(success.calls.length, 2)
+    assert.equal(
+      success.calls.filter(({ args }) =>
+        args.some((argument) => argument.includes('line_pay_remediation_preflight.sql')),
+      ).length,
+      1,
+    )
+    assert.deepEqual(
+      await (await import('node:fs/promises')).readdir(runnerTemp),
+      [],
+    )
+
+    const failure = makeSpawn(9)
+    await assert.rejects(
+      runner.runDatabasePhase('preflight', {
+        environment,
+        spawnImplementation: failure.fakeSpawn,
+      }),
+      /PREFLIGHT_PSQL_FAILED/,
+    )
+    assert.equal(failure.calls.length, 2)
+    assert.deepEqual(
+      await (await import('node:fs/promises')).readdir(runnerTemp),
+      [],
+    )
+  } finally {
+    await rm(runnerTemp, { recursive: true })
+    await rm(testTempRoot, { recursive: true })
+  }
+})
+
+test('capture overflow terminates the child and fails closed', async () => {
+  const runner = await import(pathToFileURL(runnerPath).href)
+  let killCount = 0
+  const fakeSpawn = () => {
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: PassThrough
+      stderr: PassThrough
+      kill: () => boolean
+    }
+    child.stdout = new PassThrough()
+    child.stderr = new PassThrough()
+    child.kill = () => {
+      killCount += 1
+      queueMicrotask(() => child.emit('close', null, 'SIGTERM'))
+      return true
+    }
+    queueMicrotask(() => {
+      child.stdout.write(Buffer.alloc(runner.MAX_CAPTURE_BYTES + 1, 65))
+    })
+    return child
+  }
+
+  const result = await runner.spawnCaptured(
+    '/fixed/psql',
+    [],
+    { cwd: root, env: {} },
+    fakeSpawn,
+  )
+  assert.equal(killCount, 1)
+  assert.equal(result.code, null)
+  assert.equal(result.signal, 'CAPTURE_LIMIT')
+})
+
+test('signal handling terminates the active child and leaves no credential file', async () => {
+  const runner = await import(pathToFileURL(runnerPath).href)
+  const testTempRoot = join(writableTestRoot, '.line-pay-production-test-tmp')
+  await mkdir(testTempRoot, { recursive: true })
+  const runnerTemp = await mkdtemp(join(testTempRoot, 'line-pay-signal-temp-'))
+  const processObject = new EventEmitter() as EventEmitter & {
+    exitCode?: number
+    stderr: PassThrough
+  }
+  processObject.stderr = new PassThrough()
+  let phaseChildKilled = false
+  let callCount = 0
+  const fakeSpawn = () => {
+    callCount += 1
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: PassThrough
+      stderr: PassThrough
+      kill: () => boolean
+    }
+    child.stdout = new PassThrough()
+    child.stderr = new PassThrough()
+    child.kill = () => {
+      phaseChildKilled = true
+      queueMicrotask(() => child.emit('close', null, 'SIGTERM'))
+      return true
+    }
+    queueMicrotask(() => {
+      if (callCount === 1) {
+        child.stdout.end('psql (PostgreSQL) 17.10\n')
+        child.stderr.end()
+        child.emit('close', 0, null)
+        return
+      }
+      processObject.emit('SIGTERM')
+    })
+    return child
+  }
+
+  try {
+    await assert.rejects(
+      runner.runDatabasePhase('preflight', {
+        environment: {
+          RUNNER_TEMP: runnerTemp,
+          SUPABASE_PRODUCTION_CHANNEL_READY: 'true',
+          SUPABASE_PRODUCTION_DB_URL:
+            'postgresql://postgres:synthetic@db.ndbqoznvobmpkgxkiezz.supabase.co:5432/postgres?sslmode=require',
+          SUPABASE_PROJECT_ID: 'ndbqoznvobmpkgxkiezz',
+        },
+        processObject,
+        spawnImplementation: fakeSpawn,
+      }),
+      /PROCESS_INTERRUPTED/,
+    )
+    assert.equal(phaseChildKilled, true)
+    assert.equal(processObject.exitCode, 1)
+    assert.deepEqual(
+      await (await import('node:fs/promises')).readdir(runnerTemp),
+      [],
+    )
+  } finally {
+    await rm(runnerTemp, { recursive: true })
+    await rm(testTempRoot, { recursive: true })
+  }
+})
