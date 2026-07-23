@@ -103,17 +103,6 @@ export const spiritualProducts: SpiritualProduct[] = [
     usage: '建議隨身攜帶，放在皮夾、包包內層或乾淨的夾鏈袋中。',
   },
   {
-    slug: 'wu-lei-ya-sha-fu',
-    name: '五雷壓煞符',
-    category: '符咒商品',
-    priceTwd: 1500,
-    validity: '3 個月',
-    image: '/products/spiritual/wu-lei-ya-sha-fu.jpg',
-    description: '祈求淨身、去霉氣、清理負能量與減少外在靈性干擾，適合成人在感覺磁場低落、卡陰或運勢不順時作為民俗淨化用品。',
-    usage: '使用時可燒化後，以煙繞過自身周圍作為淨化。請注意通風與用火安全，遠離易燃物。',
-    note: '限成人使用。請勿直接對小朋友燒化；若小朋友需要淨化，請先將符咒燒化於清水中，再以噴霧方式外用淨化全身。請勿飲用符水。',
-  },
-  {
     slug: 'ju-bao-pen',
     name: '聚寶盆',
     category: '聚寶盆',

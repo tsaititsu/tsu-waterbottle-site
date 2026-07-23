@@ -207,6 +207,46 @@ test('unknown productSlug is rejected', async () => {
   })
 })
 
+test('removed 五雷壓煞符 slug is rejected before order or payment writes', async () => {
+  let createOrderCalls = 0
+  let paymentApiCalls = 0
+  const originalFetch = globalThis.fetch
+
+  globalThis.fetch = (async () => {
+    paymentApiCalls += 1
+    throw new Error('payment_api_must_not_be_called')
+  }) as typeof fetch
+
+  try {
+    const response = await handleCreateProductOrderRequest(
+      validBody({
+        items: [
+          {
+            productSlug: 'wu-lei-ya-sha-fu',
+            quantity: 1,
+          },
+        ],
+      }),
+      {
+        createProductOrder: async () => {
+          createOrderCalls += 1
+          throw new Error('product_order_must_not_be_created')
+        },
+      },
+    )
+
+    assert.equal(response.status, 400)
+    assert.deepEqual(await readJson(response), {
+      ok: false,
+      error: 'invalid_product_order_items',
+    })
+    assert.equal(createOrderCalls, 0)
+    assert.equal(paymentApiCalls, 0)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('non-positive quantity is rejected', async () => {
   const response = await handleCreateProductOrderRequest(
     validBody({
