@@ -447,6 +447,83 @@ export function assertDeployOrchestrationSql(sql) {
   return true
 }
 
+export function assertSignalLifecycleSource(source) {
+  if (typeof source !== 'string') fail('FIXED_FILE_INVALID')
+  const requiredOnce = [
+    'let activeChild = null',
+    'let credentials = null',
+    'let interrupted = false',
+    'let cleanupStarted = false',
+    'let cleanupCompleted = false',
+    'const removeSignalHandlers = installSignalCleanup(() => {',
+    'interrupted = true',
+    "activeChild?.kill('SIGTERM')",
+    'await cleanupCredentialsOnce()',
+  ]
+  for (const token of requiredOnce) {
+    if (source.split(token).length !== 2) fail('FIXED_FILE_INVALID')
+  }
+  if (
+    (source.match(/onSpawn: trackActiveChild/gu) ?? []).length !== 2 ||
+    (source.match(/ensureNotInterrupted[(][)]/gu) ?? []).length !== 4
+  ) {
+    fail('FIXED_FILE_INVALID')
+  }
+
+  const handlerIndex = source.indexOf(
+    'const removeSignalHandlers = installSignalCleanup(() => {',
+  )
+  const credentialIndex = source.indexOf(
+    'credentials = await createCredentialFile(',
+  )
+  const credentialGateIndex = source.indexOf(
+    'ensureNotInterrupted()',
+    credentialIndex,
+  )
+  const pullIndex = source.indexOf(
+    'await pullFixedPostgresImage(spawnImplementation, {',
+  )
+  const pullGateIndex = source.indexOf('ensureNotInterrupted()', pullIndex)
+  const buildIndex = source.indexOf('const dockerRunArgs = buildDockerRunArgs(')
+  const spawnGateIndex = source.indexOf('ensureNotInterrupted()', buildIndex)
+  const containerIndex = source.indexOf(
+    'result = await spawnCaptured(',
+    buildIndex,
+  )
+  const containerGateIndex = source.indexOf(
+    'ensureNotInterrupted()',
+    containerIndex,
+  )
+  const finallyIndex = source.indexOf('  } finally {', containerIndex)
+  const cleanupIndex = source.indexOf(
+    'await cleanupCredentialsOnce()',
+    finallyIndex,
+  )
+  const removeHandlersIndex = source.indexOf(
+    'removeSignalHandlers()',
+    cleanupIndex,
+  )
+  if (
+    !(
+      handlerIndex >= 0 &&
+      handlerIndex < credentialIndex &&
+      credentialIndex < credentialGateIndex &&
+      credentialGateIndex < pullIndex &&
+      pullIndex < pullGateIndex &&
+      pullGateIndex < buildIndex &&
+      buildIndex < spawnGateIndex &&
+      spawnGateIndex < containerIndex &&
+      containerIndex < containerGateIndex &&
+      containerGateIndex < finallyIndex &&
+      finallyIndex < cleanupIndex &&
+      cleanupIndex < removeHandlersIndex
+    )
+  ) {
+    fail('FIXED_FILE_INVALID')
+  }
+  return true
+}
+
 function databaseContract() {
   return {
     name: 'postgres',
@@ -680,13 +757,14 @@ export function validateSource(
   const preflight = readFixedRegularFile(root, PREFLIGHT_FILE)
   const postflight = readFixedRegularFile(root, POSTFLIGHT_FILE)
   const deploy = readFixedRegularFile(root, DEPLOY_FILE)
-  readFixedRegularFile(root, RUNNER_FILE)
+  const runner = readFixedRegularFile(root, RUNNER_FILE)
   readFixedRegularFile(root, WORKFLOW_FILE)
   void migration
   void fence
   assertReadOnlyAuditSql(preflight)
   assertReadOnlyAuditSql(postflight)
   assertDeployOrchestrationSql(deploy)
+  assertSignalLifecycleSource(runner)
   validatePostgresImage(POSTGRES_IMAGE)
 
   const githubSha = environment.GITHUB_SHA

@@ -378,7 +378,10 @@ export function spawnCaptured(
   })
 }
 
-export async function pullFixedPostgresImage(spawnImplementation = spawn) {
+export async function pullFixedPostgresImage(
+  spawnImplementation = spawn,
+  { onSpawn } = {},
+) {
   validatePostgresImage(POSTGRES_IMAGE)
   let result
   try {
@@ -392,6 +395,7 @@ export async function pullFixedPostgresImage(spawnImplementation = spawn) {
           LC_ALL: 'C.UTF-8',
           PATH: process.env.PATH ?? '/usr/bin:/bin',
         },
+        onSpawn,
       },
       spawnImplementation,
     )
@@ -476,26 +480,18 @@ export async function cleanupCredentialFile(
   }
 }
 
-export function installSignalCleanup(cleanup, processObject = process) {
+export function installSignalCleanup(interrupt, processObject = process) {
   let handling = false
   const handlers = new Map()
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
-    const handler = async () => {
+    const handler = () => {
       if (handling) return
       handling = true
-      let code = 'PROCESS_INTERRUPTED'
-      try {
-        await cleanup()
-      } catch {
-        code = 'TEMP_CREDENTIAL_CLEANUP_FAILED'
-      }
       processObject.exitCode = 1
-      if (code === 'TEMP_CREDENTIAL_CLEANUP_FAILED') {
-        processObject.stderr.write(`${code}\n`)
-      }
+      interrupt(signal)
     }
     handlers.set(signal, handler)
-    processObject.once(signal, handler)
+    processObject.on(signal, handler)
   }
   return () => {
     for (const [signal, handler] of handlers) {
@@ -534,25 +530,88 @@ export async function runDatabasePhase(
     environment.SUPABASE_PRODUCTION_DB_URL,
     environment.SUPABASE_PROJECT_ID,
   )
-  const credentials = await createCredentialFile(
-    environment.RUNNER_TEMP,
-    connection,
-    filesystem,
-  )
-  let activeChild
+  let activeChild = null
+  let activeChildCompletion = null
+  let credentials = null
   let interrupted = false
+  let cleanupStarted = false
+  let cleanupCompleted = false
+  let cleanupPromise = null
+  const ensureNotInterrupted = () => {
+    if (interrupted) fail('PROCESS_INTERRUPTED')
+  }
+  const trackActiveChild = (child) => {
+    activeChild = child
+    activeChildCompletion = new Promise((resolvePromise) => {
+      let settled = false
+      const settle = () => {
+        if (settled) return
+        settled = true
+        if (activeChild === child) activeChild = null
+        resolvePromise()
+      }
+      child.once('close', settle)
+      child.once('error', settle)
+    })
+    if (interrupted) child.kill('SIGTERM')
+  }
+  const terminateActiveChild = async () => {
+    const child = activeChild
+    const completion = activeChildCompletion
+    if (!child) return
+    child.kill('SIGTERM')
+    if (completion) await completion
+  }
+  const cleanupCredentialsOnce = async () => {
+    if (cleanupCompleted) return true
+    if (cleanupStarted) return cleanupPromise
+    cleanupStarted = true
+    cleanupPromise = (async () => {
+      try {
+        if (credentials) {
+          await cleanupCredentialFile(credentials, filesystem)
+        }
+        return true
+      } catch {
+        fail('TEMP_CREDENTIAL_CLEANUP_FAILED')
+      } finally {
+        cleanupCompleted = true
+      }
+    })()
+    return cleanupPromise
+  }
   const removeSignalHandlers = installSignalCleanup(() => {
     interrupted = true
     activeChild?.kill('SIGTERM')
   }, processObject)
   let operationError
   try {
-    await pullFixedPostgresImage(spawnImplementation)
+    credentials = await createCredentialFile(
+      environment.RUNNER_TEMP,
+      connection,
+      filesystem,
+    )
+    ensureNotInterrupted()
+    try {
+      await pullFixedPostgresImage(spawnImplementation, {
+        onSpawn: trackActiveChild,
+      })
+    } catch (error) {
+      if (interrupted) fail('PROCESS_INTERRUPTED')
+      throw error
+    }
+    ensureNotInterrupted()
+    const dockerRunArgs = buildDockerRunArgs(
+      phase,
+      connection,
+      credentials.pgpassFile,
+    )
+    ensureNotInterrupted()
     let result
     try {
       result = await spawnCaptured(
         DOCKER_BINARY,
-        buildDockerRunArgs(phase, connection, credentials.pgpassFile),
+        dockerRunArgs,
         {
           cwd: repositoryRoot,
           env: {
@@ -560,16 +619,14 @@ export async function runDatabasePhase(
             LC_ALL: 'C.UTF-8',
             PATH: environment.PATH ?? process.env.PATH ?? '/usr/bin:/bin',
           },
-          onSpawn: (child) => {
-            activeChild = child
-          },
+          onSpawn: trackActiveChild,
         },
         spawnImplementation,
       )
     } catch {
       fail(phaseFailureCode(phase))
     }
-    if (interrupted) fail('PROCESS_INTERRUPTED')
+    ensureNotInterrupted()
     if (result.code !== 0 || result.signal) fail(phaseFailureCode(phase))
     try {
       parseAndValidateAuditOutput(
@@ -586,13 +643,34 @@ export async function runDatabasePhase(
       fail(`${phase.toUpperCase()}_CONTRACT_FAILED`)
     }
   } catch (error) {
-    operationError = error
+    operationError =
+      error instanceof Error &&
+      error.message === 'TEMP_CREDENTIAL_CLEANUP_FAILED'
+        ? error
+        : interrupted
+          ? new Error('PROCESS_INTERRUPTED')
+          : error
   } finally {
-    removeSignalHandlers()
     try {
-      await cleanupCredentialFile(credentials, filesystem)
+      await terminateActiveChild()
+    } catch {
+      if (!operationError) operationError = new Error('PROCESS_INTERRUPTED')
+    }
+    try {
+      await cleanupCredentialsOnce()
     } catch (cleanupError) {
       operationError = cleanupError
+    } finally {
+      removeSignalHandlers()
+      if (
+        interrupted &&
+        !(
+          operationError instanceof Error &&
+          operationError.message === 'TEMP_CREDENTIAL_CLEANUP_FAILED'
+        )
+      ) {
+        operationError = new Error('PROCESS_INTERRUPTED')
+      }
     }
   }
   if (operationError) throw operationError

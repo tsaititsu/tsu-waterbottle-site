@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict'
+import {
+  spawn as spawnProcess,
+  type ChildProcessWithoutNullStreams,
+} from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
@@ -295,6 +299,56 @@ test('deploy orchestration mutations cannot remove guard, manifest, timeout, or 
   }
 })
 
+test('signal lifecycle source contract catches fail-open mutations', async () => {
+  const validator = await import(pathToFileURL(validatorPath).href)
+  const source = readFileSync(runnerPath, 'utf8')
+  assert.equal(validator.assertSignalLifecycleSource(source), true)
+
+  const handlerBlock =
+    `  const removeSignalHandlers = installSignalCleanup(() => {\n` +
+    `    interrupted = true\n` +
+    `    activeChild?.kill('SIGTERM')\n` +
+    `  }, processObject)\n`
+  const credentialBlock =
+    `    credentials = await createCredentialFile(\n` +
+    `      environment.RUNNER_TEMP,\n` +
+    `      connection,\n` +
+    `      filesystem,\n` +
+    `    )\n`
+  const handlerAfterCredential = source
+    .replace(handlerBlock, '  let removeSignalHandlers = () => {}\n')
+    .replace(
+      credentialBlock,
+      credentialBlock +
+        `    removeSignalHandlers = installSignalCleanup(() => {\n` +
+        `      interrupted = true\n` +
+        `      activeChild?.kill('SIGTERM')\n` +
+        `    }, processObject)\n`,
+    )
+
+  for (const mutated of [
+    source.replace(
+      `await pullFixedPostgresImage(spawnImplementation, {\n` +
+        `        onSpawn: trackActiveChild,\n` +
+        `      })`,
+      'await pullFixedPostgresImage(spawnImplementation)',
+    ),
+    source.replace(
+      `    ensureNotInterrupted()\n` +
+        `    const dockerRunArgs = buildDockerRunArgs(`,
+      '    const dockerRunArgs = buildDockerRunArgs(',
+    ),
+    handlerAfterCredential,
+    source.replace('      await cleanupCredentialsOnce()\n', ''),
+    source.replace('    interrupted = true\n', '    interrupted = false\n'),
+  ]) {
+    assert.throws(
+      () => validator.assertSignalLifecycleSource(mutated),
+      /FIXED_FILE_INVALID/,
+    )
+  }
+})
+
 test('audit parser requires one JSON row and fixed safe statuses', async () => {
   const validator = await import(pathToFileURL(validatorPath).href)
   const preflight = validator.buildExpectedAuditFixture('preflight')
@@ -540,6 +594,136 @@ test('temporary pgpass is mode 0600 and always cleanable', async () => {
   }
 })
 
+test('credential cleanup failure exposes only the fixed safe code', async () => {
+  const runner = await import(pathToFileURL(runnerPath).href)
+  const validator = await import(pathToFileURL(validatorPath).href)
+  const realFilesystem = await import('node:fs/promises')
+  const testTempRoot = join(writableTestRoot, '.line-pay-production-test-tmp')
+  await mkdir(testTempRoot, { recursive: true })
+  const runnerTemp = await mkdtemp(join(testTempRoot, 'line-pay-cleanup-temp-'))
+  const syntheticSecret = 'synthetic-cleanup-secret'
+  const filesystem = {
+    stat: realFilesystem.stat,
+    mkdtemp: realFilesystem.mkdtemp,
+    writeFile: realFilesystem.writeFile,
+    unlink: async () => {
+      throw new Error(
+        `unsafe cleanup detail ${runnerTemp} ${syntheticSecret}`,
+      )
+    },
+    rmdir: realFilesystem.rmdir,
+  }
+  const fakeSpawn = (
+    _binary: string,
+    args: string[],
+  ) => {
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: PassThrough
+      stderr: PassThrough
+      kill: () => boolean
+    }
+    child.stdout = new PassThrough()
+    child.stderr = new PassThrough()
+    child.kill = () => true
+    queueMicrotask(() => {
+      child.stdout.end(
+        args[0] === 'pull'
+          ? 'fixed image ready\n'
+          : `${JSON.stringify(
+              validator.buildExpectedAuditFixture('postflight'),
+            )}\n`,
+      )
+      child.stderr.end()
+      child.emit('close', 0, null)
+    })
+    return child
+  }
+
+  try {
+    const error = await runner
+      .runDatabasePhase('deploy', {
+        environment: {
+          RUNNER_TEMP: runnerTemp,
+          SUPABASE_PRODUCTION_CHANNEL_READY: 'true',
+          SUPABASE_PRODUCTION_DB_URL:
+            'postgresql://postgres:synthetic@db.ndbqoznvobmpkgxkiezz.supabase.co:5432/postgres?sslmode=require',
+          SUPABASE_PROJECT_ID: 'ndbqoznvobmpkgxkiezz',
+        },
+        filesystem,
+        spawnImplementation: fakeSpawn,
+      })
+      .then(
+        () => null,
+        (caught: unknown) => caught,
+      )
+    assert.ok(error instanceof Error)
+    assert.equal(error.message, 'TEMP_CREDENTIAL_CLEANUP_FAILED')
+    assert.equal(runner.safeFailureCode(error), 'TEMP_CREDENTIAL_CLEANUP_FAILED')
+    assert.doesNotMatch(error.message, new RegExp(syntheticSecret))
+    assert.doesNotMatch(error.message, new RegExp(runnerTemp))
+  } finally {
+    await rm(runnerTemp, { recursive: true })
+    await rm(testTempRoot, { recursive: true })
+  }
+})
+
+test('credential creation cleanup failure outranks a concurrent signal', async () => {
+  const runner = await import(pathToFileURL(runnerPath).href)
+  const realFilesystem = await import('node:fs/promises')
+  const testTempRoot = join(writableTestRoot, '.line-pay-production-test-tmp')
+  await mkdir(testTempRoot, { recursive: true })
+  const runnerTemp = await mkdtemp(join(testTempRoot, 'line-pay-create-temp-'))
+  const processObject = new EventEmitter() as EventEmitter & {
+    exitCode?: number
+    stderr: PassThrough
+  }
+  processObject.stderr = new PassThrough()
+  let spawnCount = 0
+  const filesystem = {
+    stat: realFilesystem.stat,
+    mkdtemp: realFilesystem.mkdtemp,
+    writeFile: async (
+      path: string,
+      data: string,
+      options: Record<string, unknown>,
+    ) => {
+      await realFilesystem.writeFile(path, data, options)
+      processObject.emit('SIGTERM')
+      throw new Error('synthetic credential create failure')
+    },
+    unlink: async () => {
+      throw new Error('synthetic credential cleanup failure')
+    },
+    rmdir: realFilesystem.rmdir,
+  }
+
+  try {
+    await assert.rejects(
+      runner.runDatabasePhase('deploy', {
+        environment: {
+          RUNNER_TEMP: runnerTemp,
+          SUPABASE_PRODUCTION_CHANNEL_READY: 'true',
+          SUPABASE_PRODUCTION_DB_URL:
+            'postgresql://postgres:synthetic@db.ndbqoznvobmpkgxkiezz.supabase.co:5432/postgres?sslmode=require',
+          SUPABASE_PROJECT_ID: 'ndbqoznvobmpkgxkiezz',
+        },
+        filesystem,
+        processObject,
+        spawnImplementation: () => {
+          spawnCount += 1
+          throw new Error('unexpected child')
+        },
+      }),
+      /TEMP_CREDENTIAL_CLEANUP_FAILED/,
+    )
+    assert.equal(processObject.exitCode, 1)
+    assert.equal(spawnCount, 0)
+  } finally {
+    await rm(runnerTemp, { recursive: true })
+    await rm(testTempRoot, { recursive: true })
+  }
+})
+
 test('runner executes one fixed phase and cleans credentials on success and failure', async () => {
   const runner = await import(pathToFileURL(runnerPath).href)
   const validator = await import(pathToFileURL(validatorPath).href)
@@ -726,4 +910,285 @@ test('signal handling terminates the active child and leaves no credential file'
     await rm(runnerTemp, { recursive: true })
     await rm(testTempRoot, { recursive: true })
   }
+})
+
+type SignalName = 'SIGINT' | 'SIGTERM' | 'SIGHUP'
+type SignalStage =
+  | 'before-credential'
+  | 'credential-created'
+  | 'pull-running'
+  | 'post-pull'
+  | 'container-running'
+  | 'cleanup-running'
+
+async function runSignalLifecycleScenario(
+  signal: SignalName,
+  stage: SignalStage,
+) {
+  const runner = await import(pathToFileURL(runnerPath).href)
+  const validator = await import(pathToFileURL(validatorPath).href)
+  const realFilesystem = await import('node:fs/promises')
+  const testTempRoot = join(writableTestRoot, '.line-pay-production-test-tmp')
+  await mkdir(testTempRoot, { recursive: true })
+  const runnerTemp = await mkdtemp(join(testTempRoot, 'line-pay-lifecycle-temp-'))
+  const processObject = new EventEmitter() as EventEmitter & {
+    exitCode?: number
+    stderr: PassThrough
+  }
+  processObject.stderr = new PassThrough()
+
+  let signalEmitted = false
+  let credentialCleanupCount = 0
+  let childKillCount = 0
+  const calls: string[][] = []
+  const emitSignal = () => {
+    if (signalEmitted) return
+    signalEmitted = true
+    processObject.emit(signal)
+  }
+  const filesystem = {
+    stat: async (path: string) => {
+      if (stage === 'before-credential' && path === runnerTemp) emitSignal()
+      const result = await realFilesystem.stat(path)
+      if (
+        stage === 'credential-created' &&
+        path.endsWith('/pgpass')
+      ) {
+        emitSignal()
+      }
+      return result
+    },
+    mkdtemp: realFilesystem.mkdtemp,
+    writeFile: realFilesystem.writeFile,
+    unlink: async (path: string) => {
+      if (path.endsWith('/pgpass')) credentialCleanupCount += 1
+      if (stage === 'cleanup-running' && path.endsWith('/pgpass')) {
+        emitSignal()
+      }
+      return realFilesystem.unlink(path)
+    },
+    rmdir: realFilesystem.rmdir,
+  }
+  const fakeSpawn = (
+    _binary: string,
+    args: string[],
+  ) => {
+    calls.push(args)
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: PassThrough
+      stderr: PassThrough
+      kill: () => boolean
+    }
+    child.stdout = new PassThrough()
+    child.stderr = new PassThrough()
+    let closed = false
+    const close = (code: number | null, closeSignal: string | null) => {
+      if (closed) return
+      closed = true
+      child.stdout.end()
+      child.stderr.end()
+      child.emit('close', code, closeSignal)
+    }
+    child.kill = () => {
+      childKillCount += 1
+      queueMicrotask(() => close(null, 'SIGTERM'))
+      return true
+    }
+
+    if (args[0] === 'pull') {
+      if (stage === 'pull-running') {
+        queueMicrotask(() => {
+          emitSignal()
+          setImmediate(() => close(0, null))
+        })
+      } else if (stage === 'post-pull') {
+        queueMicrotask(() => {
+          close(0, null)
+          emitSignal()
+        })
+      } else {
+        queueMicrotask(() => close(0, null))
+      }
+    } else if (stage === 'container-running') {
+      queueMicrotask(emitSignal)
+    } else {
+      queueMicrotask(() => {
+        child.stdout.end(
+          `${JSON.stringify(
+            validator.buildExpectedAuditFixture('postflight'),
+          )}\n`,
+        )
+        child.stderr.end()
+        closed = true
+        child.emit('close', 0, null)
+      })
+    }
+    return child
+  }
+
+  try {
+    await assert.rejects(
+      runner.runDatabasePhase('deploy', {
+        environment: {
+          RUNNER_TEMP: runnerTemp,
+          SUPABASE_PRODUCTION_CHANNEL_READY: 'true',
+          SUPABASE_PRODUCTION_DB_URL:
+            'postgresql://postgres:synthetic@db.ndbqoznvobmpkgxkiezz.supabase.co:5432/postgres?sslmode=require',
+          SUPABASE_PROJECT_ID: 'ndbqoznvobmpkgxkiezz',
+        },
+        filesystem,
+        processObject,
+        spawnImplementation: fakeSpawn,
+      }),
+      /PROCESS_INTERRUPTED/,
+    )
+    assert.equal(processObject.exitCode, 1)
+    assert.equal(credentialCleanupCount, 1)
+    assert.deepEqual(await realFilesystem.readdir(runnerTemp), [])
+
+    const expectedSpawnCount =
+      stage === 'before-credential' || stage === 'credential-created'
+        ? 0
+        : stage === 'container-running' || stage === 'cleanup-running'
+          ? 2
+          : 1
+    assert.equal(calls.length, expectedSpawnCount)
+    assert.equal(
+      calls.filter(({ 0: command }) => command === 'run').length,
+      stage === 'container-running' || stage === 'cleanup-running' ? 1 : 0,
+    )
+    assert.equal(
+      childKillCount,
+      stage === 'pull-running' || stage === 'container-running' ? 1 : 0,
+    )
+  } finally {
+    await rm(runnerTemp, { recursive: true })
+    await rm(testTempRoot, { recursive: true })
+  }
+}
+
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {
+  for (const stage of [
+    'before-credential',
+    'credential-created',
+    'pull-running',
+    'post-pull',
+    'container-running',
+    'cleanup-running',
+  ] as const) {
+    test(`${signal} at ${stage} fails closed without a later child`, async () => {
+      await runSignalLifecycleScenario(signal, stage)
+    })
+  }
+}
+
+test('real OS signals terminate a real active pull child and clean credentials', async () => {
+  const realFilesystem = await import('node:fs/promises')
+  const testTempRoot = join(writableTestRoot, '.line-pay-production-test-tmp')
+  await mkdir(testTempRoot, { recursive: true })
+
+  for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {
+    const runnerTemp = await mkdtemp(
+      join(testTempRoot, `line-pay-real-${signal.toLowerCase()}-`),
+    )
+    const probeSource = `
+      import { spawn } from 'node:child_process'
+      import { promises as fs } from 'node:fs'
+      const runner = await import(${JSON.stringify(pathToFileURL(runnerPath).href)})
+      const runnerTemp = ${JSON.stringify(runnerTemp)}
+      const fakeSpawn = () => {
+        const child = spawn(
+          process.execPath,
+          ['--input-type=module', '--eval', 'setInterval(() => {}, 1000)'],
+          { stdio: ['ignore', 'pipe', 'pipe'] },
+        )
+        setImmediate(() => process.stdout.write('ACTIVE\\n'))
+        return child
+      }
+      try {
+        await runner.runDatabasePhase('deploy', {
+          environment: {
+            RUNNER_TEMP: runnerTemp,
+            SUPABASE_PRODUCTION_CHANNEL_READY: 'true',
+            SUPABASE_PRODUCTION_DB_URL:
+              'postgresql://postgres:synthetic@db.ndbqoznvobmpkgxkiezz.supabase.co:5432/postgres?sslmode=require',
+            SUPABASE_PROJECT_ID: 'ndbqoznvobmpkgxkiezz',
+          },
+          spawnImplementation: fakeSpawn,
+        })
+        process.stdout.write('UNEXPECTED_SUCCESS\\n')
+        process.exitCode = 2
+      } catch (error) {
+        const code = error instanceof Error ? error.message : 'UNKNOWN_ERROR'
+        const residual = await fs.readdir(runnerTemp)
+        process.stdout.write(
+          'RESULT:' + code + ':RESIDUAL:' + residual.length + '\\n',
+        )
+        if (code !== 'PROCESS_INTERRUPTED' || residual.length !== 0) {
+          process.exitCode = 2
+        }
+      }
+    `
+    const worker: ChildProcessWithoutNullStreams = spawnProcess(
+      process.execPath,
+      ['--input-type=module', '--eval', probeSource],
+      {
+        cwd: root,
+        env: {
+          NODE_ENV: 'test',
+          LANG: 'C.UTF-8',
+          LC_ALL: 'C.UTF-8',
+          PATH: process.env.PATH ?? '/usr/bin:/bin',
+        },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    )
+    worker.stdin.end()
+    let stdout = ''
+    let stderr = ''
+    let signalSent = false
+    worker.stdout.on('data', (chunk) => {
+      stdout += chunk.toString('utf8')
+      if (!signalSent && stdout.includes('ACTIVE\n')) {
+        signalSent = true
+        worker.kill(signal)
+      }
+    })
+    worker.stderr.on('data', (chunk) => {
+      stderr += chunk.toString('utf8')
+    })
+
+    try {
+      const result = await new Promise<{
+        code: number | null
+        signal: NodeJS.Signals | null
+      }>((resolvePromise, rejectPromise) => {
+        const timeout = setTimeout(() => {
+          worker.kill('SIGKILL')
+          rejectPromise(new Error('REAL_SIGNAL_PROBE_TIMEOUT'))
+        }, 10_000)
+        worker.once('error', (error) => {
+          clearTimeout(timeout)
+          rejectPromise(error)
+        })
+        worker.once('close', (code, closeSignal) => {
+          clearTimeout(timeout)
+          resolvePromise({ code, signal: closeSignal })
+        })
+      })
+      assert.equal(signalSent, true)
+      assert.deepEqual(result, { code: 1, signal: null })
+      assert.match(stdout, /RESULT:PROCESS_INTERRUPTED:RESIDUAL:0/)
+      assert.doesNotMatch(stdout, /UNEXPECTED_SUCCESS/)
+      assert.doesNotMatch(stderr, /synthetic|postgresql:|ndbqoznvobmpkgxkiezz/)
+      assert.deepEqual(await realFilesystem.readdir(runnerTemp), [])
+    } finally {
+      if (worker.exitCode === null && worker.signalCode === null) {
+        worker.kill('SIGKILL')
+      }
+      await rm(runnerTemp, { recursive: true })
+    }
+  }
+
+  await rm(testTempRoot, { recursive: true })
 })
