@@ -1,0 +1,126 @@
+name: Supabase Production LINE Pay Migration
+run-name: LINE Pay exact-file migration at ${{ github.sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      authorized_commit:
+        description: Exact main commit SHA authorized for this execution
+        required: true
+        type: string
+      project_ref:
+        description: Exact authorized Supabase project ref
+        required: true
+        type: string
+      migration_sha256:
+        description: Exact authorized LINE Pay Migration SHA-256
+        required: true
+        type: string
+      confirmation:
+        description: Exact deployment confirmation phrase
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-production-line-pay-migration
+  cancel-in-progress: false
+
+jobs:
+  source-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact workflow commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up fixed Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24"
+
+      - name: Validate fixed source identity
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_SHA: ${{ github.sha }}
+          AUTHORIZED_COMMIT: ${{ inputs.authorized_commit }}
+          PROJECT_REF_INPUT: ${{ inputs.project_ref }}
+          MIGRATION_SHA256_INPUT: ${{ inputs.migration_sha256 }}
+          DEPLOY_CONFIRMATION: ${{ inputs.confirmation }}
+        run: node scripts/supabase/validate-line-pay-production-deployment.mjs source
+
+  deploy-production:
+    needs: source-validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: supabase-production
+    steps:
+      - name: Check out the exact authorized commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up fixed Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24"
+
+      - name: Install fixed PostgreSQL 17 client
+        run: |
+          set -euo pipefail
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install --yes --no-install-recommends postgresql-client-17
+
+      - name: Revalidate fixed source identity
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_SHA: ${{ github.sha }}
+          AUTHORIZED_COMMIT: ${{ inputs.authorized_commit }}
+          PROJECT_REF_INPUT: ${{ inputs.project_ref }}
+          MIGRATION_SHA256_INPUT: ${{ inputs.migration_sha256 }}
+          DEPLOY_CONFIRMATION: ${{ inputs.confirmation }}
+        run: node scripts/supabase/validate-line-pay-production-deployment.mjs source
+
+      - name: Validate protected channel gate
+        env:
+          SUPABASE_PRODUCTION_CHANNEL_READY: ${{ vars.SUPABASE_PRODUCTION_CHANNEL_READY }}
+          SUPABASE_PRODUCTION_DB_URL: ${{ secrets.SUPABASE_PRODUCTION_DB_URL }}
+          SUPABASE_PROJECT_ID: ndbqoznvobmpkgxkiezz
+        run: node scripts/supabase/validate-line-pay-production-deployment.mjs channel
+
+      - name: Validate fixed PostgreSQL 17 client
+        run: node scripts/supabase/validate-line-pay-production-deployment.mjs psql
+
+      - name: Run read-only preflight
+        env:
+          SUPABASE_PRODUCTION_CHANNEL_READY: ${{ vars.SUPABASE_PRODUCTION_CHANNEL_READY }}
+          SUPABASE_PRODUCTION_DB_URL: ${{ secrets.SUPABASE_PRODUCTION_DB_URL }}
+          SUPABASE_PROJECT_ID: ndbqoznvobmpkgxkiezz
+        run: node scripts/supabase/run-line-pay-production-exact-file.mjs preflight
+
+      - name: Apply the single fixed Migration
+        env:
+          SUPABASE_PRODUCTION_CHANNEL_READY: ${{ vars.SUPABASE_PRODUCTION_CHANNEL_READY }}
+          SUPABASE_PRODUCTION_DB_URL: ${{ secrets.SUPABASE_PRODUCTION_DB_URL }}
+          SUPABASE_PROJECT_ID: ndbqoznvobmpkgxkiezz
+        run: node scripts/supabase/run-line-pay-production-exact-file.mjs migration
+
+      - name: Run read-only postflight
+        env:
+          SUPABASE_PRODUCTION_CHANNEL_READY: ${{ vars.SUPABASE_PRODUCTION_CHANNEL_READY }}
+          SUPABASE_PRODUCTION_DB_URL: ${{ secrets.SUPABASE_PRODUCTION_DB_URL }}
+          SUPABASE_PROJECT_ID: ndbqoznvobmpkgxkiezz
+        run: node scripts/supabase/run-line-pay-production-exact-file.mjs postflight
