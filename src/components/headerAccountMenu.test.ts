@@ -49,7 +49,8 @@ assert.equal(source.includes('/api/divination/interpret'), false)
 
 // 8. 管理員入口只依 server session 驗證結果顯示，不讀 allowlist 或硬編碼 Email。
 assert.match(source, /getAuthAccessToken/)
-assert.match(source, /verifyAdminMenuAccess\(user/)
+assert.match(source, /createAdminMenuAccessController\(/)
+assert.match(adminAccessSource, /verifyAdminMenuAccess\(user/)
 assert.match(source, /const showAdminMenu = canShowAdminMenu\(adminMenuAccess, user\)/)
 assert.equal(source.includes('ADMIN_EMAILS'), false)
 assert.equal(source.includes('user.email'), false)
@@ -98,16 +99,26 @@ for (const label of ['會員中心', '我的課程', '我的占卜紀錄', '登�
   assert.equal(mobileMenuSource.includes(label), true, `手機選單應保留「${label}」`)
 }
 
-// 11. checking／denied／idle 都由 canShowAdminMenu fail closed；舊請求會被取消且受 sequence gate 保護。
-assert.match(source, /const adminAccessRequestIdRef = useRef\(0\)/)
-assert.match(source, /const controller = new AbortController\(\)/)
-assert.match(source, /if \(cancelled \|\| result === 'idle'\) return/)
-assert.match(source, /completeAdminMenuAccessCheck\(current, requestId, result\)/)
-assert.match(source, /cancelled = true\s*\n\s*controller\.abort\(\)/)
+// 11. checking／denied／idle 都由 canShowAdminMenu fail closed；桌機與手機開啟事件共用同一條重查路徑。
+assert.match(source, /const runAdminMenuAccessCheck = useCallback\(/)
 assert.match(
   source,
-  /setAdminMenuAccess\(beginAdminMenuAccessCheck\(null, requestId\)\)\s*\n\s*logoutMockUser\(\)/,
+  /const handleAccountMenuToggle = \(\) => \{[\s\S]*shouldRecheckAdminMenuOnOpen\(accountMenuOpen, user\)[\s\S]*runAdminMenuAccessCheck\(user\)[\s\S]*setAccountMenuOpen\(\(open\) => !open\)/,
 )
+assert.match(
+  source,
+  /const handleMobileMenuToggle = \(\) => \{[\s\S]*shouldRecheckAdminMenuOnOpen\(menuOpen, user\)[\s\S]*runAdminMenuAccessCheck\(user\)[\s\S]*setMenuOpen\(\(open\) => !open\)/,
+)
+assert.match(source, /onClick=\{handleAccountMenuToggle\}/)
+assert.match(source, /onClick=\{handleMobileMenuToggle\}/)
+assert.equal(source.includes('setInterval'), false)
+assert.equal(source.includes('setTimeout'), false)
+assert.match(
+  source,
+  /void runAdminMenuAccessCheck\(null\)\s*\n\s*logoutMockUser\(\)/,
+)
+assert.match(adminAccessSource, /activeController\?\.abort\(\)/)
+assert.match(adminAccessSource, /completeAdminMenuAccessCheck\([\s\S]*currentRequestId/)
 
 // 桌機＋手機各一個入口；URL 不含 token、Email 或管理員旗標。
 assert.equal(source.split('後台管理').length - 1, 2)

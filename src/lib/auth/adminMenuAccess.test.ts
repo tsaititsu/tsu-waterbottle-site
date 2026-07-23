@@ -3,7 +3,10 @@ import {
   beginAdminMenuAccessCheck,
   canShowAdminMenu,
   completeAdminMenuAccessCheck,
+  createAdminMenuAccessController,
+  shouldRecheckAdminMenuOnOpen,
   verifyAdminMenuAccess,
+  type AdminMenuAccessSnapshot,
   type VerifyAdminMenuAccessDeps,
 } from './adminMenuAccess'
 import type { UserProfile } from './types'
@@ -69,6 +72,14 @@ function makeDeps(input: {
   }
 
   return { deps, calls, getTokenCalls: () => tokenCalls }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
 }
 
 test('未登入時保持 idle，且不取得 token 或呼叫 admin session', async () => {
@@ -234,6 +245,176 @@ test('stale response 不得把新使用者設為 authorized', () => {
 
   assert.deepEqual(staleCompletion, current)
   assert.equal(canShowAdminMenu(staleCompletion, secondGoogleUser), false)
+})
+
+test('選單只有 closed → open 且已有 user 時才觸發重查', () => {
+  assert.equal(shouldRecheckAdminMenuOnOpen(false, googleUser), true)
+  assert.equal(shouldRecheckAdminMenuOnOpen(true, googleUser), false)
+  assert.equal(shouldRecheckAdminMenuOnOpen(false, null), false)
+})
+
+test('選單保持 open 的普通 rerender 不會新增 token 或 admin session request', async () => {
+  const snapshots: AdminMenuAccessSnapshot[] = []
+  let tokenCalls = 0
+  let fetchCalls = 0
+  let menuOpen = false
+  const controller = createAdminMenuAccessController(
+    {
+      getAccessToken: async () => {
+        tokenCalls += 1
+        return 'synthetic-access-token'
+      },
+      fetchSession: async () => {
+        fetchCalls += 1
+        return {
+          ok: true,
+          json: async () => ({ ok: true, isAdmin: true }),
+        }
+      },
+    },
+    (snapshot) => snapshots.push(snapshot),
+  )
+
+  if (shouldRecheckAdminMenuOnOpen(menuOpen, googleUser)) {
+    await controller.run(googleUser)
+  }
+  menuOpen = true
+
+  if (shouldRecheckAdminMenuOnOpen(menuOpen, googleUser)) {
+    await controller.run(googleUser)
+  }
+
+  assert.equal(tokenCalls, 1)
+  assert.equal(fetchCalls, 1)
+  assert.equal(snapshots.at(-1)?.state, 'authorized')
+})
+
+test('初次 token 尚未就緒 denied，桌機選單開啟後可重查並 authorized', async () => {
+  const snapshots: AdminMenuAccessSnapshot[] = []
+  let tokenCalls = 0
+  let fetchCalls = 0
+  const controller = createAdminMenuAccessController(
+    {
+      getAccessToken: async () => {
+        tokenCalls += 1
+        return tokenCalls === 1 ? null : 'synthetic-hydrated-access-token'
+      },
+      fetchSession: async () => {
+        fetchCalls += 1
+        return {
+          ok: true,
+          json: async () => ({ ok: true, isAdmin: true }),
+        }
+      },
+    },
+    (snapshot) => snapshots.push(snapshot),
+  )
+
+  await controller.run(googleUser)
+  assert.equal(snapshots.at(-1)?.state, 'denied')
+  assert.equal(fetchCalls, 0)
+
+  assert.equal(shouldRecheckAdminMenuOnOpen(false, googleUser), true)
+  await controller.run(googleUser)
+
+  assert.equal(tokenCalls, 2)
+  assert.equal(fetchCalls, 1)
+  assert.equal(snapshots.at(-1)?.state, 'authorized')
+  assert.equal(canShowAdminMenu(snapshots.at(-1)!, googleUser), true)
+})
+
+test('手機選單重開不永久快取 denied，第二次 server authorized 可顯示入口', async () => {
+  const snapshots: AdminMenuAccessSnapshot[] = []
+  let fetchCalls = 0
+  const controller = createAdminMenuAccessController(
+    {
+      getAccessToken: async () => 'synthetic-access-token',
+      fetchSession: async () => {
+        fetchCalls += 1
+        return {
+          ok: fetchCalls > 1,
+          json: async () => ({ ok: true, isAdmin: true }),
+        }
+      },
+    },
+    (snapshot) => snapshots.push(snapshot),
+  )
+
+  await controller.run(googleUser)
+  assert.equal(snapshots.at(-1)?.state, 'denied')
+
+  assert.equal(shouldRecheckAdminMenuOnOpen(false, googleUser), true)
+  await controller.run(googleUser)
+
+  assert.equal(fetchCalls, 2)
+  assert.equal(snapshots.at(-1)?.state, 'authorized')
+})
+
+test('新選單 request 先 authorized，舊 request 後續 denied 不得覆寫', async () => {
+  const snapshots: AdminMenuAccessSnapshot[] = []
+  const firstToken = deferred<string | null>()
+  let tokenCalls = 0
+  const controller = createAdminMenuAccessController(
+    {
+      getAccessToken: async () => {
+        tokenCalls += 1
+        return tokenCalls === 1
+          ? firstToken.promise
+          : 'synthetic-current-access-token'
+      },
+      fetchSession: async () => ({
+        ok: true,
+        json: async () => ({ ok: true, isAdmin: true }),
+      }),
+    },
+    (snapshot) => snapshots.push(snapshot),
+  )
+
+  const oldRequest = controller.run(googleUser)
+  const currentRequest = controller.run(googleUser)
+  await currentRequest
+  assert.equal(snapshots.at(-1)?.state, 'authorized')
+
+  firstToken.resolve(null)
+  await oldRequest
+
+  assert.equal(snapshots.at(-1)?.state, 'authorized')
+  assert.equal(canShowAdminMenu(snapshots.at(-1)!, googleUser), true)
+})
+
+test('舊使用者 authorized 不得覆寫新使用者 denied', async () => {
+  const snapshots: AdminMenuAccessSnapshot[] = []
+  const firstToken = deferred<string | null>()
+  let tokenCalls = 0
+  const controller = createAdminMenuAccessController(
+    {
+      getAccessToken: async () => {
+        tokenCalls += 1
+        return tokenCalls === 1 ? firstToken.promise : 'synthetic-new-user-token'
+      },
+      fetchSession: async (_input, init) => {
+        const authorization = (init.headers as Record<string, string>).Authorization
+        const oldUserRequest = authorization === 'Bearer synthetic-old-user-token'
+        return {
+          ok: oldUserRequest,
+          json: async () => ({ ok: true, isAdmin: true }),
+        }
+      },
+    },
+    (snapshot) => snapshots.push(snapshot),
+  )
+
+  const oldUserRequest = controller.run(googleUser)
+  const newUserRequest = controller.run(secondGoogleUser)
+  await newUserRequest
+  assert.equal(snapshots.at(-1)?.state, 'denied')
+  assert.equal(canShowAdminMenu(snapshots.at(-1)!, secondGoogleUser), false)
+
+  firstToken.resolve('synthetic-old-user-token')
+  await oldUserRequest
+
+  assert.equal(snapshots.at(-1)?.state, 'denied')
+  assert.equal(snapshots.at(-1)?.subjectKey, 'google:google-user-2')
 })
 
 async function runTests() {

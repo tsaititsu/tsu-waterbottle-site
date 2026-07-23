@@ -3,14 +3,14 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { BookOpen, CalendarCheck, FileText, LogOut, Menu, ScrollText, ShieldCheck, ShoppingCart, Sparkles, UserRound, X } from 'lucide-react'
-import { type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from 'react'
+import { type MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { GoogleAnalyticsCtaDestination } from '@/lib/analytics/googleAnalytics'
 import {
   beginAdminMenuAccessCheck,
   canShowAdminMenu,
-  completeAdminMenuAccessCheck,
-  verifyAdminMenuAccess,
+  createAdminMenuAccessController,
+  shouldRecheckAdminMenuOnOpen,
   type AdminMenuAccessSnapshot,
 } from '@/lib/auth/adminMenuAccess'
 import {
@@ -64,9 +64,17 @@ export function Header() {
   const [loginMessage, setLoginMessage] = useState('')
   const [loadingProvider, setLoadingProvider] = useState<'line' | 'google' | ''>('')
   const [user, setUser] = useState<UserProfile | null>(null)
-  const adminAccessRequestIdRef = useRef(0)
   const [adminMenuAccess, setAdminMenuAccess] = useState<AdminMenuAccessSnapshot>(() =>
     beginAdminMenuAccessCheck(null, 0),
+  )
+  const [adminMenuAccessController] = useState(() =>
+    createAdminMenuAccessController(
+      {
+        getAccessToken: getAuthAccessToken,
+        fetchSession: (input, init) => fetch(input, init),
+      },
+      setAdminMenuAccess,
+    ),
   )
   const { totalQuantity } = useCart()
   const hideAiDivinationServices = shouldHideAiDivinationServices()
@@ -79,34 +87,21 @@ export function Header() {
     return subscribeAuthChange(sync)
   }, [])
 
+  const runAdminMenuAccessCheck = useCallback(
+    (currentUser: UserProfile | null) => adminMenuAccessController.run(currentUser),
+    [adminMenuAccessController],
+  )
+
   useEffect(() => {
-    const requestId = adminAccessRequestIdRef.current + 1
-    adminAccessRequestIdRef.current = requestId
-    const startedAccess = beginAdminMenuAccessCheck(user, requestId)
-    setAdminMenuAccess(startedAccess)
+    void runAdminMenuAccessCheck(user)
+  }, [runAdminMenuAccessCheck, user])
 
-    if (startedAccess.state !== 'checking') return
-
-    let cancelled = false
-    const controller = new AbortController()
-
-    void verifyAdminMenuAccess(user, {
-      getAccessToken: getAuthAccessToken,
-      fetchSession: fetch,
-      signal: controller.signal,
-    }).then((result) => {
-      if (cancelled || result === 'idle') return
-
-      setAdminMenuAccess((current) =>
-        completeAdminMenuAccessCheck(current, requestId, result),
-      )
-    })
-
-    return () => {
-      cancelled = true
-      controller.abort()
-    }
-  }, [user])
+  useEffect(
+    () => () => {
+      adminMenuAccessController.cancel()
+    },
+    [adminMenuAccessController],
+  )
 
   useEffect(() => {
     setMenuOpen(false)
@@ -159,10 +154,22 @@ export function Header() {
     }
   }
 
+  const handleAccountMenuToggle = () => {
+    if (shouldRecheckAdminMenuOnOpen(accountMenuOpen, user)) {
+      void runAdminMenuAccessCheck(user)
+    }
+    setAccountMenuOpen((open) => !open)
+  }
+
+  const handleMobileMenuToggle = () => {
+    if (shouldRecheckAdminMenuOnOpen(menuOpen, user)) {
+      void runAdminMenuAccessCheck(user)
+    }
+    setMenuOpen((open) => !open)
+  }
+
   const handleLogout = () => {
-    const requestId = adminAccessRequestIdRef.current + 1
-    adminAccessRequestIdRef.current = requestId
-    setAdminMenuAccess(beginAdminMenuAccessCheck(null, requestId))
+    void runAdminMenuAccessCheck(null)
     logoutMockUser()
     setAccountMenuOpen(false)
     setMenuOpen(false)
@@ -355,7 +362,7 @@ export function Header() {
 
             <button
               type="button"
-              onClick={() => setAccountMenuOpen((open) => !open)}
+              onClick={handleAccountMenuToggle}
               className="grid h-12 w-12 place-items-center rounded-full bg-[#08080a] text-white shadow-[0_10px_24px_rgba(0,0,0,0.18)] transition hover:scale-105"
               aria-label="會員選單"
               aria-expanded={accountMenuOpen}
@@ -386,7 +393,7 @@ export function Header() {
               aria-label={menuOpen ? '關閉選單' : '開啟選單'}
               aria-expanded={menuOpen}
               aria-controls="mobile-navigation"
-              onClick={() => setMenuOpen((value) => !value)}
+              onClick={handleMobileMenuToggle}
             >
               {menuOpen ? <X size={21} /> : <Menu size={21} />}
             </button>
