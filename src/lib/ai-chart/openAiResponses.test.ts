@@ -1263,6 +1263,15 @@ test('transport diagnostics are copied, frozen, and non-writable', () => {
   )
   assert.equal(descriptor?.writable, false)
   assert.equal(descriptor?.configurable, false)
+  assert.deepEqual(Reflect.ownKeys(error.transportDiagnostic ?? {}), [
+    'failureKind',
+    'httpStatus',
+    'requestId',
+    'clientRequestId',
+    'responseErrorType',
+    'responseErrorCode',
+    'responseErrorParam',
+  ])
   assert.throws(() => {
     ;(
       error as unknown as {
@@ -1270,6 +1279,204 @@ test('transport diagnostics are copied, frozen, and non-writable', () => {
       }
     ).transportDiagnostic = null
   }, TypeError)
+})
+
+test('transport diagnostic constructor boundary rejects hostile runtime values', () => {
+  const sensitiveMarker =
+    'synthetic API Key Authorization Prompt request body marker'
+  const safeClientRequestId = '00000000-0000-4000-8000-000000000003'
+  let accessorExecuted = false
+  const accessorDiagnostic = {
+    failureKind: 'HTTP_ERROR',
+    httpStatus: 400,
+    requestId: 'req_safe',
+    clientRequestId: safeClientRequestId,
+    responseErrorCode: 'safe_code',
+    responseErrorParam: 'safe_param',
+  }
+  Object.defineProperty(accessorDiagnostic, 'responseErrorType', {
+    enumerable: true,
+    get() {
+      accessorExecuted = true
+      return sensitiveMarker
+    },
+  })
+
+  const cyclicDiagnostic: Record<string, unknown> = {
+    failureKind: 'HTTP_ERROR',
+    httpStatus: 400,
+    requestId: 'req_safe',
+    clientRequestId: safeClientRequestId,
+    responseErrorType: 'safe_type',
+    responseErrorCode: 'safe_code',
+    responseErrorParam: null,
+  }
+  cyclicDiagnostic.responseErrorParam = cyclicDiagnostic
+
+  const proxyDiagnostic = new Proxy(
+    {},
+    {
+      ownKeys() {
+        throw new Error(sensitiveMarker)
+      },
+    },
+  )
+  const revocableDiagnostic = Proxy.revocable({}, {})
+  revocableDiagnostic.revoke()
+
+  const hostileDiagnostics: unknown[] = [
+    {
+      failureKind: 'HOSTILE_KIND',
+      httpStatus: 400,
+      requestId: 'req_safe',
+      clientRequestId: safeClientRequestId,
+      responseErrorType: 'safe_type',
+      responseErrorCode: 'safe_code',
+      responseErrorParam: null,
+    },
+    {
+      failureKind: 'HTTP_ERROR',
+      httpStatus: '400',
+      requestId: 'req_safe',
+      clientRequestId: safeClientRequestId,
+      responseErrorType: 'safe_type',
+      responseErrorCode: 'safe_code',
+      responseErrorParam: null,
+    },
+    {
+      failureKind: 'HTTP_ERROR',
+      httpStatus: Number.NaN,
+      requestId: 'req_safe',
+      clientRequestId: safeClientRequestId,
+      responseErrorType: 'safe_type',
+      responseErrorCode: 'safe_code',
+      responseErrorParam: null,
+    },
+    {
+      failureKind: 'HTTP_ERROR',
+      httpStatus: Number.POSITIVE_INFINITY,
+      requestId: 'req_safe',
+      clientRequestId: safeClientRequestId,
+      responseErrorType: 'safe_type',
+      responseErrorCode: 'safe_code',
+      responseErrorParam: null,
+    },
+    {
+      failureKind: 'HTTP_ERROR',
+      httpStatus: -1,
+      requestId: 'req_safe',
+      clientRequestId: safeClientRequestId,
+      responseErrorType: 'safe_type',
+      responseErrorCode: 'safe_code',
+      responseErrorParam: null,
+    },
+    {
+      failureKind: 'HTTP_ERROR',
+      httpStatus: 600,
+      requestId: 'req_safe',
+      clientRequestId: safeClientRequestId,
+      responseErrorType: 'safe_type',
+      responseErrorCode: 'safe_code',
+      responseErrorParam: null,
+    },
+    {
+      failureKind: 'HTTP_ERROR',
+      httpStatus: 400,
+      requestId: `unsafe\n${sensitiveMarker}`,
+      clientRequestId: safeClientRequestId,
+      responseErrorType: 'safe_type',
+      responseErrorCode: 'safe_code',
+      responseErrorParam: null,
+    },
+    {
+      failureKind: 'HTTP_ERROR',
+      httpStatus: 400,
+      requestId: 'req_safe',
+      clientRequestId: sensitiveMarker,
+      responseErrorType: 'safe_type',
+      responseErrorCode: 'safe_code',
+      responseErrorParam: null,
+    },
+    {
+      failureKind: 'HTTP_ERROR',
+      httpStatus: 400,
+      requestId: 'req_safe',
+      clientRequestId: safeClientRequestId,
+      responseErrorType: sensitiveMarker,
+      responseErrorCode: 'safe_code',
+      responseErrorParam: null,
+    },
+    {
+      failureKind: 'HTTP_ERROR',
+      httpStatus: 400,
+      requestId: 'req_safe',
+      clientRequestId: safeClientRequestId,
+      responseErrorType: 'safe_type',
+      responseErrorCode: 'x'.repeat(81),
+      responseErrorParam: null,
+    },
+    {
+      failureKind: 'HTTP_ERROR',
+      httpStatus: 400,
+      requestId: 'req_safe',
+      clientRequestId: safeClientRequestId,
+      responseErrorType: 'safe_type',
+      responseErrorCode: 'safe_code',
+      responseErrorParam: 'unsafe param',
+    },
+    {
+      failureKind: 'HTTP_ERROR',
+      httpStatus: 400,
+      requestId: 'req_safe',
+      clientRequestId: safeClientRequestId,
+      responseErrorType: 'safe_type',
+      responseErrorCode: 'safe_code',
+      responseErrorParam: 'unsafe\tparam',
+    },
+    {
+      failureKind: 'HTTP_ERROR',
+      httpStatus: 400,
+      requestId: 'req_safe',
+      clientRequestId: safeClientRequestId,
+      responseErrorType: 'safe_type',
+      responseErrorCode: 'safe_code',
+      responseErrorParam: null,
+      arbitraryExtraKey: sensitiveMarker,
+    },
+    Object.assign(
+      {
+        failureKind: 'HTTP_ERROR',
+        httpStatus: 400,
+        requestId: 'req_safe',
+        clientRequestId: safeClientRequestId,
+        responseErrorType: 'safe_type',
+        responseErrorCode: 'safe_code',
+        responseErrorParam: null,
+      },
+      { [Symbol('hostile')]: sensitiveMarker },
+    ),
+    accessorDiagnostic,
+    cyclicDiagnostic,
+    [],
+    new Date(),
+    proxyDiagnostic,
+    revocableDiagnostic.proxy,
+  ]
+
+  for (const hostileDiagnostic of hostileDiagnostics) {
+    const error = new AiChartOpenAiError(
+      AI_CHART_OPENAI_REQUEST_FAILED,
+      true,
+      undefined,
+      hostileDiagnostic as never,
+    )
+
+    assert.equal(error.transportDiagnostic, undefined)
+    assert.deepEqual(Object.keys(error).sort(), ['code', 'retryable'])
+    assert.equal(String(error).includes(sensitiveMarker), false)
+    assert.equal(JSON.stringify(error).includes(sensitiveMarker), false)
+  }
+  assert.equal(accessorExecuted, false)
 })
 
 assert.equal(testCount >= 54, true)

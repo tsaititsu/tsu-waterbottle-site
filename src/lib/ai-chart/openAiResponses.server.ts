@@ -24,8 +24,20 @@ type AiChartOpenAiServerDependencies = {
 }
 
 const SAFE_TRANSPORT_IDENTIFIER = /^[A-Za-z0-9_.:-]{1,80}$/u
+const AI_CHART_OPENAI_ERROR_BODY_MAX_BYTES = 32 * 1024
 
 type PlainRecord = Record<string, unknown>
+type SafeAsyncResult<T> =
+  | Readonly<{ status: 'SUCCESS'; value: T }>
+  | Readonly<{ status: 'FAILED' }>
+  | Readonly<{ status: 'TIMEOUT' }>
+
+type HttpTransportDiagnosticResult =
+  | Readonly<{
+      status: 'DIAGNOSTIC'
+      diagnostic: AiChartOpenAiTransportDiagnostic
+    }>
+  | Readonly<{ status: 'TIMEOUT' }>
 
 function getServerConfig(env: Record<string, string | undefined>) {
   try {
@@ -79,6 +91,13 @@ function timeoutFailed(
   clientRequestId: string,
   response?: Response,
 ): never {
+  if (response !== undefined) {
+    try {
+      cancelResponseBody(response.body)
+    } catch {
+      // The abort signal remains authoritative if the body is inaccessible.
+    }
+  }
   throw new AiChartOpenAiError(
     AI_CHART_OPENAI_TIMEOUT,
     true,
@@ -96,6 +115,14 @@ function timeoutFailed(
 
 function responseInvalid(): never {
   throw new AiChartOpenAiError(AI_CHART_OPENAI_RESPONSE_INVALID, false)
+}
+
+function isAiChartOpenAiError(value: unknown): value is AiChartOpenAiError {
+  try {
+    return value instanceof AiChartOpenAiError
+  } catch {
+    return false
+  }
 }
 
 function createClientRequestId(factory: () => string): string {
@@ -127,6 +154,22 @@ function isPlainObject(value: unknown): value is PlainRecord {
   }
 }
 
+function getOwnEnumerableDataProperty(
+  value: PlainRecord,
+  key: string,
+): unknown {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    return descriptor !== undefined &&
+      descriptor.enumerable &&
+      Object.hasOwn(descriptor, 'value')
+      ? descriptor.value
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
 function sanitizeTransportIdentifier(value: unknown): string | null {
   return typeof value === 'string' && SAFE_TRANSPORT_IDENTIFIER.test(value)
     ? value
@@ -142,40 +185,250 @@ function getResponseRequestId(response: Response): string | null {
 }
 
 function getResponseHttpStatus(response: Response): number | null {
-  return Number.isInteger(response.status) &&
-    response.status >= 100 &&
-    response.status <= 599
-    ? response.status
-    : null
+  try {
+    return Number.isInteger(response.status) &&
+      response.status >= 100 &&
+      response.status <= 599
+      ? response.status
+      : null
+  } catch {
+    return null
+  }
+}
+
+function cancelResponseBody(body: ReadableStream<Uint8Array> | null) {
+  if (body === null) return
+  try {
+    void body.cancel().catch(() => {})
+  } catch {
+    // Cancellation is best-effort and never diagnostic data.
+  }
+}
+
+function cancelResponseReader(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+) {
+  try {
+    void reader.cancel().catch(() => {})
+  } catch {
+    // Cancellation is best-effort and never diagnostic data.
+  }
+}
+
+function releaseResponseReader(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+) {
+  try {
+    reader.releaseLock()
+  } catch {
+    // A pending or cancelled reader may not be releasable.
+  }
+}
+
+function responseContentLengthExceedsLimit(response: Response): boolean {
+  try {
+    const value = response.headers?.get('content-length')
+    if (typeof value !== 'string' || !/^[0-9]+$/u.test(value)) {
+      return false
+    }
+    const contentLength = Number(value)
+    return (
+      !Number.isSafeInteger(contentLength) ||
+      contentLength > AI_CHART_OPENAI_ERROR_BODY_MAX_BYTES
+    )
+  } catch {
+    return false
+  }
+}
+
+function settleWithAbort<T>(
+  operation: Promise<T>,
+  signal: AbortSignal,
+): Promise<SafeAsyncResult<T>> {
+  if (signal.aborted) {
+    void operation.catch(() => {})
+    return Promise.resolve(Object.freeze({ status: 'TIMEOUT' }))
+  }
+
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (result: SafeAsyncResult<T>) => {
+      if (settled) return
+      settled = true
+      signal.removeEventListener('abort', onAbort)
+      resolve(Object.freeze(result))
+    }
+    const onAbort = () => {
+      setTimeout(() => finish({ status: 'TIMEOUT' }), 0)
+    }
+
+    signal.addEventListener('abort', onAbort, { once: true })
+    operation.then(
+      (value) => finish({ status: 'SUCCESS', value }),
+      () => finish({ status: 'FAILED' }),
+    )
+  })
+}
+
+async function readBoundedErrorBody(
+  response: Response,
+  signal: AbortSignal,
+): Promise<SafeAsyncResult<string>> {
+  let body: ReadableStream<Uint8Array> | null
+  try {
+    body = response.body
+  } catch {
+    return Object.freeze({ status: 'FAILED' })
+  }
+
+  if (body === null) {
+    return Object.freeze({ status: 'FAILED' })
+  }
+  if (responseContentLengthExceedsLimit(response)) {
+    cancelResponseBody(body)
+    return Object.freeze({ status: 'FAILED' })
+  }
+
+  let reader: ReadableStreamDefaultReader<Uint8Array>
+  try {
+    reader = body.getReader()
+  } catch {
+    cancelResponseBody(body)
+    return Object.freeze({ status: 'FAILED' })
+  }
+
+  const chunks: Uint8Array[] = []
+  let byteLength = 0
+  while (true) {
+    if (signal.aborted) {
+      cancelResponseReader(reader)
+      releaseResponseReader(reader)
+      return Object.freeze({ status: 'TIMEOUT' })
+    }
+
+    let readOperation: Promise<ReadableStreamReadResult<Uint8Array>>
+    try {
+      readOperation = reader.read()
+    } catch {
+      cancelResponseReader(reader)
+      releaseResponseReader(reader)
+      return Object.freeze({ status: 'FAILED' })
+    }
+
+    const readResult = await settleWithAbort(readOperation, signal)
+    if (readResult.status === 'TIMEOUT') {
+      cancelResponseReader(reader)
+      releaseResponseReader(reader)
+      return Object.freeze({ status: 'TIMEOUT' })
+    }
+    if (readResult.status === 'FAILED') {
+      cancelResponseReader(reader)
+      releaseResponseReader(reader)
+      return Object.freeze({ status: 'FAILED' })
+    }
+    if (readResult.value.done) break
+
+    const chunk = readResult.value.value
+    if (!(chunk instanceof Uint8Array)) {
+      cancelResponseReader(reader)
+      releaseResponseReader(reader)
+      return Object.freeze({ status: 'FAILED' })
+    }
+    byteLength += chunk.byteLength
+    if (byteLength > AI_CHART_OPENAI_ERROR_BODY_MAX_BYTES) {
+      cancelResponseReader(reader)
+      releaseResponseReader(reader)
+      return Object.freeze({ status: 'FAILED' })
+    }
+    chunks.push(chunk.slice())
+  }
+  releaseResponseReader(reader)
+
+  const bytes = new Uint8Array(byteLength)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+
+  try {
+    return Object.freeze({
+      status: 'SUCCESS',
+      value: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+    })
+  } catch {
+    return Object.freeze({ status: 'FAILED' })
+  }
 }
 
 async function buildHttpTransportDiagnostic(
   response: Response,
   clientRequestId: string,
-): Promise<AiChartOpenAiTransportDiagnostic> {
-  let body: unknown
-  try {
-    body = await response.json()
-  } catch {
-    return buildTransportDiagnostic({
-      failureKind: 'RESPONSE_BODY_INVALID',
-      httpStatus: getResponseHttpStatus(response),
-      requestId: getResponseRequestId(response),
-      clientRequestId,
+  signal: AbortSignal,
+): Promise<HttpTransportDiagnosticResult> {
+  const httpStatus = getResponseHttpStatus(response)
+  const requestId = getResponseRequestId(response)
+  const bodyResult = await readBoundedErrorBody(response, signal)
+  if (bodyResult.status === 'TIMEOUT') {
+    return Object.freeze({ status: 'TIMEOUT' })
+  }
+  if (bodyResult.status === 'FAILED') {
+    return Object.freeze({
+      status: 'DIAGNOSTIC',
+      diagnostic: buildTransportDiagnostic({
+        failureKind: 'RESPONSE_BODY_INVALID',
+        httpStatus,
+        requestId,
+        clientRequestId,
+      }),
     })
   }
 
-  const responseError = isPlainObject(body) && isPlainObject(body.error)
-    ? body.error
+  let parsedBody: unknown
+  try {
+    parsedBody = JSON.parse(bodyResult.value) as unknown
+  } catch {
+    return Object.freeze({
+      status: 'DIAGNOSTIC',
+      diagnostic: buildTransportDiagnostic({
+        failureKind: 'RESPONSE_BODY_INVALID',
+        httpStatus,
+        requestId,
+        clientRequestId,
+      }),
+    })
+  }
+
+  const responseErrorValue = isPlainObject(parsedBody)
+    ? getOwnEnumerableDataProperty(parsedBody, 'error')
+    : undefined
+  const responseError = isPlainObject(responseErrorValue)
+    ? responseErrorValue
     : null
-  return buildTransportDiagnostic({
-    failureKind: responseError === null ? 'RESPONSE_BODY_INVALID' : 'HTTP_ERROR',
-    httpStatus: getResponseHttpStatus(response),
-    requestId: getResponseRequestId(response),
-    clientRequestId,
-    responseErrorType: sanitizeTransportIdentifier(responseError?.type),
-    responseErrorCode: sanitizeTransportIdentifier(responseError?.code),
-    responseErrorParam: sanitizeTransportIdentifier(responseError?.param),
+  return Object.freeze({
+    status: 'DIAGNOSTIC',
+    diagnostic: buildTransportDiagnostic({
+      failureKind:
+        responseError === null ? 'RESPONSE_BODY_INVALID' : 'HTTP_ERROR',
+      httpStatus,
+      requestId,
+      clientRequestId,
+      responseErrorType: sanitizeTransportIdentifier(
+        responseError === null
+          ? undefined
+          : getOwnEnumerableDataProperty(responseError, 'type'),
+      ),
+      responseErrorCode: sanitizeTransportIdentifier(
+        responseError === null
+          ? undefined
+          : getOwnEnumerableDataProperty(responseError, 'code'),
+      ),
+      responseErrorParam: sanitizeTransportIdentifier(
+        responseError === null
+          ? undefined
+          : getOwnEnumerableDataProperty(responseError, 'param'),
+      ),
+    }),
   })
 }
 
@@ -214,61 +467,99 @@ export async function requestAiChartOpenAiStructuredResponse<T>(
   }, validated.timeoutMs)
 
   let response: Response | undefined
+  let responseObtained = false
   try {
-    response = await fetchImpl(AI_CHART_OPENAI_RESPONSES_URL, {
-      method: 'POST',
-      redirect: 'error',
-      cache: 'no-store',
-      signal: controller.signal,
-      headers: {
-        Authorization: `Bearer ${serverConfig.apiKey}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        'X-Client-Request-Id': clientRequestId,
-      },
-      body: JSON.stringify(requestBody),
-    })
+    const fetchResult = await settleWithAbort(
+      fetchImpl(AI_CHART_OPENAI_RESPONSES_URL, {
+        method: 'POST',
+        redirect: 'error',
+        cache: 'no-store',
+        signal: controller.signal,
+        headers: {
+          Authorization: `Bearer ${serverConfig.apiKey}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'X-Client-Request-Id': clientRequestId,
+        },
+        body: JSON.stringify(requestBody),
+      }),
+      controller.signal,
+    )
+    const fetchedResponse =
+      fetchResult.status === 'SUCCESS' ? fetchResult.value : undefined
+    if (timeoutTriggered || fetchResult.status === 'TIMEOUT') {
+      timeoutFailed(clientRequestId, fetchedResponse)
+    }
+    if (fetchResult.status === 'FAILED') {
+      requestFailed(
+        true,
+        buildTransportDiagnostic({
+          failureKind: 'NETWORK_ERROR',
+          clientRequestId,
+        }),
+      )
+    }
+    response = fetchResult.value
+    responseObtained = true
 
     if (timeoutTriggered) {
       timeoutFailed(clientRequestId, response)
     }
-    if (!response.ok) {
-      const transportDiagnostic = await buildHttpTransportDiagnostic(
+    let responseOk: boolean
+    try {
+      if (typeof response.ok !== 'boolean') responseInvalid()
+      responseOk = response.ok
+    } catch (error) {
+      if (isAiChartOpenAiError(error)) throw error
+      responseInvalid()
+    }
+
+    if (!responseOk) {
+      const transportResult = await buildHttpTransportDiagnostic(
         response,
         clientRequestId,
+        controller.signal,
       )
-      if (timeoutTriggered) {
+      if (timeoutTriggered || transportResult.status === 'TIMEOUT') {
         timeoutFailed(clientRequestId, response)
       }
       requestFailed(
-        isRetryableStatus(response.status),
-        transportDiagnostic,
+        isRetryableStatus(getResponseHttpStatus(response) ?? -1),
+        transportResult.diagnostic,
       )
     }
 
-    let rawResponse: unknown
+    let responseBodyOperation: Promise<unknown>
     try {
-      rawResponse = await response.json()
+      responseBodyOperation = response.json()
     } catch {
       if (timeoutTriggered) {
         timeoutFailed(clientRequestId, response)
       }
       responseInvalid()
     }
-
-    if (timeoutTriggered) {
+    const responseBodyResult = await settleWithAbort(
+      responseBodyOperation,
+      controller.signal,
+    )
+    if (
+      timeoutTriggered ||
+      responseBodyResult.status === 'TIMEOUT'
+    ) {
       timeoutFailed(clientRequestId, response)
     }
+    if (responseBodyResult.status === 'FAILED') responseInvalid()
 
     return parseAiChartOpenAiStructuredResponse(
-      rawResponse,
+      responseBodyResult.value,
       validated.parseResult,
     )
   } catch (error) {
-    if (error instanceof AiChartOpenAiError) throw error
+    if (isAiChartOpenAiError(error)) throw error
     if (timeoutTriggered) {
       timeoutFailed(clientRequestId, response)
     }
+    if (responseObtained) responseInvalid()
     requestFailed(
       true,
       buildTransportDiagnostic({

@@ -266,16 +266,36 @@ async function captureSafeError(
   }
 }
 
+function beforeTestDeadline<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error('synthetic-test-deadline-exceeded'))
+    }, timeoutMs)
+    operation.then(
+      (value) => {
+        clearTimeout(timeout)
+        resolve(value)
+      },
+      (error: unknown) => {
+        clearTimeout(timeout)
+        reject(error)
+      },
+    )
+  })
+}
+
 function nonOkResponse(status: number, onBodyRead: () => void): Response {
-  return {
-    ok: false,
-    status,
-    headers: new Headers(),
-    json: async () => {
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
       onBodyRead()
-      throw new Error(SYNTHETIC_RESPONSE_BODY)
+      controller.enqueue(new TextEncoder().encode(SYNTHETIC_RESPONSE_BODY))
+      controller.close()
     },
-  } as unknown as Response
+  })
+  return new Response(body, { status })
 }
 
 function jsonHttpErrorResponse(
@@ -286,6 +306,27 @@ function jsonHttpErrorResponse(
     body?: unknown
   } = {},
 ): Response {
+  const bodyValue =
+    options.body ?? {
+      error: {
+        type: 'invalid_request_error',
+        code: 'synthetic_error_code',
+        param: 'input.0.content',
+        message: SYNTHETIC_RESPONSE_BODY,
+      },
+    }
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      onBodyRead()
+      controller.enqueue(
+        new TextEncoder().encode(JSON.stringify(bodyValue)),
+      )
+      controller.close()
+    },
+  })
+  const response = new Response(body, { status })
+  if (options.requestId === undefined) return response
+
   const headers = {
     get(name: string) {
       return name.toLowerCase() === 'x-request-id'
@@ -295,23 +336,62 @@ function jsonHttpErrorResponse(
   } as Headers
 
   return {
-    ok: false,
-    status,
+    ok: response.ok,
+    status: response.status,
     headers,
-    json: async () => {
-      onBodyRead()
-      return (
-        options.body ?? {
-          error: {
-            type: 'invalid_request_error',
-            code: 'synthetic_error_code',
-            param: 'input.0.content',
-            message: SYNTHETIC_RESPONSE_BODY,
-          },
-        }
-      )
-    },
+    body: response.body,
+    json: response.json.bind(response),
   } as unknown as Response
+}
+
+function fixedByteLengthHttpErrorBody(byteLength: number): string {
+  const prefix =
+    '{"error":{"type":"invalid_request_error","code":"safe_code","param":"safe_param","padding":"'
+  const suffix = '"}}'
+  const paddingLength =
+    byteLength -
+    new TextEncoder().encode(prefix).byteLength -
+    new TextEncoder().encode(suffix).byteLength
+  assert.equal(paddingLength >= 0, true)
+  const body = `${prefix}${'x'.repeat(paddingLength)}${suffix}`
+  assert.equal(new TextEncoder().encode(body).byteLength, byteLength)
+  return body
+}
+
+function streamedHttpResponse(
+  status: number,
+  chunks: readonly Uint8Array[],
+  options: {
+    headers?: Record<string, string>
+    onPull?: () => void
+    onCancel?: () => void
+    failOnPull?: boolean
+  } = {},
+): Response {
+  let index = 0
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      options.onPull?.()
+      if (options.failOnPull) {
+        throw new Error(SYNTHETIC_RESPONSE_BODY)
+      }
+      if (index >= chunks.length) {
+        controller.close()
+        return
+      }
+      controller.enqueue(chunks[index])
+      index += 1
+    },
+    cancel() {
+      options.onCancel?.()
+    },
+  }, {
+    highWaterMark: 0,
+  })
+  return new Response(body, {
+    status,
+    headers: options.headers,
+  })
 }
 
 async function run() {
@@ -670,6 +750,85 @@ async function run() {
     assert.equal(Object.isFrozen(error.transportDiagnostic), true)
   })
 
+  const revokedNetworkError = Proxy.revocable({}, {})
+  revokedNetworkError.revoke()
+  for (const networkError of [
+    new Error(SYNTHETIC_RESPONSE_BODY),
+    new DOMException(SYNTHETIC_RESPONSE_BODY, 'NetworkError'),
+    { message: SYNTHETIC_RESPONSE_BODY },
+    SYNTHETIC_RESPONSE_BODY,
+    new Proxy(
+      {},
+      {
+        get() {
+          throw new Error(SYNTHETIC_RESPONSE_BODY)
+        },
+      },
+    ),
+    revokedNetworkError.proxy,
+  ]) {
+    await asyncTest(
+      'network failures of any runtime shape remain sanitized',
+      async () => {
+        const error = await captureSafeError(
+          () =>
+            requestAiChartOpenAiStructuredResponse(requestFixture(), {
+              env: syntheticEnv(),
+              clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+              fetchImpl: mockFetch(async () => {
+                throw networkError
+              }),
+            }),
+          AI_CHART_OPENAI_REQUEST_FAILED,
+          true,
+          [SYNTHETIC_RESPONSE_BODY],
+        )
+
+        assert.deepEqual(error.transportDiagnostic, {
+          failureKind: 'NETWORK_ERROR',
+          httpStatus: null,
+          requestId: null,
+          clientRequestId: SYNTHETIC_CLIENT_REQUEST_ID,
+          responseErrorType: null,
+          responseErrorCode: null,
+          responseErrorParam: null,
+        })
+        assert.equal(
+          JSON.stringify(error).includes(SYNTHETIC_RESPONSE_BODY),
+          false,
+        )
+      },
+    )
+  }
+
+  await asyncTest(
+    'local failure after fetch resolves is not classified as network failure',
+    async () => {
+      const error = await captureSafeError(
+        () =>
+          requestAiChartOpenAiStructuredResponse(requestFixture(), {
+            env: syntheticEnv(),
+            clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+            fetchImpl: mockFetch(
+              async () =>
+                ({
+                  get ok() {
+                    throw new Error(SYNTHETIC_RESPONSE_BODY)
+                  },
+                  status: 200,
+                  headers: new Headers(),
+                }) as unknown as Response,
+            ),
+          }),
+        AI_CHART_OPENAI_RESPONSE_INVALID,
+        false,
+        [SYNTHETIC_RESPONSE_BODY],
+      )
+
+      assert.equal(error.transportDiagnostic, undefined)
+    },
+  )
+
   for (const [status, retryable] of [
     [400, false],
     [401, false],
@@ -795,6 +954,270 @@ async function run() {
     },
   )
 
+  for (const [bodyByteLength, expectedFailureKind] of [
+    [32 * 1024, 'HTTP_ERROR'],
+    [32 * 1024 + 1, 'RESPONSE_BODY_INVALID'],
+  ] as const) {
+    await asyncTest(
+      `HTTP error body byte length ${bodyByteLength} is bounded`,
+      async () => {
+        const error = await captureSafeError(
+          () =>
+            requestAiChartOpenAiStructuredResponse(requestFixture(), {
+              env: syntheticEnv(),
+              clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+              fetchImpl: mockFetch(
+                async () =>
+                  new Response(
+                    fixedByteLengthHttpErrorBody(bodyByteLength),
+                    {
+                      status: 400,
+                      headers: {
+                        'x-request-id': SYNTHETIC_PROVIDER_REQUEST_ID,
+                      },
+                    },
+                  ),
+              ),
+            }),
+          AI_CHART_OPENAI_REQUEST_FAILED,
+          false,
+          [SYNTHETIC_RESPONSE_BODY],
+        )
+
+        assert.equal(
+          error.transportDiagnostic?.failureKind,
+          expectedFailureKind,
+        )
+        assert.equal(error.transportDiagnostic?.httpStatus, 400)
+        assert.equal(
+          error.transportDiagnostic?.requestId,
+          SYNTHETIC_PROVIDER_REQUEST_ID,
+        )
+      },
+    )
+  }
+
+  await asyncTest(
+    'chunked HTTP error body crossing the byte cap is cancelled and rejected',
+    async () => {
+      let cancelCount = 0
+      const body = new TextEncoder().encode(
+        fixedByteLengthHttpErrorBody(32 * 1024 + 1),
+      )
+      const error = await captureSafeError(
+        () =>
+          requestAiChartOpenAiStructuredResponse(requestFixture(), {
+            env: syntheticEnv(),
+            clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+            fetchImpl: mockFetch(async () =>
+              streamedHttpResponse(
+                429,
+                [body.slice(0, 20_000), body.slice(20_000)],
+                {
+                  onCancel: () => {
+                    cancelCount += 1
+                  },
+                },
+              ),
+            ),
+          }),
+        AI_CHART_OPENAI_REQUEST_FAILED,
+        true,
+        [SYNTHETIC_RESPONSE_BODY],
+      )
+
+      assert.equal(
+        error.transportDiagnostic?.failureKind,
+        'RESPONSE_BODY_INVALID',
+      )
+      assert.equal(cancelCount, 1)
+    },
+  )
+
+  await asyncTest(
+    'oversized Content-Length rejects before reading the body',
+    async () => {
+      let pullCount = 0
+      let cancelCount = 0
+      const error = await captureSafeError(
+        () =>
+          requestAiChartOpenAiStructuredResponse(requestFixture(), {
+            env: syntheticEnv(),
+            clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+            fetchImpl: mockFetch(async () =>
+              streamedHttpResponse(
+                400,
+                [new TextEncoder().encode('must-not-be-read')],
+                {
+                  headers: {
+                    'content-length': String(32 * 1024 + 1),
+                  },
+                  onPull: () => {
+                    pullCount += 1
+                  },
+                  onCancel: () => {
+                    cancelCount += 1
+                  },
+                },
+              ),
+            ),
+          }),
+        AI_CHART_OPENAI_REQUEST_FAILED,
+        false,
+      )
+
+      assert.equal(
+        error.transportDiagnostic?.failureKind,
+        'RESPONSE_BODY_INVALID',
+      )
+      assert.equal(pullCount, 0)
+      assert.equal(cancelCount, 1)
+    },
+  )
+
+  await asyncTest(
+    'deceptive small Content-Length cannot bypass the actual byte cap',
+    async () => {
+      const oversizedBody = new TextEncoder().encode(
+        fixedByteLengthHttpErrorBody(32 * 1024 + 1),
+      )
+      const error = await captureSafeError(
+        () =>
+          requestAiChartOpenAiStructuredResponse(requestFixture(), {
+            env: syntheticEnv(),
+            clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+            fetchImpl: mockFetch(async () =>
+              streamedHttpResponse(500, [oversizedBody], {
+                headers: {
+                  'content-length': '1',
+                },
+              }),
+            ),
+          }),
+        AI_CHART_OPENAI_REQUEST_FAILED,
+        true,
+      )
+
+      assert.equal(
+        error.transportDiagnostic?.failureKind,
+        'RESPONSE_BODY_INVALID',
+      )
+    },
+  )
+
+  for (const invalidBody of [
+    '[]',
+    '{"error":"not-an-object"}',
+    '{"error":[]}',
+  ]) {
+    await asyncTest(
+      'non-plain provider error containers are rejected',
+      async () => {
+        const error = await captureSafeError(
+          () =>
+            requestAiChartOpenAiStructuredResponse(requestFixture(), {
+              env: syntheticEnv(),
+              clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+              fetchImpl: mockFetch(async () =>
+                streamedHttpResponse(400, [
+                  new TextEncoder().encode(invalidBody),
+                ]),
+              ),
+            }),
+          AI_CHART_OPENAI_REQUEST_FAILED,
+          false,
+        )
+        assert.equal(
+          error.transportDiagnostic?.failureKind,
+          'RESPONSE_BODY_INVALID',
+        )
+      },
+    )
+  }
+
+  await asyncTest(
+    'missing provider body is a safe response body invalid diagnostic',
+    async () => {
+      let jsonAccessCount = 0
+      const error = await captureSafeError(
+        () =>
+          requestAiChartOpenAiStructuredResponse(requestFixture(), {
+            env: syntheticEnv(),
+            clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+            fetchImpl: mockFetch(
+              async () =>
+                ({
+                  ok: false,
+                  status: 400,
+                  headers: new Headers(),
+                  body: null,
+                  get json() {
+                    jsonAccessCount += 1
+                    throw new Error(SYNTHETIC_RESPONSE_BODY)
+                  },
+                }) as unknown as Response,
+            ),
+          }),
+        AI_CHART_OPENAI_REQUEST_FAILED,
+        false,
+        [SYNTHETIC_RESPONSE_BODY],
+      )
+
+      assert.equal(
+        error.transportDiagnostic?.failureKind,
+        'RESPONSE_BODY_INVALID',
+      )
+      assert.equal(jsonAccessCount, 0)
+    },
+  )
+
+  await asyncTest(
+    'provider stream failure is not misclassified as a network failure',
+    async () => {
+      const error = await captureSafeError(
+        () =>
+          requestAiChartOpenAiStructuredResponse(requestFixture(), {
+            env: syntheticEnv(),
+            clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+            fetchImpl: mockFetch(async () =>
+              streamedHttpResponse(400, [], { failOnPull: true }),
+            ),
+          }),
+        AI_CHART_OPENAI_REQUEST_FAILED,
+        false,
+        [SYNTHETIC_RESPONSE_BODY],
+      )
+
+      assert.equal(
+        error.transportDiagnostic?.failureKind,
+        'RESPONSE_BODY_INVALID',
+      )
+    },
+  )
+
+  await asyncTest(
+    'invalid UTF-8 provider body is rejected without decoder details',
+    async () => {
+      const error = await captureSafeError(
+        () =>
+          requestAiChartOpenAiStructuredResponse(requestFixture(), {
+            env: syntheticEnv(),
+            clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+            fetchImpl: mockFetch(async () =>
+              streamedHttpResponse(400, [new Uint8Array([0xff])]),
+            ),
+          }),
+        AI_CHART_OPENAI_REQUEST_FAILED,
+        false,
+      )
+
+      assert.equal(
+        error.transportDiagnostic?.failureKind,
+        'RESPONSE_BODY_INVALID',
+      )
+    },
+  )
+
   await asyncTest(
     'unsafe provider identifiers and provider message are discarded',
     async () => {
@@ -857,6 +1280,136 @@ async function run() {
     },
   )
 
+  await asyncTest(
+    'hostile provider headers are discarded without exposing proxy errors',
+    async () => {
+      const safeResponse = streamedHttpResponse(400, [
+        new TextEncoder().encode(
+          JSON.stringify({
+            error: {
+              type: 'safe_type',
+              code: 'safe_code',
+              param: 'safe_param',
+            },
+          }),
+        ),
+      ])
+      const hostileHeaders = new Proxy(
+        {},
+        {
+          get() {
+            throw new Error(SYNTHETIC_RESPONSE_BODY)
+          },
+        },
+      ) as Headers
+      const error = await captureSafeError(
+        () =>
+          requestAiChartOpenAiStructuredResponse(requestFixture(), {
+            env: syntheticEnv(),
+            clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+            fetchImpl: mockFetch(
+              async () =>
+                ({
+                  ok: false,
+                  status: 400,
+                  headers: hostileHeaders,
+                  body: safeResponse.body,
+                }) as Response,
+            ),
+          }),
+        AI_CHART_OPENAI_REQUEST_FAILED,
+        false,
+        [SYNTHETIC_RESPONSE_BODY],
+      )
+
+      assert.equal(error.transportDiagnostic?.requestId, null)
+      assert.equal(
+        error.transportDiagnostic?.failureKind,
+        'HTTP_ERROR',
+      )
+      assert.equal(
+        JSON.stringify(error).includes(SYNTHETIC_RESPONSE_BODY),
+        false,
+      )
+    },
+  )
+
+  for (const [value, expected] of [
+    ['', null],
+    ['a', 'a'],
+    ['a'.repeat(80), 'a'.repeat(80)],
+    ['a'.repeat(81), null],
+    ['unsafe value', null],
+    ['unsafe\nvalue', null],
+    ['unsafe\rvalue', null],
+    ['unsafe\tvalue', null],
+    ['不安全', null],
+    [{ unsafe: true }, null],
+    [['unsafe'], null],
+    [123, null],
+    [true, null],
+  ] as const) {
+    await asyncTest(
+      'provider error identifier obeys the ASCII length boundary',
+      async () => {
+        const error = await captureSafeError(
+          () =>
+            requestAiChartOpenAiStructuredResponse(requestFixture(), {
+              env: syntheticEnv(),
+              clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+              fetchImpl: mockFetch(async () =>
+                jsonHttpErrorResponse(400, () => {}, {
+                  body: {
+                    error: {
+                      type: value,
+                      code: 'safe_code',
+                      param: 'safe_param',
+                      message: SYNTHETIC_RESPONSE_BODY,
+                    },
+                  },
+                }),
+              ),
+            }),
+          AI_CHART_OPENAI_REQUEST_FAILED,
+          false,
+          [SYNTHETIC_RESPONSE_BODY],
+        )
+        assert.equal(error.transportDiagnostic?.responseErrorType, expected)
+      },
+    )
+  }
+
+  for (const [requestId, expected] of [
+    ['', null],
+    ['r', 'r'],
+    ['r'.repeat(80), 'r'.repeat(80)],
+    ['r'.repeat(81), null],
+    ['unsafe request', null],
+    ['unsafe\rrequest', null],
+    ['unsafe\trequest', null],
+    ['請求', null],
+  ] as const) {
+    await asyncTest(
+      'provider request ID obeys the ASCII length boundary',
+      async () => {
+        const error = await captureSafeError(
+          () =>
+            requestAiChartOpenAiStructuredResponse(requestFixture(), {
+              env: syntheticEnv(),
+              clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+              fetchImpl: mockFetch(async () =>
+                jsonHttpErrorResponse(400, () => {}, { requestId }),
+              ),
+            }),
+          AI_CHART_OPENAI_REQUEST_FAILED,
+          false,
+          [SYNTHETIC_RESPONSE_BODY],
+        )
+        assert.equal(error.transportDiagnostic?.requestId, expected)
+      },
+    )
+  }
+
   await asyncTest('overlong provider request ID is discarded', async () => {
     const overlongRequestId = 'r'.repeat(81)
     const error = await captureSafeError(
@@ -883,7 +1436,11 @@ async function run() {
   })
 
   for (const invalidClientRequestId of [
+    '',
     `invalid\n${SYNTHETIC_RESPONSE_BODY}`,
+    `invalid\r${SYNTHETIC_RESPONSE_BODY}`,
+    `invalid\t${SYNTHETIC_RESPONSE_BODY}`,
+    '不安全',
     'x'.repeat(81),
     '   ',
   ]) {
@@ -904,13 +1461,83 @@ async function run() {
                 fetchCount += 1
                 throw new Error('must-not-run')
               }),
-            }),
+          }),
           AI_CHART_OPENAI_CONFIG_INVALID,
           false,
-          [invalidClientRequestId, SYNTHETIC_RESPONSE_BODY],
+          [invalidClientRequestId, SYNTHETIC_RESPONSE_BODY].filter(
+            (marker) => marker.length > 0,
+          ),
         )
         assert.equal(factoryCount, 1)
         assert.equal(fetchCount, 0)
+      },
+    )
+  }
+
+  for (const clientRequestIdFactory of [
+    () => {
+      throw new Error(
+        `${SYNTHETIC_API_KEY} ${SYNTHETIC_PROMPT} ${SYNTHETIC_RESPONSE_BODY}`,
+      )
+    },
+    () => 123 as never,
+    () => true as never,
+    () => [] as never,
+    () => ({ unsafe: true }) as never,
+    () =>
+      new Proxy(
+        {},
+        {
+          get() {
+            throw new Error(SYNTHETIC_RESPONSE_BODY)
+          },
+        },
+      ) as never,
+  ]) {
+    await asyncTest(
+      'client request ID generator failure is safe and fetch remains zero',
+      async () => {
+        let fetchCount = 0
+        const error = await captureSafeError(
+          () =>
+            requestAiChartOpenAiStructuredResponse(requestFixture(), {
+              env: syntheticEnv(),
+              clientRequestIdFactory,
+              fetchImpl: mockFetch(async () => {
+                fetchCount += 1
+                throw new Error('must-not-run')
+              }),
+            }),
+          AI_CHART_OPENAI_CONFIG_INVALID,
+          false,
+          [SYNTHETIC_API_KEY, SYNTHETIC_PROMPT, SYNTHETIC_RESPONSE_BODY],
+        )
+        assert.equal(fetchCount, 0)
+        const serializedError = JSON.stringify(error)
+        assert.equal(serializedError.includes(SYNTHETIC_API_KEY), false)
+        assert.equal(serializedError.includes(SYNTHETIC_PROMPT), false)
+        assert.equal(serializedError.includes(SYNTHETIC_RESPONSE_BODY), false)
+      },
+    )
+  }
+
+  for (const validClientRequestId of ['c', 'c'.repeat(80)]) {
+    await asyncTest(
+      'client request ID accepts the ASCII length boundary',
+      async () => {
+        let sentClientRequestId: string | undefined
+        await requestAiChartOpenAiStructuredResponse(requestFixture(), {
+          env: syntheticEnv(),
+          clientRequestIdFactory: () => validClientRequestId,
+          fetchImpl: mockFetch(async (_input, init) => {
+            const headers = init?.headers as Record<string, string>
+            sentClientRequestId = headers['X-Client-Request-Id']
+            return new Response(JSON.stringify(rawResponseFixture()), {
+              status: 200,
+            })
+          }),
+        })
+        assert.equal(sentClientRequestId, validClientRequestId)
       },
     )
   }
@@ -957,6 +1584,55 @@ async function run() {
       responseErrorParam: null,
     })
   })
+
+  await asyncTest(
+    'timeout completes when the mock fetch ignores abort and never settles',
+    async () => {
+      let fetchCount = 0
+      let abortCount = 0
+      const error = await beforeTestDeadline(
+        captureSafeError(
+          () =>
+            requestAiChartOpenAiStructuredResponse(
+              requestFixture({ timeoutMs: 1_000 }),
+              {
+                env: syntheticEnv(),
+                clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+                fetchImpl: mockFetch(
+                  async (_input, init) =>
+                    new Promise<Response>(() => {
+                      fetchCount += 1
+                      assert.ok(init?.signal)
+                      init.signal.addEventListener(
+                        'abort',
+                        () => {
+                          abortCount += 1
+                        },
+                        { once: true },
+                      )
+                    }),
+                ),
+              },
+            ),
+          AI_CHART_OPENAI_TIMEOUT,
+          true,
+        ),
+        1_500,
+      )
+
+      assert.equal(fetchCount, 1)
+      assert.equal(abortCount, 1)
+      assert.deepEqual(error.transportDiagnostic, {
+        failureKind: 'TIMEOUT',
+        httpStatus: null,
+        requestId: null,
+        clientRequestId: SYNTHETIC_CLIENT_REQUEST_ID,
+        responseErrorType: null,
+        responseErrorCode: null,
+        responseErrorParam: null,
+      })
+    },
+  )
 
   let bodyTimeoutFetchCount = 0
   let bodyTimeoutAbortCount = 0
@@ -1040,6 +1716,208 @@ async function run() {
     })
     assert.equal(Object.isFrozen(bodyTimeoutError.transportDiagnostic), true)
   })
+
+  await asyncTest(
+    'stalled non-2xx body cannot outlive the request timeout',
+    async () => {
+      let cancelCount = 0
+      const error = await beforeTestDeadline(
+        captureSafeError(
+          () =>
+            requestAiChartOpenAiStructuredResponse(
+              requestFixture({ timeoutMs: 1_000 }),
+              {
+                env: syntheticEnv(),
+                clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+                fetchImpl: mockFetch(async () => {
+                  const body = new ReadableStream<Uint8Array>({
+                    pull() {
+                      return new Promise<void>(() => {})
+                    },
+                    cancel() {
+                      cancelCount += 1
+                    },
+                  }, {
+                    highWaterMark: 0,
+                  })
+                  return new Response(body, {
+                    status: 429,
+                    headers: {
+                      'x-request-id': SYNTHETIC_PROVIDER_REQUEST_ID,
+                    },
+                  })
+                }),
+              },
+            ),
+          AI_CHART_OPENAI_TIMEOUT,
+          true,
+        ),
+        1_500,
+      )
+
+      assert.equal(error.transportDiagnostic?.failureKind, 'TIMEOUT')
+      assert.equal(error.transportDiagnostic?.httpStatus, 429)
+      assert.equal(
+        error.transportDiagnostic?.requestId,
+        SYNTHETIC_PROVIDER_REQUEST_ID,
+      )
+      assert.equal(cancelCount, 1)
+    },
+  )
+
+  await asyncTest(
+    'stalled successful response body cannot outlive the request timeout',
+    async () => {
+      let cancelCount = 0
+      const body = new ReadableStream<Uint8Array>({
+        cancel() {
+          cancelCount += 1
+        },
+      })
+      const error = await beforeTestDeadline(
+        captureSafeError(
+          () =>
+            requestAiChartOpenAiStructuredResponse(
+              requestFixture({ timeoutMs: 1_000 }),
+              {
+                env: syntheticEnv(),
+                clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+                fetchImpl: mockFetch(
+                  async () =>
+                    ({
+                      ok: true,
+                      status: 200,
+                      headers: new Headers({
+                        'x-request-id': SYNTHETIC_PROVIDER_REQUEST_ID,
+                      }),
+                      body,
+                      json: () => new Promise<unknown>(() => {}),
+                    }) as unknown as Response,
+                ),
+              },
+            ),
+          AI_CHART_OPENAI_TIMEOUT,
+          true,
+        ),
+        1_500,
+      )
+
+      assert.equal(error.transportDiagnostic?.failureKind, 'TIMEOUT')
+      assert.equal(error.transportDiagnostic?.httpStatus, 200)
+      assert.equal(
+        error.transportDiagnostic?.requestId,
+        SYNTHETIC_PROVIDER_REQUEST_ID,
+      )
+      assert.equal(cancelCount, 1)
+    },
+  )
+
+  await asyncTest(
+    'timeout wins when fetch resolves only after abort',
+    async () => {
+      const error = await captureSafeError(
+        () =>
+          requestAiChartOpenAiStructuredResponse(
+            requestFixture({ timeoutMs: 1_000 }),
+            {
+              env: syntheticEnv(),
+              clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+              fetchImpl: mockFetch(
+                async (_input, init) =>
+                  new Promise<Response>((resolve) => {
+                    assert.ok(init?.signal)
+                    init.signal.addEventListener(
+                      'abort',
+                      () => {
+                        resolve(
+                          new Response(
+                            JSON.stringify(rawResponseFixture()),
+                            {
+                              status: 200,
+                              headers: {
+                                'x-request-id':
+                                  SYNTHETIC_PROVIDER_REQUEST_ID,
+                              },
+                            },
+                          ),
+                        )
+                      },
+                      { once: true },
+                    )
+                  }),
+              ),
+            },
+          ),
+        AI_CHART_OPENAI_TIMEOUT,
+        true,
+      )
+
+      assert.equal(error.transportDiagnostic?.failureKind, 'TIMEOUT')
+      assert.equal(error.transportDiagnostic?.httpStatus, 200)
+      assert.equal(
+        error.transportDiagnostic?.requestId,
+        SYNTHETIC_PROVIDER_REQUEST_ID,
+      )
+    },
+  )
+
+  await asyncTest(
+    'timeout wins when the error body finishes during abort',
+    async () => {
+      const error = await captureSafeError(
+        () =>
+          requestAiChartOpenAiStructuredResponse(
+            requestFixture({ timeoutMs: 1_000 }),
+            {
+              env: syntheticEnv(),
+              clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+              fetchImpl: mockFetch(async (_input, init) => {
+                assert.ok(init?.signal)
+                const signal = init.signal
+                const body = new ReadableStream<Uint8Array>({
+                  pull(controller) {
+                    return new Promise<void>((resolve) => {
+                      signal.addEventListener(
+                        'abort',
+                        () => {
+                          controller.enqueue(
+                            new TextEncoder().encode(
+                              JSON.stringify({
+                                error: {
+                                  type: 'safe_type',
+                                  code: 'safe_code',
+                                  param: 'safe_param',
+                                },
+                              }),
+                            ),
+                          )
+                          controller.close()
+                          resolve()
+                        },
+                        { once: true },
+                      )
+                    })
+                  },
+                }, {
+                  highWaterMark: 0,
+                })
+                return new Response(body, {
+                  status: 400,
+                  headers: {
+                    'x-request-id': SYNTHETIC_PROVIDER_REQUEST_ID,
+                  },
+                })
+              }),
+            },
+          ),
+        AI_CHART_OPENAI_TIMEOUT,
+        true,
+      )
+
+      assert.equal(error.transportDiagnostic?.failureKind, 'TIMEOUT')
+      assert.equal(error.transportDiagnostic?.httpStatus, 400)
+    },
+  )
 
   await asyncTest('invalid response JSON becomes fixed response invalid', async () => {
     await captureSafeError(
