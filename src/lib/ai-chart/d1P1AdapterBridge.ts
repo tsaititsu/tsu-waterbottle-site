@@ -855,6 +855,30 @@ function hasOmissionTrace(
   )
 }
 
+const P1_OPAQUE_ID_CHARACTER = /^[A-Za-z0-9_.:-]$/
+
+function hasOpaqueIdOmissionTrace(
+  texts: readonly string[],
+  requiredId: string,
+): boolean {
+  if (requiredId.length === 0) return false
+  return texts.some((text) => {
+    let index = text.indexOf(requiredId)
+    while (index >= 0) {
+      const before = text[index - 1]
+      const after = text[index + requiredId.length]
+      if (
+        (before === undefined || !P1_OPAQUE_ID_CHARACTER.test(before)) &&
+        (after === undefined || !P1_OPAQUE_ID_CHARACTER.test(after))
+      ) {
+        return true
+      }
+      index = text.indexOf(requiredId, index + 1)
+    }
+    return false
+  })
+}
+
 function assertCoverageSourceBinding(
   result: AiChartD1P1Result,
   modelInput: AiChartD1P1ModelInput,
@@ -954,7 +978,10 @@ function assertCoverageSourceBinding(
 
   const omissions = omissionTexts(result.coverage)
   for (const meaningId of expected.targetMeaningIds) {
-    if (!directMeanings.has(meaningId) && !hasOmissionTrace(omissions, meaningId)) {
+    if (
+      !directMeanings.has(meaningId) &&
+      !hasOpaqueIdOmissionTrace(omissions, meaningId)
+    ) {
       resultInvalid(
         AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_OMISSION_TRACE_MISSING,
       )

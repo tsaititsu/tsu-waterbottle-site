@@ -1075,9 +1075,9 @@ async function run() {
     (meaning) => meaning.palaceRole === 'opposite',
   )
   assert.ok(oppositeMeaning)
+  const unexpectedMeaningId = 'meaning:invented'
   check('invented meaningId is rejected from direct coverage', () => {
     const value = createValidAiChartD1P1Result(modelInput)
-    const unexpectedMeaningId = 'meaning:invented'
     value.coverage.directMeaningsConsidered = [unexpectedMeaningId]
     const error = assertResultInvalid(
       () => parseResult(bridge, value),
@@ -1093,6 +1093,73 @@ async function run() {
       AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_UNEXPECTED,
     )
     assertSafeResultInvalid(error, [oppositeMeaning.meaningId])
+  })
+  check('duplicate precedes unexpected regardless of array order', () => {
+    const expectedMeaningId = modelInput.knowledgeContext.meanings.find(
+      (meaning) => meaning.palaceRole === 'target',
+    )?.meaningId
+    assert.ok(expectedMeaningId)
+    for (const directMeaningsConsidered of [
+      [unexpectedMeaningId, unexpectedMeaningId, expectedMeaningId],
+      [expectedMeaningId, unexpectedMeaningId, unexpectedMeaningId],
+    ]) {
+      const value = createValidAiChartD1P1Result(modelInput)
+      value.coverage.directMeaningsConsidered = directMeaningsConsidered
+      assertResultInvalid(
+        () => parseResult(bridge, value),
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_DUPLICATE,
+      )
+    }
+  })
+  check('duplicate precedes complete exact-set missing', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const expectedMeaningId = value.coverage.directMeaningsConsidered[0]
+    assert.ok(expectedMeaningId)
+    value.coverage.directMeaningsConsidered = [
+      expectedMeaningId,
+      expectedMeaningId,
+    ]
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_DUPLICATE,
+    )
+  })
+  check('unexpected precedes complete exact-set missing', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.coverage.directMeaningsConsidered = [unexpectedMeaningId]
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_UNEXPECTED,
+    )
+  })
+  check('partial duplicate precedes omission trace missing', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const expectedMeaningId = value.coverage.directMeaningsConsidered[0]
+    assert.ok(expectedMeaningId)
+    value.status = 'partial'
+    value.coverage.directMeaningsConsidered = [
+      expectedMeaningId,
+      expectedMeaningId,
+    ]
+    value.coverage.omittedItems = [
+      { item: 'unrelated omission', reason: 'not processed' },
+    ]
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_DUPLICATE,
+    )
+  })
+  check('partial unexpected precedes omission trace missing', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.status = 'partial'
+    value.coverage.directMeaningsConsidered = [unexpectedMeaningId]
+    value.coverage.omittedItems = [
+      { item: 'unrelated omission', reason: 'not processed' },
+    ]
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_UNEXPECTED,
+    )
   })
   const otherMajorStar = modelInputs[1].structuralContext.targetPalace
     .canonicalMajorStars[0]
@@ -1470,6 +1537,68 @@ async function run() {
       parseResult(coverageBridge, createSubsetResult('incomplete')).status,
       'incomplete',
     )
+  })
+  for (const status of ['partial', 'incomplete'] as const) {
+    for (const suffix of ['A', 'z', '0', '_', '-', '.', ':']) {
+      check(`${status} opaque meaningId rejects a longer valid-ID suffix ${suffix}`, () => {
+        const value = createSubsetResult(status)
+        const meaningOmission = value.coverage.omittedItems[0]
+        assert.ok(meaningOmission)
+        meaningOmission.item = `${meaningOmission.item}${suffix}long`
+        assertResultInvalid(
+          () => parseResult(coverageBridge, value),
+          AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_OMISSION_TRACE_MISSING,
+        )
+      })
+    }
+    for (const prefix of ['A', 'z', '0', '_', '-', '.', ':']) {
+      check(`${status} opaque meaningId rejects a longer valid-ID prefix ${prefix}`, () => {
+        const value = createSubsetResult(status)
+        const meaningOmission = value.coverage.omittedItems[0]
+        assert.ok(meaningOmission)
+        meaningOmission.item = `${prefix}${meaningOmission.item}`
+        assertResultInvalid(
+          () => parseResult(coverageBridge, value),
+          AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_OMISSION_TRACE_MISSING,
+        )
+      })
+    }
+  }
+  for (const separator of [' ', '\n', '，', '。']) {
+    check(`opaque meaningId accepts a complete token before ${JSON.stringify(separator)}`, () => {
+      const value = createSubsetResult('partial')
+      const meaningOmission = value.coverage.omittedItems[0]
+      assert.ok(meaningOmission)
+      meaningOmission.item =
+        `未處理${separator}${meaningOmission.item}${separator}因資料不足`
+      assert.equal(parseResult(coverageBridge, value).status, 'partial')
+    })
+  }
+  check('opaque meaningId may be traced exactly inside an omission reason', () => {
+    const value = createSubsetResult('partial')
+    const meaningOmission = value.coverage.omittedItems[0]
+    assert.ok(meaningOmission)
+    const missingMeaningId = meaningOmission.item
+    meaningOmission.item = 'target meaning 未處理'
+    meaningOmission.reason = `未處理 ${missingMeaningId}，因資料不足`
+    assert.equal(parseResult(coverageBridge, value).status, 'partial')
+  })
+  check('one omitted item can trace multiple complete opaque meaningIds', () => {
+    const value = createValidAiChartD1P1Result(coverageInput)
+    value.status = 'partial'
+    const firstMissingMeaningId =
+      value.coverage.directMeaningsConsidered.shift()
+    const secondMissingMeaningId =
+      value.coverage.directMeaningsConsidered.shift()
+    assert.ok(firstMissingMeaningId)
+    assert.ok(secondMissingMeaningId)
+    value.coverage.omittedItems = [
+      {
+        item: `${firstMissingMeaningId}、${secondMissingMeaningId}`,
+        reason: '兩項 target meanings 因資料不足未處理',
+      },
+    ]
+    assert.equal(parseResult(coverageBridge, value).status, 'partial')
   })
   for (const status of ['partial', 'incomplete'] as const) {
     check(`${status} subset rejects a missing meaning omission trace`, () => {
