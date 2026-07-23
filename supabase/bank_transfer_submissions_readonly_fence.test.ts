@@ -46,11 +46,22 @@ test('migration revokes the complete runtime privilege surface before granting r
     'TRUNCATE',
     'REFERENCES',
     'TRIGGER',
+    'MAINTAIN',
   ]) {
     assert.ok(migration.includes(`'${privilege}'`), `${privilege} must be verified explicitly`)
   }
 
   assert.match(migration, /has_table_privilege/i)
+  assert.match(migration, /pg_catalog\.aclexplode/i)
+  assert.match(migration, /pg_catalog\.acldefault\('r',\s*relation\.relowner\)/i)
+  assert.match(migration, /acl\.grantee\s*=\s*0/i)
+  assert.match(migration, /acl\.grantee\s*<>\s*relation\.relowner/i)
+  assert.match(
+    migration,
+    /acl\.privilege_type\s+in\s*\(\s*'INSERT',\s*'UPDATE',\s*'DELETE',\s*'TRUNCATE'\s*\)/i,
+  )
+  assert.match(migration, /catalog_acl_mismatch/i)
+  assert.match(migration, /catalog_select_acl_mismatch/i)
   assert.match(migration, /privilege_mismatch/i)
 })
 
@@ -68,6 +79,13 @@ test('migration removes the write policy and installs one exact owner-scoped rea
     /create\s+policy\s+"Users can read own bank transfer submissions"[\s\S]*?for\s+select[\s\S]*?to\s+authenticated[\s\S]*?using\s*\(\(select\s+auth\.uid\(\)\)\s*=\s*user_id\)/i,
   )
   assert.match(migration, /v_policy_count\s*<>\s*1/i)
+  assert.match(migration, /from\s+pg_catalog\.pg_policy\s+as\s+policy/i)
+  assert.match(
+    migration,
+    /pg_catalog\.pg_get_expr\(\s*policy\.polqual,\s*policy\.polrelid,\s*false\s*\)\s*=\s*'\(\(\sSELECT auth\.uid\(\) AS uid\) = user_id\)'/i,
+  )
+  assert.match(migration, /policy\.polroles\s*=\s*array\[v_authenticated_oid\]::oid\[\]/i)
+  assert.match(migration, /policy\.polwithcheck\s+is\s+null/i)
   assert.doesNotMatch(migration, /create\s+policy[\s\S]*?for\s+(?:insert|update|delete)/i)
 })
 

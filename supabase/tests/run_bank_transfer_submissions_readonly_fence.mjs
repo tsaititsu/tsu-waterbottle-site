@@ -92,6 +92,35 @@ function psqlFile(database, path, label = path) {
   psql(database, readFileSync(path, 'utf8'), label)
 }
 
+function psqlFileExpectFailure(database, path, expectedPattern, label) {
+  const result = spawnSync(
+    'docker',
+    [
+      'exec',
+      '-i',
+      containerName,
+      'psql',
+      '-X',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-U',
+      'postgres',
+      '-d',
+      database,
+    ],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      input: readFileSync(path, 'utf8'),
+    },
+  )
+  const combinedOutput = `${result.stdout}\n${result.stderr}`
+
+  if (result.status === 0 || !expectedPattern.test(combinedOutput)) {
+    throw new Error(`${label} did not fail closed with the required catalog ACL mismatch`)
+  }
+}
+
 function psqlExpectDenied(database, sql, label) {
   const result = spawnSync(
     'docker',
@@ -203,6 +232,10 @@ function grantProductionLikePrivileges(database) {
   psql(
     database,
     `
+      grant select, insert, update, delete, truncate, references, trigger
+      on table public.bank_transfer_submissions
+      to public;
+
       grant truncate, references, trigger
       on table public.bank_transfer_submissions
       to anon, authenticated;
@@ -288,7 +321,8 @@ function assertExactPrivileges(database) {
         'DELETE',
         'TRUNCATE',
         'REFERENCES',
-        'TRIGGER'
+        'TRIGGER',
+        'MAINTAIN'
       ]) as runtime_privilege(privilege_name)
       order by role_name, privilege_name;
     `,
@@ -311,6 +345,7 @@ function assertExactPrivileges(database) {
       'TRUNCATE',
       'REFERENCES',
       'TRIGGER',
+      'MAINTAIN',
     ]) {
       const expected = privilege === 'SELECT' && role !== 'anon'
       assert.equal(actual.get(`${role}:${privilege}`), expected, `${role}:${privilege}`)
@@ -318,27 +353,80 @@ function assertExactPrivileges(database) {
   }
 }
 
+function assertExactAclCatalog(database) {
+  const output = psql(
+    database,
+    `
+      select
+        case
+          when acl.grantee = 0 then 'PUBLIC'
+          else coalesce(grantee.rolname, acl.grantee::text)
+        end,
+        acl.privilege_type,
+        acl.is_grantable,
+        acl.grantee = relation.relowner
+      from pg_catalog.pg_class as relation
+      join pg_catalog.pg_namespace as namespace
+        on namespace.oid = relation.relnamespace
+      cross join lateral pg_catalog.aclexplode(
+        coalesce(
+          relation.relacl,
+          pg_catalog.acldefault('r', relation.relowner)
+        )
+      ) as acl
+      left join pg_catalog.pg_roles as grantee
+        on grantee.oid = acl.grantee
+      where namespace.nspname = 'public'
+        and relation.relname = 'bank_transfer_submissions'
+        and acl.grantee <> relation.relowner
+      order by 1, 2, 3, 4;
+    `,
+    'exact table ACL catalog query',
+  )
+
+  assert.equal(
+    output,
+    [
+      'authenticated|SELECT|f|f',
+      'service_role|SELECT|f|f',
+    ].join('\n'),
+  )
+}
+
 function assertExactPolicyAndRls(database) {
   const policy = psql(
     database,
     `
       select
-        policy.policyname,
-        policy.cmd,
-        pg_catalog.array_to_string(policy.roles, ','),
-        policy.with_check is null,
-        policy.qual is not null
-      from pg_catalog.pg_policies as policy
-      where policy.schemaname = 'public'
-        and policy.tablename = 'bank_transfer_submissions'
-      order by policy.policyname;
+        policy.polname,
+        policy.polcmd,
+        pg_catalog.array_to_string(
+          array(
+            select role.rolname
+            from pg_catalog.unnest(policy.polroles) as policy_role(role_oid)
+            join pg_catalog.pg_roles as role
+              on role.oid = policy_role.role_oid
+            order by role.rolname
+          ),
+          ','
+        ),
+        policy.polwithcheck is null,
+        pg_catalog.pg_get_expr(policy.polqual, policy.polrelid, false)
+      from pg_catalog.pg_policy as policy
+      join pg_catalog.pg_class as relation
+        on relation.oid = policy.polrelid
+      join pg_catalog.pg_namespace as namespace
+        on namespace.oid = relation.relnamespace
+      where namespace.nspname = 'public'
+        and relation.relname = 'bank_transfer_submissions'
+      order by policy.polname;
     `,
     'exact policy catalog query',
   )
 
   assert.equal(
     policy,
-    'Users can read own bank transfer submissions|SELECT|authenticated|t|t',
+    'Users can read own bank transfer submissions|r|authenticated|t|(( SELECT auth.uid() AS uid) = user_id)',
   )
 
   const catalog = psql(
@@ -467,6 +555,7 @@ function applyAndAssert(database, productionLikePrivileges) {
   const after = snapshotHistoricalRows(database)
   assert.equal(after, before)
   assertExactPrivileges(database)
+  assertExactAclCatalog(database)
   assertExactPolicyAndRls(database)
   assertRoleBehavior(database)
   assertNoCommerceWrites(database)
@@ -487,8 +576,79 @@ function applyAfterLinePayAndAssert(database) {
   const after = snapshotHistoricalRows(database)
   assert.equal(after, before)
   assertExactPrivileges(database)
+  assertExactAclCatalog(database)
   assertExactPolicyAndRls(database)
   assertRoleBehavior(database)
+}
+
+function applyFenceBeforeLinePayAndAssert(database) {
+  prepareLinePayUpgradeSchema(database)
+  const before = snapshotHistoricalRows(database)
+
+  psqlFile(database, migration, 'bank transfer read-only fence migration')
+  assertExactPrivileges(database)
+  assertExactAclCatalog(database)
+  assertExactPolicyAndRls(database)
+
+  psqlFile(database, linePayMigration, 'LINE Pay remediation migration after read-only fence')
+  psqlFile(
+    database,
+    join(root, 'supabase/tests/line_pay_upgrade_assertions.sql'),
+    'LINE Pay upgrade assertions after fence-first sequence',
+  )
+
+  const after = snapshotHistoricalRows(database)
+  assert.equal(after, before)
+  assertExactPrivileges(database)
+  assertExactAclCatalog(database)
+  assertExactPolicyAndRls(database)
+  assertRoleBehavior(database)
+}
+
+function assertUnknownWriteAclFailsClosed(database) {
+  prepareLegacySchema(database, true)
+  const before = snapshotHistoricalRows(database)
+
+  psql(
+    database,
+    `
+      create role bank_transfer_legacy_writer nologin;
+      grant insert on table public.bank_transfer_submissions
+      to bank_transfer_legacy_writer;
+    `,
+    'unknown non-owner write ACL fixture',
+  )
+
+  psqlFileExpectFailure(
+    database,
+    migration,
+    /bank_transfer_submissions_readonly_fence:catalog_acl_mismatch/i,
+    'unknown non-owner write ACL postcondition',
+  )
+
+  const after = snapshotHistoricalRows(database)
+  assert.equal(after, before)
+  assert.equal(
+    psql(
+      database,
+      `
+        select
+          pg_catalog.has_table_privilege(
+            'bank_transfer_legacy_writer',
+            'public.bank_transfer_submissions',
+            'INSERT'
+          ),
+          (
+            select pg_catalog.count(*)
+            from pg_catalog.pg_policies
+            where schemaname = 'public'
+              and tablename = 'bank_transfer_submissions'
+          );
+      `,
+      'unknown ACL transaction rollback evidence',
+    ),
+    't|2',
+  )
 }
 
 async function main() {
@@ -561,15 +721,27 @@ async function main() {
   psql(
     'postgres',
     'create database bank_transfer_line_pay_upgrade;',
-    'create LINE Pay sequence database',
+    'create LINE Pay-first sequence database',
+  )
+  psql(
+    'postgres',
+    'create database bank_transfer_fence_first;',
+    'create fence-first sequence database',
+  )
+  psql(
+    'postgres',
+    'create database bank_transfer_unknown_acl;',
+    'create unknown ACL fail-closed database',
   )
 
   applyAndAssert('bank_transfer_clean', false)
   applyAndAssert('bank_transfer_upgrade', true)
   applyAfterLinePayAndAssert('bank_transfer_line_pay_upgrade')
+  applyFenceBeforeLinePayAndAssert('bank_transfer_fence_first')
+  assertUnknownWriteAclFailsClosed('bank_transfer_unknown_acl')
 
   process.stdout.write(
-    'bank_transfer_submissions_readonly_fence: PASS (PostgreSQL 17, clean, production-like upgrade, LINE Pay sequence, data preservation, exact privileges, RLS, policies, runtime denial)\n',
+    'bank_transfer_submissions_readonly_fence: PASS (PostgreSQL 17, clean, production-like upgrade, LINE Pay-first, fence-first, data preservation, exact ACLs, unknown-write fail-closed rollback, canonical policy, RLS, runtime denial)\n',
   )
 }
 

@@ -68,11 +68,23 @@ comment on table public.bank_transfer_submissions is
 
 do $$
 declare
+  v_authenticated_oid oid;
   v_expected boolean;
   v_policy_count integer;
   v_privilege text;
   v_role name;
 begin
+  select role.oid
+  into v_authenticated_oid
+  from pg_catalog.pg_roles as role
+  where role.rolname = 'authenticated';
+
+  if v_authenticated_oid is null then
+    raise exception using
+      errcode = 'P0001',
+      message = 'bank_transfer_submissions_readonly_fence:authenticated_role_missing';
+  end if;
+
   foreach v_role in array array['anon', 'authenticated', 'service_role']::name[] loop
     foreach v_privilege in array array[
       'SELECT',
@@ -81,7 +93,8 @@ begin
       'DELETE',
       'TRUNCATE',
       'REFERENCES',
-      'TRIGGER'
+      'TRIGGER',
+      'MAINTAIN'
     ] loop
       v_expected := v_privilege = 'SELECT'
         and v_role in ('authenticated', 'service_role');
@@ -102,11 +115,88 @@ begin
     end loop;
   end loop;
 
+  -- relacl is the authoritative table-level ACL. PUBLIC is represented by
+  -- grantee OID 0; the table owner is excluded from the unknown-role write
+  -- fence because owner capabilities are implicit PostgreSQL capabilities.
+  if exists (
+    select 1
+    from pg_catalog.pg_class as relation
+    join pg_catalog.pg_namespace as namespace
+      on namespace.oid = relation.relnamespace
+    cross join lateral pg_catalog.aclexplode(
+      coalesce(
+        relation.relacl,
+        pg_catalog.acldefault('r', relation.relowner)
+      )
+    ) as acl
+    left join pg_catalog.pg_roles as grantee
+      on grantee.oid = acl.grantee
+    where namespace.nspname = 'public'
+      and relation.relname = 'bank_transfer_submissions'
+      and (
+        acl.grantee = 0
+        or grantee.rolname = 'anon'
+        or (
+          grantee.rolname in ('authenticated', 'service_role')
+          and (
+            acl.privilege_type <> 'SELECT'
+            or acl.is_grantable
+          )
+        )
+        or (
+          acl.grantee <> relation.relowner
+          and coalesce(grantee.rolname, '') not in (
+            'anon',
+            'authenticated',
+            'service_role'
+          )
+          and acl.privilege_type in (
+            'INSERT',
+            'UPDATE',
+            'DELETE',
+            'TRUNCATE'
+          )
+        )
+      )
+  ) then
+    raise exception using
+      errcode = 'P0001',
+      message = 'bank_transfer_submissions_readonly_fence:catalog_acl_mismatch';
+  end if;
+
+  if (
+    select pg_catalog.count(*)
+    from pg_catalog.pg_class as relation
+    join pg_catalog.pg_namespace as namespace
+      on namespace.oid = relation.relnamespace
+    cross join lateral pg_catalog.aclexplode(
+      coalesce(
+        relation.relacl,
+        pg_catalog.acldefault('r', relation.relowner)
+      )
+    ) as acl
+    join pg_catalog.pg_roles as grantee
+      on grantee.oid = acl.grantee
+    where namespace.nspname = 'public'
+      and relation.relname = 'bank_transfer_submissions'
+      and grantee.rolname in ('authenticated', 'service_role')
+      and acl.privilege_type = 'SELECT'
+      and not acl.is_grantable
+  ) <> 2 then
+    raise exception using
+      errcode = 'P0001',
+      message = 'bank_transfer_submissions_readonly_fence:catalog_select_acl_mismatch';
+  end if;
+
   select pg_catalog.count(*)
   into v_policy_count
-  from pg_catalog.pg_policies
-  where schemaname = 'public'
-    and tablename = 'bank_transfer_submissions';
+  from pg_catalog.pg_policy as policy
+  join pg_catalog.pg_class as relation
+    on relation.oid = policy.polrelid
+  join pg_catalog.pg_namespace as namespace
+    on namespace.oid = relation.relnamespace
+  where namespace.nspname = 'public'
+    and relation.relname = 'bank_transfer_submissions';
 
   if v_policy_count <> 1 then
     raise exception using
@@ -116,13 +206,22 @@ begin
 
   if not exists (
     select 1
-    from pg_catalog.pg_policies
-    where schemaname = 'public'
-      and tablename = 'bank_transfer_submissions'
-      and policyname = 'Users can read own bank transfer submissions'
-      and cmd = 'SELECT'
-      and roles = array['authenticated']::name[]
-      and with_check is null
+    from pg_catalog.pg_policy as policy
+    join pg_catalog.pg_class as relation
+      on relation.oid = policy.polrelid
+    join pg_catalog.pg_namespace as namespace
+      on namespace.oid = relation.relnamespace
+    where namespace.nspname = 'public'
+      and relation.relname = 'bank_transfer_submissions'
+      and policy.polname = 'Users can read own bank transfer submissions'
+      and policy.polcmd = 'r'
+      and policy.polroles = array[v_authenticated_oid]::oid[]
+      and pg_catalog.pg_get_expr(
+        policy.polqual,
+        policy.polrelid,
+        false
+      ) = '(( SELECT auth.uid() AS uid) = user_id)'
+      and policy.polwithcheck is null
   ) then
     raise exception using
       errcode = 'P0001',
