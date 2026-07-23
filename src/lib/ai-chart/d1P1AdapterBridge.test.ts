@@ -784,7 +784,7 @@ async function run() {
     [
       'directMeaningsConsidered',
       'majorStarsCovered',
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_DUPLICATE,
     ],
     [
       'majorStarsCovered',
@@ -852,7 +852,7 @@ async function run() {
       }
       const error = assertResultInvalid(
         () => parseResult(coveragePriorityBridge, value),
-        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_DUPLICATE,
       )
       assertSafeResultInvalid(error, duplicateValues)
       assert.equal(Object.isFrozen(error), true)
@@ -997,12 +997,39 @@ async function run() {
     value.coverage.noblesCovered.reverse()
     assert.doesNotThrow(() => parseResult(bridge, value))
   })
+  check('complete Result rejects an empty direct meaning set as missing', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const sensitiveMeaningIds = [...value.coverage.directMeaningsConsidered]
+    assert.equal(sensitiveMeaningIds.length > 0, true)
+    value.coverage.directMeaningsConsidered = []
+    const error = assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_COMPLETE_SET_MISSING,
+    )
+    assertSafeResultInvalid(error, sensitiveMeaningIds)
+  })
+  check('complete Result rejects one missing direct meaning as missing', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const missingMeaningId = value.coverage.directMeaningsConsidered.shift()
+    assert.ok(missingMeaningId)
+    const error = assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_COMPLETE_SET_MISSING,
+    )
+    assertSafeResultInvalid(error, [missingMeaningId])
+  })
+  check('direct meanings reject duplicate entries with a fixed safe reason', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const duplicateMeaningId = value.coverage.directMeaningsConsidered[0]
+    assert.ok(duplicateMeaningId)
+    value.coverage.directMeaningsConsidered.push(duplicateMeaningId)
+    const error = assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_DUPLICATE,
+    )
+    assertSafeResultInvalid(error, [duplicateMeaningId])
+  })
   for (const [name, field, reasonCode] of [
-    [
-      'target meanings',
-      'directMeaningsConsidered',
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
-    ],
     [
       'target major stars',
       'majorStarsCovered',
@@ -1050,19 +1077,22 @@ async function run() {
   assert.ok(oppositeMeaning)
   check('invented meaningId is rejected from direct coverage', () => {
     const value = createValidAiChartD1P1Result(modelInput)
-    value.coverage.directMeaningsConsidered = ['meaning:invented']
-    assertResultInvalid(
+    const unexpectedMeaningId = 'meaning:invented'
+    value.coverage.directMeaningsConsidered = [unexpectedMeaningId]
+    const error = assertResultInvalid(
       () => parseResult(bridge, value),
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_UNEXPECTED,
     )
+    assertSafeResultInvalid(error, [unexpectedMeaningId])
   })
   check('opposite meaningId is rejected from direct coverage', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.coverage.directMeaningsConsidered = [oppositeMeaning.meaningId]
-    assertResultInvalid(
+    const error = assertResultInvalid(
       () => parseResult(bridge, value),
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_UNEXPECTED,
     )
+    assertSafeResultInvalid(error, [oppositeMeaning.meaningId])
   })
   const otherMajorStar = modelInputs[1].structuralContext.targetPalace
     .canonicalMajorStars[0]
@@ -1293,7 +1323,7 @@ async function run() {
       'direct meanings',
       bridge,
       modelInput,
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_DUPLICATE,
       (value: Mutable<AiChartD1P1Result>) => {
         const first = value.coverage.directMeaningsConsidered[0]
         assert.ok(first)
@@ -1447,7 +1477,7 @@ async function run() {
       value.coverage.omittedItems = value.coverage.omittedItems.slice(1)
       assertResultInvalid(
         () => parseResult(coverageBridge, value),
-        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_OMISSION_TRACE_MISSING,
       )
     })
     check(`${status} subset rejects a missing mutagen omission trace`, () => {
@@ -1475,7 +1505,7 @@ async function run() {
       coverageBridge,
       coverageInput,
       'directMeaningsConsidered',
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_OMISSION_TRACE_MISSING,
     ],
     [
       'major stars',
@@ -1549,12 +1579,35 @@ async function run() {
   check('partial coverage cannot omit a source without naming it', () => {
     const value = createValidAiChartD1P1Result(coverageInput)
     value.status = 'partial'
-    value.coverage.directMeaningsConsidered.shift()
+    const missingMeaningId = value.coverage.directMeaningsConsidered.shift()
+    assert.ok(missingMeaningId)
     value.coverage.omittedItems = [{ item: 'known gap', reason: 'not processed' }]
-    assertResultInvalid(
+    const error = assertResultInvalid(
       () => parseResult(coverageBridge, value),
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_OMISSION_TRACE_MISSING,
     )
+    assertSafeResultInvalid(error, [missingMeaningId])
+  })
+  check('partial coverage cannot trace an omitted meaning by meaning text alone', () => {
+    const value = createValidAiChartD1P1Result(coverageInput)
+    value.status = 'partial'
+    const missingMeaningId = value.coverage.directMeaningsConsidered.shift()
+    assert.ok(missingMeaningId)
+    const missingMeaning = coverageInput.knowledgeContext.meanings.find(
+      (meaning) => meaning.meaningId === missingMeaningId,
+    )
+    assert.ok(missingMeaning)
+    value.coverage.omittedItems = [
+      {
+        item: missingMeaning.text,
+        reason: 'target meaning text was not processed',
+      },
+    ]
+    const error = assertResultInvalid(
+      () => parseResult(coverageBridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_OMISSION_TRACE_MISSING,
+    )
+    assertSafeResultInvalid(error, [missingMeaningId, missingMeaning.text])
   })
   check('complete Result cannot use empty coverage and empty omissions', () => {
     const value = createValidAiChartD1P1Result(modelInput)
@@ -1567,7 +1620,7 @@ async function run() {
     value.coverage.omittedItems = []
     assertResultInvalid(
       () => parseResult(bridge, value),
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_COMPLETE_SET_MISSING,
     )
   })
 
@@ -2636,7 +2689,7 @@ async function run() {
     }
 
     visit(sourceFile)
-    assert.equal(callSites.length, 40)
+    assert.equal(callSites.length, 42)
 
     const allowedReasonNames = new Set(
       Object.keys(AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS),
@@ -2713,9 +2766,9 @@ async function run() {
     }
     assert.equal(controlledHelperReasons, 1)
     assert.equal(controlledDuplicateMappingReasons, 1)
-    assert.equal(directFixedReasons, 38)
+    assert.equal(directFixedReasons, 40)
 
-    assert.equal(stringCoverageCallSites.length, 4)
+    assert.equal(stringCoverageCallSites.length, 3)
     assert.deepEqual(
       new Set(
         stringCoverageCallSites.map((callSite, index) => {
@@ -2735,7 +2788,6 @@ async function run() {
         }),
       ),
       new Set([
-        'COVERAGE_DIRECT_MEANINGS_MISMATCH',
         'COVERAGE_MAJOR_STARS_MISMATCH',
         'COVERAGE_MINOR_STARS_MISMATCH',
         'COVERAGE_NOBLES_MISMATCH',

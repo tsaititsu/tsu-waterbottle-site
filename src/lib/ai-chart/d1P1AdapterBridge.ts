@@ -111,7 +111,7 @@ const P1_MALEFIC_SIGNAL_TYPES = Object.freeze([
 ] as const)
 
 type AiChartD1P1CoverageDuplicateValidationReasonCode =
-  | (typeof AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS)['COVERAGE_DIRECT_MEANINGS_MISMATCH']
+  | (typeof AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS)['COVERAGE_DIRECT_MEANINGS_DUPLICATE']
   | (typeof AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS)['COVERAGE_MAJOR_STARS_MISMATCH']
   | (typeof AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS)['COVERAGE_MINOR_STARS_MISMATCH']
   | (typeof AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS)['COVERAGE_MUTAGENS_MISMATCH']
@@ -120,7 +120,7 @@ type AiChartD1P1CoverageDuplicateValidationReasonCode =
 
 const P1_COVERAGE_DUPLICATE_REASON_BY_FIELD = Object.freeze({
   directMeaningsConsidered:
-    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_DUPLICATE,
   majorStarsCovered:
     AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
   minorStarsCovered:
@@ -668,11 +668,27 @@ function setEquals(
 
 type AiChartD1P1StringCoverageReasonCode =
   (typeof AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS)[
-    | 'COVERAGE_DIRECT_MEANINGS_MISMATCH'
     | 'COVERAGE_MAJOR_STARS_MISMATCH'
     | 'COVERAGE_MINOR_STARS_MISMATCH'
     | 'COVERAGE_NOBLES_MISMATCH'
   ]
+
+function assertDirectMeaningCoverageSubset(
+  values: readonly string[],
+  expected: ReadonlySet<string>,
+): ReadonlySet<string> {
+  if (hasDuplicates(values)) {
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_DUPLICATE,
+    )
+  }
+  if (values.some((value) => !expected.has(value))) {
+    resultInvalid(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_UNEXPECTED,
+    )
+  }
+  return new Set(values)
+}
 
 function assertStringCoverageSubset(
   values: readonly string[],
@@ -844,10 +860,9 @@ function assertCoverageSourceBinding(
   modelInput: AiChartD1P1ModelInput,
 ): void {
   const expected = expectedCoverageSources(modelInput)
-  const directMeanings = assertStringCoverageSubset(
+  const directMeanings = assertDirectMeaningCoverageSubset(
     result.coverage.directMeaningsConsidered,
     expected.targetMeaningIds,
-    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
   )
   const majorStars = assertStringCoverageSubset(
     result.coverage.majorStarsCovered,
@@ -880,7 +895,7 @@ function assertCoverageSourceBinding(
   if (result.status === 'complete') {
     if (!setEquals(directMeanings, expected.targetMeaningIds)) {
       resultInvalid(
-        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_COMPLETE_SET_MISSING,
       )
     }
     if (!setEquals(majorStars, expected.targetMajorStars)) {
@@ -941,7 +956,7 @@ function assertCoverageSourceBinding(
   for (const meaningId of expected.targetMeaningIds) {
     if (!directMeanings.has(meaningId) && !hasOmissionTrace(omissions, meaningId)) {
       resultInvalid(
-        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_OMISSION_TRACE_MISSING,
       )
     }
   }
