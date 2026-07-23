@@ -211,11 +211,11 @@ test('admin layout guards the UI behind the server-side admin session check', ()
   )
   assert.match(
     clientSource,
-    /if \(accessState === 'authorized'\) \{\s*return <>\{children\}<\/>\s*}/,
+    /if \(accessState === 'authorized'\) \{\s*return <AdminShell pathname=\{pathname\}>\{children\}<\/AdminShell>\s*}/,
     '只有 authorized 狀態才能渲染後台 UI',
   )
   assert.equal(
-    clientSource.match(/<>\{children\}<\/>/g)?.length,
+    clientSource.match(/<AdminShell pathname=\{pathname\}>\{children\}<\/AdminShell>/g)?.length,
     1,
     'children 不得出現在 authorized gate 以外的分支',
   )

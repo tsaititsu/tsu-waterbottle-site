@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState, type ReactNode } from 'react'
 import { LoginModal } from '@/components/LoginModal'
+import AdminShell from '@/components/admin/AdminShell'
 import { sanitizeAuthReturnPath } from '@/lib/auth/returnTo'
 import { getAuthAccessToken, getMockUser, subscribeAuthChange } from '@/lib/mockAuth'
 
@@ -74,7 +75,7 @@ export default function AdminLayoutClient({ children }: { children: ReactNode })
   }, [])
 
   if (accessState === 'authorized') {
-    return <>{children}</>
+    return <AdminShell pathname={pathname}>{children}</AdminShell>
   }
 
   if (accessState === 'forbidden') {

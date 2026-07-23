@@ -1,140 +1,109 @@
-'use client'
-
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { BarChart3, Boxes, CalendarCheck2, CalendarClock, CreditCard, Landmark, ScrollText } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { getMockUser, subscribeAuthChange, type UserProfile } from '@/lib/mockAuth'
+import AdminPageHeader from '@/components/admin/AdminPageHeader'
+import AdminStatusBadge from '@/components/admin/AdminStatusBadge'
 
-const adminNavItems = [
-  { label: '總覽', description: '查看後台摘要與待辦提醒', icon: BarChart3 },
-  { label: '開運商品', description: '管理商品資料、圖片與上下架狀態', icon: Boxes },
-  { label: '訂單管理', description: '查看商品與服務訂單狀態', icon: CreditCard },
-  { label: '占卜紀錄', description: '檢視占卜服務紀錄與客戶查詢', icon: ScrollText },
-  { label: '匯款回報', description: '人工核對銀行匯款回報資料', icon: Landmark },
-  { label: '預約紀錄', description: '唯讀查看最近 100 筆真實預約資料', icon: CalendarCheck2, href: '/admin/bookings', isAvailable: true },
-  { label: '預約時段', description: '手動開放或關閉論命可預約時段', icon: CalendarClock, href: '/admin/booking-slots', isAvailable: true },
+const readOnlyModules = [
+  {
+    href: '/admin/bookings',
+    title: '預約紀錄',
+    description: '查看最近載入的預約紀錄、狀態分類與未來／過去篩選。',
+  },
+  {
+    href: '/admin/product-orders',
+    title: '商品訂單',
+    description: '查看商品摘要、金額及既有訂單／付款／物流狀態。',
+  },
+  {
+    href: '/admin/members',
+    title: '會員名錄',
+    description: '查看 profiles 的基本會員資料；不讀取登入提供者或角色 metadata。',
+  },
+  {
+    href: '/admin/bank-transfers',
+    title: '歷史匯款回報',
+    description: '查閱已停止流程的歷史回報；不提供審核、退款或改狀態。',
+  },
 ]
 
-const overviewCards = [
-  { label: '今日待處理', value: '0', hint: '靜態示意，尚未接資料庫' },
-  { label: '待確認匯款', value: '0', hint: '之後可串 bank_transfer_submissions' },
-  { label: '開運商品數', value: '11', hint: '目前來自靜態商品資料' },
+const unavailableModules = [
+  '金流營運中心',
+  'AI 命盤營運中心',
+  '占卜營運中心',
+  '退款／取消／補單',
+  'Webhook 重送',
+  '對帳',
+  '會員角色管理',
+  '稽核紀錄',
 ]
 
 export default function AdminPage() {
-  const router = useRouter()
-  const [user, setUser] = useState<UserProfile | null>(null)
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true)
-
-  useEffect(() => {
-    const sync = () => {
-      const nextUser = getMockUser()
-      setUser(nextUser)
-      setIsCheckingAuth(false)
-
-      if (!nextUser) {
-        router.replace('/')
-      }
-    }
-
-    sync()
-    return subscribeAuthChange(sync)
-  }, [router])
-
-  if (isCheckingAuth) {
-    return (
-      <main className="bg-[#faf7ff] py-16">
-        <div className="section-shell">
-          <div className="rounded-2xl border border-borderSoft bg-white p-8 text-textMuted shadow-soft">
-            正在確認登入狀態...
-          </div>
-        </div>
-      </main>
-    )
-  }
-
-  if (!user) return null
-
   return (
-    <main className="bg-[#faf7ff] py-10 md:py-14">
-      <div className="section-shell grid gap-8 lg:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="rounded-2xl border border-borderSoft bg-white p-5 shadow-soft">
-          <Link href="/" className="text-sm font-semibold text-darkGold hover:text-deepPurple">
-            回前台
-          </Link>
-          <h1 className="mt-4 font-serifTC text-2xl font-semibold text-deepPurple">後台管理</h1>
-          <p className="mt-2 text-sm leading-6 text-textMuted">
-            後台已有管理員守門；預約功能已逐步接上，其他營運模組仍在逐步建置。
-          </p>
+    <main className="grid gap-5">
+      <AdminPageHeader
+        description="這裡只提供已確認安全邊界的唯讀紀錄與既有工具入口，不呈現假統計，也不預先建立付款、AI 或權限操作。"
+        eyebrow="Admin Foundation V1"
+        title="能力與模組狀態總覽"
+      />
 
-          <nav className="mt-6 grid gap-2">
-            {adminNavItems.map((item, index) => {
-              const Icon = item.icon
-              return (
-                <Link
-                  key={item.label}
-                  href={item.href ?? `#admin-section-${index}`}
-                  className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-textDark transition hover:bg-softPurple hover:text-deepPurple"
-                >
-                  <Icon size={18} />
-                  {item.label}
-                </Link>
-              )
-            })}
-          </nav>
-        </aside>
+      <section aria-labelledby="readonly-modules" className="rounded-2xl border border-borderSoft bg-white p-5 shadow-soft md:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 id="readonly-modules" className="font-serifTC text-2xl font-semibold text-deepPurple">已啟用：唯讀紀錄</h2>
+            <p className="mt-2 text-sm leading-7 text-textMuted">所有資料操作都由後端重新驗證管理員身分。</p>
+          </div>
+          <AdminStatusBadge tone="readonly">唯讀</AdminStatusBadge>
+        </div>
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          {readOnlyModules.map((module) => (
+            <article className="rounded-2xl border border-borderSoft bg-[#faf7ff] p-5" key={module.href}>
+              <h3 className="font-serifTC text-xl font-semibold text-deepPurple">{module.title}</h3>
+              <p className="mt-2 text-sm leading-7 text-textMuted">{module.description}</p>
+              <Link
+                className="focus-ring mt-4 inline-flex rounded-lg border border-borderSoft bg-white px-4 py-2 text-sm font-semibold text-deepPurple"
+                href={module.href}
+              >
+                查看唯讀紀錄
+              </Link>
+            </article>
+          ))}
+        </div>
+      </section>
 
-        <section className="grid gap-6">
-          <div className="rounded-2xl border border-borderSoft bg-white p-6 shadow-soft md:p-8">
-            <p className="text-sm font-semibold text-darkGold">Admin Preview</p>
-            <h2 className="mt-2 font-serifTC text-3xl font-semibold text-deepPurple">總覽</h2>
-            <p className="mt-3 leading-8 text-textMuted">
-              你好，{user.displayName || '管理者'}。這裡先保留後台入口與資訊架構，之後可逐步接上商品管理、訂單管理與匯款審核資料。
+      <section aria-labelledby="existing-tools" className="rounded-2xl border border-[#ead9a6] bg-[#fffaf0] p-5 shadow-soft md:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 id="existing-tools" className="font-serifTC text-2xl font-semibold text-deepPurple">既有營運工具</h2>
+            <p className="mt-2 text-sm leading-7 text-textMuted">
+              預約時段工具包含既有資料寫入能力；本次只保留並整合入口，不擴充其流程。
             </p>
           </div>
+          <AdminStatusBadge tone="tool">含資料寫入</AdminStatusBadge>
+        </div>
+        <Link
+          className="focus-ring mt-5 inline-flex rounded-lg bg-[#7d5a00] px-5 py-3 font-semibold text-white"
+          href="/admin/booking-slots"
+        >
+          進入預約時段工具
+        </Link>
+      </section>
 
-          <div className="grid gap-4 md:grid-cols-3">
-            {overviewCards.map((card) => (
-              <article key={card.label} className="rounded-2xl border border-borderSoft bg-white p-5 shadow-soft">
-                <p className="text-sm font-semibold text-textMuted">{card.label}</p>
-                <p className="mt-2 font-serifTC text-3xl font-semibold text-deepPurple">{card.value}</p>
-                <p className="mt-2 text-sm leading-6 text-textMuted">{card.hint}</p>
-              </article>
-            ))}
+      <section aria-labelledby="unavailable-modules" className="rounded-2xl border border-borderSoft bg-white p-5 shadow-soft md:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 id="unavailable-modules" className="font-serifTC text-2xl font-semibold text-deepPurple">尚未啟用</h2>
+            <p className="mt-2 text-sm leading-7 text-textMuted">以下只記錄能力狀態，不提供按鈕、API 或假操作流程。</p>
           </div>
-
-          <div className="grid gap-4">
-            {adminNavItems.map((item, index) => {
-              const Icon = item.icon
-              return (
-                <section
-                  key={item.label}
-                  id={`admin-section-${index}`}
-                  className="rounded-2xl border border-borderSoft bg-white p-6 shadow-soft"
-                >
-                  <div className="flex items-start gap-4">
-                    <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-softPurple text-deepPurple">
-                      <Icon size={22} />
-                    </div>
-                    <div>
-                      <h3 className="font-serifTC text-2xl font-semibold text-deepPurple">{item.label}</h3>
-                      <p className="mt-2 leading-7 text-textMuted">{item.description}</p>
-                      <p className={`mt-3 rounded-xl px-4 py-3 text-sm font-semibold ${
-                        item.isAvailable ? 'bg-[#eff8ed] text-[#26713a]' : 'bg-[#fff7e5] text-darkGold'
-                      }`}>
-                        {item.isAvailable
-                          ? '功能已開放：請使用上方導覽連結進入。'
-                          : '靜態骨架：下一階段再接資料來源與操作功能。'}
-                      </p>
-                    </div>
-                  </div>
-                </section>
-              )
-            })}
-          </div>
-        </section>
-      </div>
+          <AdminStatusBadge tone="unavailable">無操作入口</AdminStatusBadge>
+        </div>
+        <ul className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {unavailableModules.map((module) => (
+            <li className="rounded-xl border border-dashed border-borderSoft bg-[#faf9fb] p-4 text-sm text-textMuted" key={module}>
+              <span className="font-semibold text-textDark">{module}</span>
+              <span className="mt-1 block">尚未啟用</span>
+            </li>
+          ))}
+        </ul>
+      </section>
     </main>
   )
 }

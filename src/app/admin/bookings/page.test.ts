@@ -41,8 +41,8 @@ assert.doesNotMatch(pageSource, /method:\s*['"](?:POST|PUT|PATCH|DELETE)['"]/)
 assert.equal(pageSource.includes('/api/admin/booking-slots/batch'), false)
 assert.equal(pageSource.includes('/api/admin/booking-slots/bulk-close'), false)
 
-assert.match(adminPageSource, /label: '預約紀錄'.*href: '\/admin\/bookings'/)
-assert.match(adminPageSource, /label: '預約時段'.*href: '\/admin\/booking-slots'/)
+assert.match(adminPageSource, /href: '\/admin\/bookings'[\s\S]*title: '預約紀錄'/)
+assert.match(adminPageSource, /href="\/admin\/booking-slots"/)
 assert.equal(routeSource.includes("export const dynamic = 'force-dynamic'"), true)
 assert.equal(routeSource.includes('handleAdminBookingsRequest(request)'), true)
 
