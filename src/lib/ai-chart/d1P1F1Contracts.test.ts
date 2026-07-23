@@ -7,6 +7,7 @@ import {
 } from './openAiResponses'
 import {
   AI_CHART_D1_CONTRACT_INVALID,
+  AI_CHART_D1_MAX_LIST_ITEMS,
   AI_CHART_D1_P1_F1_CONTRACT_VERSION,
   AiChartD1ContractError,
 } from './d1CommonContracts'
@@ -18,12 +19,15 @@ import {
   AI_CHART_D1_F1_RESULT_FIELDS,
   AI_CHART_D1_F1_SCHEMA_NAME,
   AI_CHART_D1_P1_OUTPUT_SCHEMA,
+  AI_CHART_D1_P1_COVERAGE_DUPLICATE_FIELDS,
   AI_CHART_D1_P1_COVERAGE_FIELDS,
   AI_CHART_D1_P1_PRIMARY_AXIS_FIELDS,
   AI_CHART_D1_P1_RESULT_FIELDS,
   AI_CHART_D1_P1_SCHEMA_NAME,
+  AiChartD1P1CoverageDuplicateError,
   parseAiChartD1F1Result,
   parseAiChartD1P1Result,
+  type AiChartD1P1CoverageDuplicateField,
 } from './d1P1F1Contracts'
 
 type MutableRecord = Record<string, unknown>
@@ -211,6 +215,38 @@ function expectContractInvalid(
     for (const marker of markers) {
       assert.equal(error.message.includes(marker), false)
     }
+  }
+}
+
+function expectGenericP1ContractInvalid(run: () => unknown): void {
+  try {
+    run()
+    assert.fail('expected generic P1 contract invalid')
+  } catch (error) {
+    assert.equal(error instanceof AiChartD1ContractError, true)
+    assert.equal(error instanceof AiChartD1P1CoverageDuplicateError, false)
+    assert.equal((error as AiChartD1ContractError).message, AI_CHART_D1_CONTRACT_INVALID)
+    assert.equal((error as AiChartD1ContractError).code, AI_CHART_D1_CONTRACT_INVALID)
+  }
+}
+
+function expectCoverageDuplicate(
+  run: () => unknown,
+  expectedField: AiChartD1P1CoverageDuplicateField,
+): AiChartD1P1CoverageDuplicateError {
+  try {
+    run()
+    assert.fail('expected P1 coverage duplicate')
+  } catch (error) {
+    assert.equal(error instanceof AiChartD1P1CoverageDuplicateError, true)
+    if (!(error instanceof AiChartD1P1CoverageDuplicateError)) {
+      assert.fail('expected AiChartD1P1CoverageDuplicateError')
+    }
+    assert.equal(error instanceof AiChartD1ContractError, true)
+    assert.equal(error.message, AI_CHART_D1_CONTRACT_INVALID)
+    assert.equal(error.code, AI_CHART_D1_CONTRACT_INVALID)
+    assert.equal(error.field, expectedField)
+    return error
   }
 }
 
@@ -602,6 +638,191 @@ test('P1 rejects duplicate coverage item', () => {
     'Synthetic major star',
   ]
   expectContractInvalid(() => parseAiChartD1P1Result(fixture))
+})
+
+for (const field of AI_CHART_D1_P1_COVERAGE_DUPLICATE_FIELDS) {
+  test(`P1 classifies a duplicate ${field} through the formal parser`, () => {
+    const fixture = p1Fixture()
+    const coverage = asRecord(fixture.coverage)
+    const values = asArray(coverage[field])
+    assert.ok(values[0])
+    coverage[field] = [...values, values[0]]
+    expectCoverageDuplicate(() => parseAiChartD1P1Result(fixture), field)
+  })
+}
+
+test('P1 coverage duplicate error is fixed, frozen, and non-writable', () => {
+  const fixture = p1Fixture()
+  asRecord(fixture.coverage).majorStarsCovered = [
+    'Synthetic major star',
+    'Synthetic major star',
+  ]
+  const error = expectCoverageDuplicate(
+    () => parseAiChartD1P1Result(fixture),
+    'majorStarsCovered',
+  )
+  const fieldDescriptor = Object.getOwnPropertyDescriptor(error, 'field')
+  assert.equal(Object.isFrozen(error), true)
+  assert.deepEqual(fieldDescriptor, {
+    value: 'majorStarsCovered',
+    enumerable: true,
+    writable: false,
+    configurable: false,
+  })
+  assert.throws(() => {
+    ;(error as unknown as { field: string }).field = 'directMeaningsConsidered'
+  }, TypeError)
+})
+
+test('P1 coverage duplicate error rejects arbitrary field injection', () => {
+  assert.throws(
+    () =>
+      new (AiChartD1P1CoverageDuplicateError as unknown as new (
+        field: unknown,
+      ) => AiChartD1P1CoverageDuplicateError)('attacker-controlled-field'),
+    (error: unknown) =>
+      error instanceof AiChartD1ContractError &&
+      !(error instanceof AiChartD1P1CoverageDuplicateError) &&
+      error.message === AI_CHART_D1_CONTRACT_INVALID,
+  )
+})
+
+test('P1 parser does not trust a typed error thrown by an input trap', () => {
+  const injectedError = new AiChartD1P1CoverageDuplicateError(
+    'majorStarsCovered',
+  )
+  const fixture = p1Fixture()
+  const trapped = new Proxy(fixture, {
+    ownKeys() {
+      throw injectedError
+    },
+  })
+  expectGenericP1ContractInvalid(() => parseAiChartD1P1Result(trapped))
+})
+
+test('P1 missing top-level field takes precedence over coverage duplicate', () => {
+  const fixture = p1Fixture()
+  delete fixture.callId
+  asRecord(fixture.coverage).majorStarsCovered = [
+    'Synthetic major star',
+    'Synthetic major star',
+  ]
+  expectGenericP1ContractInvalid(() => parseAiChartD1P1Result(fixture))
+})
+
+test('P1 missing coverage field takes precedence over another duplicate', () => {
+  const fixture = p1Fixture()
+  const coverage = asRecord(fixture.coverage)
+  delete coverage.noblesCovered
+  coverage.majorStarsCovered = ['Synthetic major star', 'Synthetic major star']
+  expectGenericP1ContractInvalid(() => parseAiChartD1P1Result(fixture))
+})
+
+test('P1 invalid primary axis takes precedence over coverage duplicate', () => {
+  const fixture = p1Fixture()
+  fixture.primaryAxis = null
+  asRecord(fixture.coverage).majorStarsCovered = [
+    'Synthetic major star',
+    'Synthetic major star',
+  ]
+  expectGenericP1ContractInvalid(() => parseAiChartD1P1Result(fixture))
+})
+
+for (const [name, mutate] of [
+  [
+    'candidate',
+    (fixture: MutableRecord) => {
+      asRecord(asArray(fixture.directCandidates)[0]).candidateId = 'invalid id'
+    },
+  ],
+  [
+    'boundary',
+    (fixture: MutableRecord) => {
+      asRecord(asArray(fixture.d2Boundaries)[0]).boundaryId = 'invalid id'
+    },
+  ],
+  [
+    'warning',
+    (fixture: MutableRecord) => {
+      fixture.warnings = ['Synthetic warning', 'Synthetic warning']
+    },
+  ],
+] as const) {
+  test(`P1 invalid ${name} takes precedence over coverage duplicate`, () => {
+    const fixture = p1Fixture()
+    mutate(fixture)
+    asRecord(fixture.coverage).majorStarsCovered = [
+      'Synthetic major star',
+      'Synthetic major star',
+    ]
+    expectGenericP1ContractInvalid(() => parseAiChartD1P1Result(fixture))
+  })
+}
+
+test('P1 mixed-type coverage remains generic even with duplicate strings', () => {
+  const fixture = p1Fixture()
+  asRecord(fixture.coverage).majorStarsCovered = [
+    'Synthetic major star',
+    'Synthetic major star',
+    42,
+  ]
+  expectGenericP1ContractInvalid(() => parseAiChartD1P1Result(fixture))
+})
+
+test('P1 over-limit coverage remains generic even with duplicates', () => {
+  const fixture = p1Fixture()
+  asRecord(fixture.coverage).majorStarsCovered = Array.from(
+    { length: AI_CHART_D1_MAX_LIST_ITEMS + 1 },
+    (_, index) => `Synthetic major star ${index === 1 ? 0 : index}`,
+  )
+  expectGenericP1ContractInvalid(() => parseAiChartD1P1Result(fixture))
+})
+
+const p1CoverageDuplicateAdjacentPairs = [
+  ['directMeaningsConsidered', 'majorStarsCovered'],
+  ['majorStarsCovered', 'minorStarsCovered'],
+  ['minorStarsCovered', 'mutagensCovered'],
+  ['mutagensCovered', 'maleficsCovered'],
+  ['maleficsCovered', 'noblesCovered'],
+] as const satisfies readonly (readonly [
+  AiChartD1P1CoverageDuplicateField,
+  AiChartD1P1CoverageDuplicateField,
+])[]
+
+for (const [firstField, secondField] of p1CoverageDuplicateAdjacentPairs) {
+  test(`P1 multiple coverage duplicates prioritize ${firstField} over ${secondField}`, () => {
+    const fixture = p1Fixture()
+    const coverage = asRecord(fixture.coverage)
+    const firstValues = asArray(coverage[firstField])
+    const secondValues = asArray(coverage[secondField])
+    assert.equal(firstValues.length > 0, true)
+    assert.equal(secondValues.length > 0, true)
+    assert.ok(firstValues[0])
+    assert.ok(secondValues[0])
+    coverage[firstField] = [...firstValues, firstValues[0]]
+    coverage[secondField] = [...secondValues, secondValues[0]]
+    const error = expectCoverageDuplicate(
+      () => parseAiChartD1P1Result(fixture),
+      firstField,
+    )
+    assert.equal(Object.isFrozen(error), true)
+  })
+}
+
+test('P1 all-six coverage duplicates select direct meanings first', () => {
+  const fixture = p1Fixture()
+  const coverage = asRecord(fixture.coverage)
+  for (const field of AI_CHART_D1_P1_COVERAGE_DUPLICATE_FIELDS) {
+    const values = asArray(coverage[field])
+    assert.equal(values.length > 0, true)
+    assert.ok(values[0])
+    coverage[field] = [...values, values[0]]
+  }
+  const error = expectCoverageDuplicate(
+    () => parseAiChartD1P1Result(fixture),
+    'directMeaningsConsidered',
+  )
+  assert.equal(Object.isFrozen(error), true)
 })
 
 test('P1 rejects duplicate omitted item name', () => {
