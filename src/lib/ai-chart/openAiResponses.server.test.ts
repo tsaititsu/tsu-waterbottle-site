@@ -42,6 +42,9 @@ type CapturedFetch = {
 type MutableRecord = Record<string, unknown>
 
 const SYNTHETIC_API_KEY = 'synthetic-api-key-value'
+const SYNTHETIC_CLIENT_REQUEST_ID =
+  '00000000-0000-4000-8000-000000000001'
+const SYNTHETIC_PROVIDER_REQUEST_ID = 'req_synthetic_transport_001'
 const SYNTHETIC_PROMPT = 'synthetic-private-prompt-value'
 const SYNTHETIC_RESPONSE_BODY = 'synthetic-raw-api-error-body-value'
 const SYNTHETIC_REASONING_MARKER = 'synthetic-private-reasoning-marker'
@@ -267,6 +270,7 @@ function nonOkResponse(status: number, onBodyRead: () => void): Response {
   return {
     ok: false,
     status,
+    headers: new Headers(),
     json: async () => {
       onBodyRead()
       throw new Error(SYNTHETIC_RESPONSE_BODY)
@@ -274,9 +278,46 @@ function nonOkResponse(status: number, onBodyRead: () => void): Response {
   } as unknown as Response
 }
 
+function jsonHttpErrorResponse(
+  status: number,
+  onBodyRead: () => void,
+  options: {
+    requestId?: string
+    body?: unknown
+  } = {},
+): Response {
+  const headers = {
+    get(name: string) {
+      return name.toLowerCase() === 'x-request-id'
+        ? (options.requestId ?? null)
+        : null
+    },
+  } as Headers
+
+  return {
+    ok: false,
+    status,
+    headers,
+    json: async () => {
+      onBodyRead()
+      return (
+        options.body ?? {
+          error: {
+            type: 'invalid_request_error',
+            code: 'synthetic_error_code',
+            param: 'input.0.content',
+            message: SYNTHETIC_RESPONSE_BODY,
+          },
+        }
+      )
+    },
+  } as unknown as Response
+}
+
 async function run() {
   let capturedFetch: CapturedFetch | undefined
   let successfulFetchCount = 0
+  let successfulClientRequestIdFactoryCount = 0
   const successfulFetch = mockFetch(async (input, init) => {
     successfulFetchCount += 1
     capturedFetch = { input, init }
@@ -294,6 +335,10 @@ async function run() {
         OPENAI_DIVINATION_MODEL: 'synthetic-unrelated-model',
       }),
       fetchImpl: successfulFetch,
+      clientRequestIdFactory: () => {
+        successfulClientRequestIdFactoryCount += 1
+        return SYNTHETIC_CLIENT_REQUEST_ID
+      },
     })
 
   test('successful mock request returns parsed structured data', () => {
@@ -333,17 +378,26 @@ async function run() {
     assert.equal(capturedFetch.init?.signal instanceof AbortSignal, true)
   })
 
-  test('request headers contain only Authorization, Content-Type, and Accept', () => {
+  test('request headers include the safe client request identifier', () => {
     assert.ok(capturedFetch)
     const headers = capturedFetch.init?.headers as Record<string, string>
     assert.deepEqual(Object.keys(headers).sort(), [
       'Accept',
       'Authorization',
       'Content-Type',
+      'X-Client-Request-Id',
     ])
     assert.equal(headers.Authorization, `Bearer ${SYNTHETIC_API_KEY}`)
     assert.equal(headers['Content-Type'], 'application/json')
     assert.equal(headers.Accept, 'application/json')
+    assert.equal(
+      headers['X-Client-Request-Id'],
+      SYNTHETIC_CLIENT_REQUEST_ID,
+    )
+  })
+
+  test('client request ID generator executes exactly once', () => {
+    assert.equal(successfulClientRequestIdFactoryCount, 1)
   })
 
   const successfulBody = (() => {
@@ -356,6 +410,8 @@ async function run() {
   test('API key is not present in the request body', () => {
     assert.equal(JSON.stringify(successfulBody).includes(SYNTHETIC_API_KEY), false)
     assert.equal(Object.hasOwn(successfulBody, 'apiKey'), false)
+    assert.equal(Object.hasOwn(successfulBody, 'clientRequestId'), false)
+    assert.equal(Object.hasOwn(successfulBody, 'client_request_id'), false)
   })
 
   test('request body locks store, stream, background, and truncation', () => {
@@ -585,13 +641,14 @@ async function run() {
 
   await asyncTest('network error becomes safe retryable request failure', async () => {
     let fetchCount = 0
-    await captureSafeError(
+    const error = await captureSafeError(
       () =>
         requestAiChartOpenAiStructuredResponse(requestFixture(), {
           env: syntheticEnv(),
+          clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
           fetchImpl: mockFetch(async () => {
             fetchCount += 1
-            throw new Error(
+            throw new TypeError(
               `${SYNTHETIC_API_KEY} ${SYNTHETIC_PROMPT} ${SYNTHETIC_RESPONSE_BODY}`,
             )
           }),
@@ -601,54 +658,79 @@ async function run() {
       [SYNTHETIC_API_KEY, SYNTHETIC_PROMPT, SYNTHETIC_RESPONSE_BODY],
     )
     assert.equal(fetchCount, 1)
+    assert.deepEqual(error.transportDiagnostic, {
+      failureKind: 'NETWORK_ERROR',
+      httpStatus: null,
+      requestId: null,
+      clientRequestId: SYNTHETIC_CLIENT_REQUEST_ID,
+      responseErrorType: null,
+      responseErrorCode: null,
+      responseErrorParam: null,
+    })
+    assert.equal(Object.isFrozen(error.transportDiagnostic), true)
   })
 
-  await asyncTest('HTTP 429 is retryable and body is not read', async () => {
-    let fetchCount = 0
-    let bodyReadCount = 0
-    await captureSafeError(
-      () =>
-        requestAiChartOpenAiStructuredResponse(requestFixture(), {
-          env: syntheticEnv(),
-          fetchImpl: mockFetch(async () => {
-            fetchCount += 1
-            return nonOkResponse(429, () => {
-              bodyReadCount += 1
-            })
-          }),
-        }),
-      AI_CHART_OPENAI_REQUEST_FAILED,
-      true,
-      [SYNTHETIC_RESPONSE_BODY],
-    )
-    assert.equal(fetchCount, 1)
-    assert.equal(bodyReadCount, 0)
-  })
-
-  await asyncTest('HTTP 500 is retryable', async () => {
-    let bodyReadCount = 0
-    await captureSafeError(
-      () =>
-        requestAiChartOpenAiStructuredResponse(requestFixture(), {
-          env: syntheticEnv(),
-          fetchImpl: mockFetch(async () =>
-            nonOkResponse(500, () => {
-              bodyReadCount += 1
+  for (const [status, retryable] of [
+    [400, false],
+    [401, false],
+    [403, false],
+    [404, false],
+    [408, true],
+    [409, true],
+    [425, true],
+    [429, true],
+    [500, true],
+    [599, true],
+  ] as const) {
+    await asyncTest(
+      `HTTP ${status} preserves safe transport metadata and retryable=${retryable}`,
+      async () => {
+        let fetchCount = 0
+        let bodyReadCount = 0
+        const error = await captureSafeError(
+          () =>
+            requestAiChartOpenAiStructuredResponse(requestFixture(), {
+              env: syntheticEnv(),
+              clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+              fetchImpl: mockFetch(async () => {
+                fetchCount += 1
+                return jsonHttpErrorResponse(
+                  status,
+                  () => {
+                    bodyReadCount += 1
+                  },
+                  { requestId: SYNTHETIC_PROVIDER_REQUEST_ID },
+                )
+              }),
             }),
-          ),
-        }),
-      AI_CHART_OPENAI_REQUEST_FAILED,
-      true,
-    )
-    assert.equal(bodyReadCount, 0)
-  })
+          AI_CHART_OPENAI_REQUEST_FAILED,
+          retryable,
+          [SYNTHETIC_RESPONSE_BODY],
+        )
 
-  await asyncTest('HTTP 400 is non-retryable', async () => {
+        assert.equal(fetchCount, 1)
+        assert.equal(bodyReadCount, 1)
+        assert.deepEqual(error.transportDiagnostic, {
+          failureKind: 'HTTP_ERROR',
+          httpStatus: status,
+          requestId: SYNTHETIC_PROVIDER_REQUEST_ID,
+          clientRequestId: SYNTHETIC_CLIENT_REQUEST_ID,
+          responseErrorType: 'invalid_request_error',
+          responseErrorCode: 'synthetic_error_code',
+          responseErrorParam: 'input.0.content',
+        })
+        assert.equal(Object.isFrozen(error.transportDiagnostic), true)
+      },
+    )
+  }
+
+  await asyncTest('non-JSON HTTP error body is safely classified', async () => {
     let bodyReadCount = 0
-    await captureSafeError(
+    const error = await captureSafeError(
       () =>
         requestAiChartOpenAiStructuredResponse(requestFixture(), {
           env: syntheticEnv(),
+          clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
           fetchImpl: mockFetch(async () =>
             nonOkResponse(400, () => {
               bodyReadCount += 1
@@ -657,33 +739,192 @@ async function run() {
         }),
       AI_CHART_OPENAI_REQUEST_FAILED,
       false,
+      [SYNTHETIC_RESPONSE_BODY],
     )
-    assert.equal(bodyReadCount, 0)
+
+    assert.equal(bodyReadCount, 1)
+    assert.deepEqual(error.transportDiagnostic, {
+      failureKind: 'RESPONSE_BODY_INVALID',
+      httpStatus: 400,
+      requestId: null,
+      clientRequestId: SYNTHETIC_CLIENT_REQUEST_ID,
+      responseErrorType: null,
+      responseErrorCode: null,
+      responseErrorParam: null,
+    })
   })
 
-  await asyncTest('HTTP 408, 409, and 425 are retryable', async () => {
-    for (const status of [408, 409, 425]) {
-      await captureSafeError(
+  await asyncTest(
+    'JSON HTTP error body without error object is safely classified',
+    async () => {
+      let bodyReadCount = 0
+      const error = await captureSafeError(
         () =>
           requestAiChartOpenAiStructuredResponse(requestFixture(), {
             env: syntheticEnv(),
-            fetchImpl: mockFetch(async () => nonOkResponse(status, () => {})),
+            clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+            fetchImpl: mockFetch(async () =>
+              jsonHttpErrorResponse(
+                403,
+                () => {
+                  bodyReadCount += 1
+                },
+                {
+                  body: {
+                    message: SYNTHETIC_RESPONSE_BODY,
+                  },
+                },
+              ),
+            ),
           }),
         AI_CHART_OPENAI_REQUEST_FAILED,
-        true,
+        false,
+        [SYNTHETIC_RESPONSE_BODY],
       )
-    }
+
+      assert.equal(bodyReadCount, 1)
+      assert.deepEqual(error.transportDiagnostic, {
+        failureKind: 'RESPONSE_BODY_INVALID',
+        httpStatus: 403,
+        requestId: null,
+        clientRequestId: SYNTHETIC_CLIENT_REQUEST_ID,
+        responseErrorType: null,
+        responseErrorCode: null,
+        responseErrorParam: null,
+      })
+    },
+  )
+
+  await asyncTest(
+    'unsafe provider identifiers and provider message are discarded',
+    async () => {
+      const unsafeRequestId = `req unsafe\n${SYNTHETIC_RESPONSE_BODY}`
+      const unsafeType = `invalid\n${SYNTHETIC_API_KEY}`
+      const unsafeCode = 'x'.repeat(81)
+      const error = await captureSafeError(
+        () =>
+          requestAiChartOpenAiStructuredResponse(requestFixture(), {
+            env: syntheticEnv(),
+            clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+            fetchImpl: mockFetch(async () =>
+              jsonHttpErrorResponse(400, () => {}, {
+                requestId: unsafeRequestId,
+                body: {
+                  error: {
+                    type: unsafeType,
+                    code: unsafeCode,
+                    param: 'input.safe_param',
+                    message: `${SYNTHETIC_RESPONSE_BODY} ${SYNTHETIC_PROMPT}`,
+                  },
+                },
+              }),
+            ),
+          }),
+        AI_CHART_OPENAI_REQUEST_FAILED,
+        false,
+        [
+          unsafeRequestId,
+          unsafeType,
+          unsafeCode,
+          SYNTHETIC_RESPONSE_BODY,
+          SYNTHETIC_PROMPT,
+          SYNTHETIC_API_KEY,
+          `Bearer ${SYNTHETIC_API_KEY}`,
+        ],
+      )
+
+      assert.deepEqual(error.transportDiagnostic, {
+        failureKind: 'HTTP_ERROR',
+        httpStatus: 400,
+        requestId: null,
+        clientRequestId: SYNTHETIC_CLIENT_REQUEST_ID,
+        responseErrorType: null,
+        responseErrorCode: null,
+        responseErrorParam: 'input.safe_param',
+      })
+      const serializedError = JSON.stringify(error)
+      for (const marker of [
+        unsafeRequestId,
+        unsafeType,
+        unsafeCode,
+        SYNTHETIC_RESPONSE_BODY,
+        SYNTHETIC_PROMPT,
+        SYNTHETIC_API_KEY,
+        'Authorization',
+      ]) {
+        assert.equal(serializedError.includes(marker), false, marker)
+      }
+    },
+  )
+
+  await asyncTest('overlong provider request ID is discarded', async () => {
+    const overlongRequestId = 'r'.repeat(81)
+    const error = await captureSafeError(
+      () =>
+        requestAiChartOpenAiStructuredResponse(requestFixture(), {
+          env: syntheticEnv(),
+          clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
+          fetchImpl: mockFetch(async () =>
+            jsonHttpErrorResponse(429, () => {}, {
+              requestId: overlongRequestId,
+            }),
+          ),
+        }),
+      AI_CHART_OPENAI_REQUEST_FAILED,
+      true,
+      [overlongRequestId, SYNTHETIC_RESPONSE_BODY],
+    )
+
+    assert.equal(error.transportDiagnostic?.requestId, null)
+    assert.equal(
+      JSON.stringify(error).includes(overlongRequestId),
+      false,
+    )
   })
+
+  for (const invalidClientRequestId of [
+    `invalid\n${SYNTHETIC_RESPONSE_BODY}`,
+    'x'.repeat(81),
+    '   ',
+  ]) {
+    await asyncTest(
+      'invalid client request ID fails closed before fetch',
+      async () => {
+        let factoryCount = 0
+        let fetchCount = 0
+        await captureSafeError(
+          () =>
+            requestAiChartOpenAiStructuredResponse(requestFixture(), {
+              env: syntheticEnv(),
+              clientRequestIdFactory: () => {
+                factoryCount += 1
+                return invalidClientRequestId
+              },
+              fetchImpl: mockFetch(async () => {
+                fetchCount += 1
+                throw new Error('must-not-run')
+              }),
+            }),
+          AI_CHART_OPENAI_CONFIG_INVALID,
+          false,
+          [invalidClientRequestId, SYNTHETIC_RESPONSE_BODY],
+        )
+        assert.equal(factoryCount, 1)
+        assert.equal(fetchCount, 0)
+      },
+    )
+  }
 
   await asyncTest('timeout aborts the mock fetch', async () => {
     let fetchCount = 0
     let abortCount = 0
-    await captureSafeError(
+    const error = await captureSafeError(
       () =>
         requestAiChartOpenAiStructuredResponse(
           requestFixture({ timeoutMs: 1_000 }),
           {
             env: syntheticEnv(),
+            clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
             fetchImpl: mockFetch(
               async (_input, init) =>
                 new Promise<Response>((_resolve, reject) => {
@@ -706,6 +947,15 @@ async function run() {
     )
     assert.equal(fetchCount, 1)
     assert.equal(abortCount, 1)
+    assert.deepEqual(error.transportDiagnostic, {
+      failureKind: 'TIMEOUT',
+      httpStatus: null,
+      requestId: null,
+      clientRequestId: SYNTHETIC_CLIENT_REQUEST_ID,
+      responseErrorType: null,
+      responseErrorCode: null,
+      responseErrorParam: null,
+    })
   })
 
   let bodyTimeoutFetchCount = 0
@@ -716,6 +966,7 @@ async function run() {
         requestFixture({ timeoutMs: 1_000 }),
         {
           env: syntheticEnv(),
+          clientRequestIdFactory: () => SYNTHETIC_CLIENT_REQUEST_ID,
           fetchImpl: mockFetch(async (_input, init) => {
             bodyTimeoutFetchCount += 1
             const signal = init?.signal
@@ -723,6 +974,9 @@ async function run() {
             return {
               ok: true,
               status: 200,
+              headers: new Headers({
+                'x-request-id': SYNTHETIC_PROVIDER_REQUEST_ID,
+              }),
               json: () =>
                 new Promise<unknown>((_resolve, reject) => {
                   if (!(signal instanceof AbortSignal)) {
@@ -772,6 +1026,19 @@ async function run() {
     assert.equal(serializedError.includes(SYNTHETIC_API_KEY), false)
     assert.equal(serializedError.includes(SYNTHETIC_PROMPT), false)
     assert.equal(serializedError.includes(SYNTHETIC_RESPONSE_BODY), false)
+  })
+
+  test('JSON body timeout preserves only safe transport metadata', () => {
+    assert.deepEqual(bodyTimeoutError.transportDiagnostic, {
+      failureKind: 'TIMEOUT',
+      httpStatus: 200,
+      requestId: SYNTHETIC_PROVIDER_REQUEST_ID,
+      clientRequestId: SYNTHETIC_CLIENT_REQUEST_ID,
+      responseErrorType: null,
+      responseErrorCode: null,
+      responseErrorParam: null,
+    })
+    assert.equal(Object.isFrozen(bodyTimeoutError.transportDiagnostic), true)
   })
 
   await asyncTest('invalid response JSON becomes fixed response invalid', async () => {

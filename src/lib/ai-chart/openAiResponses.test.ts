@@ -11,6 +11,7 @@ import {
   AI_CHART_OPENAI_OUTPUT_JSON_INVALID,
   AI_CHART_OPENAI_OUTPUT_MISSING,
   AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID,
+  AI_CHART_OPENAI_REQUEST_FAILED,
   AI_CHART_OPENAI_RESPONSE_INCOMPLETE,
   AI_CHART_OPENAI_RESPONSE_INVALID,
   AI_CHART_OPENAI_RESPONSE_REFUSED,
@@ -1219,6 +1220,56 @@ test('safe errors expose only fixed enumerable fields', () => {
   assert.equal(error.message.includes(SYNTHETIC_API_KEY), false)
   assert.equal(error.message.includes(SYNTHETIC_PROMPT), false)
   assert.equal(error.message.includes(SYNTHETIC_RESPONSE_BODY), false)
+})
+
+test('transport diagnostics are copied, frozen, and non-writable', () => {
+  const sourceDiagnostic = {
+    failureKind: 'HTTP_ERROR' as const,
+    httpStatus: 429,
+    requestId: 'req_contract_001',
+    clientRequestId: '00000000-0000-4000-8000-000000000002',
+    responseErrorType: 'rate_limit_error',
+    responseErrorCode: 'rate_limit_exceeded',
+    responseErrorParam: null,
+  }
+  const error = new AiChartOpenAiError(
+    AI_CHART_OPENAI_REQUEST_FAILED,
+    true,
+    undefined,
+    sourceDiagnostic,
+  )
+
+  sourceDiagnostic.requestId = 'mutated-after-construction'
+
+  assert.deepEqual(error.transportDiagnostic, {
+    failureKind: 'HTTP_ERROR',
+    httpStatus: 429,
+    requestId: 'req_contract_001',
+    clientRequestId: '00000000-0000-4000-8000-000000000002',
+    responseErrorType: 'rate_limit_error',
+    responseErrorCode: 'rate_limit_exceeded',
+    responseErrorParam: null,
+  })
+  assert.equal(Object.isFrozen(error.transportDiagnostic), true)
+  assert.deepEqual(Object.keys(error).sort(), [
+    'code',
+    'retryable',
+    'transportDiagnostic',
+  ])
+
+  const descriptor = Object.getOwnPropertyDescriptor(
+    error,
+    'transportDiagnostic',
+  )
+  assert.equal(descriptor?.writable, false)
+  assert.equal(descriptor?.configurable, false)
+  assert.throws(() => {
+    ;(
+      error as unknown as {
+        transportDiagnostic: unknown
+      }
+    ).transportDiagnostic = null
+  }, TypeError)
 })
 
 assert.equal(testCount >= 54, true)

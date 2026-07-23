@@ -66,6 +66,22 @@ export type AiChartOpenAiResponseDiagnostic = Readonly<{
   usage: AiChartOpenAiUsage | null
 }>
 
+export type AiChartOpenAiTransportFailureKind =
+  | 'HTTP_ERROR'
+  | 'NETWORK_ERROR'
+  | 'TIMEOUT'
+  | 'RESPONSE_BODY_INVALID'
+
+export type AiChartOpenAiTransportDiagnostic = Readonly<{
+  failureKind: AiChartOpenAiTransportFailureKind
+  httpStatus: number | null
+  requestId: string | null
+  clientRequestId: string
+  responseErrorType: string | null
+  responseErrorCode: string | null
+  responseErrorParam: string | null
+}>
+
 export type AiChartOpenAiStructuredResult<T> = Readonly<{
   data: T
   usage: AiChartOpenAiUsage | null
@@ -133,11 +149,13 @@ export class AiChartOpenAiError extends Error {
   readonly code: AiChartOpenAiErrorCode
   readonly retryable: boolean
   declare readonly diagnostic?: AiChartOpenAiResponseDiagnostic
+  declare readonly transportDiagnostic?: AiChartOpenAiTransportDiagnostic
 
   constructor(
     code: AiChartOpenAiErrorCode,
     retryable: boolean,
     diagnostic?: AiChartOpenAiResponseDiagnostic,
+    transportDiagnostic?: AiChartOpenAiTransportDiagnostic,
   ) {
     super(code)
     this.code = code
@@ -145,6 +163,14 @@ export class AiChartOpenAiError extends Error {
     if (diagnostic !== undefined) {
       Object.defineProperty(this, 'diagnostic', {
         value: diagnostic,
+        enumerable: true,
+        configurable: false,
+        writable: false,
+      })
+    }
+    if (transportDiagnostic !== undefined) {
+      Object.defineProperty(this, 'transportDiagnostic', {
+        value: Object.freeze({ ...transportDiagnostic }),
         enumerable: true,
         configurable: false,
         writable: false,
