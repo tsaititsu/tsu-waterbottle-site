@@ -1,6 +1,6 @@
 'use client'
 
-import { Check, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { Check, ChevronDown, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useState } from 'react'
 import { createZiweiGptPayload, type ChartInput, type ZiweiGptPayload } from '@/features/ziwei-chart/package'
@@ -117,6 +117,7 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
   const [editingCategory, setEditingCategory] = useState('')
   const [editingValue, setEditingValue] = useState('')
   const [selectedBirthOrder, setSelectedBirthOrder] = useState('')
+  const [isTwinOptionsOpen, setIsTwinOptionsOpen] = useState(false)
   const [birthYear, setBirthYear] = useState('')
   const [birthMonth, setBirthMonth] = useState('')
   const [birthDay, setBirthDay] = useState('')
@@ -144,6 +145,7 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
     setEditingCategory('')
     setEditingValue('')
     setSelectedBirthOrder('')
+    setIsTwinOptionsOpen(false)
     setBirthYear('')
     setBirthMonth('')
     setBirthDay('')
@@ -595,24 +597,51 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
         </select>
       </label>
 
-      <div className="rounded-xl border border-borderSoft bg-softPurple/55 p-4">
-        <button type="button" className="text-sm font-semibold text-deepPurple">
-          多胞胎功能 · 測試中 Beta
+      <div className="rounded-xl border border-borderSoft bg-softPurple/45">
+        <button
+          aria-controls="twin-birth-order-options"
+          aria-expanded={isTwinOptionsOpen}
+          className="focus-ring flex w-full items-start justify-between gap-3 rounded-xl p-4 text-left"
+          onClick={() => setIsTwinOptionsOpen((current) => !current)}
+          type="button"
+        >
+          <span className="grid min-w-0 gap-1">
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold text-deepPurple">雙胞胎／多胞胎命盤請點這裡</span>
+              <span className="rounded-full border border-borderSoft bg-white px-2 py-0.5 text-[11px] font-semibold text-textMuted">Beta</span>
+            </span>
+            <span className="text-xs leading-5 text-textMuted">
+              若為第二胎以上，請選擇出生順序；第一胎與非多胞胎可直接略過。
+            </span>
+            {selectedBirthOrder && !isTwinOptionsOpen && (
+              <span className="text-xs font-semibold text-deepPurple">已選擇：{selectedBirthOrder}</span>
+            )}
+          </span>
+          <ChevronDown
+            aria-hidden="true"
+            className={`mt-0.5 shrink-0 text-textMuted transition-transform ${isTwinOptionsOpen ? 'rotate-180' : ''}`}
+            size={20}
+          />
         </button>
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          {birthOrders.map((order) => (
-            <button
-              className={`focus-ring rounded-lg border px-3 py-2 text-sm font-semibold ${
-                selectedBirthOrder === order ? 'border-deepPurple bg-white text-deepPurple' : 'border-borderSoft bg-white text-textMuted'
-              }`}
-              key={order}
-              onClick={() => setSelectedBirthOrder((current) => (current === order ? '' : order))}
-              type="button"
-            >
-              {order}
-            </button>
-          ))}
-        </div>
+        {isTwinOptionsOpen && (
+          <div className="border-t border-borderSoft px-4 pb-4 pt-3" id="twin-birth-order-options">
+            <p className="mb-3 text-sm font-semibold text-textDark">請選擇出生順序</p>
+            <div className="grid grid-cols-3 gap-2">
+              {birthOrders.map((order) => (
+                <button
+                  className={`focus-ring rounded-lg border px-3 py-2 text-sm font-semibold ${
+                    selectedBirthOrder === order ? 'border-deepPurple bg-white text-deepPurple' : 'border-borderSoft bg-white text-textMuted'
+                  }`}
+                  key={order}
+                  onClick={() => setSelectedBirthOrder((current) => (current === order ? '' : order))}
+                  type="button"
+                >
+                  {order}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <button className="focus-ring w-full rounded-lg bg-deepPurple px-4 py-3 font-semibold text-white" onClick={generateChart} type="button">

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { getMobileBottomNavigationItemKeys } from './mobileBottomNavigationItems'
 
 const root = process.cwd()
 const header = readFileSync(join(root, 'src/components/Header.tsx'), 'utf8')
@@ -56,8 +57,47 @@ assert.equal(globals.includes('--mobile-bottom-nav-height: 68px'), true)
 assert.equal(globals.includes('.site-main'), true)
 assert.equal(globals.includes('.mobile-bottom-nav'), true)
 
-// 手機 LINE 固定為 56px、避開 bottom nav；只有桌面沿用拖曳座標。
-assert.equal(lineButton.includes('h-14 w-14'), true)
+// 正常狀態以預約取代課程；預約隱藏時才回退課程，兩者皆隱藏時使用四欄。
+const normalItems = getMobileBottomNavigationItemKeys({
+  hideConsultationServices: false,
+  hideCoursesServices: false,
+})
+const courseFallbackItems = getMobileBottomNavigationItemKeys({
+  hideConsultationServices: true,
+  hideCoursesServices: false,
+})
+const hiddenServiceItems = getMobileBottomNavigationItemKeys({
+  hideConsultationServices: true,
+  hideCoursesServices: true,
+})
+
+assert.deepEqual(normalItems, ['home', 'ai-chart', 'ai-divination', 'booking', 'account'])
+assert.deepEqual(courseFallbackItems, ['home', 'ai-chart', 'ai-divination', 'courses', 'account'])
+assert.deepEqual(hiddenServiceItems, ['home', 'ai-chart', 'ai-divination', 'account'])
+for (const items of [normalItems, courseFallbackItems, hiddenServiceItems]) {
+  assert.equal(new Set(items).size, items.length)
+}
+
+assert.equal(bottomNav.includes("booking: { label: '預約', href: '/booking', icon: CalendarCheck }"), true)
+assert.equal(bottomNav.includes("courses: { label: '課程', href: '/courses', icon: BookOpen }"), true)
+assert.equal(bottomNav.includes("account: { label: '我的', href: '/account', icon: UserRound }"), true)
+assert.equal(bottomNav.includes("'/booking': 'booking'"), true)
+assert.equal(bottomNav.includes("'/courses': 'courses'"), true)
+assert.equal(bottomNav.includes('placement="mobile_bottom_nav"'), true)
+assert.equal(bottomNav.includes('shouldHideConsultationServices()'), true)
+assert.equal(bottomNav.includes('shouldHideCoursesServices()'), true)
+assert.equal(bottomNav.includes("visibleItems.length === 4 ? 'grid-cols-4' : 'grid-cols-5'"), true)
+assert.equal(bottomNav.includes('grid-cols-${'), false)
+assert.equal(bottomNav.includes('mobile-bottom-nav-spacer'), true)
+assert.equal(
+  bottomNav.includes(
+    'h-[calc(var(--mobile-bottom-nav-height)+env(safe-area-inset-bottom,0px))] md:hidden',
+  ),
+  true,
+)
+
+// 手機 LINE 固定為 48px、避開 bottom nav；只有桌面沿用拖曳座標。
+assert.equal(lineButton.includes('h-12 w-12'), true)
 assert.equal(lineButton.includes('md:h-16 md:w-16'), true)
 assert.equal(lineButton.includes("data-draggable={isDesktop ? 'true' : 'false'}"), true)
 assert.equal(lineButton.includes("style={isDesktop ?"), true)

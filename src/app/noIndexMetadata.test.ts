@@ -73,13 +73,16 @@ for (const expectedSource of [
   "setAccessState('unauthenticated')",
   "setAccessState('forbidden')",
   'subscribeAuthChange',
-  "router.replace('/')",
+  '請先登入管理員帳號',
+  '<LoginModal',
+  'returnTo={returnTo}',
   "accessState === 'authorized'",
   "accessState === 'forbidden'",
   '正在確認管理權限...',
 ]) {
   assert.ok(adminLayoutClient.includes(expectedSource), `admin guard lost: ${expectedSource}`)
 }
+assert.equal(adminLayoutClient.includes("router.replace('/')"), false)
 
 const publicRouteSources = [
   'src/app/page.tsx',

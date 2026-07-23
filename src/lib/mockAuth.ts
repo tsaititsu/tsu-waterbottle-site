@@ -2,6 +2,10 @@
 
 import { createClient, type AuthChangeEvent, type Session, type User } from '@supabase/supabase-js'
 import type { UserProfile } from './auth/types'
+import {
+  buildSameOriginAuthCallbackUrl,
+  sanitizeAuthReturnPath,
+} from './auth/returnTo'
 import { getSupabaseBrowserClient, hasSupabaseBrowserConfig } from './supabase/client'
 
 export type { UserProfile } from './auth/types'
@@ -141,12 +145,16 @@ function getLineOAuthClient() {
   })
 }
 
-export function loginWithLine() {
+function currentBrowserReturnPath(returnTo?: string) {
   const currentPath = `${window.location.pathname}${window.location.search}`
-  const next = encodeURIComponent(currentPath || '/account')
+  return sanitizeAuthReturnPath(returnTo ?? currentPath)
+}
+
+export function loginWithLine(returnTo?: string) {
+  const safeReturnPath = currentBrowserReturnPath(returnTo)
   const supabase = getLineOAuthClient()
   type OAuthProvider = Parameters<typeof supabase.auth.signInWithOAuth>[0]['provider']
-  const redirectTo = `${window.location.origin}/auth/callback?next=${next}`
+  const redirectTo = buildSameOriginAuthCallbackUrl(window.location.origin, safeReturnPath)
 
   return supabase.auth.signInWithOAuth({
     provider: LINE_OAUTH_PROVIDER as OAuthProvider,
@@ -266,12 +274,11 @@ export function getMockUser(): UserProfile | null {
   return cachedUser ?? getLegacyMockUser()
 }
 
-export async function loginWithProvider(provider: 'line' | 'google') {
-  const currentPath = `${window.location.pathname}${window.location.search}`
-  const next = encodeURIComponent(currentPath || '/account')
+export async function loginWithProvider(provider: 'line' | 'google', returnTo?: string) {
+  const safeReturnPath = currentBrowserReturnPath(returnTo)
 
   if (provider === 'line') {
-    const { error } = await loginWithLine()
+    const { error } = await loginWithLine(safeReturnPath)
 
     if (error) throw error
     return
@@ -282,7 +289,7 @@ export async function loginWithProvider(provider: 'line' | 'google') {
   }
 
   const supabase = getSupabaseBrowserClient()
-  const redirectTo = `${window.location.origin}/auth/callback?next=${next}`
+  const redirectTo = buildSameOriginAuthCallbackUrl(window.location.origin, safeReturnPath)
 
   const { error } = await supabase.auth.signInWithOAuth({
     provider: 'google',

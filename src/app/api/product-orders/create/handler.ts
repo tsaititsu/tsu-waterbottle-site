@@ -80,7 +80,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function getPaymentMethod(value: unknown): ProductOrderPaymentMethod | null {
-  if (value === 'bank_transfer' || value === 'newebpay') return value
+  if (value === 'newebpay') return value
   return null
 }
 
