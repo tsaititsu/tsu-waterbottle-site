@@ -43,7 +43,10 @@ jobs:
       - name: Set up fixed Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: "24"
+          node-version: "24.16.0"
+
+      - name: Validate exact Node.js runtime
+        run: node scripts/supabase/validate-line-pay-production-deployment.mjs node
 
       - name: Validate fixed source identity
         env:
@@ -74,13 +77,15 @@ jobs:
       - name: Set up fixed Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: "24"
+          node-version: "24.16.0"
 
-      - name: Install fixed PostgreSQL 17 client
-        run: |
-          set -euo pipefail
-          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
-          sudo apt-get install --yes --no-install-recommends postgresql-client-17
+      - name: Validate exact Node.js runtime
+        run: node scripts/supabase/validate-line-pay-production-deployment.mjs node
+
+      - name: Record fixed PostgreSQL image identity
+        env:
+          POSTGRES_IMAGE: postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+        run: node scripts/supabase/validate-line-pay-production-deployment.mjs image
 
       - name: Revalidate fixed source identity
         env:
@@ -101,9 +106,6 @@ jobs:
           SUPABASE_PROJECT_ID: ndbqoznvobmpkgxkiezz
         run: node scripts/supabase/validate-line-pay-production-deployment.mjs channel
 
-      - name: Validate fixed PostgreSQL 17 client
-        run: node scripts/supabase/validate-line-pay-production-deployment.mjs psql
-
       - name: Run read-only preflight
         env:
           SUPABASE_PRODUCTION_CHANNEL_READY: ${{ vars.SUPABASE_PRODUCTION_CHANNEL_READY }}
@@ -111,16 +113,9 @@ jobs:
           SUPABASE_PROJECT_ID: ndbqoznvobmpkgxkiezz
         run: node scripts/supabase/run-line-pay-production-exact-file.mjs preflight
 
-      - name: Apply the single fixed Migration
+      - name: Run locked guard, exact Migration, and manifest postflight
         env:
           SUPABASE_PRODUCTION_CHANNEL_READY: ${{ vars.SUPABASE_PRODUCTION_CHANNEL_READY }}
           SUPABASE_PRODUCTION_DB_URL: ${{ secrets.SUPABASE_PRODUCTION_DB_URL }}
           SUPABASE_PROJECT_ID: ndbqoznvobmpkgxkiezz
-        run: node scripts/supabase/run-line-pay-production-exact-file.mjs migration
-
-      - name: Run read-only postflight
-        env:
-          SUPABASE_PRODUCTION_CHANNEL_READY: ${{ vars.SUPABASE_PRODUCTION_CHANNEL_READY }}
-          SUPABASE_PRODUCTION_DB_URL: ${{ secrets.SUPABASE_PRODUCTION_DB_URL }}
-          SUPABASE_PROJECT_ID: ndbqoznvobmpkgxkiezz
-        run: node scripts/supabase/run-line-pay-production-exact-file.mjs postflight
+        run: node scripts/supabase/run-line-pay-production-exact-file.mjs deploy

@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -15,6 +15,7 @@ const networkName = `${containerName}-network`
 const volumeName = `${containerName}-data`
 const password = randomBytes(32).toString('base64url')
 const image = LINE_PAY_POSTGRES_IMAGE
+let measuredLockedDeployMs = 0
 const migrationPath = join(
   root,
   'supabase/migrations/20260719033404_line_pay_remediation_contracts.sql',
@@ -30,6 +31,10 @@ const preflightPath = join(
 const postflightPath = join(
   root,
   'supabase/deployment/line_pay_remediation_postflight.sql',
+)
+const deployPath = join(
+  root,
+  'supabase/deployment/line_pay_remediation_deploy.sql',
 )
 const baselineFiles = [
   'supabase/schema.sql',
@@ -104,6 +109,92 @@ function psql(
 
 function psqlFile(database, relativePath, label = relativePath) {
   psql(database, readFileSync(join(root, relativePath), 'utf8'), label)
+}
+
+function psqlContainerFile(database, containerPath, label) {
+  const result = spawnSync(
+    'docker',
+    [
+      'exec',
+      '-i',
+      containerName,
+      'psql',
+      '-X',
+      '--set=ON_ERROR_STOP=1',
+      '--quiet',
+      '--no-align',
+      '--tuples-only',
+      '-U',
+      'postgres',
+      '-d',
+      database,
+      `--file=${containerPath}`,
+    ],
+    { cwd: root, encoding: 'utf8' },
+  )
+  if (result.status !== 0) {
+    throw new Error(`${label}:FAILED\n${result.stderr || result.stdout}`)
+  }
+  return result.stdout.trim()
+}
+
+function writeContainerFile(containerPath, contents) {
+  const result = spawnSync(
+    'docker',
+    ['exec', '-i', containerName, 'tee', containerPath],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      input: contents,
+      stdio: ['pipe', 'ignore', 'pipe'],
+    },
+  )
+  if (result.status !== 0) {
+    throw new Error(`CONTAINER_FIXTURE_WRITE_FAILED:${containerPath}`)
+  }
+}
+
+function startBlockingLock(database, tableName) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn(
+      'docker',
+      [
+        'exec',
+        '-i',
+        containerName,
+        'psql',
+        '-X',
+        '--set=ON_ERROR_STOP=1',
+        '--no-align',
+        '--tuples-only',
+        '-U',
+        'postgres',
+        '-d',
+        database,
+      ],
+      { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] },
+    )
+    let stdout = ''
+    let settled = false
+    const completion = new Promise((resolveCompletion) => {
+      child.once('close', (code) => resolveCompletion(code))
+    })
+    child.once('error', rejectPromise)
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString('utf8')
+      if (!settled && stdout.includes('LOCK_READY')) {
+        settled = true
+        resolvePromise({ child, completion })
+      }
+    })
+    child.stdin.end(`
+      begin;
+      lock table public.${tableName} in access exclusive mode;
+      select 'LOCK_READY';
+      select pg_sleep(3);
+      commit;
+    `)
+  })
 }
 
 function prepareBaseline(database) {
@@ -380,6 +471,174 @@ function readLinePayFunctionMetadata(database) {
   )
 }
 
+function runDeployOrchestrationScenario() {
+  const database = 'exact_file_orchestration'
+  psql('postgres', `create database ${database};`, 'create orchestration db')
+  prepareBaseline(database)
+  const baseline = readFingerprints(database, false)
+  runDocker([
+    'exec',
+    containerName,
+    'mkdir',
+    '-p',
+    '/workspace/supabase/deployment',
+    '/workspace/supabase/migrations',
+  ])
+  writeContainerFile(
+    '/workspace/supabase/deployment/line_pay_remediation_preflight.sql',
+    useFixtureContract(readFileSync(preflightPath, 'utf8'), baseline, database),
+  )
+  writeContainerFile(
+    '/workspace/supabase/deployment/line_pay_remediation_postflight.sql',
+    useFixtureContract(readFileSync(postflightPath, 'utf8'), baseline, database),
+  )
+  writeContainerFile(
+    '/workspace/supabase/deployment/line_pay_remediation_deploy.sql',
+    readFileSync(deployPath, 'utf8').replace(
+      '\\set line_pay_baseline_manifest 1',
+      `
+insert into public.product_orders (
+  id, order_no, user_id, total_amount_twd, payment_method,
+  payment_status, order_status, shipping_status, payment_id
+) values (
+  '30000000-0000-4000-8000-000000000099',
+  'POST-COMMIT-SYNTHETIC-ORDER',
+  null,
+  100,
+  'newebpay',
+  'pending',
+  'pending_payment',
+  'not_shipped',
+  null
+);
+\\set line_pay_baseline_manifest 1`,
+    ),
+  )
+  runDocker([
+    'cp',
+    migrationPath,
+    `${containerName}:/workspace/supabase/migrations/20260719033404_line_pay_remediation_contracts.sql`,
+  ])
+  const deployStartedAt = Date.now()
+  const deployOutput = psqlContainerFile(
+      database,
+      '/workspace/supabase/deployment/line_pay_remediation_deploy.sql',
+      'locked deploy orchestration',
+    )
+  measuredLockedDeployMs = Date.now() - deployStartedAt
+  assertAuditStatus(
+    deployOutput,
+    'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED',
+    baseline,
+  )
+  psql(
+    'postgres',
+    `
+      drop database ${database} with (force);
+      drop role line_pay_payment_executor;
+      drop role line_pay_payment_function_owner;
+    `,
+    'orchestration cleanup',
+  )
+}
+
+function runBaselineMutationScenario() {
+  const database = 'exact_file_baseline_mutation'
+  psql('postgres', `create database ${database};`, 'create baseline mutation db')
+  prepareBaseline(database)
+  const baseline = readFingerprints(database, false)
+  writeContainerFile(
+    '/workspace/supabase/deployment/line_pay_remediation_preflight.sql',
+    useFixtureContract(readFileSync(preflightPath, 'utf8'), baseline, database),
+  )
+  writeContainerFile(
+    '/workspace/supabase/deployment/line_pay_remediation_postflight.sql',
+    useFixtureContract(readFileSync(postflightPath, 'utf8'), baseline, database),
+  )
+  writeContainerFile(
+    '/workspace/supabase/deployment/line_pay_remediation_deploy.sql',
+    readFileSync(deployPath, 'utf8').replace(
+      '\\set line_pay_baseline_manifest 1',
+      `
+update public.payments
+set item_name = 'post-commit synthetic drift'
+where id = '20000000-0000-4000-8000-000000000001';
+\\set line_pay_baseline_manifest 1`,
+    ),
+  )
+  assertAuditFailureStatus(
+    psqlContainerFile(
+      database,
+      '/workspace/supabase/deployment/line_pay_remediation_deploy.sql',
+      'baseline mutation orchestration',
+    ),
+    'POSTFLIGHT_CONTRACT_FAILED',
+  )
+  psql(
+    'postgres',
+    `
+      drop database ${database} with (force);
+      drop role line_pay_payment_executor;
+      drop role line_pay_payment_function_owner;
+    `,
+    'baseline mutation cleanup',
+  )
+}
+
+async function runLockedTimeoutScenario(tableName) {
+  const database = `exact_file_timeout_${tableName}`
+  psql('postgres', `create database ${database};`, `create ${tableName} timeout db`)
+  prepareBaseline(database)
+  const before = readFingerprints(database, false)
+  writeContainerFile(
+    '/workspace/supabase/deployment/line_pay_remediation_preflight.sql',
+    useFixtureContract(readFileSync(preflightPath, 'utf8'), before, database),
+  )
+  writeContainerFile(
+    '/workspace/supabase/deployment/line_pay_remediation_postflight.sql',
+    useFixtureContract(readFileSync(postflightPath, 'utf8'), before, database),
+  )
+  writeContainerFile(
+    '/workspace/supabase/deployment/line_pay_remediation_deploy.sql',
+    readFileSync(deployPath, 'utf8')
+      .replace("set local lock_timeout = '15s';", "set local lock_timeout = '0';")
+      .replace(
+        "set local statement_timeout = '120s';",
+        "set local statement_timeout = '750ms';",
+      ),
+  )
+  const blocker = await startBlockingLock(database, tableName)
+  let failure
+  try {
+    psqlContainerFile(
+      database,
+      '/workspace/supabase/deployment/line_pay_remediation_deploy.sql',
+      `${tableName} statement timeout`,
+    )
+  } catch (error) {
+    failure = error
+  }
+  if (
+    !(failure instanceof Error) ||
+    !failure.message.includes('canceling statement due to statement timeout')
+  ) {
+    throw new Error(`${tableName}:STATEMENT_TIMEOUT_NOT_OBSERVED`)
+  }
+  if ((await blocker.completion) !== 0) {
+    throw new Error(`${tableName}:LOCK_HOLDER_FAILED`)
+  }
+  assertNoLinePayObjects(database)
+  const after = readFingerprints(database, false)
+  if (JSON.stringify(before) !== JSON.stringify(after)) {
+    throw new Error(`${tableName}:TIMEOUT_ROLLBACK_FINGERPRINT_CHANGED`)
+  }
+  psql(
+    'postgres',
+    `drop database ${database} with (force);`,
+    `${tableName} timeout cleanup`,
+  )
+}
+
 function cleanup() {
   spawnSync('docker', ['rm', '--force', containerName], {
     cwd: root,
@@ -461,6 +720,23 @@ async function main() {
   if (!/^postgres \(PostgreSQL\) 17(?:[.]|$)/u.test(version)) {
     throw new Error('POSTGRES_MAJOR_VERSION_MISMATCH')
   }
+  runDocker([
+    'exec',
+    containerName,
+    'mkdir',
+    '-p',
+    '/workspace/supabase/deployment',
+    '/workspace/supabase/migrations',
+  ])
+  runDocker([
+    'cp',
+    migrationPath,
+    `${containerName}:/workspace/supabase/migrations/20260719033404_line_pay_remediation_contracts.sql`,
+  ])
+  await runLockedTimeoutScenario('payments')
+  await runLockedTimeoutScenario('product_orders')
+  runDeployOrchestrationScenario()
+  runBaselineMutationScenario()
 
   psql('postgres', 'create database exact_file_success;', 'create success db')
   psql('postgres', 'create database exact_file_rollback;', 'create rollback db')
@@ -717,7 +993,8 @@ async function main() {
   process.stdout.write(
     'line_pay_production_exact_file_contracts: PASS ' +
       '(PostgreSQL 17, preflight, exact Migration, postflight, ' +
-      'catalog mutations, rollback, cleanup)\n',
+      'server_timeouts=2/2, post_commit_insert=PASS, baseline_mutation=CAUGHT, ' +
+      `catalog mutations, rollback, cleanup, locked_deploy_ms=${measuredLockedDeployMs})\n`,
   )
 }
 

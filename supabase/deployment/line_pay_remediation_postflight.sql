@@ -863,6 +863,125 @@ bank_transfer_fingerprint as (
     ) as content_digest
   from public.bank_transfer_submissions as row_value
 ),
+\if :{?line_pay_baseline_manifest}
+payments_fingerprint as (
+  select
+    pg_catalog.count(*)::integer as rows,
+    pg_catalog.encode(
+      pg_catalog.sha256(pg_catalog.convert_to(
+        coalesce(pg_catalog.string_agg(manifest.id, E'\n' order by manifest.id), ''),
+        'UTF8'
+      )),
+      'hex'
+    ) as pk_digest,
+    case when pg_catalog.bool_and(
+      row_value.id is not null
+      and pg_catalog.encode(
+        pg_catalog.sha256(pg_catalog.convert_to(
+          (
+            to_jsonb(row_value) - array[
+              'updated_at',
+              'product_order_id',
+              'environment',
+              'checkout_attempt_id',
+              'request_state',
+              'request_idempotency_key',
+              'request_body_sha256',
+              'line_pay_transaction_id',
+              'reconciliation_required',
+              'state_version'
+            ]
+          )::text,
+          'UTF8'
+        )),
+        'hex'
+      ) = manifest.row_hash
+    ) then pg_catalog.encode(
+      pg_catalog.sha256(pg_catalog.convert_to(
+        coalesce(pg_catalog.string_agg(
+          (
+            to_jsonb(row_value) - array[
+              'updated_at',
+              'product_order_id',
+              'environment',
+              'checkout_attempt_id',
+              'request_state',
+              'request_idempotency_key',
+              'request_body_sha256',
+              'line_pay_transaction_id',
+              'reconciliation_required',
+              'state_version'
+            ]
+          )::text,
+          E'\n' order by manifest.id
+        ), ''),
+        'UTF8'
+      )),
+      'hex'
+    ) else 'drift' end as content_digest
+  from pg_catalog.jsonb_each_text(
+    :'baseline_payments_manifest'::jsonb
+  ) as manifest(id, row_hash)
+  left join public.payments as row_value on row_value.id::text = manifest.id
+),
+product_orders_fingerprint as (
+  select
+    pg_catalog.count(*)::integer as rows,
+    pg_catalog.encode(
+      pg_catalog.sha256(pg_catalog.convert_to(
+        coalesce(pg_catalog.string_agg(manifest.id, E'\n' order by manifest.id), ''),
+        'UTF8'
+      )),
+      'hex'
+    ) as pk_digest,
+    case when pg_catalog.bool_and(
+      row_value.id is not null
+      and pg_catalog.encode(
+        pg_catalog.sha256(pg_catalog.convert_to(
+          (
+            to_jsonb(row_value) - array[
+              'environment',
+              'fulfillment_mode',
+              'sandbox_test',
+              'currency',
+              'checkout_attempt_id',
+              'payment_request_state',
+              'reconciliation_required',
+              'state_version'
+            ]
+          )::text,
+          'UTF8'
+        )),
+        'hex'
+      ) = manifest.row_hash
+    ) then pg_catalog.encode(
+      pg_catalog.sha256(pg_catalog.convert_to(
+        coalesce(pg_catalog.string_agg(
+          (
+            to_jsonb(row_value) - array[
+              'environment',
+              'fulfillment_mode',
+              'sandbox_test',
+              'currency',
+              'checkout_attempt_id',
+              'payment_request_state',
+              'reconciliation_required',
+              'state_version'
+            ]
+          )::text,
+          E'\n' order by manifest.id
+        ), ''),
+        'UTF8'
+      )),
+      'hex'
+    ) else 'drift' end as content_digest
+  from pg_catalog.jsonb_each_text(
+    :'baseline_product_orders_manifest'::jsonb
+  ) as manifest(id, row_hash)
+  left join public.product_orders as row_value
+    on row_value.id::text = manifest.id
+),
+\else
 payments_fingerprint as (
   select
     pg_catalog.count(*)::integer as rows,
@@ -937,6 +1056,7 @@ product_orders_fingerprint as (
     ) as content_digest
   from public.product_orders as row_value
 ),
+\endif
 historical_contract as (
   select pg_catalog.jsonb_build_object(
     'bank_transfer', (select to_jsonb(row_value) from bank_transfer_fingerprint as row_value),

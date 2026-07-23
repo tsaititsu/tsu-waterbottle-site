@@ -28,6 +28,11 @@ test('validator fixes the complete Production deployment identity', async () => 
   assert.equal(validator.EXPECTED_PROJECT_REF, 'ndbqoznvobmpkgxkiezz')
   assert.equal(validator.EXPECTED_EVENT, 'workflow_dispatch')
   assert.equal(validator.EXPECTED_REF, 'refs/heads/main')
+  assert.equal(validator.EXPECTED_NODE_VERSION, 'v24.16.0')
+  assert.equal(
+    validator.POSTGRES_IMAGE,
+    'postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193',
+  )
   assert.equal(
     validator.EXPECTED_CONFIRMATION,
     'DEPLOY_LINE_PAY_REMEDIATION_EXACT_FILE_ONCE',
@@ -90,6 +95,30 @@ test('validator rejects identity mutations and unsupported PostgreSQL clients', 
     () => validator.validateFenceHash('0'.repeat(64)),
     /FENCE_HASH_MISMATCH/,
   )
+  assert.equal(validator.validateNodeVersion('v24.16.0'), true)
+  for (const version of ['24', '24.x', 'v24.15.0', 'v24.16.0\n', 'v24.16.0x']) {
+    assert.throws(
+      () => validator.validateNodeVersion(version),
+      /INVALID_NODE_VERSION/,
+    )
+  }
+  assert.equal(
+    validator.validatePostgresImage(
+      'postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193',
+    ),
+    true,
+  )
+  for (const image of [
+    'postgres:17',
+    'postgres:17-alpine',
+    'postgres@main',
+    'postgres@sha256:' + '0'.repeat(64),
+  ]) {
+    assert.throws(
+      () => validator.validatePostgresImage(image),
+      /POSTGRES_IMAGE_MISMATCH/,
+    )
+  }
   for (const output of [
     'psql (PostgreSQL) 17',
     'psql (PostgreSQL) 17.6',
@@ -241,6 +270,31 @@ test('preflight and postflight SQL are fixed read-only single-statement queries'
   }
 })
 
+test('deploy orchestration mutations cannot remove guard, manifest, timeout, or duplicate Migration', async () => {
+  const validator = await import(pathToFileURL(validatorPath).href)
+  const deploy = readFileSync(join(root, validator.DEPLOY_FILE), 'utf8')
+  assert.equal(validator.assertDeployOrchestrationSql(deploy), true)
+  for (const mutated of [
+    deploy.replace(
+      'lock table public.product_orders, public.payments in access exclusive mode;\n',
+      '',
+    ),
+    deploy.replace('\\if :line_pay_locked_guard_ready\n', ''),
+    deploy.replace('baseline_payments_manifest', 'removed_manifest'),
+    deploy.replace("set local statement_timeout = '120s';\n", ''),
+    deploy.replace(
+      '\\ir ../migrations/20260719033404_line_pay_remediation_contracts.sql',
+      '\\ir ../migrations/20260719033404_line_pay_remediation_contracts.sql\n\\ir ../migrations/20260719033404_line_pay_remediation_contracts.sql',
+    ),
+    `${deploy}\n\\ir :include_path\n`,
+  ]) {
+    assert.throws(
+      () => validator.assertDeployOrchestrationSql(mutated),
+      /FIXED_FILE_INVALID/,
+    )
+  }
+})
+
 test('audit parser requires one JSON row and fixed safe statuses', async () => {
   const validator = await import(pathToFileURL(validatorPath).href)
   const preflight = validator.buildExpectedAuditFixture('preflight')
@@ -321,26 +375,23 @@ test('audit parser requires one JSON row and fixed safe statuses', async () => {
   )
 })
 
-test('runner accepts only the three fixed phases and strict Supabase URLs', async () => {
+test('runner accepts only preflight and locked deploy phases with strict Supabase URLs', async () => {
   const runner = await import(pathToFileURL(runnerPath).href)
-  assert.deepEqual(Object.keys(runner.PHASE_FILES).sort(), [
-    'migration',
-    'postflight',
-    'preflight',
-  ])
-  for (const phase of ['preflight', 'migration', 'postflight']) {
+  assert.deepEqual(Object.keys(runner.PHASE_FILES).sort(), ['deploy', 'preflight'])
+  for (const phase of ['preflight', 'deploy']) {
     assert.equal(runner.validatePhase(phase), phase)
     const args = runner.buildPsqlArgs(phase)
-    assert.deepEqual(args.slice(0, 4), [
+    assert.deepEqual(args.slice(0, 5), [
       '--no-psqlrc',
       '--set=ON_ERROR_STOP=1',
+      '--quiet',
       '--no-align',
       '--tuples-only',
     ])
-    assert.equal(args.length, 5)
-    assert.match(args[4], /^--file=/)
+    assert.equal(args.length, 6)
+    assert.match(args[5], /^--file=\/workspace\//)
   }
-  for (const phase of ['', 'sql', '../x', 'migration extra']) {
+  for (const phase of ['', 'sql', '../x', 'migration', 'postflight']) {
     assert.throws(() => runner.validatePhase(phase), /UNSUPPORTED_DATABASE_PHASE/)
   }
 
@@ -376,15 +427,17 @@ test('runner uses shell=false, stdin=ignore, capped output, and fixed redaction'
     'postgresql://postgres:synthetic-secret@db.ndbqoznvobmpkgxkiezz.supabase.co:5432/postgres?sslmode=require',
     'ndbqoznvobmpkgxkiezz',
   )
-  const childEnvironment = runner.buildChildEnvironment(
-    connection,
-    '/tmp/synthetic-pgpass',
-  )
+  const childEnvironment = runner.buildChildEnvironment(connection)
   assert.equal(
     childEnvironment.PGAPPNAME,
     'line-pay-production-exact-file-migration',
   )
-  assert.equal(childEnvironment.PGPASSFILE, '/tmp/synthetic-pgpass')
+  assert.equal(childEnvironment.PGPASSFILE, '/run/secrets/pgpass')
+  assert.equal(childEnvironment.PGCONNECT_TIMEOUT, '15')
+  assert.equal(
+    childEnvironment.PGOPTIONS,
+    '-c statement_timeout=120000 -c lock_timeout=15000 -c idle_in_transaction_session_timeout=30000',
+  )
   assert.equal('PGPASSWORD' in childEnvironment, false)
   assert.equal(
     runner.redactSensitiveText(
@@ -392,6 +445,41 @@ test('runner uses shell=false, stdin=ignore, capped output, and fixed redaction'
       connection,
     ).includes('synthetic-secret'),
     false,
+  )
+  const dockerArgs = runner.buildDockerRunArgs(
+    'deploy',
+    connection,
+    '/tmp/synthetic-pgpass',
+  ) as string[]
+  for (const fixedArg of [
+    '--rm',
+    '--read-only',
+    '--cap-drop=ALL',
+    '--security-opt=no-new-privileges',
+    '--pull=never',
+  ]) {
+    assert.ok(dockerArgs.includes(fixedArg), fixedArg)
+  }
+  assert.ok(
+    dockerArgs.includes(
+      'postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193',
+    ),
+  )
+  assert.equal(dockerArgs.some((arg) => arg.includes('synthetic-secret')), false)
+  assert.equal(dockerArgs.some((arg) => arg.includes('docker.sock')), false)
+  assert.equal(dockerArgs.includes('--privileged'), false)
+  assert.ok(
+    dockerArgs.some(
+      (arg) =>
+        arg.includes('target=/workspace') && arg.endsWith(',readonly'),
+    ),
+  )
+  assert.ok(
+    dockerArgs.some(
+      (arg) =>
+        arg.includes('target=/run/secrets/pgpass') &&
+        arg.endsWith(',readonly'),
+    ),
   )
 
   const calls: Array<Record<string, unknown>> = []
@@ -483,15 +571,15 @@ test('runner executes one fixed phase and cleans credentials on success and fail
       child.stderr = new PassThrough()
       child.kill = () => true
       queueMicrotask(() => {
-        if (args[0] === '--version') {
-          child.stdout.end('psql (PostgreSQL) 17.10\n')
+        if (args[0] === 'pull') {
+          child.stdout.end('fixed image ready\n')
           child.stderr.end()
           child.emit('close', 0, null)
           return
         }
         child.stdout.end(
           `${JSON.stringify(
-            validator.buildExpectedAuditFixture('preflight'),
+            validator.buildExpectedAuditFixture('postflight'),
           )}\n`,
         )
         child.stderr.end('synthetic failure detail\n')
@@ -505,16 +593,16 @@ test('runner executes one fixed phase and cleans credentials on success and fail
   try {
     const success = makeSpawn(0)
     assert.equal(
-      await runner.runDatabasePhase('preflight', {
+      await runner.runDatabasePhase('deploy', {
         environment,
         spawnImplementation: success.fakeSpawn,
       }),
-      'PREFLIGHT_VALIDATED',
+      'DEPLOYMENT_VALIDATED',
     )
     assert.equal(success.calls.length, 2)
     assert.equal(
       success.calls.filter(({ args }) =>
-        args.some((argument) => argument.includes('line_pay_remediation_preflight.sql')),
+        args.some((argument) => argument.includes('line_pay_remediation_deploy.sql')),
       ).length,
       1,
     )
@@ -525,11 +613,11 @@ test('runner executes one fixed phase and cleans credentials on success and fail
 
     const failure = makeSpawn(9)
     await assert.rejects(
-      runner.runDatabasePhase('preflight', {
+      runner.runDatabasePhase('deploy', {
         environment,
         spawnImplementation: failure.fakeSpawn,
       }),
-      /PREFLIGHT_PSQL_FAILED/,
+      /DEPLOY_PSQL_FAILED/,
     )
     assert.equal(failure.calls.length, 2)
     assert.deepEqual(
@@ -603,7 +691,7 @@ test('signal handling terminates the active child and leaves no credential file'
     }
     queueMicrotask(() => {
       if (callCount === 1) {
-        child.stdout.end('psql (PostgreSQL) 17.10\n')
+        child.stdout.end('fixed image ready\n')
         child.stderr.end()
         child.emit('close', 0, null)
         return

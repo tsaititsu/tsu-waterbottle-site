@@ -11,6 +11,9 @@ export const EXPECTED_EVENT = 'workflow_dispatch'
 export const EXPECTED_REF = 'refs/heads/main'
 export const EXPECTED_CONFIRMATION =
   'DEPLOY_LINE_PAY_REMEDIATION_EXACT_FILE_ONCE'
+export const EXPECTED_NODE_VERSION = 'v24.16.0'
+export const POSTGRES_IMAGE =
+  'postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193'
 export const MIGRATION_FILE =
   'supabase/migrations/20260719033404_line_pay_remediation_contracts.sql'
 export const FENCE_MIGRATION_FILE =
@@ -19,6 +22,8 @@ export const PREFLIGHT_FILE =
   'supabase/deployment/line_pay_remediation_preflight.sql'
 export const POSTFLIGHT_FILE =
   'supabase/deployment/line_pay_remediation_postflight.sql'
+export const DEPLOY_FILE =
+  'supabase/deployment/line_pay_remediation_deploy.sql'
 export const RUNNER_FILE =
   'scripts/supabase/run-line-pay-production-exact-file.mjs'
 export const WORKFLOW_FILE =
@@ -29,7 +34,6 @@ export const EXPECTED_MIGRATION_SHA256 =
   '370984c499d93f602b3dccf876becd030085e88ccd9a17106fee8b0009d84046'
 export const EXPECTED_FENCE_SHA256 =
   '2f43979b1f4ff88243296f0a389c146b879652715d40d23bdb7ce1d6785407d7'
-export const PSQL_BINARY = '/usr/lib/postgresql/17/bin/psql'
 export const EXPECTED_PSQL_MAJOR = 17
 
 const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/u
@@ -45,8 +49,10 @@ const SAFE_ERROR_CODES = new Set([
   'FIXED_FILE_INVALID',
   'INVALID_DEPLOYMENT_CONFIRMATION',
   'INVALID_MAIN_SHA',
+  'INVALID_NODE_VERSION',
   'INVALID_SQL_SYNTAX',
   'MIGRATION_HASH_MISMATCH',
+  'POSTGRES_IMAGE_MISMATCH',
   'PARTIAL_APPLICATION',
   'POSTFLIGHT_CONTRACT_FAILED',
   'PRODUCTION_CHANNEL_NOT_READY',
@@ -157,6 +163,16 @@ export function validateFenceHash(value) {
   return true
 }
 
+export function validateNodeVersion(value = process.version) {
+  if (value !== EXPECTED_NODE_VERSION) fail('INVALID_NODE_VERSION')
+  return true
+}
+
+export function validatePostgresImage(value) {
+  if (value !== POSTGRES_IMAGE) fail('POSTGRES_IMAGE_MISMATCH')
+  return true
+}
+
 export function validatePsqlVersionOutput(output) {
   if (typeof output !== 'string') fail('UNSUPPORTED_PSQL_VERSION')
   const record = output.endsWith('\n') ? output.slice(0, -1) : output
@@ -178,6 +194,7 @@ export function validatePsqlVersionOutput(output) {
 }
 
 export function validateWorkflowContext(environment = process.env) {
+  validateNodeVersion()
   if (
     environment.GITHUB_REPOSITORY !== EXPECTED_REPOSITORY ||
     environment.GITHUB_EVENT_NAME !== EXPECTED_EVENT ||
@@ -369,7 +386,23 @@ export function stripSqlForStaticAnalysis(sql) {
 }
 
 export function assertReadOnlyAuditSql(sql) {
-  const normalized = stripSqlForStaticAnalysis(sql)
+  const psqlCommands = sql
+    .split(/\r?\n/u)
+    .filter((line) => line.trimStart().startsWith('\\'))
+  if (
+    psqlCommands.some(
+      (line) =>
+        !/^\\(?:if :\{\?[a-z_]+\}|else|endif|gset)\s*$/u.test(line.trim()),
+    )
+  ) {
+    fail('UNSAFE_AUDIT_SQL')
+  }
+  const normalized = stripSqlForStaticAnalysis(
+    sql
+      .split(/\r?\n/u)
+      .filter((line) => !line.trimStart().startsWith('\\'))
+      .join('\n'),
+  )
   if (
     !/^\s*with\b/iu.test(normalized) ||
     (normalized.match(/;/gu) ?? []).length !== 1 ||
@@ -380,6 +413,37 @@ export function assertReadOnlyAuditSql(sql) {
   const forbidden =
     /\b(insert|update|delete|truncate|create|alter|drop|grant|revoke|comment|call|copy|do|begin|commit|rollback|savepoint|release|prepare|execute|set\s+role|reset\s+role|listen|notify|vacuum|analyze|reindex|cluster)\b|\bpg_(?:try_)?advisory_(?:lock|xact_lock|unlock)\b|\bpg_(?:cancel|terminate)_backend\b/iu
   if (forbidden.test(normalized)) fail('UNSAFE_AUDIT_SQL')
+  return true
+}
+
+export function assertDeployOrchestrationSql(sql) {
+  if (typeof sql !== 'string') fail('FIXED_FILE_INVALID')
+  const requiredOnce = [
+    '\\ir line_pay_remediation_preflight.sql',
+    '\\ir ../migrations/20260719033404_line_pay_remediation_contracts.sql',
+    '\\ir line_pay_remediation_postflight.sql',
+    'lock table public.product_orders, public.payments in access exclusive mode;',
+    'set local lock_timeout = \'15s\';',
+    'set local statement_timeout = \'120s\';',
+    'set local idle_in_transaction_session_timeout = \'30s\';',
+    '\\set line_pay_locked_guard 1',
+    '\\if :line_pay_locked_guard_ready',
+    'baseline_payments_manifest',
+    'baseline_product_orders_manifest',
+    '\\set line_pay_baseline_manifest 1',
+  ]
+  for (const token of requiredOnce) {
+    if (sql.split(token).length !== 2) fail('FIXED_FILE_INVALID')
+  }
+  const includeLines = sql
+    .split(/\r?\n/u)
+    .filter((line) => /^\\i(?:r)?\s/u.test(line.trim()))
+  if (
+    includeLines.length !== 3 ||
+    /(?:^|\n)\s*\\i\s|:[{]?include|base64|\\!|\\copy/iu.test(sql)
+  ) {
+    fail('FIXED_FILE_INVALID')
+  }
   return true
 }
 
@@ -615,12 +679,15 @@ export function validateSource(
   )
   const preflight = readFixedRegularFile(root, PREFLIGHT_FILE)
   const postflight = readFixedRegularFile(root, POSTFLIGHT_FILE)
+  const deploy = readFixedRegularFile(root, DEPLOY_FILE)
   readFixedRegularFile(root, RUNNER_FILE)
   readFixedRegularFile(root, WORKFLOW_FILE)
   void migration
   void fence
   assertReadOnlyAuditSql(preflight)
   assertReadOnlyAuditSql(postflight)
+  assertDeployOrchestrationSql(deploy)
+  validatePostgresImage(POSTGRES_IMAGE)
 
   const githubSha = environment.GITHUB_SHA
   if (runGit(['rev-parse', 'HEAD'], root) !== githubSha) {
@@ -634,27 +701,13 @@ export function validateSource(
     FENCE_MIGRATION_FILE,
     PREFLIGHT_FILE,
     POSTFLIGHT_FILE,
+    DEPLOY_FILE,
     RUNNER_FILE,
     WORKFLOW_FILE,
   ]) {
     runGit(['ls-files', '--error-unmatch', relativePath], root)
     runGit(['cat-file', '-e', `${githubSha}:${relativePath}`], root)
   }
-  return true
-}
-
-export function validateInstalledPsql(execImplementation = execFileSync) {
-  let output
-  try {
-    output = execImplementation(PSQL_BINARY, ['--version'], {
-      encoding: 'utf8',
-      env: { LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-  } catch {
-    fail('PSQL_VERSION_CHECK_FAILED')
-  }
-  validatePsqlVersionOutput(output)
   return true
 }
 
@@ -672,9 +725,14 @@ async function main() {
     console.log('SOURCE_VALIDATED')
     return
   }
-  if (mode === 'psql') {
-    validateInstalledPsql()
-    console.log('PSQL_VERSION_VALIDATED')
+  if (mode === 'node') {
+    validateNodeVersion()
+    console.log('NODE_VERSION_VALIDATED')
+    return
+  }
+  if (mode === 'image') {
+    validatePostgresImage(process.env.POSTGRES_IMAGE)
+    console.log('POSTGRES_IMAGE_VALIDATED')
     return
   }
   if (mode === 'channel') {

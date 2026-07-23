@@ -488,6 +488,13 @@ classified as (
     assembled.*
   from assembled
 )
+\if :{?line_pay_locked_guard}
+select
+  status as line_pay_locked_guard_status,
+  status = 'READY_EXPECTED' as line_pay_locked_guard_ready
+from classified
+\gset
+\else
 select pg_catalog.jsonb_build_object(
   'status', status,
   'database', database,
@@ -498,3 +505,4 @@ select pg_catalog.jsonb_build_object(
   'migration_history', migration_history
 ) as audit_result
 from classified;
+\endif

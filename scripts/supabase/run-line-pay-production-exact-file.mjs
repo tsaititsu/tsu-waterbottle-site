@@ -4,14 +4,19 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import {
+  DEPLOY_FILE,
+  EXPECTED_FENCE_SHA256,
+  EXPECTED_MIGRATION_SHA256,
   EXPECTED_PROJECT_REF,
+  FENCE_MIGRATION_FILE,
   MIGRATION_FILE,
-  POSTFLIGHT_FILE,
+  POSTGRES_IMAGE,
   PREFLIGHT_FILE,
-  PSQL_BINARY,
   parseAndValidateAuditOutput,
+  readAndValidateFixedFile,
+  validateNodeVersion,
+  validatePostgresImage,
   validateProductionChannel,
-  validatePsqlVersionOutput,
 } from './validate-line-pay-production-deployment.mjs'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -23,17 +28,26 @@ const POOLER_USERNAME_PATTERN = /^postgres[.]([a-z0-9]{20})$/u
 const ASCII_HOST_PATTERN = /^[a-z0-9.-]+$/u
 const ALLOWED_SSL_MODES = new Set(['require', 'verify-ca', 'verify-full'])
 export const MAX_CAPTURE_BYTES = 1024 * 1024
+export const DOCKER_BINARY = '/usr/bin/docker'
+export const CONTAINER_REPOSITORY_ROOT = '/workspace'
+export const CONTAINER_PGPASS_FILE = '/run/secrets/pgpass'
+export const CONNECT_TIMEOUT_SECONDS = '15'
+export const LOCK_TIMEOUT_MS = '15000'
+export const STATEMENT_TIMEOUT_MS = '120000'
+export const IDLE_IN_TRANSACTION_TIMEOUT_MS = '30000'
+export const FIXED_PGOPTIONS =
+  `-c statement_timeout=${STATEMENT_TIMEOUT_MS} ` +
+  `-c lock_timeout=${LOCK_TIMEOUT_MS} ` +
+  `-c idle_in_transaction_session_timeout=${IDLE_IN_TRANSACTION_TIMEOUT_MS}`
 
 export const PHASE_FILES = Object.freeze({
-  preflight: resolve(repositoryRoot, PREFLIGHT_FILE),
-  migration: resolve(repositoryRoot, MIGRATION_FILE),
-  postflight: resolve(repositoryRoot, POSTFLIGHT_FILE),
+  preflight: PREFLIGHT_FILE,
+  deploy: DEPLOY_FILE,
 })
 
 export const SUCCESS_MESSAGES = Object.freeze({
   preflight: 'PREFLIGHT_VALIDATED',
-  migration: 'MIGRATION_EXECUTED',
-  postflight: 'POSTFLIGHT_VALIDATED',
+  deploy: 'DEPLOYMENT_VALIDATED',
 })
 
 export const CONNECTION_MODES = Object.freeze({
@@ -47,16 +61,18 @@ const SAFE_FAILURE_CODES = new Set([
   'DATABASE_TARGET_MISMATCH',
   'DATABASE_URL_INVALID',
   'FENCE_REGRESSION',
-  'MIGRATION_PSQL_FAILED',
+  'INVALID_NODE_VERSION',
+  'POSTGRES_IMAGE_MISMATCH',
+  'DEPLOY_PSQL_FAILED',
+  'DOCKER_IMAGE_PULL_FAILED',
   'PARTIAL_APPLICATION',
   'POSTFLIGHT_CONTRACT_FAILED',
-  'POSTFLIGHT_PSQL_FAILED',
   'PREFLIGHT_CONTRACT_FAILED',
   'PREFLIGHT_PSQL_FAILED',
   'PROCESS_INTERRUPTED',
   'PRODUCTION_CHANNEL_NOT_READY',
   'PRODUCTION_DATA_DRIFT',
-  'PSQL_VERSION_CHECK_FAILED',
+  'DEPLOY_CONTRACT_FAILED',
   'RUNNER_TEMP_INVALID',
   'SCHEMA_DRIFT',
   'SUPABASE_DB_URL_MISSING',
@@ -64,7 +80,6 @@ const SAFE_FAILURE_CODES = new Set([
   'TEMP_CREDENTIAL_CLEANUP_FAILED',
   'TEMP_CREDENTIAL_CREATE_FAILED',
   'UNSUPPORTED_DATABASE_PHASE',
-  'UNSUPPORTED_PSQL_VERSION',
 ])
 
 function fail(code) {
@@ -236,13 +251,14 @@ export function buildPsqlArgs(phase) {
   return [
     '--no-psqlrc',
     '--set=ON_ERROR_STOP=1',
+    '--quiet',
     '--no-align',
     '--tuples-only',
-    `--file=${PHASE_FILES[phase]}`,
+    `--file=${join(CONTAINER_REPOSITORY_ROOT, PHASE_FILES[phase])}`,
   ]
 }
 
-export function buildChildEnvironment(connection, pgpassFile) {
+export function buildChildEnvironment(connection) {
   const environment = {
     LANG: 'C.UTF-8',
     LC_ALL: 'C.UTF-8',
@@ -250,15 +266,45 @@ export function buildChildEnvironment(connection, pgpassFile) {
     PGPORT: connection.port,
     PGDATABASE: connection.database,
     PGUSER: connection.username,
-    PGPASSFILE: pgpassFile,
+    PGPASSFILE: CONTAINER_PGPASS_FILE,
     PGSSLMODE: connection.sslmode,
     PGAPPNAME: 'line-pay-production-exact-file-migration',
-    PGCONNECT_TIMEOUT: '15',
+    PGCONNECT_TIMEOUT: CONNECT_TIMEOUT_SECONDS,
+    PGOPTIONS: FIXED_PGOPTIONS,
   }
   if (connection.mode === CONNECTION_MODES.supavisorSession) {
     environment.PGGSSENCMODE = 'disable'
   }
   return environment
+}
+
+export function buildDockerRunArgs(phase, connection, pgpassFile) {
+  validatePhase(phase)
+  validatePostgresImage(POSTGRES_IMAGE)
+  const childEnvironment = buildChildEnvironment(connection)
+  const user = `${process.getuid?.() ?? 1001}:${process.getgid?.() ?? 1001}`
+  return [
+    'run',
+    '--rm',
+    '--read-only',
+    '--cap-drop=ALL',
+    '--security-opt=no-new-privileges',
+    '--pull=never',
+    `--user=${user}`,
+    '--mount',
+    `type=bind,source=${repositoryRoot},target=${CONTAINER_REPOSITORY_ROOT},readonly`,
+    '--mount',
+    `type=bind,source=${pgpassFile},target=${CONTAINER_PGPASS_FILE},readonly`,
+    '--workdir',
+    CONTAINER_REPOSITORY_ROOT,
+    ...Object.entries(childEnvironment).flatMap(([key, value]) => [
+      '--env',
+      `${key}=${value}`,
+    ]),
+    POSTGRES_IMAGE,
+    'psql',
+    ...buildPsqlArgs(phase),
+  ]
 }
 
 export function redactSensitiveText(text, connection) {
@@ -332,23 +378,27 @@ export function spawnCaptured(
   })
 }
 
-export async function verifyFixedPsql(spawnImplementation = spawn) {
+export async function pullFixedPostgresImage(spawnImplementation = spawn) {
+  validatePostgresImage(POSTGRES_IMAGE)
   let result
   try {
     result = await spawnCaptured(
-      PSQL_BINARY,
-      ['--version'],
+      DOCKER_BINARY,
+      ['pull', POSTGRES_IMAGE],
       {
         cwd: repositoryRoot,
-        env: { LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' },
+        env: {
+          LANG: 'C.UTF-8',
+          LC_ALL: 'C.UTF-8',
+          PATH: process.env.PATH ?? '/usr/bin:/bin',
+        },
       },
       spawnImplementation,
     )
   } catch {
-    fail('PSQL_VERSION_CHECK_FAILED')
+    fail('DOCKER_IMAGE_PULL_FAILED')
   }
-  if (result.code !== 0 || result.signal) fail('PSQL_VERSION_CHECK_FAILED')
-  validatePsqlVersionOutput(result.stdout)
+  if (result.code !== 0 || result.signal) fail('DOCKER_IMAGE_PULL_FAILED')
   return true
 }
 
@@ -468,8 +518,18 @@ export async function runDatabasePhase(
   } = {},
 ) {
   validatePhase(phase)
+  validateNodeVersion()
   validateProductionChannel(environment)
-  await verifyFixedPsql(spawnImplementation)
+  readAndValidateFixedFile(
+    repositoryRoot,
+    MIGRATION_FILE,
+    EXPECTED_MIGRATION_SHA256,
+  )
+  readAndValidateFixedFile(
+    repositoryRoot,
+    FENCE_MIGRATION_FILE,
+    EXPECTED_FENCE_SHA256,
+  )
   const connection = parseDatabaseUrl(
     environment.SUPABASE_PRODUCTION_DB_URL,
     environment.SUPABASE_PROJECT_ID,
@@ -487,14 +547,19 @@ export async function runDatabasePhase(
   }, processObject)
   let operationError
   try {
+    await pullFixedPostgresImage(spawnImplementation)
     let result
     try {
       result = await spawnCaptured(
-        PSQL_BINARY,
-        buildPsqlArgs(phase),
+        DOCKER_BINARY,
+        buildDockerRunArgs(phase, connection, credentials.pgpassFile),
         {
           cwd: repositoryRoot,
-          env: buildChildEnvironment(connection, credentials.pgpassFile),
+          env: {
+            LANG: 'C.UTF-8',
+            LC_ALL: 'C.UTF-8',
+            PATH: environment.PATH ?? process.env.PATH ?? '/usr/bin:/bin',
+          },
           onSpawn: (child) => {
             activeChild = child
           },
@@ -506,18 +571,19 @@ export async function runDatabasePhase(
     }
     if (interrupted) fail('PROCESS_INTERRUPTED')
     if (result.code !== 0 || result.signal) fail(phaseFailureCode(phase))
-    if (phase !== 'migration') {
-      try {
-        parseAndValidateAuditOutput(result.stdout, phase)
-      } catch (error) {
-        if (
-          error instanceof Error &&
-          SAFE_FAILURE_CODES.has(error.message)
-        ) {
-          throw error
-        }
-        fail(`${phase.toUpperCase()}_CONTRACT_FAILED`)
+    try {
+      parseAndValidateAuditOutput(
+        result.stdout,
+        phase === 'deploy' ? 'postflight' : 'preflight',
+      )
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        SAFE_FAILURE_CODES.has(error.message)
+      ) {
+        throw error
       }
+      fail(`${phase.toUpperCase()}_CONTRACT_FAILED`)
     }
   } catch (error) {
     operationError = error

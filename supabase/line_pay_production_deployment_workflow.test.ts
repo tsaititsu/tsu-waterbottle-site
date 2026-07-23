@@ -55,7 +55,7 @@ test('workflow fixes inputs, source identity, Environment, Secret, and variable 
   assert.match(workflow, /GITHUB_REF: \$\{\{ github\.ref \}\}/)
 })
 
-test('workflow actions are full-SHA pinned and executes each database phase once', () => {
+test('workflow actions and both Node runtimes are pinned exactly', () => {
   const actionUses = [...workflow.matchAll(/^\s+uses:\s+([^\s]+)$/gm)].map(
     (match) => match[1],
   )
@@ -63,55 +63,45 @@ test('workflow actions are full-SHA pinned and executes each database phase once
   for (const use of actionUses) {
     assert.match(use, /@[0-9a-f]{40}$/)
   }
-  for (const phase of ['preflight', 'migration', 'postflight']) {
-    assert.equal(
-      (
-        workflow.match(
-          new RegExp(
-            `node scripts/supabase/run-line-pay-production-exact-file[.]mjs ${phase}`,
-            'g',
-          ),
-        ) ?? []
-      ).length,
-      1,
-    )
-  }
+  assert.equal((workflow.match(/node-version: "24[.]16[.]0"/g) ?? []).length, 2)
+  assert.doesNotMatch(workflow, /node-version:\s*"(?:24|24[.]x)"/)
+  assert.equal(
+    (
+      workflow.match(
+        /node scripts\/supabase\/validate-line-pay-production-deployment[.]mjs node/g,
+      ) ?? []
+    ).length,
+    2,
+  )
+})
+
+test('workflow has one fixed deploy database invocation and no stale migration phase', () => {
+  assert.equal(
+    (
+      workflow.match(
+        /node scripts\/supabase\/run-line-pay-production-exact-file[.]mjs deploy/g,
+      ) ?? []
+    ).length,
+    1,
+  )
+  assert.doesNotMatch(
+    workflow,
+    /run-line-pay-production-exact-file[.]mjs (?:migration|postflight)/,
+  )
   assert.doesNotMatch(
     workflow,
     /\bsupabase\s+(?:db|migration)|run:\s*(?:sudo\s+)?psql\b|\bcurl\b|\bretry\b|workflow_call|base64|<<[-~]?['"]?[A-Z_]+/,
   )
 })
 
-test('workflow installs and validates the fixed PostgreSQL 17 client', () => {
-  assert.equal(
-    (
-      workflow.match(
-        /sudo \/usr\/share\/postgresql-common\/pgdg\/apt[.]postgresql[.]org[.]sh -y/g,
-      ) ?? []
-    ).length,
-    1,
+test('workflow uses only the reviewed PostgreSQL 17 image digest', () => {
+  assert.match(
+    workflow,
+    /postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193/,
   )
-  assert.equal(
-    (
-      workflow.match(
-        /sudo apt-get install --yes --no-install-recommends postgresql-client-17/g,
-      ) ?? []
-    ).length,
-    1,
-  )
-  assert.equal(
-    (
-      workflow.match(
-        /node scripts\/supabase\/validate-line-pay-production-deployment[.]mjs psql/g,
-      ) ?? []
-    ).length,
-    1,
-  )
-  assert.ok(
-    workflow.indexOf('postgresql-client-17') <
-      workflow.indexOf(
-        'node scripts/supabase/validate-line-pay-production-deployment.mjs psql',
-      ),
+  assert.doesNotMatch(
+    workflow,
+    /apt-get|apt[.]postgresql[.]org|postgresql-client|validate-line-pay-production-deployment[.]mjs psql/,
   )
 })
 
@@ -133,6 +123,7 @@ test('LINE Pay contract CI watches and executes all new safety contracts', () =>
     'scripts/supabase/run-line-pay-production-exact-file.mjs',
     'supabase/deployment/line_pay_remediation_preflight.sql',
     'supabase/deployment/line_pay_remediation_postflight.sql',
+    'supabase/deployment/line_pay_remediation_deploy.sql',
     'supabase/line_pay_production_exact_file_runner.test.ts',
     'supabase/line_pay_production_deployment_workflow.test.ts',
     'supabase/tests/run_line_pay_production_exact_file_contracts.mjs',

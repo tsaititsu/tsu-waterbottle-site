@@ -15,6 +15,7 @@ on:
       - "supabase/bank_transfer_submissions_readonly_fence.test.ts"
       - "supabase/deployment/line_pay_remediation_postflight.sql"
       - "supabase/deployment/line_pay_remediation_preflight.sql"
+      - "supabase/deployment/line_pay_remediation_deploy.sql"
       - "supabase/line_pay_remediation_contracts.test.ts"
       - "supabase/line_pay_production_deployment_workflow.test.ts"
       - "supabase/line_pay_production_exact_file_runner.test.ts"
