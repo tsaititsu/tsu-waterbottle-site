@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { BarChart3, Boxes, CalendarClock, CreditCard, Landmark, ScrollText } from 'lucide-react'
+import { BarChart3, Boxes, CalendarCheck2, CalendarClock, CreditCard, Landmark, ScrollText } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { getMockUser, subscribeAuthChange, type UserProfile } from '@/lib/mockAuth'
 
@@ -12,7 +12,8 @@ const adminNavItems = [
   { label: '訂單管理', description: '查看商品與服務訂單狀態', icon: CreditCard },
   { label: '占卜紀錄', description: '檢視占卜服務紀錄與客戶查詢', icon: ScrollText },
   { label: '匯款回報', description: '人工核對銀行匯款回報資料', icon: Landmark },
-  { label: '預約時段', description: '手動開放或關閉論命可預約時段', icon: CalendarClock, href: '/admin/booking-slots' },
+  { label: '預約紀錄', description: '唯讀查看最近 100 筆真實預約資料', icon: CalendarCheck2, href: '/admin/bookings', isAvailable: true },
+  { label: '預約時段', description: '手動開放或關閉論命可預約時段', icon: CalendarClock, href: '/admin/booking-slots', isAvailable: true },
 ]
 
 const overviewCards = [
@@ -64,7 +65,7 @@ export default function AdminPage() {
           </Link>
           <h1 className="mt-4 font-serifTC text-2xl font-semibold text-deepPurple">後台管理</h1>
           <p className="mt-2 text-sm leading-6 text-textMuted">
-            目前為新網站後台骨架，先做靜態畫面與登入保護，尚未接資料庫與正式 admin 權限。
+            後台已有管理員守門；預約功能已逐步接上，其他營運模組仍在逐步建置。
           </p>
 
           <nav className="mt-6 grid gap-2">
@@ -119,8 +120,12 @@ export default function AdminPage() {
                     <div>
                       <h3 className="font-serifTC text-2xl font-semibold text-deepPurple">{item.label}</h3>
                       <p className="mt-2 leading-7 text-textMuted">{item.description}</p>
-                      <p className="mt-3 rounded-xl bg-[#fff7e5] px-4 py-3 text-sm font-semibold text-darkGold">
-                        靜態骨架：下一階段再接資料來源與操作功能。
+                      <p className={`mt-3 rounded-xl px-4 py-3 text-sm font-semibold ${
+                        item.isAvailable ? 'bg-[#eff8ed] text-[#26713a]' : 'bg-[#fff7e5] text-darkGold'
+                      }`}>
+                        {item.isAvailable
+                          ? '功能已開放：請使用上方導覽連結進入。'
+                          : '靜態骨架：下一階段再接資料來源與操作功能。'}
                       </p>
                     </div>
                   </div>
