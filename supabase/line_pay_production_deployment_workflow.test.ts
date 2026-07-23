@@ -65,6 +65,8 @@ test('workflow actions and both Node runtimes are pinned exactly', () => {
   }
   assert.equal((workflow.match(/node-version: "24[.]16[.]0"/g) ?? []).length, 2)
   assert.doesNotMatch(workflow, /node-version:\s*"(?:24|24[.]x)"/)
+  assert.equal((ci.match(/node-version: "24[.]16[.]0"/g) ?? []).length, 1)
+  assert.doesNotMatch(ci, /node-version:\s*"(?:24|24[.]x)"/)
   assert.equal(
     (
       workflow.match(
