@@ -66,6 +66,22 @@ export type AiChartOpenAiResponseDiagnostic = Readonly<{
   usage: AiChartOpenAiUsage | null
 }>
 
+export type AiChartOpenAiTransportFailureKind =
+  | 'HTTP_ERROR'
+  | 'NETWORK_ERROR'
+  | 'TIMEOUT'
+  | 'RESPONSE_BODY_INVALID'
+
+export type AiChartOpenAiTransportDiagnostic = Readonly<{
+  failureKind: AiChartOpenAiTransportFailureKind
+  httpStatus: number | null
+  requestId: string | null
+  clientRequestId: string
+  responseErrorType: string | null
+  responseErrorCode: string | null
+  responseErrorParam: string | null
+}>
+
 export type AiChartOpenAiStructuredResult<T> = Readonly<{
   data: T
   usage: AiChartOpenAiUsage | null
@@ -128,16 +144,34 @@ type FailureFactory = () => never
 
 const SCHEMA_NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
 const REASONING_EFFORTS = new Set<unknown>(['low', 'medium', 'high'])
+const SAFE_TRANSPORT_IDENTIFIER = /^[A-Za-z0-9_.:-]{1,80}$/u
+const TRANSPORT_FAILURE_KINDS = new Set<unknown>([
+  'HTTP_ERROR',
+  'NETWORK_ERROR',
+  'TIMEOUT',
+  'RESPONSE_BODY_INVALID',
+])
+const TRANSPORT_DIAGNOSTIC_KEYS = Object.freeze([
+  'failureKind',
+  'httpStatus',
+  'requestId',
+  'clientRequestId',
+  'responseErrorType',
+  'responseErrorCode',
+  'responseErrorParam',
+] as const)
 
 export class AiChartOpenAiError extends Error {
   readonly code: AiChartOpenAiErrorCode
   readonly retryable: boolean
   declare readonly diagnostic?: AiChartOpenAiResponseDiagnostic
+  declare readonly transportDiagnostic?: AiChartOpenAiTransportDiagnostic
 
   constructor(
     code: AiChartOpenAiErrorCode,
     retryable: boolean,
     diagnostic?: AiChartOpenAiResponseDiagnostic,
+    transportDiagnostic?: AiChartOpenAiTransportDiagnostic,
   ) {
     super(code)
     this.code = code
@@ -145,6 +179,16 @@ export class AiChartOpenAiError extends Error {
     if (diagnostic !== undefined) {
       Object.defineProperty(this, 'diagnostic', {
         value: diagnostic,
+        enumerable: true,
+        configurable: false,
+        writable: false,
+      })
+    }
+    const safeTransportDiagnostic =
+      normalizeTransportDiagnostic(transportDiagnostic)
+    if (safeTransportDiagnostic !== undefined) {
+      Object.defineProperty(this, 'transportDiagnostic', {
+        value: safeTransportDiagnostic,
         enumerable: true,
         configurable: false,
         writable: false,
@@ -186,6 +230,96 @@ function isPlainObject(value: unknown): value is PlainRecord {
     return prototype === Object.prototype || prototype === null
   } catch {
     return false
+  }
+}
+
+function normalizeTransportIdentifier(value: unknown): string | null | undefined {
+  if (value === null) return null
+  return typeof value === 'string' && SAFE_TRANSPORT_IDENTIFIER.test(value)
+    ? value
+    : undefined
+}
+
+function normalizeTransportDiagnostic(
+  value: unknown,
+): AiChartOpenAiTransportDiagnostic | undefined {
+  if (value === undefined) return undefined
+
+  try {
+    if (!isPlainObject(value)) return undefined
+
+    const ownKeys = Reflect.ownKeys(value)
+    if (
+      ownKeys.length !== TRANSPORT_DIAGNOSTIC_KEYS.length ||
+      ownKeys.some(
+        (key) =>
+          typeof key !== 'string' ||
+          !TRANSPORT_DIAGNOSTIC_KEYS.includes(
+            key as (typeof TRANSPORT_DIAGNOSTIC_KEYS)[number],
+          ),
+      )
+    ) {
+      return undefined
+    }
+
+    const values: Record<string, unknown> = {}
+    for (const key of TRANSPORT_DIAGNOSTIC_KEYS) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key)
+      if (
+        descriptor === undefined ||
+        !descriptor.enumerable ||
+        !Object.hasOwn(descriptor, 'value')
+      ) {
+        return undefined
+      }
+      values[key] = descriptor.value
+    }
+
+    const failureKind = values.failureKind
+    const httpStatus = values.httpStatus
+    const requestId = normalizeTransportIdentifier(values.requestId)
+    const clientRequestId = values.clientRequestId
+    const responseErrorType = normalizeTransportIdentifier(
+      values.responseErrorType,
+    )
+    const responseErrorCode = normalizeTransportIdentifier(
+      values.responseErrorCode,
+    )
+    const responseErrorParam = normalizeTransportIdentifier(
+      values.responseErrorParam,
+    )
+
+    if (
+      !TRANSPORT_FAILURE_KINDS.has(failureKind) ||
+      !(
+        httpStatus === null ||
+        (typeof httpStatus === 'number' &&
+          Number.isInteger(httpStatus) &&
+          httpStatus >= 100 &&
+          httpStatus <= 599)
+      ) ||
+      requestId === undefined ||
+      typeof clientRequestId !== 'string' ||
+      !SAFE_TRANSPORT_IDENTIFIER.test(clientRequestId) ||
+      responseErrorType === undefined ||
+      responseErrorCode === undefined ||
+      responseErrorParam === undefined
+    ) {
+      return undefined
+    }
+
+    return Object.freeze({
+      failureKind:
+        failureKind as AiChartOpenAiTransportFailureKind,
+      httpStatus,
+      requestId,
+      clientRequestId,
+      responseErrorType,
+      responseErrorCode,
+      responseErrorParam,
+    })
+  } catch {
+    return undefined
   }
 }
 
