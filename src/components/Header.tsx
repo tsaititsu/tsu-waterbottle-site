@@ -2,11 +2,19 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { BookOpen, CalendarCheck, FileText, LogOut, Menu, ScrollText, ShoppingCart, Sparkles, UserRound, X } from 'lucide-react'
-import { type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from 'react'
+import { BookOpen, CalendarCheck, FileText, LogOut, Menu, ScrollText, ShieldCheck, ShoppingCart, Sparkles, UserRound, X } from 'lucide-react'
+import { type MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { GoogleAnalyticsCtaDestination } from '@/lib/analytics/googleAnalytics'
 import {
+  beginAdminMenuAccessCheck,
+  canShowAdminMenu,
+  createAdminMenuAccessController,
+  shouldRecheckAdminMenuOnOpen,
+  type AdminMenuAccessSnapshot,
+} from '@/lib/auth/adminMenuAccess'
+import {
+  getAuthAccessToken,
   getMockUser,
   loginWithProvider,
   logoutMockUser,
@@ -56,6 +64,18 @@ export function Header() {
   const [loginMessage, setLoginMessage] = useState('')
   const [loadingProvider, setLoadingProvider] = useState<'line' | 'google' | ''>('')
   const [user, setUser] = useState<UserProfile | null>(null)
+  const [adminMenuAccess, setAdminMenuAccess] = useState<AdminMenuAccessSnapshot>(() =>
+    beginAdminMenuAccessCheck(null, 0),
+  )
+  const [adminMenuAccessController] = useState(() =>
+    createAdminMenuAccessController(
+      {
+        getAccessToken: getAuthAccessToken,
+        fetchSession: (input, init) => fetch(input, init),
+      },
+      setAdminMenuAccess,
+    ),
+  )
   const { totalQuantity } = useCart()
   const hideAiDivinationServices = shouldHideAiDivinationServices()
   const hideConsultationServices = shouldHideConsultationServices()
@@ -66,6 +86,22 @@ export function Header() {
     sync()
     return subscribeAuthChange(sync)
   }, [])
+
+  const runAdminMenuAccessCheck = useCallback(
+    (currentUser: UserProfile | null) => adminMenuAccessController.run(currentUser),
+    [adminMenuAccessController],
+  )
+
+  useEffect(() => {
+    void runAdminMenuAccessCheck(user)
+  }, [runAdminMenuAccessCheck, user])
+
+  useEffect(
+    () => () => {
+      adminMenuAccessController.cancel()
+    },
+    [adminMenuAccessController],
+  )
 
   useEffect(() => {
     setMenuOpen(false)
@@ -118,12 +154,29 @@ export function Header() {
     }
   }
 
+  const handleAccountMenuToggle = () => {
+    if (shouldRecheckAdminMenuOnOpen(accountMenuOpen, user)) {
+      void runAdminMenuAccessCheck(user)
+    }
+    setAccountMenuOpen((open) => !open)
+  }
+
+  const handleMobileMenuToggle = () => {
+    if (shouldRecheckAdminMenuOnOpen(menuOpen, user)) {
+      void runAdminMenuAccessCheck(user)
+    }
+    setMenuOpen((open) => !open)
+  }
+
   const handleLogout = () => {
+    void runAdminMenuAccessCheck(null)
     logoutMockUser()
     setAccountMenuOpen(false)
     setMenuOpen(false)
     router.push('/')
   }
+
+  const showAdminMenu = canShowAdminMenu(adminMenuAccess, user)
 
   const accountMenu = user ? (
     <div className="absolute right-0 top-[calc(100%+14px)] z-50 w-[340px] overflow-hidden rounded-[20px] bg-[#050505] text-white shadow-2xl ring-1 ring-white/10">
@@ -163,6 +216,14 @@ export function Header() {
           </Link>
         ) : null}
       </nav>
+      {showAdminMenu ? (
+        <nav aria-label="管理員功能" className="grid border-t border-white/15 py-3 text-lg font-semibold">
+          <Link href="/admin" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-5 px-7 py-4 transition hover:bg-white/10">
+            <ShieldCheck size={22} />
+            後台管理
+          </Link>
+        </nav>
+      ) : null}
       <button
         type="button"
         onClick={handleLogout}
@@ -215,6 +276,13 @@ export function Header() {
       <Link href="/account/divinations" onClick={() => setMenuOpen(false)} className="rounded-xl border border-[#e8dff2] px-4 py-3 text-center font-semibold">
         我的占卜紀錄
       </Link>
+      {showAdminMenu ? (
+        <div className="border-y border-[#e8dff2] py-3">
+          <Link href="/admin" onClick={() => setMenuOpen(false)} className="block rounded-xl border border-[#e8dff2] px-4 py-3 text-center font-semibold text-deepPurple">
+            後台管理
+          </Link>
+        </div>
+      ) : null}
       <button type="button" onClick={handleLogout} className="rounded-xl bg-[#3d0d74] px-4 py-3 font-semibold text-white">
         登出
       </button>
@@ -294,7 +362,7 @@ export function Header() {
 
             <button
               type="button"
-              onClick={() => setAccountMenuOpen((open) => !open)}
+              onClick={handleAccountMenuToggle}
               className="grid h-12 w-12 place-items-center rounded-full bg-[#08080a] text-white shadow-[0_10px_24px_rgba(0,0,0,0.18)] transition hover:scale-105"
               aria-label="會員選單"
               aria-expanded={accountMenuOpen}
@@ -325,7 +393,7 @@ export function Header() {
               aria-label={menuOpen ? '關閉選單' : '開啟選單'}
               aria-expanded={menuOpen}
               aria-controls="mobile-navigation"
-              onClick={() => setMenuOpen((value) => !value)}
+              onClick={handleMobileMenuToggle}
             >
               {menuOpen ? <X size={21} /> : <Menu size={21} />}
             </button>
