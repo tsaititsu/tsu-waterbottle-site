@@ -279,7 +279,7 @@ export default function CartPage() {
                     <tr className="border-b border-borderSoft text-textMuted">
                       <th className="py-3 pr-4">項目名稱</th>
                       <th className="py-3 pr-4">類型</th>
-                      <th className="py-3 pr-4">金額</th>
+                      <th className="py-3 pr-4">單價</th>
                       <th className="py-3 pr-4">數量</th>
                       <th className="py-3 pr-4">狀態</th>
                       <th className="py-3 pr-2">操作</th>
@@ -295,7 +295,7 @@ export default function CartPage() {
                           <div className="inline-flex items-center overflow-hidden rounded-lg border border-borderSoft bg-white">
                             <button
                               aria-label={`減少「${item.itemName}」數量`}
-                              className="focus-ring flex size-9 items-center justify-center text-lg font-semibold text-deepPurple transition hover:bg-softPurple disabled:cursor-not-allowed disabled:text-textMuted disabled:opacity-50 disabled:hover:bg-white"
+                              className="focus-ring flex size-10 items-center justify-center text-lg font-semibold text-deepPurple transition hover:bg-softPurple disabled:cursor-not-allowed disabled:text-textMuted disabled:opacity-50 disabled:hover:bg-white"
                               disabled={item.quantity === 1}
                               onClick={() => updateItemQuantity(item.id, item.type, item.quantity - 1)}
                               type="button"
@@ -311,7 +311,7 @@ export default function CartPage() {
                             </span>
                             <button
                               aria-label={`增加「${item.itemName}」數量`}
-                              className="focus-ring flex size-9 items-center justify-center text-lg font-semibold text-deepPurple transition hover:bg-softPurple"
+                              className="focus-ring flex size-10 items-center justify-center text-lg font-semibold text-deepPurple transition hover:bg-softPurple"
                               onClick={() => updateItemQuantity(item.id, item.type, item.quantity + 1)}
                               type="button"
                             >

@@ -61,6 +61,22 @@ for (const required of [
   assert.equal(cartPageSource.includes(required), true, `${required} must remain in the cart quantity controls`)
 }
 
+assert.equal(
+  cartPageSource.includes('<th className="py-3 pr-4">單價</th>'),
+  true,
+  'the item price column must be labeled 單價',
+)
+assert.equal(
+  cartPageSource.includes('<th className="py-3 pr-4">金額</th>'),
+  false,
+  'the item price column must no longer be labeled 金額',
+)
+assert.equal(
+  cartPageSource.match(/className="focus-ring flex size-10 /g)?.length,
+  2,
+  'both quantity buttons must provide a 40px touch target',
+)
+
 for (const forbidden of [
   'MAX_CART_QUANTITY',
   'Math.min',
