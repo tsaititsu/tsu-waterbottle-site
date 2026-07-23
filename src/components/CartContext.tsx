@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { shouldHideConsultationServices, shouldHideCoursesServices } from '@/lib/siteVisibility'
+import { getCartItemsWithUpdatedQuantity } from './cartQuantity'
 
 export type CartItemType = 'divination' | 'consultation' | 'course' | 'booking' | 'spiritual_product' | 'other'
 
@@ -30,6 +31,7 @@ type CartContextValue = {
   totalQuantity: number
   totalAmount: number
   addItem: (item: AddCartItemInput) => void
+  updateItemQuantity: (id: string, type: CartItemType, quantity: number) => void
   removeItem: (id: string) => void
 }
 
@@ -143,6 +145,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
     setItems((current) => current.filter((item) => item.id !== id || item.status !== 'unpaid'))
   }, [])
 
+  const updateItemQuantity = useCallback((id: string, type: CartItemType, quantity: number) => {
+    setItems((current) => getCartItemsWithUpdatedQuantity(current, id, type, quantity))
+  }, [])
+
   const value = useMemo(
     () => ({
       items: items.filter((item) => item.status === 'unpaid').filter(isVisibleCartItem),
@@ -156,9 +162,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
         .filter(isVisibleCartItem)
         .reduce((total, item) => total + item.amount * item.quantity, 0),
       addItem,
+      updateItemQuantity,
       removeItem,
     }),
-    [addItem, isLoaded, items, removeItem]
+    [addItem, isLoaded, items, removeItem, updateItemQuantity]
   )
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>

@@ -95,7 +95,7 @@ function submitCartNewebPayForm(input: CartNewebPayFormInput) {
 }
 
 export default function CartPage() {
-  const { items, isLoaded, removeItem, totalAmount, totalQuantity } = useCart()
+  const { items, isLoaded, removeItem, totalAmount, totalQuantity, updateItemQuantity } = useCart()
   const [spiritualProductsAccepted, setSpiritualProductsAccepted] = useState(false)
   const [postOfficeShippingInfo, setPostOfficeShippingInfo] = useState<PostOfficeShippingInfo>(emptyPostOfficeShippingInfo)
   const [checkoutError, setCheckoutError] = useState('')
@@ -247,7 +247,7 @@ export default function CartPage() {
 
   return (
     <div className="bg-white py-12 md:py-16">
-      <div className="section-shell grid gap-7">
+      <div className="section-shell grid min-w-0 grid-cols-[minmax(0,1fr)] gap-7">
         <section className="rounded-2xl border border-borderSoft bg-softPurple p-6 md:p-8">
           <p className="text-sm font-semibold text-darkGold">購物車</p>
           <h1 className="mt-2 font-serifTC text-3xl font-semibold text-deepPurple">購物車內容</h1>
@@ -291,7 +291,34 @@ export default function CartPage() {
                         <td className="py-4 pr-4 font-semibold text-textDark">{item.itemName}</td>
                         <td className="py-4 pr-4">{typeLabel[item.type] ?? item.type}</td>
                         <td className="py-4 pr-4">NT${item.amount.toLocaleString('zh-TW')}</td>
-                        <td className="py-4 pr-4">{item.quantity}</td>
+                        <td className="py-4 pr-4">
+                          <div className="inline-flex items-center overflow-hidden rounded-lg border border-borderSoft bg-white">
+                            <button
+                              aria-label={`減少「${item.itemName}」數量`}
+                              className="focus-ring flex size-9 items-center justify-center text-lg font-semibold text-deepPurple transition hover:bg-softPurple disabled:cursor-not-allowed disabled:text-textMuted disabled:opacity-50 disabled:hover:bg-white"
+                              disabled={item.quantity === 1}
+                              onClick={() => updateItemQuantity(item.id, item.type, item.quantity - 1)}
+                              type="button"
+                            >
+                              −
+                            </button>
+                            <span
+                              aria-label={`目前數量 ${item.quantity}`}
+                              aria-live="polite"
+                              className="min-w-9 border-x border-borderSoft px-2 py-2 text-center font-semibold tabular-nums text-textDark"
+                            >
+                              {item.quantity}
+                            </span>
+                            <button
+                              aria-label={`增加「${item.itemName}」數量`}
+                              className="focus-ring flex size-9 items-center justify-center text-lg font-semibold text-deepPurple transition hover:bg-softPurple"
+                              onClick={() => updateItemQuantity(item.id, item.type, item.quantity + 1)}
+                              type="button"
+                            >
+                              ＋
+                            </button>
+                          </div>
+                        </td>
                         <td className="py-4 pr-4">未付款</td>
                         <td className="py-4">
                           <button
