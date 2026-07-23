@@ -44,6 +44,19 @@ const SYNTHETIC_SENSITIVE_OUTPUT_TEXT =
 const SYNTHETIC_REASONING_SUMMARY = 'synthetic-private-reasoning-summary'
 const SYNTHETIC_ENCRYPTED_REASONING =
   'synthetic-private-encrypted-reasoning-content'
+const SYNTHETIC_SOURCE_BOUND_SENSITIVE_MESSAGE =
+  'synthetic-output_text-prompt-model-input-starName-palaceId-ruleId-meaningId-omission-detail'
+
+const COVERAGE_DETAIL_REASON_CODES = Object.freeze([
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_NOBLES_MISMATCH,
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_PROCESSING_FLAGS_MISMATCH,
+  AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_STATUS_OMISSIONS_MISMATCH,
+] as const)
 
 let testCount = 0
 
@@ -1093,8 +1106,33 @@ test('valid JSON rejected by the source-bound parser is schema invalid', () => {
   )
 })
 
+test('coverage detail reason codes propagate as frozen safe diagnostics', () => {
+  for (const reasonCode of COVERAGE_DETAIL_REASON_CODES) {
+    const error = expectResponseError(
+      () =>
+        parseAiChartOpenAiStructuredResponse(
+          responseFixture(),
+          () => {
+            throw new AiChartD1P1AdapterBridgeResultInvalidError(reasonCode)
+          },
+        ),
+      AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID,
+      [
+        SYNTHETIC_SOURCE_BOUND_SENSITIVE_MESSAGE,
+        SYNTHETIC_RESPONSE_BODY,
+      ],
+    )
+    assert.equal(error.diagnostic?.outputSchemaValidationCode, reasonCode)
+    assert.equal(Object.isFrozen(error.diagnostic), true)
+    assert.equal(
+      JSON.stringify(error).includes(SYNTHETIC_SOURCE_BOUND_SENSITIVE_MESSAGE),
+      false,
+    )
+  }
+})
+
 test('unknown parser errors remain schema invalid without leaking messages', () => {
-  const sensitiveParserMessage = 'synthetic-model-text-must-not-leak'
+  const sensitiveParserMessage = SYNTHETIC_SOURCE_BOUND_SENSITIVE_MESSAGE
   const error = expectResponseError(
     () =>
       parseAiChartOpenAiStructuredResponse(responseFixture(), () => {

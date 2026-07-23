@@ -181,6 +181,10 @@ async function run() {
       Object.getOwnPropertyDescriptor(error, 'reasonCode')?.writable,
       false,
     )
+    assert.equal(
+      Object.getOwnPropertyDescriptor(error, 'reasonCode')?.configurable,
+      false,
+    )
   })
   check('source-bound validation reasons are a closed frozen allowlist', () => {
     assert.equal(
@@ -201,10 +205,38 @@ async function run() {
         'CANDIDATE_RULE_AUTHORITY_MISMATCH',
         'RULE_PALACE_STAR_BINDING_MISMATCH',
         'COVERAGE_BINDING_MISMATCH',
+        'COVERAGE_DIRECT_MEANINGS_MISMATCH',
+        'COVERAGE_MAJOR_STARS_MISMATCH',
+        'COVERAGE_MINOR_STARS_MISMATCH',
+        'COVERAGE_MUTAGENS_MISMATCH',
+        'COVERAGE_MALEFICS_MISMATCH',
+        'COVERAGE_NOBLES_MISMATCH',
+        'COVERAGE_PROCESSING_FLAGS_MISMATCH',
+        'COVERAGE_STATUS_OMISSIONS_MISMATCH',
         'OTHER_SOURCE_BOUND_BINDING_MISMATCH',
       ],
     )
   })
+  for (const reasonCode of [
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_NOBLES_MISMATCH,
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_PROCESSING_FLAGS_MISMATCH,
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_STATUS_OMISSIONS_MISMATCH,
+  ] as const) {
+    check(`${reasonCode} error metadata is fixed and immutable`, () => {
+      const error = new AiChartD1P1AdapterBridgeResultInvalidError(reasonCode)
+      const descriptor = Object.getOwnPropertyDescriptor(error, 'reasonCode')
+      assert.equal(error.message, AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID)
+      assert.equal(error.reasonCode, reasonCode)
+      assert.equal(Object.isFrozen(error), true)
+      assert.equal(descriptor?.writable, false)
+      assert.equal(descriptor?.configurable, false)
+    })
+  }
   check('result-invalid class rejects an injected reason value', () => {
     const sensitiveValue = 'synthetic-model-value-must-not-be-saved'
     assert.throws(
