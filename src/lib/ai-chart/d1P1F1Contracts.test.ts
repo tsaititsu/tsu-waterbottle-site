@@ -778,18 +778,51 @@ test('P1 over-limit coverage remains generic even with duplicates', () => {
   expectGenericP1ContractInvalid(() => parseAiChartD1P1Result(fixture))
 })
 
-test('P1 multiple coverage duplicates select the first fixed field', () => {
+const p1CoverageDuplicateAdjacentPairs = [
+  ['directMeaningsConsidered', 'majorStarsCovered'],
+  ['majorStarsCovered', 'minorStarsCovered'],
+  ['minorStarsCovered', 'mutagensCovered'],
+  ['mutagensCovered', 'maleficsCovered'],
+  ['maleficsCovered', 'noblesCovered'],
+] as const satisfies readonly (readonly [
+  AiChartD1P1CoverageDuplicateField,
+  AiChartD1P1CoverageDuplicateField,
+])[]
+
+for (const [firstField, secondField] of p1CoverageDuplicateAdjacentPairs) {
+  test(`P1 multiple coverage duplicates prioritize ${firstField} over ${secondField}`, () => {
+    const fixture = p1Fixture()
+    const coverage = asRecord(fixture.coverage)
+    const firstValues = asArray(coverage[firstField])
+    const secondValues = asArray(coverage[secondField])
+    assert.equal(firstValues.length > 0, true)
+    assert.equal(secondValues.length > 0, true)
+    assert.ok(firstValues[0])
+    assert.ok(secondValues[0])
+    coverage[firstField] = [...firstValues, firstValues[0]]
+    coverage[secondField] = [...secondValues, secondValues[0]]
+    const error = expectCoverageDuplicate(
+      () => parseAiChartD1P1Result(fixture),
+      firstField,
+    )
+    assert.equal(Object.isFrozen(error), true)
+  })
+}
+
+test('P1 all-six coverage duplicates select direct meanings first', () => {
   const fixture = p1Fixture()
   const coverage = asRecord(fixture.coverage)
-  coverage.directMeaningsConsidered = [
-    'Synthetic direct meaning',
-    'Synthetic direct meaning',
-  ]
-  coverage.majorStarsCovered = ['Synthetic major star', 'Synthetic major star']
-  expectCoverageDuplicate(
+  for (const field of AI_CHART_D1_P1_COVERAGE_DUPLICATE_FIELDS) {
+    const values = asArray(coverage[field])
+    assert.equal(values.length > 0, true)
+    assert.ok(values[0])
+    coverage[field] = [...values, values[0]]
+  }
+  const error = expectCoverageDuplicate(
     () => parseAiChartD1P1Result(fixture),
     'directMeaningsConsidered',
   )
+  assert.equal(Object.isFrozen(error), true)
 })
 
 test('P1 rejects duplicate omitted item name', () => {

@@ -778,18 +778,85 @@ async function run() {
     )
     assertSafeResultInvalid(error, [malformedDuplicateMarker])
   })
-  check('multiple coverage duplicates select the first fixed reason', () => {
-    const value = createValidAiChartD1P1Result(modelInput)
-    const firstMeaning = value.coverage.directMeaningsConsidered[0]
-    const firstMajor = value.coverage.majorStarsCovered[0]
-    assert.ok(firstMeaning)
-    assert.ok(firstMajor)
-    value.coverage.directMeaningsConsidered.push(firstMeaning)
-    value.coverage.majorStarsCovered.push(firstMajor)
-    assertResultInvalid(
-      () => parseResult(bridge, value),
+  const coveragePriorityInput = modelInputs[2]
+  const coveragePriorityBridge = bridges[2]
+  const coverageDuplicateAdjacentPairMatrix = [
+    [
+      'directMeaningsConsidered',
+      'majorStarsCovered',
       AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
-    )
+    ],
+    [
+      'majorStarsCovered',
+      'minorStarsCovered',
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
+    ],
+    [
+      'minorStarsCovered',
+      'mutagensCovered',
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
+    ],
+    [
+      'mutagensCovered',
+      'maleficsCovered',
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
+    ],
+    [
+      'maleficsCovered',
+      'noblesCovered',
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
+    ],
+  ] as const
+  for (const [
+    firstField,
+    secondField,
+    expectedReasonCode,
+  ] of coverageDuplicateAdjacentPairMatrix) {
+    check(`multiple coverage duplicates prioritize ${firstField} over ${secondField}`, () => {
+      assertNoFetch(() => {
+        const value = createValidAiChartD1P1Result(coveragePriorityInput)
+        const firstValue = value.coverage[firstField][0]
+        const secondValue = value.coverage[secondField][0]
+        assert.equal(value.coverage[firstField].length > 0, true)
+        assert.equal(value.coverage[secondField].length > 0, true)
+        assert.ok(firstValue)
+        assert.ok(secondValue)
+        value.coverage[firstField].push(firstValue)
+        value.coverage[secondField].push(secondValue)
+        const error = assertResultInvalid(
+          () => parseResult(coveragePriorityBridge, value),
+          expectedReasonCode,
+        )
+        assertSafeResultInvalid(error, [firstValue, secondValue])
+        assert.equal(Object.isFrozen(error), true)
+      })
+    })
+  }
+  check('all-six coverage duplicates select direct meanings first', () => {
+    assertNoFetch(() => {
+      const value = createValidAiChartD1P1Result(coveragePriorityInput)
+      const duplicateValues: string[] = []
+      for (const field of [
+        'directMeaningsConsidered',
+        'majorStarsCovered',
+        'minorStarsCovered',
+        'mutagensCovered',
+        'maleficsCovered',
+        'noblesCovered',
+      ] as const) {
+        const firstValue = value.coverage[field][0]
+        assert.equal(value.coverage[field].length > 0, true)
+        assert.ok(firstValue)
+        duplicateValues.push(firstValue)
+        value.coverage[field].push(firstValue)
+      }
+      const error = assertResultInvalid(
+        () => parseResult(coveragePriorityBridge, value),
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+      )
+      assertSafeResultInvalid(error, duplicateValues)
+      assert.equal(Object.isFrozen(error), true)
+    })
   })
   check('source-bound parser matches formal parser top-level traversal count', () => {
     const formalValue = createValidAiChartD1P1Result(modelInput)
