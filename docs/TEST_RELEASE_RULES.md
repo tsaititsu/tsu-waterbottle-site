@@ -21,6 +21,46 @@ npm run build
 - 不可刪除測試來讓流程通過。
 - 不可關閉 TypeScript 或 Lint 規則來掩蓋問題。
 
+### Canonical offline tests
+
+Repository 的完整本機離線 unit／static suite 統一使用：
+
+```bash
+npm test
+```
+
+此入口只從 Git tracked files 發現允許目錄內的 TypeScript／TSX tests，並以
+Repository-relative POSIX path、UTF-8 byte order、duplicate 與 empty-suite
+fail-closed 規則逐檔循序執行。非 TypeScript contract 必須進入 runner 內的
+明確 offline allowlist；focused scripts 仍保留，但不會由 canonical runner
+再次呼叫而重複執行相同 TypeScript tests。
+
+`npm test` 不包含：
+
+- lint
+- typecheck
+- build
+- audit
+- Docker 或 PostgreSQL integration
+- Migration、fixed psql runner 或 deployment validation
+- Preview／Production smoke
+- OAuth、OpenAI、Supabase 或付款服務的 live request
+
+正式修改仍應分別執行：
+
+```bash
+npm test
+npm run lint
+npm run typecheck -- --incremental false
+npm run build
+```
+
+可使用下列唯讀模式檢查 deterministic execution manifest；它不會執行 tests：
+
+```bash
+node scripts/test/run-tests.mjs --list
+```
+
 ### AI 命盤 canonical tests
 
 AI 命盤 assertion tests 的唯一正式指令是：
