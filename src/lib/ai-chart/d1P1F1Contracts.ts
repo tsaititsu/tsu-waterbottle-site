@@ -157,6 +157,40 @@ export const AI_CHART_D1_P1_COVERAGE_FIELDS = Object.freeze([
   'omittedItems',
 ] as const)
 
+export const AI_CHART_D1_P1_COVERAGE_DUPLICATE_FIELDS = Object.freeze([
+  'directMeaningsConsidered',
+  'majorStarsCovered',
+  'minorStarsCovered',
+  'mutagensCovered',
+  'maleficsCovered',
+  'noblesCovered',
+] as const)
+
+export type AiChartD1P1CoverageDuplicateField =
+  (typeof AI_CHART_D1_P1_COVERAGE_DUPLICATE_FIELDS)[number]
+
+const AI_CHART_D1_P1_COVERAGE_DUPLICATE_FIELD_SET: ReadonlySet<unknown> =
+  new Set(AI_CHART_D1_P1_COVERAGE_DUPLICATE_FIELDS)
+
+export class AiChartD1P1CoverageDuplicateError extends AiChartD1ContractError {
+  declare readonly field: AiChartD1P1CoverageDuplicateField
+
+  constructor(field: unknown) {
+    super()
+    if (!AI_CHART_D1_P1_COVERAGE_DUPLICATE_FIELD_SET.has(field)) {
+      throw new AiChartD1ContractError()
+    }
+    this.name = 'AiChartD1P1CoverageDuplicateError'
+    Object.defineProperty(this, 'field', {
+      value: field,
+      enumerable: true,
+      writable: false,
+      configurable: false,
+    })
+    Object.freeze(this)
+  }
+}
+
 export const AI_CHART_D1_P1_RESULT_FIELDS = Object.freeze([
   'contractVersion',
   'task',
@@ -322,7 +356,30 @@ function parsePrimaryAxis(value: unknown): AiChartD1P1PrimaryAxis {
   })
 }
 
-function parseCoverage(value: unknown): AiChartD1P1Coverage {
+type ParsedP1Coverage = Readonly<{
+  value: AiChartD1P1Coverage
+  duplicateField: AiChartD1P1CoverageDuplicateField | null
+}>
+
+function parseCoverageStringArray(value: unknown): Readonly<{
+  value: readonly string[]
+  hasDuplicate: boolean
+}> {
+  if (!Array.isArray(value) || value.length > AI_CHART_D1_MAX_LIST_ITEMS) {
+    invalid()
+  }
+  const parsed = Object.freeze(
+    value.map((item) =>
+      parseAiChartD1Text(item, AI_CHART_D1_MAX_SHORT_TEXT_LENGTH),
+    ),
+  )
+  return Object.freeze({
+    value: parsed,
+    hasDuplicate: new Set(parsed).size !== parsed.length,
+  })
+}
+
+function parseCoverage(value: unknown): ParsedP1Coverage {
   const record = requireAiChartD1ExactObject(
     value,
     AI_CHART_D1_P1_COVERAGE_FIELDS,
@@ -349,25 +406,52 @@ function parseCoverage(value: unknown): AiChartD1P1Coverage {
   const omittedNames = omittedItems.map((item) => item.item)
   if (new Set(omittedNames).size !== omittedNames.length) invalid()
 
-  return Object.freeze({
-    directMeaningsConsidered: parseAiChartD1StringArray(
-      record.directMeaningsConsidered,
-    ),
-    majorStarsCovered: parseAiChartD1StringArray(record.majorStarsCovered),
-    minorStarsCovered: parseAiChartD1StringArray(record.minorStarsCovered),
-    mutagensCovered: parseAiChartD1StringArray(record.mutagensCovered),
-    maleficsCovered: parseAiChartD1StringArray(record.maleficsCovered),
-    noblesCovered: parseAiChartD1StringArray(record.noblesCovered),
-    oppositeProcessed: parseAiChartD1Boolean(record.oppositeProcessed),
-    hiddenCombinationProcessed: parseAiChartD1Boolean(
-      record.hiddenCombinationProcessed,
-    ),
-    trinesProcessed: parseAiChartD1Boolean(record.trinesProcessed),
+  const parsedArrays = Object.fromEntries(
+    AI_CHART_D1_P1_COVERAGE_DUPLICATE_FIELDS.map((field) => [
+      field,
+      parseCoverageStringArray(record[field]),
+    ]),
+  ) as Record<
+    AiChartD1P1CoverageDuplicateField,
+    ReturnType<typeof parseCoverageStringArray>
+  >
+  const duplicateField =
+    AI_CHART_D1_P1_COVERAGE_DUPLICATE_FIELDS.find(
+      (field) => parsedArrays[field].hasDuplicate,
+    ) ?? null
+  const oppositeProcessed = parseAiChartD1Boolean(record.oppositeProcessed)
+  const hiddenCombinationProcessed = parseAiChartD1Boolean(
+    record.hiddenCombinationProcessed,
+  )
+  const trinesProcessed = parseAiChartD1Boolean(record.trinesProcessed)
+
+  const coverage = Object.freeze({
+    directMeaningsConsidered: parsedArrays.directMeaningsConsidered.value,
+    majorStarsCovered: parsedArrays.majorStarsCovered.value,
+    minorStarsCovered: parsedArrays.minorStarsCovered.value,
+    mutagensCovered: parsedArrays.mutagensCovered.value,
+    maleficsCovered: parsedArrays.maleficsCovered.value,
+    noblesCovered: parsedArrays.noblesCovered.value,
+    oppositeProcessed,
+    hiddenCombinationProcessed,
+    trinesProcessed,
     omittedItems,
   })
+
+  return Object.freeze({ value: coverage, duplicateField })
 }
 
-function parseP1(value: unknown): AiChartD1P1Result {
+type ParsedP1Result =
+  | Readonly<{
+      value: AiChartD1P1Result
+      duplicateField: null
+    }>
+  | Readonly<{
+      value: null
+      duplicateField: AiChartD1P1CoverageDuplicateField
+    }>
+
+function parseP1(value: unknown): ParsedP1Result {
   assertAiChartD1SafeGraph(value)
   const record = requireAiChartD1ExactObject(
     value,
@@ -412,15 +496,28 @@ function parseP1(value: unknown): AiChartD1P1Result {
   const boundaryIds = boundaries.map((boundary) => boundary.boundaryId)
   if (new Set(boundaryIds).size !== boundaryIds.length) invalid()
 
-  return Object.freeze({
+  const callId = parseAiChartD1Id(record.callId)
+  const chartId = parseAiChartD1Id(record.chartId)
+  const palaceId = parseAiChartD1Id(record.palaceId)
+  const palace = parseAiChartD1Enum(record.palace, AI_CHART_D1_PALACE_NAMES)
+  const status = parseAiChartD1Enum(record.status, AI_CHART_D1_RESULT_STATUSES)
+  const primaryAxis = parsePrimaryAxis(record.primaryAxis)
+  const coverage = parseCoverage(record.coverage)
+  const warnings = parseAiChartD1StringArray(record.warnings)
+
+  if (coverage.duplicateField !== null) {
+    return Object.freeze({ value: null, duplicateField: coverage.duplicateField })
+  }
+
+  const parsed = Object.freeze({
     contractVersion: AI_CHART_D1_P1_F1_CONTRACT_VERSION,
     task: 'P1',
-    callId: parseAiChartD1Id(record.callId),
-    chartId: parseAiChartD1Id(record.chartId),
-    palaceId: parseAiChartD1Id(record.palaceId),
-    palace: parseAiChartD1Enum(record.palace, AI_CHART_D1_PALACE_NAMES),
-    status: parseAiChartD1Enum(record.status, AI_CHART_D1_RESULT_STATUSES),
-    primaryAxis: parsePrimaryAxis(record.primaryAxis),
+    callId,
+    chartId,
+    palaceId,
+    palace,
+    status,
+    primaryAxis,
     directCandidates: candidateCollections.directCandidates,
     oppositeInfluences: candidateCollections.oppositeInfluences,
     hiddenCombinationInfluences:
@@ -430,10 +527,11 @@ function parseP1(value: unknown): AiChartD1P1Result {
     tensions,
     strengths: candidateCollections.strengths,
     imbalancePossibilities: candidateCollections.imbalancePossibilities,
-    coverage: parseCoverage(record.coverage),
+    coverage: coverage.value,
     d2Boundaries: boundaries,
-    warnings: parseAiChartD1StringArray(record.warnings),
+    warnings,
   })
+  return Object.freeze({ value: parsed, duplicateField: null })
 }
 
 function parseF1Candidate(value: unknown): AiChartD1F1Candidate {
@@ -624,11 +722,16 @@ function parseF1(value: unknown): AiChartD1F1Result {
 }
 
 export function parseAiChartD1P1Result(value: unknown): AiChartD1P1Result {
+  let parsed: ParsedP1Result
   try {
-    return parseP1(value)
+    parsed = parseP1(value)
   } catch {
     invalid()
   }
+  if (parsed.duplicateField !== null) {
+    throw new AiChartD1P1CoverageDuplicateError(parsed.duplicateField)
+  }
+  return parsed.value
 }
 
 export function parseAiChartD1F1Result(value: unknown): AiChartD1F1Result {
