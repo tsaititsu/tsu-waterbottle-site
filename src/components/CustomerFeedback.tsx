@@ -1,51 +1,262 @@
+'use client'
+
+import { ChevronLeft, ChevronRight, X } from 'lucide-react'
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FocusEvent,
+} from 'react'
+import { createPortal } from 'react-dom'
 import { TrackedPublicCtaLink } from './analytics/TrackedPublicCtaLink'
+import { HOME_FEEDBACKS, type HomeFeedback } from './homeFeedbacks'
 
-const featuredFeedback = {
-  service: '論命預約',
-  label: '精選回饋',
-  author: '匿名會員',
-  paragraphs: [
-    '我原本有一位十幾年的紫微論命老師，所以其實不太再找其他人論命。後來看到水瓶先生的文章，聊天之後才知道原來也是大耕老師的學生，幾次交流後決定請水瓶先生排命盤。',
-    '大致上都符合，但讓我最有感的是，水瓶先生不是叫我認命，而是讓我知道可以怎麼微調，讓自己的人生慢慢掌握在自己手裡。雖然不可能全部都控制，但那種為自己而活的感受是很好的。',
-    '最後讓我驚訝的是，水瓶先生會寄淨身符、財運符、人緣符給客戶，是到雲林武德宮過完爐後寄來的。這些行為讓我感受到希望，而且符的期限到了，還會再重新寄給我，我真的覺得這份幫助已經超過解盤費用了。',
-    '如果你對自己的人生有興趣，或對人生感到迷惑，真的可以給水瓶先生解盤。可以認識自己，是一件很幸福的事情。'
-  ]
-}
-
-const feedbackItems = [
-  {
-    service: '紫微命盤分析',
-    message: '才 100 元，把我的個性分析講到我都懷疑 AI 是不是我媽了。',
-    author: '匿名會員'
-  },
-  {
-    service: '紫微命盤分析',
-    message: '看完後比較知道自己個性上容易卡住的地方，也比較知道下一步怎麼調整。',
-    author: '匿名會員'
-  },
-  {
-    service: '紫微牌卡占卜',
-    message: '原本只是想問一個感情問題，解讀卻把我心裡真正糾結的點講出來了。',
-    author: '匿名會員'
-  },
-  {
-    service: '紫微牌卡占卜',
-    message: '占卜一次 50 元，講得比外面 15 分鐘 300 元的還要詳細。',
-    author: '匿名會員'
-  },
-  {
-    service: '論命預約',
-    message: '老師完全站在我這邊，會提醒我該注意什麼，也會提醒我哪些決定做了之後不要讓自己後悔。',
-    author: '匿名會員'
-  },
-  {
-    service: '論命預約',
-    message: '以前會有靈異體質，老師竟然也看得出來，論命後還有逐字稿跟重點整理也太貼心了。',
-    author: '匿名會員'
-  }
-]
+const AUTOPLAY_INTERVAL_MS = 4500
+const MANUAL_RESUME_DELAY_MS = 6500
+const CAROUSEL_COPIES = [0, 1, 2] as const
+const focusableSelector = [
+  'button:not([disabled])',
+  'a[href]',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
 
 export function CustomerFeedback() {
+  const carouselRef = useRef<HTMLDivElement | null>(null)
+  const carouselRegionRef = useRef<HTMLDivElement | null>(null)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null)
+  const previousFocusRef = useRef<HTMLElement | null>(null)
+  const manualPauseUntilRef = useRef(0)
+  const dialogTitleId = useId()
+  const dialogDescriptionId = useId()
+  const [selectedFeedback, setSelectedFeedback] = useState<HomeFeedback | null>(null)
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
+  const [isPointerPaused, setIsPointerPaused] = useState(false)
+  const [isFocusPaused, setIsFocusPaused] = useState(false)
+  const [manualInteractionVersion, setManualInteractionVersion] = useState(0)
+  const isPaused = isPointerPaused || isFocusPaused
+
+  const getCarouselAnchor = useCallback((copy: number, index = 0) => {
+    return carouselRef.current?.querySelector<HTMLElement>(
+      `[data-carousel-copy="${copy}"][data-feedback-index="${index}"]`,
+    )
+  }, [])
+
+  const scrollByCard = useCallback(
+    (direction: -1 | 1, behavior: ScrollBehavior) => {
+      const viewport = carouselRef.current
+      const firstCard = getCarouselAnchor(1)
+      const secondCard = getCarouselAnchor(1, 1)
+      if (!viewport || !firstCard) return
+
+      const cardStep = secondCard
+        ? secondCard.offsetLeft - firstCard.offsetLeft
+        : firstCard.offsetWidth
+      viewport.scrollBy({ left: direction * cardStep, behavior })
+    },
+    [getCarouselAnchor],
+  )
+
+  const pauseAfterManualInteraction = useCallback(() => {
+    manualPauseUntilRef.current = Date.now() + MANUAL_RESUME_DELAY_MS
+    setManualInteractionVersion((version) => version + 1)
+  }, [])
+
+  const handleManualScroll = useCallback(
+    (direction: -1 | 1) => {
+      pauseAfterManualInteraction()
+      scrollByCard(direction, prefersReducedMotion ? 'auto' : 'smooth')
+    },
+    [pauseAfterManualInteraction, prefersReducedMotion, scrollByCard],
+  )
+
+  const handleInfiniteScroll = useCallback(() => {
+    const viewport = carouselRef.current
+    const firstCopyStart = getCarouselAnchor(0)?.offsetLeft
+    const middleCopyStart = getCarouselAnchor(1)?.offsetLeft
+    const lastCopyStart = getCarouselAnchor(2)?.offsetLeft
+    if (
+      !viewport ||
+      firstCopyStart === undefined ||
+      middleCopyStart === undefined ||
+      lastCopyStart === undefined
+    ) {
+      return
+    }
+
+    const copyWidth = middleCopyStart - firstCopyStart
+    if (viewport.scrollLeft <= firstCopyStart + 1) {
+      viewport.scrollLeft += copyWidth
+    } else if (viewport.scrollLeft >= lastCopyStart - 1) {
+      viewport.scrollLeft -= copyWidth
+    }
+  }, [getCarouselAnchor])
+
+  const closeDialog = useCallback(() => {
+    setSelectedFeedback(null)
+  }, [])
+
+  const openDialog = useCallback(
+    (feedback: HomeFeedback, trigger: HTMLButtonElement) => {
+      previousFocusRef.current = trigger
+      setSelectedFeedback(feedback)
+      pauseAfterManualInteraction()
+    },
+    [pauseAfterManualInteraction],
+  )
+
+  useEffect(() => {
+    const middleCopyStart = getCarouselAnchor(1)?.offsetLeft
+    if (middleCopyStart === undefined || !carouselRef.current) return
+    carouselRef.current.scrollLeft = middleCopyStart
+  }, [getCarouselAnchor])
+
+  useEffect(() => {
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const updateMotionPreference = () => setPrefersReducedMotion(motionQuery.matches)
+    updateMotionPreference()
+    motionQuery.addEventListener('change', updateMotionPreference)
+    return () => motionQuery.removeEventListener('change', updateMotionPreference)
+  }, [])
+
+  useEffect(() => {
+    if (prefersReducedMotion || isPaused) return
+
+    let timeoutId = 0
+    const scheduleNextScroll = () => {
+      const resumeDelay = Math.max(0, manualPauseUntilRef.current - Date.now())
+      timeoutId = window.setTimeout(
+        () => {
+          scrollByCard(1, 'smooth')
+          scheduleNextScroll()
+        },
+        Math.max(AUTOPLAY_INTERVAL_MS, resumeDelay),
+      )
+    }
+
+    scheduleNextScroll()
+    return () => window.clearTimeout(timeoutId)
+  }, [
+    isPaused,
+    manualInteractionVersion,
+    prefersReducedMotion,
+    scrollByCard,
+  ])
+
+  useEffect(() => {
+    if (!selectedFeedback) return
+
+    const previousBodyOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const focusFrame = window.requestAnimationFrame(() => closeButtonRef.current?.focus())
+
+    const handleDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeDialog()
+        return
+      }
+
+      if (event.key !== 'Tab') return
+      const focusableElements = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? [],
+      ).filter((element) => element.offsetParent !== null)
+
+      if (focusableElements.length === 0) {
+        event.preventDefault()
+        dialogRef.current?.focus()
+        return
+      }
+
+      const first = focusableElements[0]
+      const last = focusableElements[focusableElements.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', handleDocumentKeyDown)
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      document.removeEventListener('keydown', handleDocumentKeyDown)
+      document.body.style.overflow = previousBodyOverflow
+      previousFocusRef.current?.focus()
+    }
+  }, [closeDialog, selectedFeedback])
+
+  const handleCarouselBlur = (event: FocusEvent<HTMLDivElement>) => {
+    if (!carouselRegionRef.current?.contains(event.relatedTarget as Node | null)) {
+      setIsFocusPaused(false)
+    }
+  }
+
+  const dialog =
+    selectedFeedback && typeof document !== 'undefined'
+      ? createPortal(
+          <div
+            className="fixed inset-0 z-[90] flex items-end justify-center overflow-y-auto bg-textDark/50 px-4 py-4 backdrop-blur-sm sm:items-center sm:py-8"
+            data-feedback-dialog-backdrop
+            onClick={(event) => {
+              if (event.target === event.currentTarget) closeDialog()
+            }}
+          >
+            <div
+              ref={dialogRef}
+              aria-describedby={dialogDescriptionId}
+              aria-labelledby={dialogTitleId}
+              aria-modal="true"
+              className="w-full max-w-2xl overflow-y-auto overscroll-contain rounded-2xl border border-lightGold bg-white p-5 shadow-2xl sm:p-7"
+              data-feedback-dialog
+              role="dialog"
+              style={{
+                maxHeight: 'min(88dvh, 760px)',
+                paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom, 0px))',
+              }}
+              tabIndex={-1}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <span className="inline-flex rounded-full bg-lightGold px-3 py-1 text-xs font-semibold text-darkGold">
+                    {selectedFeedback.category}
+                  </span>
+                  <h3
+                    className="mt-4 font-serifTC text-2xl font-semibold text-deepPurple sm:text-3xl"
+                    id={dialogTitleId}
+                  >
+                    完整客戶回饋
+                  </h3>
+                </div>
+                <button
+                  ref={closeButtonRef}
+                  aria-label="關閉完整客戶回饋"
+                  className="focus-ring grid size-11 shrink-0 place-items-center rounded-lg text-textMuted transition hover:bg-softPurple"
+                  onClick={closeDialog}
+                  type="button"
+                >
+                  <X aria-hidden="true" size={22} />
+                </button>
+              </div>
+
+              <p
+                className="mt-6 whitespace-pre-line break-words text-base leading-8 text-textDark sm:text-lg sm:leading-9"
+                id={dialogDescriptionId}
+              >
+                「{selectedFeedback.fullText}」
+              </p>
+              <p className="mt-6 border-t border-borderSoft pt-4 text-sm font-semibold text-textMuted">
+                {selectedFeedback.author}
+              </p>
+            </div>
+          </div>,
+          document.body,
+        )
+      : null
+
   return (
     <section className="bg-bgGray py-12 md:py-20">
       <div className="section-shell">
@@ -57,43 +268,94 @@ export function CustomerFeedback() {
           </p>
         </div>
 
-        <article
-          className="mt-10 min-w-0 rounded-[28px] border border-lightGold bg-white p-6 shadow-soft md:p-8"
-          data-featured-feedback
+        <div
+          ref={carouselRegionRef}
+          aria-label="客戶回饋輪播"
+          aria-roledescription="carousel"
+          className="relative mt-8 min-w-0"
+          data-home-feedback-carousel
+          onBlurCapture={handleCarouselBlur}
+          onFocusCapture={() => setIsFocusPaused(true)}
+          onMouseEnter={() => setIsPointerPaused(true)}
+          onMouseLeave={() => setIsPointerPaused(false)}
+          onPointerDown={pauseAfterManualInteraction}
+          role="region"
         >
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-wrap gap-2">
-              <span className="w-fit rounded-full bg-gold px-3 py-1 text-xs font-semibold text-white">
-                {featuredFeedback.label}
-              </span>
-              <span className="w-fit rounded-full bg-lightGold px-3 py-1 text-xs font-semibold text-darkGold">
-                {featuredFeedback.service}
-              </span>
+          <div className="mb-4 flex items-center justify-between gap-4">
+            <p className="text-sm font-semibold text-textMuted sm:hidden">
+              左右滑動查看更多
+            </p>
+            <div className="ml-auto flex gap-2">
+              <button
+                aria-label="上一則客戶回饋"
+                className="focus-ring grid size-11 place-items-center rounded-full border border-borderSoft bg-white text-deepPurple shadow-soft transition hover:border-lightGold hover:bg-softPurple"
+                onClick={() => handleManualScroll(-1)}
+                type="button"
+              >
+                <ChevronLeft aria-hidden="true" size={22} />
+              </button>
+              <button
+                aria-label="下一則客戶回饋"
+                className="focus-ring grid size-11 place-items-center rounded-full border border-borderSoft bg-white text-deepPurple shadow-soft transition hover:border-lightGold hover:bg-softPurple"
+                onClick={() => handleManualScroll(1)}
+                type="button"
+              >
+                <ChevronRight aria-hidden="true" size={22} />
+              </button>
             </div>
-            <p className="text-sm font-semibold text-textMuted">{featuredFeedback.author}</p>
           </div>
 
-          <div className="mt-6 grid gap-5 text-lg leading-8 text-textDark md:text-xl md:leading-9">
-            {featuredFeedback.paragraphs.map((paragraph) => (
-              <p key={paragraph}>「{paragraph}」</p>
-            ))}
-          </div>
-        </article>
-
-        <div className="mt-10 grid items-stretch gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-5">
-          {feedbackItems.map((item) => (
-            <article
-              className="flex min-w-0 flex-col rounded-2xl border border-borderSoft bg-white p-6 shadow-soft"
-              data-feedback-card
-              key={`${item.service}-${item.message}`}
+          <div className="relative">
+            <div
+              ref={carouselRef}
+              className="grid auto-cols-[86%] grid-flow-col items-stretch gap-4 overflow-x-auto overscroll-x-contain snap-x snap-mandatory pb-2 [scrollbar-width:none] sm:auto-cols-[calc((100%_-_1rem)/2)] lg:auto-cols-[calc((100%_-_2.5rem)/3)] lg:gap-5 [&::-webkit-scrollbar]:hidden"
+              data-feedback-carousel-viewport
+              onScroll={handleInfiniteScroll}
             >
-              <span className="w-fit rounded-full bg-lightGold px-3 py-1 text-xs font-semibold text-darkGold">
-                {item.service}
-              </span>
-              <p className="mt-5 grow text-lg leading-8 text-textDark">「{item.message}」</p>
-              <p className="mt-6 text-sm font-semibold text-textMuted">{item.author}</p>
-            </article>
-          ))}
+              {CAROUSEL_COPIES.flatMap((copy) =>
+                HOME_FEEDBACKS.map((feedback, index) => (
+                  <article
+                    aria-hidden={copy === 1 ? undefined : true}
+                    className="flex min-h-[260px] min-w-0 snap-start flex-col rounded-2xl border border-borderSoft bg-white p-5 shadow-soft sm:p-6"
+                    data-carousel-copy={copy}
+                    data-feedback-card
+                    data-feedback-id={feedback.id}
+                    data-feedback-index={index}
+                    key={`${copy}-${feedback.id}`}
+                  >
+                    <span className="w-fit rounded-full bg-lightGold px-3 py-1 text-xs font-semibold text-darkGold">
+                      {feedback.category}
+                    </span>
+                    <p
+                      className="mt-5 line-clamp-4 grow break-words text-base leading-7 text-textDark sm:text-lg sm:leading-8"
+                      data-feedback-highlight
+                    >
+                      「{feedback.highlight}」
+                    </p>
+                    <p className="mt-5 text-sm font-semibold text-textMuted">
+                      {feedback.author}
+                    </p>
+                    <button
+                      className="focus-ring mt-4 inline-flex min-h-11 w-fit items-center rounded-lg font-semibold text-deepPurple underline decoration-lightGold decoration-2 underline-offset-4 transition hover:text-purpleMain"
+                      onClick={(event) => openDialog(feedback, event.currentTarget)}
+                      tabIndex={copy === 1 ? 0 : -1}
+                      type="button"
+                    >
+                      查看完整回饋
+                    </button>
+                  </article>
+                )),
+              )}
+            </div>
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 left-0 w-2 bg-gradient-to-r from-bgGray to-transparent"
+            />
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 right-0 w-2 bg-gradient-to-l from-bgGray to-transparent"
+            />
+          </div>
         </div>
 
         <div className="mt-10 grid gap-4 rounded-2xl border border-borderSoft bg-white p-6 text-center shadow-soft md:grid-cols-[1fr_auto] md:items-center md:text-left">
@@ -120,6 +382,7 @@ export function CustomerFeedback() {
           </div>
         </div>
       </div>
+      {dialog}
     </section>
   )
 }
