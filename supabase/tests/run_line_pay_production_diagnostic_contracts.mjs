@@ -336,6 +336,142 @@ function runDiagnostic(source) {
   return parseAndValidateDiagnosticOutput(`${raw}\n`)
 }
 
+function attemptDiagnostic(source, {
+  database = 'postgres',
+  role,
+} = {}) {
+  const pgOptions = role
+    ? `${fixedPgOptions} -c role=${role}`
+    : fixedPgOptions
+  return spawnSync(
+    'docker',
+    [
+      'exec',
+      '-i',
+      '--env',
+      `PGOPTIONS=${pgOptions}`,
+      containerName,
+      'psql',
+      '-X',
+      '--set=ON_ERROR_STOP=1',
+      '--quiet',
+      '--no-align',
+      '--tuples-only',
+      '-U',
+      'postgres',
+      '-d',
+      database,
+    ],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      input: source,
+    },
+  )
+}
+
+function parseSuccessfulDiagnosticAttempt(result) {
+  assert.equal(result.status, 0)
+  const rows = result.stdout.split(/\r?\n/u).filter(Boolean)
+  assert.equal(rows.length, 1)
+  assert.doesNotMatch(
+    result.stdout,
+    /(?:[0-9a-f]{8}-){1,4}[0-9a-f-]+|\b[0-9a-f]{64}\b|@/iu,
+  )
+  return parseAndValidateDiagnosticOutput(`${rows[0]}\n`)
+}
+
+function assertSafeShapeMismatch(result) {
+  assert.equal(result.database_identity_match, true)
+  assert.equal(result.line_pay_unapplied, false)
+  assert.equal(result.migration_history_absent, true)
+  assert.equal(result.fence_match, false)
+  for (const item of result.datasets) {
+    assert.equal(item.actual_rows, 0)
+    assert.equal(item.rows_match, false)
+    assert.equal(item.pk_digest_match, false)
+    assert.equal(item.content_digest_match, false)
+  }
+  assert.equal(result.datasets[0].actual_pending_review, 0)
+  assert.equal(result.datasets[0].pending_review_match, false)
+}
+
+function runRobustnessScenarios(source, baselineResult) {
+  const results = []
+
+  psql(
+    'alter table public.payments rename to payments_missing;',
+    'temporarily hide payments relation',
+  )
+  assertSafeShapeMismatch(
+    parseSuccessfulDiagnosticAttempt(attemptDiagnostic(source)),
+  )
+  psql(
+    'alter table public.payments_missing rename to payments;',
+    'restore payments relation',
+  )
+  results.push('relation_missing')
+
+  psql(
+    'alter table public.payments rename column updated_at to updated_at_missing;',
+    'temporarily hide payments column',
+  )
+  assertSafeShapeMismatch(
+    parseSuccessfulDiagnosticAttempt(attemptDiagnostic(source)),
+  )
+  psql(
+    'alter table public.payments rename column updated_at_missing to updated_at;',
+    'restore payments column',
+  )
+  results.push('column_missing')
+
+  psql(
+    'alter table supabase_migrations.schema_migrations rename to schema_migrations_missing;',
+    'temporarily hide migration history',
+  )
+  const noHistory = parseSuccessfulDiagnosticAttempt(
+    attemptDiagnostic(source),
+  )
+  assert.deepEqual(noHistory, baselineResult)
+  psql(
+    'alter table supabase_migrations.schema_migrations_missing rename to schema_migrations;',
+    'restore migration history',
+  )
+  results.push('migration_history_missing')
+
+  psql(
+    `
+      create role diagnostic_reader nologin;
+      grant usage on schema public, supabase_migrations to diagnostic_reader;
+      grant select on supabase_migrations.schema_migrations
+        to diagnostic_reader;
+    `,
+    'create restricted diagnostic reader',
+  )
+  const permissionDenied = attemptDiagnostic(source, {
+    role: 'diagnostic_reader',
+  })
+  assert.equal(permissionDenied.status, 3)
+  results.push('permission_denied')
+
+  const syntaxMutation = source.replace(
+    'expected_relations(schema_name, relation_name) as (',
+    'expected_relations(schema_name, relation_name) syntax_error (',
+  )
+  assert.notEqual(syntaxMutation, source)
+  const syntaxFailure = attemptDiagnostic(syntaxMutation)
+  assert.equal(syntaxFailure.status, 3)
+  results.push('sql_syntax_mutation')
+
+  const connectionRejected = attemptDiagnostic('select 1;', {
+    database: 'diagnostic_database_does_not_exist',
+  })
+  assert.equal(connectionRejected.status, 2)
+  results.push('connection_rejected')
+
+  return results
+}
+
 function assertOnlyDatasetChanged(baseline, drift, datasetName) {
   assert.equal(drift.status, 'DIAGNOSTIC_COMPLETED')
   for (const key of [
@@ -711,13 +847,21 @@ async function main() {
 
   const scenarios = runScenarios(source, baselineResult)
   assert.equal(scenarios.length, 8)
+  const robustnessScenarios = runRobustnessScenarios(
+    source,
+    baselineResult,
+  )
+  assert.equal(robustnessScenarios.length, 6)
   assert.deepEqual(readFingerprints(), baselineFingerprints)
-  return scenarios.length
+  return {
+    driftScenarios: scenarios.length,
+    robustnessScenarios: robustnessScenarios.length,
+  }
 }
 
-let scenarioCount
+let scenarioCounts
 try {
-  scenarioCount = await main()
+  scenarioCounts = await main()
 } finally {
   cleanup()
 }
@@ -725,5 +869,7 @@ assertNoTaskResources()
 console.log(
   'LINE_PAY_PRODUCTION_DIAGNOSTIC_CONTRACTS_PASS ' +
     'postgres=17 baseline=3/18/5 pending_review=3 ' +
-    `drift_scenarios=${scenarioCount} read_only=PASS cleanup=PASS`,
+    `drift_scenarios=${scenarioCounts.driftScenarios} ` +
+    `robustness_scenarios=${scenarioCounts.robustnessScenarios} ` +
+    'read_only=PASS cleanup=PASS',
 )

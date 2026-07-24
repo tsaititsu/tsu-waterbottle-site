@@ -1,5 +1,68 @@
 BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY;
 
+select
+  exists (
+    select 1
+    from pg_catalog.pg_class as relation
+    join pg_catalog.pg_namespace as namespace
+      on namespace.oid = relation.relnamespace
+    where namespace.nspname = 'supabase_migrations'
+      and relation.relname = 'schema_migrations'
+      and relation.relkind in ('r', 'p')
+  ) as migration_history_ready,
+  (
+    (
+      select pg_catalog.count(*)
+      from (
+        values
+          ('public', 'bank_transfer_submissions'),
+          ('public', 'payments'),
+          ('public', 'product_orders')
+      ) as expected(schema_name, relation_name)
+      join pg_catalog.pg_namespace as namespace
+        on namespace.nspname = expected.schema_name
+      join pg_catalog.pg_class as relation
+        on relation.relnamespace = namespace.oid
+       and relation.relname = expected.relation_name
+       and relation.relkind in ('r', 'p')
+    ) = 3
+    and (
+      select pg_catalog.count(*)
+      from (
+        values
+          ('bank_transfer_submissions', 'id'),
+          ('bank_transfer_submissions', 'status'),
+          ('payments', 'id'),
+          ('payments', 'updated_at'),
+          ('product_orders', 'id')
+      ) as expected(relation_name, column_name)
+      join pg_catalog.pg_namespace as namespace
+        on namespace.nspname = 'public'
+      join pg_catalog.pg_class as relation
+        on relation.relnamespace = namespace.oid
+       and relation.relname = expected.relation_name
+       and relation.relkind in ('r', 'p')
+      join pg_catalog.pg_attribute as attribute
+        on attribute.attrelid = relation.oid
+       and attribute.attname = expected.column_name
+       and attribute.attnum > 0
+       and not attribute.attisdropped
+    ) = 5
+  ) as diagnostic_shape_ready
+\gset
+
+\if :migration_history_ready
+select not exists (
+  select 1
+  from supabase_migrations.schema_migrations
+  where version = '20260719033404'
+) as migration_history_absent
+\gset
+\else
+\set migration_history_absent true
+\endif
+
+\if :diagnostic_shape_ready
 with
 expected_relations(schema_name, relation_name) as (
   values
@@ -386,11 +449,7 @@ select pg_catalog.jsonb_build_object(
   'line_pay_unapplied',
   (select value from line_pay_inventory),
   'migration_history_absent',
-  not exists (
-    select 1
-    from supabase_migrations.schema_migrations
-    where version = '20260719033404'
-  ),
+  :'migration_history_absent'::boolean,
   'fence_match',
   (select value from fence_match),
   'datasets',
@@ -454,5 +513,75 @@ select pg_catalog.jsonb_build_object(
 from bank_transfer_fingerprint
 cross join payments_fingerprint
 cross join product_orders_fingerprint;
+
+\else
+select pg_catalog.jsonb_build_object(
+  'status',
+  'DIAGNOSTIC_COMPLETED',
+  'database_identity_match',
+  (
+    pg_catalog.current_database() = 'postgres'
+    and pg_catalog.current_setting('server_version_num')::integer / 10000 = 17
+    and not pg_catalog.pg_is_in_recovery()
+  ),
+  'line_pay_unapplied',
+  false,
+  'migration_history_absent',
+  :'migration_history_absent'::boolean,
+  'fence_match',
+  false,
+  'datasets',
+  pg_catalog.jsonb_build_array(
+    pg_catalog.jsonb_build_object(
+      'dataset',
+      'bank_transfer',
+      'expected_rows',
+      3,
+      'actual_rows',
+      0,
+      'rows_match',
+      false,
+      'pk_digest_match',
+      false,
+      'content_digest_match',
+      false,
+      'expected_pending_review',
+      3,
+      'actual_pending_review',
+      0,
+      'pending_review_match',
+      false
+    ),
+    pg_catalog.jsonb_build_object(
+      'dataset',
+      'payments',
+      'expected_rows',
+      18,
+      'actual_rows',
+      0,
+      'rows_match',
+      false,
+      'pk_digest_match',
+      false,
+      'content_digest_match',
+      false
+    ),
+    pg_catalog.jsonb_build_object(
+      'dataset',
+      'product_orders',
+      'expected_rows',
+      5,
+      'actual_rows',
+      0,
+      'rows_match',
+      false,
+      'pk_digest_match',
+      false,
+      'content_digest_match',
+      false
+    )
+  )
+) as diagnostic_result;
+\endif
 
 ROLLBACK;

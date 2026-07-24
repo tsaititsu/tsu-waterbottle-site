@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { PassThrough } from 'node:stream'
 import test, { before } from 'node:test'
 import { pathToFileURL } from 'node:url'
 
@@ -71,6 +73,153 @@ const safeOutput = Object.freeze({
     }),
   ]),
 })
+
+const sensitiveFixture = Object.freeze([
+  'postgresql://postgres:fake-password@db.example.invalid:5432/postgres',
+  'fake-password',
+  '21000000-0000-4000-8000-000000000001',
+  'person@example.invalid',
+  'a'.repeat(40),
+  'b'.repeat(64),
+  'Bearer fake-token',
+])
+
+const productionEnvironment = Object.freeze({
+  SUPABASE_PRODUCTION_CHANNEL_READY: 'true',
+  SUPABASE_PRODUCTION_DB_URL:
+    'postgresql://postgres:synthetic@db.ndbqoznvobmpkgxkiezz.supabase.co:5432/postgres?sslmode=require',
+  SUPABASE_PROJECT_ID: 'ndbqoznvobmpkgxkiezz',
+  RUNNER_TEMP: '/runner-temp',
+  PATH: '/usr/bin:/bin',
+})
+
+function createFilesystem({
+  credentialMode = 0o600,
+  failCreate = false,
+  failCleanup = false,
+} = {}) {
+  return {
+    async stat(path: string) {
+      if (path.endsWith('/pgpass')) {
+        return { mode: credentialMode }
+      }
+      return { isDirectory: () => true }
+    },
+    async mkdtemp(prefix: string) {
+      if (failCreate) throw new Error('synthetic create failure')
+      return `${prefix}fixture`
+    },
+    async writeFile() {},
+    async unlink() {
+      if (failCleanup) throw new Error('synthetic cleanup failure')
+    },
+    async rmdir() {},
+  }
+}
+
+function createChild({
+  code = 0,
+  signal = null,
+  stdout = sensitiveFixture.join('\n'),
+  stderr = sensitiveFixture.join('\n'),
+  emitError = false,
+  closeOnlyAfterKill = false,
+} = {}) {
+  const child: any = new EventEmitter()
+  child.stdout = new PassThrough()
+  child.stderr = new PassThrough()
+  let closed = false
+  const close = (nextCode = code, nextSignal = signal) => {
+    if (closed) return
+    closed = true
+    child.stdout.end()
+    child.stderr.end()
+    child.emit('close', nextCode, nextSignal)
+  }
+  child.kill = () => {
+    queueMicrotask(() => close(null, 'SIGTERM'))
+    return true
+  }
+  queueMicrotask(() => {
+    if (emitError) {
+      child.emit('error', new Error('synthetic spawn failure'))
+      return
+    }
+    if (stdout) child.stdout.write(stdout)
+    if (stderr) child.stderr.write(stderr)
+    if (!closeOnlyAfterKill) close()
+  })
+  return child
+}
+
+function createSpawnSequence(
+  steps: Array<
+    | { throw: true }
+    | Parameters<typeof createChild>[0]
+  >,
+) {
+  let executions = 0
+  const spawnImplementation = () => {
+    const step = steps[executions]
+    executions += 1
+    if (!step) throw new Error('unexpected extra process')
+    if ('throw' in step && step.throw) {
+      throw new Error('synthetic spawn failure')
+    }
+    return createChild(step)
+  }
+  return {
+    spawnImplementation,
+    get executions() {
+      return executions
+    },
+  }
+}
+
+async function captureFailure({
+  filesystem = createFilesystem(),
+  processObject = process,
+  steps,
+}: {
+  filesystem?: any
+  processObject?: any
+  steps: Array<{ throw: true } | Parameters<typeof createChild>[0]>
+}) {
+  const sequence = createSpawnSequence(steps)
+  let caught: unknown
+  try {
+    await runner.runDiagnostic({
+      environment: productionEnvironment,
+      filesystem,
+      processObject,
+      spawnImplementation: sequence.spawnImplementation,
+    })
+  } catch (error) {
+    caught = error
+  }
+  assert.ok(caught)
+  const attestation = runner.toSafeFailureAttestation(caught)
+  assert.equal(Object.isFrozen(attestation), true)
+  assert.deepEqual(
+    Object.keys(attestation).sort(),
+    [
+      'status',
+      'phase',
+      'failure_code',
+      'docker_pull_completed',
+      'container_started',
+      'database_connection',
+      'sql_completed',
+      'output_validated',
+      'credential_cleanup_completed',
+    ].sort(),
+  )
+  const serialized = JSON.stringify(attestation)
+  for (const sensitive of sensitiveFixture) {
+    assert.equal(serialized.includes(sensitive), false)
+  }
+  return { attestation, executions: sequence.executions }
+}
 
 test('fixed source and runtime identities are exact', () => {
   assert.equal(validator.EXPECTED_REPOSITORY, 'tsaititsu/tsu-waterbottle-site')
@@ -267,6 +416,9 @@ test('SQL mutations are caught before any database session', () => {
       "'pk_digest_match'",
       "'primary_key', payment_fingerprint.pk_digest, 'pk_digest_match'",
     ),
+    sql.replace('\\gset', '\\include /tmp/arbitrary.sql'),
+    sql.replace('\\gset', '\\! arbitrary-command'),
+    sql.replace('\\if :diagnostic_shape_ready', ''),
   ]
   for (const mutation of mutations) {
     assert.throws(
@@ -301,6 +453,23 @@ test('runner source mutations cannot weaken image, shell, retry, fallback, sessi
       'const secondDatabaseSession = true\\nconst dockerRunArgs = buildDockerRunArgs(',
     ),
     source.replace('await cleanupCredentialsOnce()', 'void credentials'),
+    source.replace(
+      'execution.state = DIAGNOSTIC_STATES.IMAGE_PULL_STARTED',
+      'void execution.state',
+    ),
+    source.replace(
+      'execution.state = DIAGNOSTIC_STATES.PSQL_COMPLETED',
+      'void execution.state',
+    ),
+    source.replace(
+      'JSON.stringify(toSafeFailureAttestation(error))',
+      'String(error)',
+    ),
+    source.replace(
+      'sanitizedResult = parseAndValidateDiagnosticOutput(result.stdout)',
+      'console.error(result.stderr)\\n' +
+        'sanitizedResult = parseAndValidateDiagnosticOutput(result.stdout)',
+    ),
   ]
   for (const mutation of mutations) {
     assert.throws(
@@ -308,6 +477,24 @@ test('runner source mutations cannot weaken image, shell, retry, fallback, sessi
       /DIAGNOSTIC_SQL_INVALID/,
     )
   }
+})
+
+test('runner exposes the exact monotonic execution state machine', () => {
+  assert.deepEqual(runner.DIAGNOSTIC_STATES, {
+    SOURCE_VALIDATED: 'SOURCE_VALIDATED',
+    CREDENTIAL_CREATED: 'CREDENTIAL_CREATED',
+    IMAGE_PULL_STARTED: 'IMAGE_PULL_STARTED',
+    IMAGE_PULL_COMPLETED: 'IMAGE_PULL_COMPLETED',
+    CONTAINER_STARTED: 'CONTAINER_STARTED',
+    PSQL_COMPLETED: 'PSQL_COMPLETED',
+    OUTPUT_VALIDATED: 'OUTPUT_VALIDATED',
+    CREDENTIAL_CLEANED: 'CREDENTIAL_CLEANED',
+  })
+  assert.deepEqual(runner.DATABASE_CONNECTION_STATES, {
+    CONFIRMED: 'CONFIRMED',
+    NOT_ESTABLISHED: 'NOT_ESTABLISHED',
+    UNKNOWN: 'UNKNOWN',
+  })
 })
 
 test('validator source mutation cannot remove the output allowlist', () => {
@@ -326,12 +513,260 @@ test('validator source mutation cannot remove the output allowlist', () => {
   )
 })
 
-test('safe failure output is restricted to the approved code list', () => {
+test('safe failure code list uses the execution observability taxonomy', () => {
+  assert.deepEqual(
+    [...validator.SAFE_FAILURE_CODES],
+    [
+      'SOURCE_CONTEXT_INVALID',
+      'INVALID_NODE_VERSION',
+      'POSTGRES_IMAGE_MISMATCH',
+      'PRODUCTION_CHANNEL_NOT_READY',
+      'DATABASE_TARGET_MISMATCH',
+      'DATABASE_URL_INVALID',
+      'DIAGNOSTIC_SQL_INVALID',
+      'DIAGNOSTIC_DOCKER_IMAGE_PULL_FAILED',
+      'DIAGNOSTIC_TEMP_CREDENTIAL_CREATE_FAILED',
+      'DIAGNOSTIC_CONTAINER_START_FAILED',
+      'DIAGNOSTIC_CONTAINER_EXEC_FAILED',
+      'DIAGNOSTIC_DB_CONNECT_FAILED',
+      'DIAGNOSTIC_SQL_EXECUTION_FAILED',
+      'DIAGNOSTIC_OUTPUT_INVALID',
+      'DIAGNOSTIC_CAPTURE_LIMIT_EXCEEDED',
+      'PROCESS_INTERRUPTED',
+      'TEMP_CREDENTIAL_CLEANUP_FAILED',
+    ],
+  )
   for (const code of validator.SAFE_FAILURE_CODES) {
     assert.equal(validator.safeErrorCode(new Error(code)), code)
   }
   assert.equal(
     validator.safeErrorCode(new Error('sensitive internal details')),
-    'DIAGNOSTIC_PSQL_FAILED',
+    'DIAGNOSTIC_CONTAINER_EXEC_FAILED',
   )
+})
+
+test('credential creation and permission failures are safely classified before Docker', async () => {
+  for (const filesystem of [
+    createFilesystem({ failCreate: true }),
+    createFilesystem({ credentialMode: 0o644 }),
+  ]) {
+    const { attestation, executions } = await captureFailure({
+      filesystem,
+      steps: [],
+    })
+    assert.equal(executions, 0)
+    assert.deepEqual(attestation, {
+      status: 'DIAGNOSTIC_EXECUTION_FAILED',
+      phase: 'credential_create',
+      failure_code: 'DIAGNOSTIC_TEMP_CREDENTIAL_CREATE_FAILED',
+      docker_pull_completed: false,
+      container_started: false,
+      database_connection: 'NOT_ESTABLISHED',
+      sql_completed: false,
+      output_validated: false,
+      credential_cleanup_completed: true,
+    })
+  }
+})
+
+test('Docker pull spawn and exit failures have one fixed safe classification', async () => {
+  for (const pullStep of [{ throw: true } as const, { code: 1 }]) {
+    const { attestation, executions } = await captureFailure({
+      steps: [pullStep],
+    })
+    assert.equal(executions, 1)
+    assert.deepEqual(attestation, {
+      status: 'DIAGNOSTIC_EXECUTION_FAILED',
+      phase: 'docker_pull',
+      failure_code: 'DIAGNOSTIC_DOCKER_IMAGE_PULL_FAILED',
+      docker_pull_completed: false,
+      container_started: false,
+      database_connection: 'NOT_ESTABLISHED',
+      sql_completed: false,
+      output_validated: false,
+      credential_cleanup_completed: true,
+    })
+  }
+})
+
+test('Docker run start and exec exit codes map without inspecting stderr', async () => {
+  for (const scenario of [
+    {
+      runStep: { throw: true } as const,
+      code: 'DIAGNOSTIC_CONTAINER_START_FAILED',
+      phase: 'docker_run_start',
+      started: false,
+      connection: 'NOT_ESTABLISHED',
+    },
+    {
+      runStep: { code: 125 },
+      code: 'DIAGNOSTIC_CONTAINER_START_FAILED',
+      phase: 'docker_run_start',
+      started: false,
+      connection: 'NOT_ESTABLISHED',
+    },
+    {
+      runStep: { code: 126 },
+      code: 'DIAGNOSTIC_CONTAINER_EXEC_FAILED',
+      phase: 'docker_run_start',
+      started: true,
+      connection: 'NOT_ESTABLISHED',
+    },
+    {
+      runStep: { code: 127 },
+      code: 'DIAGNOSTIC_CONTAINER_EXEC_FAILED',
+      phase: 'docker_run_start',
+      started: true,
+      connection: 'NOT_ESTABLISHED',
+    },
+    {
+      runStep: { code: 9 },
+      code: 'DIAGNOSTIC_CONTAINER_EXEC_FAILED',
+      phase: 'docker_run_start',
+      started: true,
+      connection: 'UNKNOWN',
+    },
+  ]) {
+    const { attestation, executions } = await captureFailure({
+      steps: [{ code: 0 }, scenario.runStep],
+    })
+    assert.equal(executions, 2)
+    assert.equal(attestation.failure_code, scenario.code)
+    assert.equal(attestation.phase, scenario.phase)
+    assert.equal(attestation.docker_pull_completed, true)
+    assert.equal(attestation.container_started, scenario.started)
+    assert.equal(
+      attestation.database_connection,
+      scenario.connection,
+    )
+    assert.equal(attestation.sql_completed, false)
+  }
+})
+
+test('psql connection and SQL failures use documented exit semantics', async () => {
+  for (const scenario of [
+    {
+      exitCode: 2,
+      failureCode: 'DIAGNOSTIC_DB_CONNECT_FAILED',
+      phase: 'psql_connection',
+      connection: 'NOT_ESTABLISHED',
+    },
+    {
+      exitCode: 3,
+      failureCode: 'DIAGNOSTIC_SQL_EXECUTION_FAILED',
+      phase: 'diagnostic_sql',
+      connection: 'CONFIRMED',
+    },
+  ]) {
+    const { attestation } = await captureFailure({
+      steps: [{ code: 0 }, { code: scenario.exitCode }],
+    })
+    assert.equal(attestation.failure_code, scenario.failureCode)
+    assert.equal(attestation.phase, scenario.phase)
+    assert.equal(attestation.container_started, true)
+    assert.equal(attestation.database_connection, scenario.connection)
+    assert.equal(attestation.sql_completed, false)
+  }
+})
+
+test('signals and capture limits never expose captured process output', async () => {
+  const interrupted = await captureFailure({
+    steps: [{ code: 0 }, { code: null, signal: 'SIGTERM' }],
+  })
+  assert.equal(interrupted.attestation.phase, 'process_signal')
+  assert.equal(
+    interrupted.attestation.failure_code,
+    'PROCESS_INTERRUPTED',
+  )
+  assert.equal(interrupted.attestation.database_connection, 'UNKNOWN')
+
+  const captureLimit = await captureFailure({
+    steps: [
+      { code: 0 },
+      {
+        stdout: 'x'.repeat(runner.MAX_CAPTURE_BYTES + 1),
+        closeOnlyAfterKill: true,
+      },
+    ],
+  })
+  assert.equal(captureLimit.attestation.phase, 'diagnostic_output')
+  assert.equal(
+    captureLimit.attestation.failure_code,
+    'DIAGNOSTIC_CAPTURE_LIMIT_EXCEEDED',
+  )
+  assert.equal(captureLimit.attestation.database_connection, 'UNKNOWN')
+})
+
+test('invalid and extra-field JSON fail after SQL completion with frozen safe output', async () => {
+  for (const stdout of [
+    'not-json\n',
+    `${JSON.stringify({ ...safeOutput, extra: true })}\n`,
+  ]) {
+    const { attestation } = await captureFailure({
+      steps: [{ code: 0 }, { code: 0, stdout }],
+    })
+    assert.deepEqual(attestation, {
+      status: 'DIAGNOSTIC_EXECUTION_FAILED',
+      phase: 'diagnostic_output',
+      failure_code: 'DIAGNOSTIC_OUTPUT_INVALID',
+      docker_pull_completed: true,
+      container_started: true,
+      database_connection: 'CONFIRMED',
+      sql_completed: true,
+      output_validated: false,
+      credential_cleanup_completed: true,
+    })
+  }
+})
+
+test('credential cleanup failure overrides execution outcome without leaking credentials', async () => {
+  const { attestation } = await captureFailure({
+    filesystem: createFilesystem({ failCleanup: true }),
+    steps: [{ code: 0 }, { code: 0, stdout: `${JSON.stringify(safeOutput)}\n` }],
+  })
+  assert.deepEqual(attestation, {
+    status: 'DIAGNOSTIC_EXECUTION_FAILED',
+    phase: 'credential_cleanup',
+    failure_code: 'TEMP_CREDENTIAL_CLEANUP_FAILED',
+    docker_pull_completed: true,
+    container_started: true,
+    database_connection: 'CONFIRMED',
+    sql_completed: true,
+    output_validated: true,
+    credential_cleanup_completed: false,
+  })
+
+  const partialCredentialCleanup = await captureFailure({
+    filesystem: createFilesystem({
+      credentialMode: 0o644,
+      failCleanup: true,
+    }),
+    steps: [],
+  })
+  assert.deepEqual(partialCredentialCleanup.attestation, {
+    status: 'DIAGNOSTIC_EXECUTION_FAILED',
+    phase: 'credential_cleanup',
+    failure_code: 'TEMP_CREDENTIAL_CLEANUP_FAILED',
+    docker_pull_completed: false,
+    container_started: false,
+    database_connection: 'NOT_ESTABLISHED',
+    sql_completed: false,
+    output_validated: false,
+    credential_cleanup_completed: false,
+  })
+})
+
+test('successful execution returns only the frozen aggregate result through one database session', async () => {
+  const sequence = createSpawnSequence([
+    { code: 0 },
+    { code: 0, stdout: `${JSON.stringify(safeOutput)}\n` },
+  ])
+  const result = await runner.runDiagnostic({
+    environment: productionEnvironment,
+    filesystem: createFilesystem(),
+    spawnImplementation: sequence.spawnImplementation,
+  })
+  assert.deepEqual(result, safeOutput)
+  assert.equal(Object.isFrozen(result), true)
+  assert.equal(sequence.executions, 2)
 })
