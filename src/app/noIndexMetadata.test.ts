@@ -62,16 +62,15 @@ assert.ok(adminLayout.includes('NO_INDEX_METADATA'))
 assert.ok(adminLayout.includes('<AdminLayoutClient>{children}</AdminLayoutClient>'))
 
 const adminLayoutClient = readFileSync(join(root, 'src/app/admin/AdminLayoutClient.tsx'), 'utf8')
+const adminPageAccess = readFileSync(join(root, 'src/lib/auth/adminPageAccess.ts'), 'utf8')
 assert.match(adminLayoutClient, /^'use client'/)
-for (const expectedSource of [
+for (const expectedClientSource of [
   "getMockUser()",
-  "getAuthAccessToken()",
-  "fetch('/api/admin/session'",
-  "cache: 'no-store'",
-  'response.status === 401',
-  "setAccessState('authorized')",
-  "setAccessState('unauthenticated')",
-  "setAccessState('forbidden')",
+  'getAccessToken: getAuthAccessToken',
+  'createAdminPageAccessController',
+  'fetchSession: (input, init) => fetch(input, init)',
+  '(snapshot) => setAccessState(snapshot.state)',
+  'controller.cancel()',
   'subscribeAuthChange',
   '請先登入管理員帳號',
   '<LoginModal',
@@ -80,7 +79,26 @@ for (const expectedSource of [
   "accessState === 'forbidden'",
   '正在確認管理權限...',
 ]) {
-  assert.ok(adminLayoutClient.includes(expectedSource), `admin guard lost: ${expectedSource}`)
+  assert.ok(
+    adminLayoutClient.includes(expectedClientSource),
+    `admin client guard lost: ${expectedClientSource}`,
+  )
+}
+for (const expectedControllerSource of [
+  "'/api/admin/session'",
+  "cache: 'no-store'",
+  'response.status === 401',
+  "'authorized'",
+  "'unauthenticated'",
+  "'forbidden'",
+  'requestId !== currentRequestId',
+  'controller.signal.aborted',
+  'activeController?.abort()',
+]) {
+  assert.ok(
+    adminPageAccess.includes(expectedControllerSource),
+    `admin controller guard lost: ${expectedControllerSource}`,
+  )
 }
 assert.equal(adminLayoutClient.includes("router.replace('/')"), false)
 
