@@ -117,6 +117,20 @@ function createFilesystem({
   }
 }
 
+type ChildProcessFixture = {
+  throw?: never
+  code?: number | null
+  signal?: string | null
+  stdout?: string
+  stderr?: string
+  emitError?: boolean
+  closeOnlyAfterKill?: boolean
+}
+
+type SpawnFixture =
+  | { throw: true }
+  | ChildProcessFixture
+
 function createChild({
   code = 0,
   signal = null,
@@ -124,7 +138,7 @@ function createChild({
   stderr = sensitiveFixture.join('\n'),
   emitError = false,
   closeOnlyAfterKill = false,
-} = {}) {
+}: ChildProcessFixture = {}) {
   const child: any = new EventEmitter()
   child.stdout = new PassThrough()
   child.stderr = new PassThrough()
@@ -153,10 +167,7 @@ function createChild({
 }
 
 function createSpawnSequence(
-  steps: Array<
-    | { throw: true }
-    | Parameters<typeof createChild>[0]
-  >,
+  steps: SpawnFixture[],
 ) {
   let executions = 0
   const spawnImplementation = () => {
@@ -183,7 +194,7 @@ async function captureFailure({
 }: {
   filesystem?: any
   processObject?: any
-  steps: Array<{ throw: true } | Parameters<typeof createChild>[0]>
+  steps: SpawnFixture[]
 }) {
   const sequence = createSpawnSequence(steps)
   let caught: unknown
