@@ -100,6 +100,16 @@ test('diagnostic SQL is exact, read-only, rollback-only, and digest sealed', () 
     diagnosticSql.replaceAll(/'[^']*(?:''[^']*)*'/gu, "''"),
     /\b(?:insert|update|delete|merge|truncate|create|alter|drop|grant|revoke|comment|copy|call|do|execute)\b/iu,
   )
+  assert.match(
+    diagnosticSql,
+    /^select[\s\S]+as diagnostic_shape_ready\s*\\gset$/mu,
+  )
+  assert.match(diagnosticSql, /^\\if :migration_history_ready$/mu)
+  assert.match(diagnosticSql, /^\\if :diagnostic_shape_ready$/mu)
+  assert.doesNotMatch(
+    diagnosticSql,
+    /^\\(?:include|i|ir|!|copy|setenv|o|out|w|write)\b/mu,
+  )
 })
 
 test('LINE Pay DB CI includes all diagnostic contracts and cleanup', () => {

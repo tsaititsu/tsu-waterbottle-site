@@ -48,8 +48,182 @@ export const CONNECTION_MODES = Object.freeze({
   supavisorSession: 'supavisor_session',
 })
 
+export const DIAGNOSTIC_STATES = Object.freeze({
+  SOURCE_VALIDATED: 'SOURCE_VALIDATED',
+  CREDENTIAL_CREATED: 'CREDENTIAL_CREATED',
+  IMAGE_PULL_STARTED: 'IMAGE_PULL_STARTED',
+  IMAGE_PULL_COMPLETED: 'IMAGE_PULL_COMPLETED',
+  CONTAINER_STARTED: 'CONTAINER_STARTED',
+  PSQL_COMPLETED: 'PSQL_COMPLETED',
+  OUTPUT_VALIDATED: 'OUTPUT_VALIDATED',
+  CREDENTIAL_CLEANED: 'CREDENTIAL_CLEANED',
+})
+
+export const DATABASE_CONNECTION_STATES = Object.freeze({
+  CONFIRMED: 'CONFIRMED',
+  NOT_ESTABLISHED: 'NOT_ESTABLISHED',
+  UNKNOWN: 'UNKNOWN',
+})
+
+const FAILURE_CODE_PHASES = Object.freeze({
+  DIAGNOSTIC_DOCKER_IMAGE_PULL_FAILED: Object.freeze(['docker_pull']),
+  DIAGNOSTIC_TEMP_CREDENTIAL_CREATE_FAILED: Object.freeze([
+    'credential_create',
+  ]),
+  DIAGNOSTIC_CONTAINER_START_FAILED: Object.freeze(['docker_run_start']),
+  DIAGNOSTIC_CONTAINER_EXEC_FAILED: Object.freeze(['docker_run_start']),
+  DIAGNOSTIC_DB_CONNECT_FAILED: Object.freeze(['psql_connection']),
+  DIAGNOSTIC_SQL_EXECUTION_FAILED: Object.freeze(['diagnostic_sql']),
+  DIAGNOSTIC_OUTPUT_INVALID: Object.freeze(['diagnostic_output']),
+  DIAGNOSTIC_CAPTURE_LIMIT_EXCEEDED: Object.freeze([
+    'docker_pull',
+    'diagnostic_output',
+  ]),
+  PROCESS_INTERRUPTED: Object.freeze(['process_signal']),
+  TEMP_CREDENTIAL_CLEANUP_FAILED: Object.freeze(['credential_cleanup']),
+})
+
+const STATE_FAILURES = Object.freeze({
+  [DIAGNOSTIC_STATES.SOURCE_VALIDATED]: Object.freeze({
+    code: 'DIAGNOSTIC_TEMP_CREDENTIAL_CREATE_FAILED',
+    phase: 'credential_create',
+  }),
+  [DIAGNOSTIC_STATES.CREDENTIAL_CREATED]: Object.freeze({
+    code: 'DIAGNOSTIC_DOCKER_IMAGE_PULL_FAILED',
+    phase: 'docker_pull',
+  }),
+  [DIAGNOSTIC_STATES.IMAGE_PULL_STARTED]: Object.freeze({
+    code: 'DIAGNOSTIC_DOCKER_IMAGE_PULL_FAILED',
+    phase: 'docker_pull',
+  }),
+  [DIAGNOSTIC_STATES.IMAGE_PULL_COMPLETED]: Object.freeze({
+    code: 'DIAGNOSTIC_CONTAINER_START_FAILED',
+    phase: 'docker_run_start',
+  }),
+  [DIAGNOSTIC_STATES.CONTAINER_STARTED]: Object.freeze({
+    code: 'DIAGNOSTIC_CONTAINER_EXEC_FAILED',
+    phase: 'docker_run_start',
+  }),
+  [DIAGNOSTIC_STATES.PSQL_COMPLETED]: Object.freeze({
+    code: 'DIAGNOSTIC_OUTPUT_INVALID',
+    phase: 'diagnostic_output',
+  }),
+  [DIAGNOSTIC_STATES.OUTPUT_VALIDATED]: Object.freeze({
+    code: 'TEMP_CREDENTIAL_CLEANUP_FAILED',
+    phase: 'credential_cleanup',
+  }),
+  [DIAGNOSTIC_STATES.CREDENTIAL_CLEANED]: Object.freeze({
+    code: 'TEMP_CREDENTIAL_CLEANUP_FAILED',
+    phase: 'credential_cleanup',
+  }),
+})
+
+const FAILURE_ATTESTATION_KEYS = Object.freeze([
+  'status',
+  'phase',
+  'failure_code',
+  'docker_pull_completed',
+  'container_started',
+  'database_connection',
+  'sql_completed',
+  'output_validated',
+  'credential_cleanup_completed',
+])
+
+class DiagnosticExecutionFailure extends Error {
+  constructor(attestation) {
+    super(attestation.failure_code)
+    this.name = 'DiagnosticExecutionFailure'
+    this.attestation = attestation
+  }
+}
+
 function fail(code) {
   throw new Error(code)
+}
+
+export function validateFailureAttestation(attestation) {
+  const allowedPhases = FAILURE_CODE_PHASES[attestation?.failure_code]
+  if (
+    !attestation ||
+    typeof attestation !== 'object' ||
+    Object.keys(attestation).length !== FAILURE_ATTESTATION_KEYS.length ||
+    FAILURE_ATTESTATION_KEYS.some((key) => !(key in attestation)) ||
+    attestation.status !== 'DIAGNOSTIC_EXECUTION_FAILED' ||
+    !allowedPhases?.includes(attestation.phase) ||
+    !Object.values(DATABASE_CONNECTION_STATES).includes(
+      attestation.database_connection,
+    ) ||
+    [
+      'docker_pull_completed',
+      'container_started',
+      'sql_completed',
+      'output_validated',
+      'credential_cleanup_completed',
+    ].some((key) => typeof attestation[key] !== 'boolean')
+  ) {
+    fail('DIAGNOSTIC_CONTAINER_EXEC_FAILED')
+  }
+  return true
+}
+
+export function classifyFailureForState(state, error) {
+  if (
+    error instanceof Error &&
+    error.message === 'TEMP_CREDENTIAL_CLEANUP_FAILED'
+  ) {
+    return {
+      code: 'TEMP_CREDENTIAL_CLEANUP_FAILED',
+      phase: 'credential_cleanup',
+    }
+  }
+  const failure = STATE_FAILURES[state]
+  if (!failure) fail('DIAGNOSTIC_CONTAINER_EXEC_FAILED')
+  return {
+    code: failure.code,
+    phase: failure.phase,
+  }
+}
+
+function createFailureAttestation(failure, execution) {
+  const attestation = {
+    status: 'DIAGNOSTIC_EXECUTION_FAILED',
+    phase: failure.phase,
+    failure_code: failure.code,
+    docker_pull_completed: execution.dockerPullCompleted,
+    container_started: execution.containerStarted,
+    database_connection: execution.databaseConnection,
+    sql_completed: execution.sqlCompleted,
+    output_validated: execution.outputValidated,
+    credential_cleanup_completed: execution.credentialCleanupCompleted,
+  }
+  validateFailureAttestation(attestation)
+  return Object.freeze(attestation)
+}
+
+export function toSafeFailureAttestation(error) {
+  if (
+    error instanceof DiagnosticExecutionFailure &&
+    error.attestation &&
+    Object.isFrozen(error.attestation)
+  ) {
+    return error.attestation
+  }
+  return Object.freeze({
+    status: 'DIAGNOSTIC_EXECUTION_FAILED',
+    phase: 'docker_run_start',
+    failure_code: 'DIAGNOSTIC_CONTAINER_EXEC_FAILED',
+    docker_pull_completed: false,
+    container_started: false,
+    database_connection: DATABASE_CONNECTION_STATES.UNKNOWN,
+    sql_completed: false,
+    output_validated: false,
+    credential_cleanup_completed: false,
+  })
+}
+
+export function isDiagnosticExecutionFailure(error) {
+  return error instanceof DiagnosticExecutionFailure
 }
 
 function decodeComponent(value) {
@@ -245,7 +419,7 @@ export function buildChildEnvironment(connection) {
 export function buildDockerRunArgs(connection, pgpassFile) {
   validatePostgresImage(POSTGRES_IMAGE)
   if (typeof pgpassFile !== 'string' || !isAbsolute(pgpassFile)) {
-    fail('DIAGNOSTIC_PSQL_FAILED')
+    fail('DIAGNOSTIC_CONTAINER_START_FAILED')
   }
   const childEnvironment = buildChildEnvironment(connection)
   const user = `${process.getuid?.() ?? 1001}:${process.getgid?.() ?? 1001}`
@@ -279,7 +453,7 @@ export function spawnCaptured(
   options,
   spawnImplementation = spawn,
 ) {
-  return new Promise((resolvePromise, rejectPromise) => {
+  return new Promise((resolvePromise) => {
     let child
     try {
       child = spawnImplementation(binary, args, {
@@ -290,35 +464,54 @@ export function spawnCaptured(
       })
       options.onSpawn?.(child)
     } catch {
-      rejectPromise(new Error('DIAGNOSTIC_PSQL_FAILED'))
+      resolvePromise({
+        captureExceeded: false,
+        code: null,
+        signal: null,
+        spawned: false,
+        stdout: '',
+      })
       return
     }
     let stdout = ''
-    let stderr = ''
+    let capturedBytes = 0
     let captureExceeded = false
-    const append = (stream, chunk) => {
-      const next = stream + chunk.toString('utf8')
-      if (Buffer.byteLength(next, 'utf8') > MAX_CAPTURE_BYTES) {
+    let settled = false
+    const append = (chunk, includeInStdout) => {
+      capturedBytes += Buffer.byteLength(chunk)
+      if (capturedBytes > MAX_CAPTURE_BYTES) {
         captureExceeded = true
         child.kill('SIGTERM')
-        return stream
+        return
       }
-      return next
+      if (includeInStdout) stdout += chunk.toString('utf8')
     }
     child.stdout?.on('data', (chunk) => {
-      stdout = append(stdout, chunk)
+      append(chunk, true)
     })
     child.stderr?.on('data', (chunk) => {
-      stderr = append(stderr, chunk)
+      append(chunk, false)
     })
-    child.once('error', () =>
-      rejectPromise(new Error('DIAGNOSTIC_PSQL_FAILED')),
-    )
+    const settle = (result) => {
+      if (settled) return
+      settled = true
+      resolvePromise(result)
+    }
+    child.once('error', () => {
+      settle({
+        captureExceeded: false,
+        code: null,
+        signal: null,
+        spawned: false,
+        stdout: '',
+      })
+    })
     child.once('close', (code, signal) => {
-      resolvePromise({
+      settle({
+        captureExceeded,
         code: captureExceeded ? null : code,
         signal: captureExceeded ? 'CAPTURE_LIMIT' : signal,
-        stderr,
+        spawned: true,
         stdout,
       })
     })
@@ -330,7 +523,7 @@ export async function pullFixedPostgresImage(
   { onSpawn } = {},
 ) {
   validatePostgresImage(POSTGRES_IMAGE)
-  const result = await spawnCaptured(
+  return spawnCaptured(
     DOCKER_BINARY,
     ['pull', POSTGRES_IMAGE],
     {
@@ -344,10 +537,6 @@ export async function pullFixedPostgresImage(
     },
     spawnImplementation,
   )
-  if (result.code !== 0 || result.signal) {
-    fail('DIAGNOSTIC_PSQL_FAILED')
-  }
-  return true
 }
 
 export async function createCredentialFile(
@@ -356,13 +545,15 @@ export async function createCredentialFile(
   filesystem = fs,
 ) {
   if (typeof runnerTemp !== 'string' || !isAbsolute(runnerTemp)) {
-    fail('DIAGNOSTIC_PSQL_FAILED')
+    fail('DIAGNOSTIC_TEMP_CREDENTIAL_CREATE_FAILED')
   }
   try {
     const rootStat = await filesystem.stat(runnerTemp)
-    if (!rootStat.isDirectory()) fail('DIAGNOSTIC_PSQL_FAILED')
+    if (!rootStat.isDirectory()) {
+      fail('DIAGNOSTIC_TEMP_CREDENTIAL_CREATE_FAILED')
+    }
   } catch {
-    fail('DIAGNOSTIC_PSQL_FAILED')
+    fail('DIAGNOSTIC_TEMP_CREDENTIAL_CREATE_FAILED')
   }
   let directory
   let pgpassFile
@@ -382,7 +573,7 @@ export async function createCredentialFile(
     )
     const credentialStat = await filesystem.stat(pgpassFile)
     if ((credentialStat.mode & 0o777) !== 0o600) {
-      fail('DIAGNOSTIC_PSQL_FAILED')
+      fail('DIAGNOSTIC_TEMP_CREDENTIAL_CREATE_FAILED')
     }
     return { directory, pgpassFile, cleaned: false }
   } catch {
@@ -404,7 +595,7 @@ export async function createCredentialFile(
       }
     }
     if (cleanupFailed) fail('TEMP_CREDENTIAL_CLEANUP_FAILED')
-    fail('DIAGNOSTIC_PSQL_FAILED')
+    fail('DIAGNOSTIC_TEMP_CREDENTIAL_CREATE_FAILED')
   }
 }
 
@@ -456,6 +647,15 @@ export async function runDiagnostic({
     environment.SUPABASE_PRODUCTION_DB_URL,
     environment.SUPABASE_PROJECT_ID,
   )
+  const execution = {
+    state: DIAGNOSTIC_STATES.SOURCE_VALIDATED,
+    dockerPullCompleted: false,
+    containerStarted: false,
+    databaseConnection: DATABASE_CONNECTION_STATES.NOT_ESTABLISHED,
+    sqlCompleted: false,
+    outputValidated: false,
+    credentialCleanupCompleted: false,
+  }
   let databaseSessionExecutions = 0
   let activeChild = null
   let activeChildCompletion = null
@@ -510,6 +710,7 @@ export async function runDiagnostic({
     activeChild?.kill('SIGTERM')
   }, processObject)
   let operationError
+  let failure
   let sanitizedResult
   try {
     credentials = await createCredentialFile(
@@ -517,10 +718,32 @@ export async function runDiagnostic({
       connection,
       filesystem,
     )
+    execution.state = DIAGNOSTIC_STATES.CREDENTIAL_CREATED
     ensureNotInterrupted()
-    await pullFixedPostgresImage(spawnImplementation, {
+    execution.state = DIAGNOSTIC_STATES.IMAGE_PULL_STARTED
+    const pullResult = await pullFixedPostgresImage(spawnImplementation, {
       onSpawn: trackActiveChild,
     })
+    if (pullResult.captureExceeded) {
+      failure = {
+        code: 'DIAGNOSTIC_CAPTURE_LIMIT_EXCEEDED',
+        phase: 'docker_pull',
+      }
+      throw new Error(failure.code)
+    }
+    if (
+      !pullResult.spawned ||
+      pullResult.code !== 0 ||
+      pullResult.signal
+    ) {
+      failure = {
+        code: 'DIAGNOSTIC_DOCKER_IMAGE_PULL_FAILED',
+        phase: 'docker_pull',
+      }
+      throw new Error(failure.code)
+    }
+    execution.state = DIAGNOSTIC_STATES.IMAGE_PULL_COMPLETED
+    execution.dockerPullCompleted = true
     ensureNotInterrupted()
     const dockerRunArgs = buildDockerRunArgs(
       connection,
@@ -528,7 +751,11 @@ export async function runDiagnostic({
     )
     databaseSessionExecutions += 1
     if (databaseSessionExecutions !== DATABASE_SESSION_LIMIT) {
-      fail('DIAGNOSTIC_PSQL_FAILED')
+      failure = {
+        code: 'DIAGNOSTIC_CONTAINER_EXEC_FAILED',
+        phase: 'docker_run_start',
+      }
+      throw new Error(failure.code)
     }
     const result = await spawnCaptured(
       DOCKER_BINARY,
@@ -545,24 +772,105 @@ export async function runDiagnostic({
       spawnImplementation,
     )
     ensureNotInterrupted()
-    if (result.code !== 0 || result.signal) {
-      fail('DIAGNOSTIC_PSQL_FAILED')
+    if (!result.spawned || result.code === 125) {
+      failure = {
+        code: 'DIAGNOSTIC_CONTAINER_START_FAILED',
+        phase: 'docker_run_start',
+      }
+      throw new Error(failure.code)
     }
+    if (result.captureExceeded) {
+      execution.databaseConnection = DATABASE_CONNECTION_STATES.UNKNOWN
+      failure = {
+        code: 'DIAGNOSTIC_CAPTURE_LIMIT_EXCEEDED',
+        phase: 'diagnostic_output',
+      }
+      throw new Error(failure.code)
+    }
+    if (result.signal) {
+      execution.databaseConnection = DATABASE_CONNECTION_STATES.UNKNOWN
+      failure = {
+        code: 'PROCESS_INTERRUPTED',
+        phase: 'process_signal',
+      }
+      throw new Error(failure.code)
+    }
+    execution.state = DIAGNOSTIC_STATES.CONTAINER_STARTED
+    execution.containerStarted = true
+    if (result.code === 2) {
+      failure = {
+        code: 'DIAGNOSTIC_DB_CONNECT_FAILED',
+        phase: 'psql_connection',
+      }
+      throw new Error(failure.code)
+    }
+    if (result.code === 3) {
+      execution.databaseConnection = DATABASE_CONNECTION_STATES.CONFIRMED
+      failure = {
+        code: 'DIAGNOSTIC_SQL_EXECUTION_FAILED',
+        phase: 'diagnostic_sql',
+      }
+      throw new Error(failure.code)
+    }
+    if (result.code !== 0) {
+      execution.databaseConnection =
+        result.code === 126 || result.code === 127
+          ? DATABASE_CONNECTION_STATES.NOT_ESTABLISHED
+          : DATABASE_CONNECTION_STATES.UNKNOWN
+      failure = {
+        code: 'DIAGNOSTIC_CONTAINER_EXEC_FAILED',
+        phase: 'docker_run_start',
+      }
+      throw new Error(failure.code)
+    }
+    execution.state = DIAGNOSTIC_STATES.PSQL_COMPLETED
+    execution.databaseConnection = DATABASE_CONNECTION_STATES.CONFIRMED
+    execution.sqlCompleted = true
     sanitizedResult = parseAndValidateDiagnosticOutput(result.stdout)
+    execution.state = DIAGNOSTIC_STATES.OUTPUT_VALIDATED
+    execution.outputValidated = true
   } catch (error) {
     operationError = interrupted
       ? new Error('PROCESS_INTERRUPTED')
       : error
+    if (interrupted) {
+      failure = {
+        code: 'PROCESS_INTERRUPTED',
+        phase: 'process_signal',
+      }
+      execution.databaseConnection =
+        execution.containerStarted
+          ? DATABASE_CONNECTION_STATES.UNKNOWN
+          : DATABASE_CONNECTION_STATES.NOT_ESTABLISHED
+    }
+    if (!failure) {
+      failure = classifyFailureForState(execution.state, error)
+    }
   } finally {
     try {
       await terminateActiveChild()
     } catch {
-      if (!operationError) operationError = new Error('PROCESS_INTERRUPTED')
+      if (!operationError) {
+        operationError = new Error('PROCESS_INTERRUPTED')
+        failure = {
+          code: 'PROCESS_INTERRUPTED',
+          phase: 'process_signal',
+        }
+      }
     }
     try {
       await cleanupCredentialsOnce()
+      if (failure?.code !== 'TEMP_CREDENTIAL_CLEANUP_FAILED') {
+        execution.state = DIAGNOSTIC_STATES.CREDENTIAL_CLEANED
+        execution.credentialCleanupCompleted = true
+      }
     } catch {
       operationError = new Error('TEMP_CREDENTIAL_CLEANUP_FAILED')
+      failure = {
+        code: 'TEMP_CREDENTIAL_CLEANUP_FAILED',
+        phase: 'credential_cleanup',
+      }
+      execution.credentialCleanupCompleted = false
     } finally {
       removeSignalHandlers()
       if (
@@ -573,10 +881,24 @@ export async function runDiagnostic({
         )
       ) {
         operationError = new Error('PROCESS_INTERRUPTED')
+        failure = {
+          code: 'PROCESS_INTERRUPTED',
+          phase: 'process_signal',
+        }
       }
     }
   }
-  if (operationError) throw operationError
+  if (operationError) {
+    throw new DiagnosticExecutionFailure(
+      createFailureAttestation(
+        failure ?? {
+          code: 'DIAGNOSTIC_CONTAINER_EXEC_FAILED',
+          phase: 'docker_run_start',
+        },
+        execution,
+      ),
+    )
+  }
   return sanitizedResult
 }
 
@@ -591,7 +913,11 @@ const invokedPath = process.argv[1]
   : ''
 if (invokedPath === import.meta.url) {
   main().catch((error) => {
-    console.error(safeErrorCode(error))
+    console.error(
+      isDiagnosticExecutionFailure(error)
+        ? JSON.stringify(toSafeFailureAttestation(error))
+        : safeErrorCode(error),
+    )
     process.exitCode = 1
   })
 }

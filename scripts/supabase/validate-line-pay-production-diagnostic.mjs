@@ -27,7 +27,7 @@ export const MIGRATION_FILE =
 export const FENCE_MIGRATION_FILE =
   'supabase/migrations/20260722065311_retire_bank_transfer_submissions_writes.sql'
 export const EXPECTED_DIAGNOSTIC_SHA256 =
-  '90b0163743f8163ece62d6745ff15bfb5880bddfdc37c195d462b4bf8e523727'
+  'b35e7ef87ef59570cf7a71d8182174115af4560d96d101498da4432b04ffbb97'
 export const EXPECTED_MIGRATION_SHA256 =
   '370984c499d93f602b3dccf876becd030085e88ccd9a17106fee8b0009d84046'
 export const EXPECTED_FENCE_SHA256 =
@@ -42,8 +42,14 @@ export const SAFE_FAILURE_CODES = Object.freeze([
   'DATABASE_TARGET_MISMATCH',
   'DATABASE_URL_INVALID',
   'DIAGNOSTIC_SQL_INVALID',
+  'DIAGNOSTIC_DOCKER_IMAGE_PULL_FAILED',
+  'DIAGNOSTIC_TEMP_CREDENTIAL_CREATE_FAILED',
+  'DIAGNOSTIC_CONTAINER_START_FAILED',
+  'DIAGNOSTIC_CONTAINER_EXEC_FAILED',
+  'DIAGNOSTIC_DB_CONNECT_FAILED',
+  'DIAGNOSTIC_SQL_EXECUTION_FAILED',
   'DIAGNOSTIC_OUTPUT_INVALID',
-  'DIAGNOSTIC_PSQL_FAILED',
+  'DIAGNOSTIC_CAPTURE_LIMIT_EXCEEDED',
   'PROCESS_INTERRUPTED',
   'TEMP_CREDENTIAL_CLEANUP_FAILED',
 ])
@@ -311,6 +317,22 @@ export function assertDiagnosticSql(sql) {
   ) {
     fail('DIAGNOSTIC_SQL_INVALID')
   }
+  const psqlCommands = sql.match(/^\\[^\r\n]+$/gmu) ?? []
+  if (
+    !isDeepStrictEqual(psqlCommands, [
+      '\\gset',
+      '\\if :migration_history_ready',
+      '\\gset',
+      '\\else',
+      '\\set migration_history_absent true',
+      '\\endif',
+      '\\if :diagnostic_shape_ready',
+      '\\else',
+      '\\endif',
+    ])
+  ) {
+    fail('DIAGNOSTIC_SQL_INVALID')
+  }
   const normalized = stripSqlForStaticAnalysis(sql)
   const forbidden =
     /\b(insert|update|delete|merge|truncate|create|alter|drop|grant|revoke|comment|copy|call|do|execute|security\s+definer|set\s+role|lock\s+table|select\s+for\s+(?:update|share)|pg_sleep|dblink|listen|notify|vacuum|analyze|reindex|cluster|prepare|savepoint|release)\b|\bpg_(?:try_)?advisory_(?:lock|xact_lock|unlock)\b|\bpg_(?:cancel|terminate)_backend\b/iu
@@ -318,7 +340,10 @@ export function assertDiagnosticSql(sql) {
     forbidden.test(normalized) ||
     (normalized.match(/^\s*begin\s+transaction\b/gimu) ?? []).length !== 1 ||
     (normalized.match(/^\s*rollback\s*;/gimu) ?? []).length !== 1 ||
-    (normalized.match(/;/gu) ?? []).length !== 3
+    (normalized.match(/;/gu) ?? []).length !== 4 ||
+    !/as migration_history_ready,[\s\S]+as diagnostic_shape_ready\s*\\gset/iu.test(
+      sql,
+    )
   ) {
     fail('DIAGNOSTIC_SQL_INVALID')
   }
@@ -353,12 +378,28 @@ export function assertRunnerSource(source) {
     'databaseSessionExecutions += 1',
     'if (databaseSessionExecutions !== DATABASE_SESSION_LIMIT)',
     'const dockerRunArgs = buildDockerRunArgs(',
+    'state: DIAGNOSTIC_STATES.SOURCE_VALIDATED',
+    'execution.state = DIAGNOSTIC_STATES.CREDENTIAL_CREATED',
+    'execution.state = DIAGNOSTIC_STATES.IMAGE_PULL_STARTED',
+    'execution.state = DIAGNOSTIC_STATES.IMAGE_PULL_COMPLETED',
+    'execution.state = DIAGNOSTIC_STATES.CONTAINER_STARTED',
+    'execution.state = DIAGNOSTIC_STATES.PSQL_COMPLETED',
+    'execution.state = DIAGNOSTIC_STATES.OUTPUT_VALIDATED',
+    'execution.state = DIAGNOSTIC_STATES.CREDENTIAL_CLEANED',
+    'export function validateFailureAttestation(attestation)',
+    '  validateFailureAttestation(attestation)\n  return Object.freeze',
+    'classifyFailureForState(execution.state, error)',
     'await cleanupCredentialsOnce()',
+    'JSON.stringify(toSafeFailureAttestation(error))',
   ])
   if (
     /shell:\s*true|spawnSync|\b(?:execFile|execSync)\s*\(|\b(?:retry|fallback|secondDatabaseSession)\b|docker[.]sock|supabase\s+(?:db|migration)|apt(?:-get)?\s+install|['"]postgres:17['"]/iu.test(
       source,
     ) ||
+    /console[.](?:log|error)\s*\([^)]*(?:stdout|stderr)|\blet\s+stderr\b|\bstderr\s*[,}]/iu.test(
+      source,
+    ) ||
+    /else if \(!failure\)/u.test(source) ||
     !/shell:\s*false/u.test(source) ||
     !/POSTGRES_IMAGE/u.test(source) ||
     !/DIAGNOSTIC_FILE/u.test(source)
@@ -586,7 +627,7 @@ export function safeErrorCode(error) {
   return error instanceof Error &&
     SAFE_FAILURE_CODE_SET.has(error.message)
     ? error.message
-    : 'DIAGNOSTIC_PSQL_FAILED'
+    : 'DIAGNOSTIC_CONTAINER_EXEC_FAILED'
 }
 
 async function main() {
