@@ -4,10 +4,13 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState, type ReactNode } from 'react'
 import { LoginModal } from '@/components/LoginModal'
+import AdminShell from '@/components/admin/AdminShell'
+import {
+  createAdminPageAccessController,
+  type AdminPageAccessState,
+} from '@/lib/auth/adminPageAccess'
 import { sanitizeAuthReturnPath } from '@/lib/auth/returnTo'
 import { getAuthAccessToken, getMockUser, subscribeAuthChange } from '@/lib/mockAuth'
-
-type AdminAccessState = 'checking' | 'unauthenticated' | 'forbidden' | 'authorized'
 
 /**
  * 後台守門：所有 /admin/* 頁面都必須通過 server-side 的 admin 驗證
@@ -16,7 +19,7 @@ type AdminAccessState = 'checking' | 'unauthenticated' | 'forbidden' | 'authoriz
  */
 export default function AdminLayoutClient({ children }: { children: ReactNode }) {
   const pathname = usePathname()
-  const [accessState, setAccessState] = useState<AdminAccessState>('checking')
+  const [accessState, setAccessState] = useState<AdminPageAccessState>('checking')
   const [loginOpen, setLoginOpen] = useState(false)
   const [returnTo, setReturnTo] = useState(() => sanitizeAuthReturnPath(pathname))
 
@@ -25,56 +28,27 @@ export default function AdminLayoutClient({ children }: { children: ReactNode })
   }, [pathname])
 
   useEffect(() => {
-    let cancelled = false
+    const controller = createAdminPageAccessController(
+      {
+        getAccessToken: getAuthAccessToken,
+        fetchSession: (input, init) => fetch(input, init),
+      },
+      (snapshot) => setAccessState(snapshot.state),
+    )
 
-    const verifyAdminAccess = async () => {
-      const user = getMockUser()
-
-      if (!user) {
-        if (!cancelled) setAccessState('unauthenticated')
-        return
-      }
-
-      try {
-        const accessToken = await getAuthAccessToken()
-
-        if (!accessToken) {
-          if (!cancelled) setAccessState('unauthenticated')
-          return
-        }
-
-        const response = await fetch('/api/admin/session', {
-          cache: 'no-store',
-          headers: { authorization: `Bearer ${accessToken}` },
-        })
-
-        if (cancelled) return
-
-        if (response.ok) {
-          setAccessState('authorized')
-        } else if (response.status === 401) {
-          setAccessState('unauthenticated')
-        } else {
-          setAccessState('forbidden')
-        }
-      } catch {
-        if (!cancelled) setAccessState('forbidden')
-      }
-    }
-
-    void verifyAdminAccess()
+    void controller.run(getMockUser())
     const unsubscribe = subscribeAuthChange(() => {
-      void verifyAdminAccess()
+      void controller.run(getMockUser())
     })
 
     return () => {
-      cancelled = true
+      controller.cancel()
       unsubscribe()
     }
   }, [])
 
   if (accessState === 'authorized') {
-    return <>{children}</>
+    return <AdminShell pathname={pathname}>{children}</AdminShell>
   }
 
   if (accessState === 'forbidden') {
