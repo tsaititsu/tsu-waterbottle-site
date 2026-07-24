@@ -25,19 +25,44 @@ const brandedErrorPageSource = readSource('src/components/BrandedErrorPage.tsx')
 assert.ok(notFoundSource.includes('這個頁面找不到'))
 assert.ok(notFoundSource.includes('網址可能已變更，或頁面暫時不存在。'))
 assert.ok(notFoundSource.includes('BrandedErrorPage'))
+assert.ok(notFoundSource.includes("title: '找不到頁面'"))
+assert.ok(notFoundSource.includes('showChartLink'))
 
-for (const source of [errorSource, globalErrorSource]) {
-  assert.match(source, /^'use client'/)
-  assert.ok(source.includes('reset: () => void'))
-  assert.ok(source.includes('onRetry={reset}'))
-}
+assert.match(errorSource, /^'use client'/)
+assert.ok(errorSource.includes('reset: () => void'))
+assert.ok(errorSource.includes('onRetry={reset}'))
+assert.equal(errorSource.includes('showChartLink'), false)
 
 assert.ok(errorSource.includes('頁面暫時無法顯示'))
+assert.match(globalErrorSource, /^'use client'/)
 assert.ok(globalErrorSource.includes('網站暫時無法載入'))
 assert.ok(globalErrorSource.includes('<html lang="zh-Hant">'))
-assert.ok(globalErrorSource.includes('<body style={{ margin: 0 }}>'))
+assert.ok(globalErrorSource.includes('<body'))
 assert.ok(globalErrorSource.includes('<title>'))
-assert.ok(globalErrorSource.includes('<main>'))
+assert.ok(globalErrorSource.includes('<main'))
+assert.ok(globalErrorSource.includes('reset: () => void'))
+assert.ok(globalErrorSource.includes('onClick={reset}'))
+assert.ok(globalErrorSource.includes('type="button"'))
+assert.match(globalErrorSource, /<a[^>]*href="\/"[^>]*>回到首頁<\/a>/)
+assert.match(
+  globalErrorSource,
+  /<meta\s+name="robots"\s+content="noindex,\s*nofollow"\s*\/>/,
+)
+
+for (const forbiddenGlobalDependency of [
+  'BrandedErrorPage',
+  'next/image',
+  'next/link',
+  '@/',
+]) {
+  assert.equal(
+    globalErrorSource.includes(forbiddenGlobalDependency),
+    false,
+    `Global error must be self-contained: ${forbiddenGlobalDependency}`,
+  )
+}
+
+assert.doesNotMatch(globalErrorSource, /^\s*import\s/m)
 
 for (const expectedContract of [
   'WATERBOTTLE',
@@ -53,6 +78,17 @@ for (const expectedContract of [
   assert.ok(
     brandedErrorPageSource.includes(expectedContract),
     `Branded error UI lost: ${expectedContract}`,
+  )
+}
+
+for (const notFoundAction of [
+  'href="/"',
+  'href="/ai-chart"',
+  'href="/contact"',
+]) {
+  assert.ok(
+    brandedErrorPageSource.includes(notFoundAction),
+    `404 action missing: ${notFoundAction}`,
   )
 }
 

@@ -7,6 +7,7 @@ type BrandedErrorPageProps = {
   code: string
   description: string
   onRetry?: () => void
+  showChartLink?: boolean
   standalone?: boolean
   title: string
 }
@@ -168,6 +169,7 @@ export function BrandedErrorPage({
   code,
   description,
   onRetry,
+  showChartLink = false,
   standalone = false,
   title,
 }: BrandedErrorPageProps) {
@@ -225,6 +227,15 @@ export function BrandedErrorPage({
               href="/"
             >
               回到首頁
+            </Link>
+          ) : null}
+
+          {showChartLink ? (
+            <Link
+              className="waterbottle-error-action waterbottle-error-action--secondary"
+              href="/ai-chart"
+            >
+              紫微命盤分析
             </Link>
           ) : null}
 
