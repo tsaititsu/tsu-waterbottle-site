@@ -4,16 +4,25 @@ on:
   pull_request:
     paths:
       - ".github/workflows/line-pay-db-contract-ci.yml"
+      - ".github/workflows/supabase-production-line-pay-migration.yml"
       - "package.json"
       - "package-lock.json"
+      - "scripts/supabase/run-line-pay-production-exact-file.mjs"
+      - "scripts/supabase/validate-line-pay-production-deployment.mjs"
       - "src/lib/supabase/linePayDatabaseContracts.ts"
       - "src/lib/supabase/linePayDatabaseContracts.test.ts"
       - "supabase/bank_transfer_submissions_patch.sql"
       - "supabase/bank_transfer_submissions_readonly_fence.test.ts"
+      - "supabase/deployment/line_pay_remediation_postflight.sql"
+      - "supabase/deployment/line_pay_remediation_preflight.sql"
+      - "supabase/deployment/line_pay_remediation_deploy.sql"
       - "supabase/line_pay_remediation_contracts.test.ts"
+      - "supabase/line_pay_production_deployment_workflow.test.ts"
+      - "supabase/line_pay_production_exact_file_runner.test.ts"
       - "supabase/migrations/*_retire_bank_transfer_submissions_writes.sql"
       - "supabase/migrations/20260719033404_line_pay_remediation_contracts.sql"
       - "supabase/tests/run_bank_transfer_submissions_readonly_fence.mjs"
+      - "supabase/tests/run_line_pay_production_exact_file_contracts.mjs"
       - "supabase/tests/line_pay_*.sql"
       - "supabase/tests/run_line_pay_remediation_*.mjs"
       - "supabase/tests/run_line_pay_second_remediation_conflicts.mjs"
@@ -37,10 +46,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Node.js 24
+      - name: Set up Node.js 24.16.0
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: "24"
+          node-version: "24.16.0"
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -51,7 +60,12 @@ jobs:
         run: |
           node --test supabase/bank_transfer_submissions_readonly_fence.test.ts
           node --test supabase/line_pay_remediation_contracts.test.ts
+          node --test supabase/line_pay_production_exact_file_runner.test.ts
+          node --test supabase/line_pay_production_deployment_workflow.test.ts
           node --test src/lib/supabase/linePayDatabaseContracts.test.ts
+
+      - name: Run LINE Pay Production exact-file contracts
+        run: node supabase/tests/run_line_pay_production_exact_file_contracts.mjs
 
       - name: Run bank transfer read-only fence contracts
         run: node supabase/tests/run_bank_transfer_submissions_readonly_fence.mjs
@@ -81,4 +95,10 @@ jobs:
           docker volume ls -q --filter label=task=bank-transfer-db-readonly-fence |
             xargs -r docker volume rm
           docker network ls -q --filter label=task=bank-transfer-db-readonly-fence |
+            xargs -r docker network rm
+          docker ps -aq --filter label=task=line-pay-production-exact-file-runner |
+            xargs -r docker rm --force
+          docker volume ls -q --filter label=task=line-pay-production-exact-file-runner |
+            xargs -r docker volume rm
+          docker network ls -q --filter label=task=line-pay-production-exact-file-runner |
             xargs -r docker network rm
