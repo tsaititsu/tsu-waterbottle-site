@@ -308,7 +308,7 @@ export function CustomerFeedback() {
           <div className="relative">
             <div
               ref={carouselRef}
-              className="grid auto-cols-[86%] grid-flow-col items-stretch gap-4 overflow-x-auto overscroll-x-contain snap-x snap-mandatory pb-2 [scrollbar-width:none] sm:auto-cols-[calc((100%_-_1rem)/2)] lg:auto-cols-[calc((100%_-_2.5rem)/3)] lg:gap-5 [&::-webkit-scrollbar]:hidden"
+              className="grid auto-cols-[100%] grid-flow-col items-stretch gap-4 overflow-x-auto overscroll-x-contain snap-x snap-mandatory pb-2 [scrollbar-width:none] sm:auto-cols-[calc((100%_-_1rem)/2)] lg:auto-cols-[calc((100%_-_2.5rem)/3)] lg:gap-5 [&::-webkit-scrollbar]:hidden"
               data-feedback-carousel-viewport
               onScroll={handleInfiniteScroll}
             >
