@@ -1,6 +1,5 @@
 export const ADMIN_DEFAULT_PAGE_SIZE = 20
 export const ADMIN_MAX_PAGE_SIZE = 50
-export const ADMIN_MAX_QUERY_LENGTH = 100
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
@@ -17,7 +16,6 @@ export class AdminQueryValidationError extends Error {
 export type AdminListQuery = {
   page: number
   pageSize: number
-  q: string
   from: string | null
   to: string | null
   status: string | null
@@ -35,7 +33,7 @@ function invalid(): never {
 
 function parseInteger(value: string | null, fallback: number, maximum?: number) {
   if (value === null || value === '') return fallback
-  if (!/^\d+$/u.test(value)) invalid()
+  if (!/^[1-9]\d*$/u.test(value)) invalid()
 
   const parsed = Number(value)
   if (!Number.isSafeInteger(parsed) || parsed < 1 || (maximum !== undefined && parsed > maximum)) {
@@ -63,7 +61,7 @@ function parseDate(value: string | null, endOfDay: boolean) {
 }
 
 function rejectAmbiguousOrUnsupportedParams(params: URLSearchParams) {
-  const supported = new Set(['page', 'pageSize', 'q', 'from', 'to', 'status'])
+  const supported = new Set(['page', 'pageSize', 'from', 'to', 'status'])
   for (const key of supported) {
     if (params.getAll(key).length > 1) invalid()
   }
@@ -80,8 +78,6 @@ export function parseAdminListQuery(
 
   const page = parseInteger(params.get('page'), 1)
   const pageSize = parseInteger(params.get('pageSize'), ADMIN_DEFAULT_PAGE_SIZE, ADMIN_MAX_PAGE_SIZE)
-  const q = (params.get('q') ?? '').trim()
-  if (Array.from(q).length > ADMIN_MAX_QUERY_LENGTH) invalid()
 
   const from = parseDate(params.get('from'), false)
   const to = parseDate(params.get('to'), true)
@@ -97,23 +93,20 @@ export function parseAdminListQuery(
 
   const offset = (page - 1) * pageSize
   if (!Number.isSafeInteger(offset)) invalid()
+  const rangeEnd = offset + pageSize - 1
+  if (!Number.isSafeInteger(rangeEnd) || rangeEnd < offset) invalid()
 
   return {
     page,
     pageSize,
-    q,
     from,
     to,
     status,
     offset,
-    rangeEnd: offset + pageSize - 1,
+    rangeEnd,
   }
 }
 
 export function isValidAdminRecordId(value: string) {
   return UUID_PATTERN.test(value)
-}
-
-export function escapeLikePattern(value: string) {
-  return value.replace(/[\\%_]/gu, '\\$&')
 }

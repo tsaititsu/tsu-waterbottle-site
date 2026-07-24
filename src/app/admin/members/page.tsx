@@ -3,7 +3,7 @@
 import AdminPageHeader from '@/components/admin/AdminPageHeader'
 import AdminRecordList from '@/components/admin/AdminRecordList'
 import { formatAdminDateTime } from '@/lib/admin/format'
-import type { AdminMemberRecord } from '@/lib/admin/members'
+import { isAdminMemberListItem, type AdminMemberRecord } from '@/lib/admin/members'
 
 export default function AdminMembersPage() {
   return (
@@ -22,6 +22,7 @@ export default function AdminMembersPage() {
         detailBasePath="/admin/members"
         emptyMessage="目前條件下沒有會員資料。"
         endpoint="/api/admin/members"
+        getSearchText={(member) => `${member.displayName} ${member.maskedId}`}
         renderMobile={(member) => (
           <dl className="grid gap-2 text-sm">
             <div>
@@ -33,7 +34,7 @@ export default function AdminMembersPage() {
           </dl>
         )}
         responseKey="members"
-        searchLabel="搜尋顯示名稱"
+        validateRecord={isAdminMemberListItem}
       />
     </main>
   )

@@ -1,14 +1,16 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { getAuthAccessToken } from '@/lib/mockAuth'
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { getAuthAccessToken, getMockUser, subscribeAuthChange } from '@/lib/mockAuth'
 import {
   buildAdminListRequestUrl,
   classifyAdminListResponse,
+  filterAdminRecordsForCurrentPage,
   type AdminListFilters,
   type AdminListMeta,
 } from './adminRecordState'
+import { createAdminRecordRequestController } from './adminRecordRequest'
 import AdminDataState from './AdminDataState'
 import AdminPagination from './AdminPagination'
 
@@ -24,65 +26,86 @@ type AdminRecordListProps<T extends AdminRecord> = {
   endpoint: string
   responseKey: string
   detailBasePath: string
-  searchLabel: string
   emptyMessage: string
   columns: Array<AdminRecordColumn<T>>
   renderMobile: (record: T) => ReactNode
+  getSearchText: (record: T) => string
+  validateRecord: (value: unknown) => value is T
   statusOptions?: Array<{ value: string; label: string }>
 }
 
-const initialFilters: AdminListFilters = { q: '', from: '', to: '', status: '' }
+const initialFilters: AdminListFilters = { from: '', to: '', status: '' }
 
 export default function AdminRecordList<T extends AdminRecord>({
   endpoint,
   responseKey,
   detailBasePath,
-  searchLabel,
   emptyMessage,
   columns,
   renderMobile,
+  getSearchText,
+  validateRecord,
   statusOptions = [],
 }: AdminRecordListProps<T>) {
   const [records, setRecords] = useState<T[]>([])
   const [meta, setMeta] = useState<AdminListMeta>({ total: 0, page: 1, pageSize: 20, totalPages: 0 })
   const [draftFilters, setDraftFilters] = useState<AdminListFilters>(initialFilters)
   const [filters, setFilters] = useState<AdminListFilters>(initialFilters)
+  const [localQuery, setLocalQuery] = useState('')
   const [page, setPage] = useState(1)
   const [state, setState] = useState<'loading' | 'ready' | 'empty' | 'error' | 'unauthorized'>('loading')
   const [errorMessage, setErrorMessage] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
-    const controller = new AbortController()
-    async function loadRecords() {
-      setState('loading')
-      setErrorMessage('')
-
-      try {
-        const accessToken = await getAuthAccessToken()
-        if (!accessToken) {
+    const controller = createAdminRecordRequestController(
+      {
+        getCurrentUser: getMockUser,
+        getAccessToken: getAuthAccessToken,
+        fetchResponse: (accessToken, signal) =>
+          fetch(buildAdminListRequestUrl(endpoint, page, filters), {
+            cache: 'no-store',
+            headers: { authorization: `Bearer ${accessToken}` },
+            signal,
+          }),
+        classifyResponse: (response, body) =>
+          classifyAdminListResponse(
+            response.status,
+            response.ok,
+            body,
+            responseKey,
+            validateRecord,
+          ),
+      },
+      (snapshot) => {
+        if (snapshot.state === 'loading') {
+          setState('loading')
+          setErrorMessage('')
+          setRecords([])
+          return
+        }
+        if (snapshot.state === 'unauthorized') {
+          setRecords([])
+          setMeta({ total: 0, page: 1, pageSize: 20, totalPages: 0 })
           setState('unauthorized')
           return
         }
-
-        const response = await fetch(buildAdminListRequestUrl(endpoint, page, filters), {
-          cache: 'no-store',
-          headers: { authorization: `Bearer ${accessToken}` },
-          signal: controller.signal,
-        })
-        const body = (await response.json()) as {
-          ok?: boolean
-          error?: string
-          meta?: AdminListMeta
-          [key: string]: unknown
+        if (snapshot.state === 'error') {
+          setRecords([])
+          setErrorMessage('讀取資料失敗，請稍後重試。')
+          setState('error')
+          return
         }
 
-        const result = classifyAdminListResponse<T>(response.status, response.ok, body, responseKey)
+        const result = snapshot.result
         if (result.state === 'unauthorized') {
+          setRecords([])
+          setMeta({ total: 0, page: 1, pageSize: 20, totalPages: 0 })
           setState('unauthorized')
           return
         }
         if (result.state === 'error') {
+          setRecords([])
           setErrorMessage(result.message)
           setState('error')
           return
@@ -91,22 +114,27 @@ export default function AdminRecordList<T extends AdminRecord>({
         setRecords(result.records)
         setMeta(result.meta)
         setState(result.state)
-      } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') return
-        setErrorMessage('讀取資料失敗，請稍後重試。')
-        setState('error')
-      }
-    }
+      },
+    )
 
-    void loadRecords()
-    return () => controller.abort()
-  }, [endpoint, filters, page, reloadKey, responseKey])
+    const run = () => void controller.run(getMockUser())
+    run()
+    const unsubscribe = subscribeAuthChange(run)
+    return () => {
+      controller.cancel()
+      unsubscribe()
+    }
+  }, [endpoint, filters, page, reloadKey, responseKey, validateRecord])
+
+  const visibleRecords = useMemo(
+    () => filterAdminRecordsForCurrentPage(records, localQuery, getSearchText),
+    [getSearchText, localQuery, records],
+  )
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setPage(1)
     setFilters({
-      q: draftFilters.q.trim(),
       from: draftFilters.from,
       to: draftFilters.to,
       status: draftFilters.status,
@@ -116,6 +144,7 @@ export default function AdminRecordList<T extends AdminRecord>({
   function resetFilters() {
     setDraftFilters(initialFilters)
     setFilters(initialFilters)
+    setLocalQuery('')
     setPage(1)
   }
 
@@ -127,13 +156,13 @@ export default function AdminRecordList<T extends AdminRecord>({
       >
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <label className="grid gap-2 text-sm font-semibold text-textDark">
-            {searchLabel}
+            搜尋本頁已載入紀錄
             <input
               className="focus-ring min-w-0 rounded-lg border border-borderSoft px-3 py-2.5 font-normal"
               maxLength={100}
-              onChange={(event) => setDraftFilters((current) => ({ ...current, q: event.target.value }))}
+              onChange={(event) => setLocalQuery(event.target.value)}
               type="search"
-              value={draftFilters.q}
+              value={localQuery}
             />
           </label>
           <label className="grid gap-2 text-sm font-semibold text-textDark">
@@ -195,11 +224,15 @@ export default function AdminRecordList<T extends AdminRecord>({
       ) : null}
       {state === 'empty' ? <AdminDataState message={emptyMessage} state="empty" /> : null}
 
-      {state === 'ready' ? (
+      {state === 'ready' && visibleRecords.length === 0 ? (
+        <AdminDataState message="本頁已載入紀錄中沒有符合搜尋條件的資料。" state="empty" />
+      ) : null}
+
+      {state === 'ready' && visibleRecords.length > 0 ? (
         <>
-          <div data-mobile-admin-records className="grid gap-4 lg:hidden">
-            {records.map((record) => (
-              <article className="rounded-2xl border border-borderSoft bg-white p-5 shadow-soft" key={record.id}>
+          <div data-mobile-admin-records className="grid min-w-0 gap-4 overflow-x-hidden lg:hidden">
+            {visibleRecords.map((record) => (
+              <article className="min-w-0 rounded-2xl border border-borderSoft bg-white p-5 shadow-soft" key={record.id}>
                 {renderMobile(record)}
                 <Link
                   className="focus-ring mt-4 inline-flex rounded-lg border border-borderSoft px-4 py-2 text-sm font-semibold text-deepPurple"
@@ -221,10 +254,10 @@ export default function AdminRecordList<T extends AdminRecord>({
                 </tr>
               </thead>
               <tbody>
-                {records.map((record) => (
+                {visibleRecords.map((record) => (
                   <tr className="border-t border-borderSoft align-top" key={record.id}>
                     {columns.map((column) => (
-                      <td className="px-4 py-4 text-sm leading-6 text-textDark" key={column.key}>
+                      <td className="min-w-0 break-words px-4 py-4 text-sm leading-6 text-textDark [overflow-wrap:anywhere]" key={column.key}>
                         {column.render(record)}
                       </td>
                     ))}
@@ -241,16 +274,19 @@ export default function AdminRecordList<T extends AdminRecord>({
               </tbody>
             </table>
           </div>
-          <AdminPagination
-            onPageChange={(nextPage) => {
-              setPage(nextPage)
-              window.scrollTo({ top: 0, behavior: 'smooth' })
-            }}
-            page={meta.page}
-            total={meta.total}
-            totalPages={meta.totalPages}
-          />
         </>
+      ) : null}
+
+      {state === 'ready' ? (
+        <AdminPagination
+          onPageChange={(nextPage) => {
+            setPage(nextPage)
+            window.scrollTo({ top: 0, behavior: 'smooth' })
+          }}
+          page={meta.page}
+          total={meta.total}
+          totalPages={meta.totalPages}
+        />
       ) : null}
     </section>
   )

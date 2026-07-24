@@ -9,7 +9,13 @@ import {
   buildAdminListRequestUrl,
   classifyAdminDetailResponse,
   classifyAdminListResponse,
+  filterAdminRecordsForCurrentPage,
 } from './adminRecordState'
+import { isAdminProductOrderListItem } from '@/lib/admin/productOrders'
+
+const acceptsId = (value: unknown): value is { id: string } =>
+  typeof value === 'object' && value !== null && Object.keys(value).length === 1 &&
+  typeof (value as { id?: unknown }).id === 'string'
 
 const navigationMarkup = renderToStaticMarkup(
   createElement(AdminNavigation, { pathname: '/admin/product-orders' }),
@@ -57,16 +63,25 @@ assert.match(paginationMarkup, /下一頁/)
 
 assert.equal(
   buildAdminListRequestUrl('/api/admin/product-orders', 2, {
-    q: 'ORDER-1',
     from: '2026-07-01',
     to: '2026-07-31',
     status: 'payment_pending',
   }),
-  '/api/admin/product-orders?page=2&pageSize=20&q=ORDER-1&from=2026-07-01&to=2026-07-31&status=payment_pending',
+  '/api/admin/product-orders?page=2&pageSize=20&from=2026-07-01&to=2026-07-31&status=payment_pending',
 )
 
+for (const piiQuery of ['合成會員', '匯款人姓名', 'ORDER-PRIVATE-001']) {
+  const requestUrl = buildAdminListRequestUrl('/api/admin/members', 1, {
+    from: '',
+    to: '',
+    status: '',
+  })
+  assert.equal(requestUrl.includes(piiQuery), false, '本頁搜尋字串不得寫入 request URL')
+  assert.equal(new URL(requestUrl, 'https://example.test').searchParams.has('q'), false)
+}
+
 assert.deepEqual(
-  classifyAdminListResponse(401, false, {}, 'productOrders'),
+  classifyAdminListResponse(401, false, {}, 'productOrders', isAdminProductOrderListItem),
   { state: 'unauthorized' },
 )
 assert.deepEqual(
@@ -74,7 +89,7 @@ assert.deepEqual(
     ok: true,
     productOrders: [],
     meta: { total: 0, page: 1, pageSize: 20, totalPages: 0 },
-  }, 'productOrders'),
+  }, 'productOrders', isAdminProductOrderListItem),
   {
     state: 'empty',
     records: [],
@@ -82,32 +97,73 @@ assert.deepEqual(
   },
 )
 assert.equal(
-  classifyAdminListResponse(500, false, { error: '安全錯誤' }, 'productOrders').state,
+  classifyAdminListResponse(
+    500,
+    false,
+    { error: '安全錯誤' },
+    'productOrders',
+    isAdminProductOrderListItem,
+  ).state,
   'error',
 )
 assert.equal(
   classifyAdminListResponse(200, true, {
     ok: true,
-    productOrders: [{ id: 'order-1' }],
+    productOrders: [{
+      id: 'order-1',
+      orderNumber: 'ORDER-1',
+      createdAt: '2026-07-01T00:00:00.000Z',
+      customerName: '合成客戶',
+      customerEmail: 's***c@example.test',
+      customerPhone: '09••••••78',
+      productSummary: '合成商品 × 1',
+      totalAmountTwd: 1000,
+      orderStatus: 'paid',
+      paymentStatus: 'paid',
+      shippingStatus: 'not_shipped',
+    }],
     meta: { total: 1, page: 1, pageSize: 20, totalPages: 1 },
-  }, 'productOrders').state,
+  }, 'productOrders', isAdminProductOrderListItem).state,
   'ready',
 )
 
 assert.deepEqual(
-  classifyAdminDetailResponse(403, false, {}, 'productOrder'),
+  classifyAdminDetailResponse(403, false, {}, 'productOrder', acceptsId),
   { state: 'unauthorized' },
 )
 assert.equal(
-  classifyAdminDetailResponse(404, false, { error: '找不到紀錄' }, 'productOrder').state,
+  classifyAdminDetailResponse(
+    404,
+    false,
+    { error: '找不到紀錄' },
+    'productOrder',
+    acceptsId,
+  ).state,
   'error',
 )
 assert.deepEqual(
   classifyAdminDetailResponse(200, true, {
     ok: true,
     productOrder: { id: 'order-1' },
-  }, 'productOrder'),
+  }, 'productOrder', acceptsId),
   { state: 'ready', record: { id: 'order-1' } },
+)
+
+const currentPageRecords = [
+  { id: '1', searchable: 'ORDER-1 合成會員' },
+  { id: '2', searchable: 'ORDER-2 另一位會員' },
+]
+assert.deepEqual(
+  filterAdminRecordsForCurrentPage(
+    currentPageRecords,
+    '合成',
+    (record) => record.searchable,
+  ),
+  [currentPageRecords[0]],
+)
+assert.deepEqual(
+  filterAdminRecordsForCurrentPage(currentPageRecords, '', (record) => record.searchable),
+  currentPageRecords,
 )
 
 console.log('✓ admin read-only rendered behavior and state transition tests passed')

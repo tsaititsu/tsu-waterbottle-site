@@ -1,4 +1,11 @@
 import { maskEmail, maskIdentifier, maskPhone } from './pii'
+import {
+  hasExactKeys,
+  isFiniteNumber,
+  isNullableString,
+  isPlainRecord,
+  isString,
+} from './validation'
 
 export const BANK_TRANSFER_STATUSES = [
   'pending_review',
@@ -41,6 +48,67 @@ export type AdminBankTransferDetail = AdminBankTransferListItem & {
   bankAccountLast5: string
   transferTime: string | null
   confirmedAt: string | null
+}
+
+const ADMIN_BANK_TRANSFER_LIST_KEYS = [
+  'id',
+  'createdAt',
+  'payerName',
+  'amountTwd',
+  'maskedLast5',
+  'itemType',
+  'itemName',
+  'status',
+] as const
+
+const ADMIN_BANK_TRANSFER_DETAIL_KEYS = [
+  ...ADMIN_BANK_TRANSFER_LIST_KEYS,
+  'payerPhone',
+  'payerEmail',
+  'itemId',
+  'bankAccountLast5',
+  'transferTime',
+  'confirmedAt',
+] as const
+
+export function isAdminBankTransferListItem(
+  value: unknown,
+): value is AdminBankTransferListItem {
+  return (
+    isPlainRecord(value) &&
+    hasExactKeys(value, ADMIN_BANK_TRANSFER_LIST_KEYS) &&
+    isString(value.id) &&
+    isString(value.createdAt) &&
+    isString(value.payerName) &&
+    isFiniteNumber(value.amountTwd) &&
+    isString(value.maskedLast5) &&
+    isString(value.itemType) &&
+    isString(value.itemName) &&
+    isString(value.status)
+  )
+}
+
+export function isAdminBankTransferDetail(
+  value: unknown,
+): value is AdminBankTransferDetail {
+  return (
+    isPlainRecord(value) &&
+    hasExactKeys(value, ADMIN_BANK_TRANSFER_DETAIL_KEYS) &&
+    isString(value.id) &&
+    isString(value.createdAt) &&
+    isString(value.payerName) &&
+    isFiniteNumber(value.amountTwd) &&
+    isString(value.maskedLast5) &&
+    isString(value.itemType) &&
+    isString(value.itemName) &&
+    isString(value.status) &&
+    isString(value.payerPhone) &&
+    isString(value.payerEmail) &&
+    isString(value.itemId) &&
+    isString(value.bankAccountLast5) &&
+    isNullableString(value.transferTime) &&
+    isNullableString(value.confirmedAt)
+  )
 }
 
 function record(value: unknown): Record<string, unknown> {

@@ -4,7 +4,10 @@ import AdminPageHeader from '@/components/admin/AdminPageHeader'
 import AdminRecordList from '@/components/admin/AdminRecordList'
 import AdminStatusBadge from '@/components/admin/AdminStatusBadge'
 import { formatAdminDateTime, formatAdminTwd } from '@/lib/admin/format'
-import type { AdminBankTransferListItem } from '@/lib/admin/bankTransfers'
+import {
+  isAdminBankTransferListItem,
+  type AdminBankTransferListItem,
+} from '@/lib/admin/bankTransfers'
 
 const statusOptions = [
   { value: 'pending_review', label: '待檢視' },
@@ -33,6 +36,12 @@ export default function AdminBankTransfersPage() {
         detailBasePath="/admin/bank-transfers"
         emptyMessage="目前條件下沒有歷史匯款回報。"
         endpoint="/api/admin/bank-transfers"
+        getSearchText={(record) => [
+          record.payerName,
+          record.itemType,
+          record.itemName,
+          record.status,
+        ].join(' ')}
         renderMobile={(record) => (
           <div className="grid gap-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -47,8 +56,8 @@ export default function AdminBankTransfersPage() {
           </div>
         )}
         responseKey="bankTransfers"
-        searchLabel="搜尋匯款人姓名"
         statusOptions={statusOptions}
+        validateRecord={isAdminBankTransferListItem}
       />
     </main>
   )

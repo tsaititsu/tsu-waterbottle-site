@@ -1,4 +1,5 @@
 import { maskIdentifier } from './pii'
+import { hasExactKeys, isPlainRecord, isString } from './validation'
 
 export const ADMIN_MEMBER_COLUMNS = 'id,display_name,created_at,updated_at'
 
@@ -8,6 +9,26 @@ export type AdminMemberRecord = {
   displayName: string
   createdAt: string
   updatedAt: string
+}
+
+const ADMIN_MEMBER_RECORD_KEYS = [
+  'id',
+  'maskedId',
+  'displayName',
+  'createdAt',
+  'updatedAt',
+] as const
+
+export function isAdminMemberListItem(value: unknown): value is AdminMemberRecord {
+  return (
+    isPlainRecord(value) &&
+    hasExactKeys(value, ADMIN_MEMBER_RECORD_KEYS) &&
+    ADMIN_MEMBER_RECORD_KEYS.every((key) => isString(value[key]))
+  )
+}
+
+export function isAdminMemberDetail(value: unknown): value is AdminMemberRecord {
+  return isAdminMemberListItem(value)
 }
 
 function record(value: unknown): Record<string, unknown> {

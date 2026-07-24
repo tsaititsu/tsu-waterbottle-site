@@ -5,7 +5,10 @@ import AdminOrderStatusSet from '@/components/admin/AdminOrderStatusSet'
 import AdminPageHeader from '@/components/admin/AdminPageHeader'
 import AdminRecordDetail from '@/components/admin/AdminRecordDetail'
 import { formatAdminDateTime, formatAdminTwd } from '@/lib/admin/format'
-import type { AdminProductOrderDetail } from '@/lib/admin/productOrders'
+import {
+  isAdminProductOrderDetail,
+  type AdminProductOrderDetail,
+} from '@/lib/admin/productOrders'
 
 export default function ProductOrderDetailClient({ id }: { id: string }) {
   return (
@@ -68,6 +71,7 @@ export default function ProductOrderDetailClient({ id }: { id: string }) {
           </div>
         )}
         responseKey="productOrder"
+        validateRecord={isAdminProductOrderDetail}
       />
     </main>
   )

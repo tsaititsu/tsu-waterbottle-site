@@ -1,40 +1,11 @@
 import Link from 'next/link'
 import AdminPageHeader from '@/components/admin/AdminPageHeader'
 import AdminStatusBadge from '@/components/admin/AdminStatusBadge'
+import { getAdminModulesBySection } from '@/components/admin/adminModules'
 
-const readOnlyModules = [
-  {
-    href: '/admin/bookings',
-    title: '預約紀錄',
-    description: '查看最近載入的預約紀錄、狀態分類與未來／過去篩選。',
-  },
-  {
-    href: '/admin/product-orders',
-    title: '商品訂單',
-    description: '查看商品摘要、金額及既有訂單／付款／物流狀態。',
-  },
-  {
-    href: '/admin/members',
-    title: '會員名錄',
-    description: '查看 profiles 的基本會員資料；不讀取登入提供者或角色 metadata。',
-  },
-  {
-    href: '/admin/bank-transfers',
-    title: '歷史匯款回報',
-    description: '查閱已停止流程的歷史回報；不提供審核、退款或改狀態。',
-  },
-]
-
-const unavailableModules = [
-  '金流營運中心',
-  'AI 命盤營運中心',
-  '占卜營運中心',
-  '退款／取消／補單',
-  'Webhook 重送',
-  '對帳',
-  '會員角色管理',
-  '稽核紀錄',
-]
+const readOnlyModules = getAdminModulesBySection('readonly')
+const toolModules = getAdminModulesBySection('tool')
+const unavailableModules = getAdminModulesBySection('unavailable')
 
 export default function AdminPage() {
   return (
@@ -54,18 +25,21 @@ export default function AdminPage() {
           <AdminStatusBadge tone="readonly">唯讀</AdminStatusBadge>
         </div>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
-          {readOnlyModules.map((module) => (
-            <article className="rounded-2xl border border-borderSoft bg-[#faf7ff] p-5" key={module.href}>
-              <h3 className="font-serifTC text-xl font-semibold text-deepPurple">{module.title}</h3>
-              <p className="mt-2 text-sm leading-7 text-textMuted">{module.description}</p>
-              <Link
-                className="focus-ring mt-4 inline-flex rounded-lg border border-borderSoft bg-white px-4 py-2 text-sm font-semibold text-deepPurple"
-                href={module.href}
-              >
-                查看唯讀紀錄
-              </Link>
-            </article>
-          ))}
+          {readOnlyModules.map((module) => {
+            if (!module.href) return null
+            return (
+              <article className="rounded-2xl border border-borderSoft bg-[#faf7ff] p-5" key={module.key}>
+                <h3 className="font-serifTC text-xl font-semibold text-deepPurple">{module.label}</h3>
+                <p className="mt-2 text-sm leading-7 text-textMuted">{module.description}</p>
+                <Link
+                  className="focus-ring mt-4 inline-flex rounded-lg border border-borderSoft bg-white px-4 py-2 text-sm font-semibold text-deepPurple"
+                  href={module.href}
+                >
+                  查看唯讀紀錄
+                </Link>
+              </article>
+            )
+          })}
         </div>
       </section>
 
@@ -79,12 +53,18 @@ export default function AdminPage() {
           </div>
           <AdminStatusBadge tone="tool">含資料寫入</AdminStatusBadge>
         </div>
-        <Link
-          className="focus-ring mt-5 inline-flex rounded-lg bg-[#7d5a00] px-5 py-3 font-semibold text-white"
-          href="/admin/booking-slots"
-        >
-          進入預約時段工具
-        </Link>
+        {toolModules.map((module) => {
+          if (!module.href) return null
+          return (
+            <Link
+              className="focus-ring mt-5 inline-flex rounded-lg bg-[#7d5a00] px-5 py-3 font-semibold text-white"
+              href={module.href}
+              key={module.key}
+            >
+              進入{module.label}
+            </Link>
+          )
+        })}
       </section>
 
       <section aria-labelledby="unavailable-modules" className="rounded-2xl border border-borderSoft bg-white p-5 shadow-soft md:p-6">
@@ -97,8 +77,8 @@ export default function AdminPage() {
         </div>
         <ul className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {unavailableModules.map((module) => (
-            <li className="rounded-xl border border-dashed border-borderSoft bg-[#faf9fb] p-4 text-sm text-textMuted" key={module}>
-              <span className="font-semibold text-textDark">{module}</span>
+            <li className="rounded-xl border border-dashed border-borderSoft bg-[#faf9fb] p-4 text-sm text-textMuted" key={module.key}>
+              <span className="font-semibold text-textDark">{module.label}</span>
               <span className="mt-1 block">尚未啟用</span>
             </li>
           ))}

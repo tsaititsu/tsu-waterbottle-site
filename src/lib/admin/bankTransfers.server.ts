@@ -1,6 +1,6 @@
 import 'server-only'
 import type { getSupabaseAdmin } from '@/lib/supabase/admin'
-import { escapeLikePattern, type AdminListQuery } from './query'
+import type { AdminListQuery } from './query'
 import {
   ADMIN_BANK_TRANSFER_COLUMNS,
   mapAdminBankTransferDetailRow,
@@ -24,13 +24,13 @@ export async function listAdminBankTransfers(
     .from('bank_transfer_submissions')
     .select(ADMIN_BANK_TRANSFER_COLUMNS, { count: 'exact' })
 
-  if (query.q) request = request.ilike('payer_name', `%${escapeLikePattern(query.q)}%`)
   if (query.status) request = request.eq('status', query.status)
   if (query.from) request = request.gte('created_at', query.from)
   if (query.to) request = request.lte('created_at', query.to)
 
   const { data, error, count } = await request
     .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
     .range(query.offset, query.rangeEnd)
 
   if (error) throw new Error('admin_bank_transfer_list_failed')

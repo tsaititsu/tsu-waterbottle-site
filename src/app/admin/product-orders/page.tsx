@@ -4,7 +4,10 @@ import AdminPageHeader from '@/components/admin/AdminPageHeader'
 import AdminOrderStatusSet from '@/components/admin/AdminOrderStatusSet'
 import AdminRecordList from '@/components/admin/AdminRecordList'
 import { formatAdminDateTime, formatAdminTwd } from '@/lib/admin/format'
-import type { AdminProductOrderListItem } from '@/lib/admin/productOrders'
+import {
+  isAdminProductOrderListItem,
+  type AdminProductOrderListItem,
+} from '@/lib/admin/productOrders'
 
 const statusOptions = [
   { value: 'pending_payment', label: '待付款' },
@@ -53,6 +56,11 @@ export default function AdminProductOrdersPage() {
         detailBasePath="/admin/product-orders"
         emptyMessage="目前條件下沒有商品訂單。"
         endpoint="/api/admin/product-orders"
+        getSearchText={(order) => [
+          order.orderNumber,
+          order.customerName,
+          order.productSummary,
+        ].join(' ')}
         renderMobile={(order) => (
           <div className="grid gap-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -72,8 +80,8 @@ export default function AdminProductOrdersPage() {
           </div>
         )}
         responseKey="productOrders"
-        searchLabel="搜尋訂單編號"
         statusOptions={statusOptions}
+        validateRecord={isAdminProductOrderListItem}
       />
     </main>
   )

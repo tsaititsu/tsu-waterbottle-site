@@ -54,19 +54,28 @@ const orderRow = {
   },
 }
 
-const orderList = mapAdminProductOrderListRow(orderRow)
+const orderList = mapAdminProductOrderListRow(orderRow, orderRow.product_order_items)
 assert.equal(orderList.customerEmail, 's***c@example.test')
-assert.equal(orderList.customerPhone, '09••••5678')
+assert.equal(orderList.customerPhone, '09••••••78')
 assert.equal(orderList.productSummary, '合成商品 × 2')
 assert.equal(orderList.paymentStatus, 'provider_future_status', '未知狀態應安全顯示，不應推導')
 assert.equal(JSON.stringify(orderList).includes('must-not-leak'), false)
 assert.equal(JSON.stringify(orderList).includes('raw_payload'), false)
 
-const orderDetail = mapAdminProductOrderDetailRow(orderRow)
+const orderDetail = mapAdminProductOrderDetailRow(
+  orderRow,
+  orderRow.product_order_items,
+  orderRow.product_shipping_info,
+)
 assert.equal(orderDetail.items[0]?.productName, '合成商品')
 assert.equal(orderDetail.shipping?.recipientName, '收件人')
 assert.equal(JSON.stringify(orderDetail).includes('product_snapshot'), false)
 assert.equal(JSON.stringify(orderDetail).includes('must-not-leak'), false)
+assert.equal(
+  mapAdminProductOrderDetailRow(orderRow, orderRow.product_order_items, []).shipping,
+  null,
+  '找不到 shipping row 時應安全回傳 null',
+)
 
 const member = mapAdminMemberRow({
   id: '11111111-2222-4333-8444-555555555555',

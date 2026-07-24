@@ -178,6 +178,10 @@ test('all admin booking-slots routes use requireAdminUser instead of login-only 
 test('admin layout guards the UI behind the server-side admin session check', () => {
   const layoutSource = readFileSync(join(projectRoot, 'src/app/admin/layout.tsx'), 'utf8')
   const clientSource = readFileSync(join(projectRoot, 'src/app/admin/AdminLayoutClient.tsx'), 'utf8')
+  const accessControllerSource = readFileSync(
+    join(projectRoot, 'src/lib/auth/adminPageAccess.ts'),
+    'utf8',
+  )
 
   assert.equal(layoutSource.startsWith("'use client'"), false, 'admin layout 應保持為可匯出 metadata 的 Server Component')
   assert.match(layoutSource, /import AdminLayoutClient from ['"]\.\/AdminLayoutClient['"]/, 'layout 應匯入 Client 守門')
@@ -190,14 +194,16 @@ test('admin layout guards the UI behind the server-side admin session check', ()
 
   assert.equal(clientSource.startsWith("'use client'"), true, '互動式守門應留在 Client Component')
   assert.equal(clientSource.includes('getMockUser()'), true, '應先確認目前登入使用者')
-  assert.equal(clientSource.includes('getAuthAccessToken()'), true, '應取得 access token')
-  assert.equal(clientSource.includes("fetch('/api/admin/session'"), true, '應呼叫 server-side admin 驗證')
-  assert.equal(clientSource.includes("cache: 'no-store'"), true, '管理員驗證不得使用快取結果')
+  assert.equal(clientSource.includes('getAccessToken: getAuthAccessToken'), true, 'controller 應取得 access token')
   assert.match(
     clientSource,
-    /if \(response\.ok\) \{\s*setAccessState\('authorized'\)\s*} else if \(response\.status === 401\) \{\s*setAccessState\('unauthenticated'\)\s*} else \{\s*setAccessState\('forbidden'\)\s*}/,
-    '只有成功回應可授權，401 與其他拒絕回應必須分流',
+    /createAdminPageAccessController/,
+    '頁面守門應使用具 request identity 與 abort 的共用 controller',
   )
+  assert.match(clientSource, /\(snapshot\) => setAccessState\(snapshot\.state\)/)
+  assert.match(clientSource, /controller\.run\(getMockUser\(\)\)/)
+  assert.match(clientSource, /controller\.cancel\(\)/)
+  assert.doesNotMatch(clientSource, /fetch\('\/api\/admin\/session'/, '元件不得重複實作 session 判斷')
   assert.match(
     clientSource,
     /if \(accessState === 'unauthenticated'\) \{[\s\S]*請先登入管理員帳號[\s\S]*<LoginModal[\s\S]*returnTo=\{returnTo\}[\s\S]*mode="admin"/,
@@ -219,7 +225,7 @@ test('admin layout guards the UI behind the server-side admin session check', ()
     1,
     'children 不得出現在 authorized gate 以外的分支',
   )
-  assert.equal(clientSource.includes("setAccessState('forbidden')"), true, '403 或驗證錯誤應進入 forbidden 狀態')
+  assert.equal(accessControllerSource.includes("'forbidden'"), true, '403 或驗證錯誤應進入 forbidden 狀態')
   assert.equal(clientSource.includes('沒有管理權限'), true, '非 admin 應看到沒有管理權限訊息')
   assert.equal(clientSource.includes('subscribeAuthChange'), true, '登入狀態變更時應重新驗證')
   assert.equal(clientSource.includes('ADMIN_EMAILS'), false, '前端不應出現 ADMIN_EMAILS 細節')

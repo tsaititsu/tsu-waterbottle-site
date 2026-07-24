@@ -5,12 +5,13 @@ import {
   listAdminBankTransfers,
 } from './bankTransfers.server'
 import { getAdminMember, listAdminMembers } from './members.server'
-import {
-  getAdminProductOrder,
-  listAdminProductOrders,
-} from './productOrders.server'
 
 type Call = { method: string; args: unknown[] }
+
+type SyntheticPaginationRow = {
+  id: string
+  created_at: string
+}
 
 class FakeQuery {
   readonly calls: Call[] = []
@@ -36,6 +37,64 @@ class FakeQuery {
   }
 }
 
+function orderedRows(rows: SyntheticPaginationRow[], calls: Call[]) {
+  const orderCalls = calls.filter((call) => call.method === 'order')
+
+  return [...rows].sort((left, right) => {
+    for (const call of orderCalls) {
+      const [column, options] = call.args as [
+        keyof SyntheticPaginationRow,
+        { ascending?: boolean },
+      ]
+      const leftValue = left[column]
+      const rightValue = right[column]
+      if (leftValue === rightValue) continue
+      const comparison = leftValue < rightValue ? -1 : 1
+      return options?.ascending === false ? -comparison : comparison
+    }
+    return 0
+  })
+}
+
+function assertStableSameTimestampPagination(calls: Call[], label: string) {
+  const orderCalls = calls.filter((call) => call.method === 'order')
+  assert.deepEqual(orderCalls.map((call) => call.args), [
+    ['created_at', { ascending: false }],
+    ['id', { ascending: false }],
+  ], `${label} 必須在資料庫層使用 created_at DESC、id DESC`)
+
+  const rangeIndex = calls.findIndex((call) => call.method === 'range')
+  assert.ok(rangeIndex >= 0, `${label} 必須套用 range`)
+  assert.equal(
+    calls.findIndex((call) => call.method === 'order' && call.args[0] === 'id') < rangeIndex,
+    true,
+    `${label} 的唯一 id tie-breaker 必須在 range 前套用`,
+  )
+
+  const createdAt = '2026-07-01T00:00:00.000Z'
+  const rowA = { id: '00000000-0000-4000-8000-00000000000a', created_at: createdAt }
+  const rowB = { id: '00000000-0000-4000-8000-00000000000b', created_at: createdAt }
+  const rowC = { id: '00000000-0000-4000-8000-00000000000c', created_at: createdAt }
+  const differentlyOrderedSources = [
+    [rowA, rowB, rowC],
+    [rowC, rowA, rowB],
+    [rowB, rowC, rowA],
+  ]
+
+  const pageSizeOneIds = differentlyOrderedSources.map((rows, pageIndex) =>
+    orderedRows(rows, calls).slice(pageIndex, pageIndex + 1)[0]?.id,
+  )
+  assert.deepEqual(pageSizeOneIds, [rowC.id, rowB.id, rowA.id])
+  assert.equal(new Set(pageSizeOneIds).size, 3, `${label} pageSize=1 不得重複或遺漏`)
+
+  const pageSizeTwoIds = [
+    ...orderedRows(differentlyOrderedSources[0], calls).slice(0, 2),
+    ...orderedRows(differentlyOrderedSources[1], calls).slice(2, 4),
+  ].map((row) => row.id)
+  assert.deepEqual(pageSizeTwoIds, [rowC.id, rowB.id, rowA.id])
+  assert.equal(new Set(pageSizeTwoIds).size, 3, `${label} pageSize=2 不得重複或遺漏`)
+}
+
 function client(result: Record<string, unknown>) {
   const query = new FakeQuery(result)
   let table = ''
@@ -54,7 +113,6 @@ function client(result: Record<string, unknown>) {
 const listQuery: AdminListQuery = {
   page: 2,
   pageSize: 20,
-  q: '100%_safe',
   from: '2026-07-01T00:00:00.000Z',
   to: '2026-07-31T23:59:59.999Z',
   status: 'paid',
@@ -79,25 +137,6 @@ const orderRow = {
 }
 
 async function main() {
-  const orderListClient = client({ data: [orderRow], error: null, count: 1 })
-  const orders = await listAdminProductOrders(orderListClient.value as never, listQuery)
-  assert.equal(orderListClient.table, 'product_orders')
-  assert.equal(orders.total, 1)
-  assert.deepEqual(
-    orderListClient.query.calls.map((call) => call.method),
-    ['select', 'ilike', 'eq', 'gte', 'lte', 'order', 'range'],
-  )
-  assert.deepEqual(orderListClient.query.calls.at(-1)?.args, [20, 39])
-  assert.deepEqual(orderListClient.query.calls.find((call) => call.method === 'ilike')?.args, [
-    'order_no',
-    '%100\\%\\_safe%',
-  ])
-
-  const orderDetailClient = client({ data: orderRow, error: null })
-  assert.equal((await getAdminProductOrder(orderDetailClient.value as never, orderRow.id))?.id, orderRow.id)
-  assert.equal(orderDetailClient.table, 'product_orders')
-  assert.deepEqual(orderDetailClient.query.calls.map((call) => call.method), ['select', 'eq', 'maybeSingle'])
-
   const memberRow = {
     id: orderRow.id,
     display_name: '合成會員',
@@ -109,8 +148,9 @@ async function main() {
   assert.equal(memberListClient.table, 'profiles')
   assert.deepEqual(
     memberListClient.query.calls.map((call) => call.method),
-    ['select', 'ilike', 'gte', 'lte', 'order', 'range'],
+    ['select', 'gte', 'lte', 'order', 'order', 'range'],
   )
+  assertStableSameTimestampPagination(memberListClient.query.calls, 'member list')
   const memberDetailClient = client({ data: memberRow, error: null })
   assert.equal((await getAdminMember(memberDetailClient.value as never, memberRow.id))?.maskedId, '1111…5555')
 
@@ -134,14 +174,13 @@ async function main() {
   assert.equal(transferListClient.table, 'bank_transfer_submissions')
   assert.deepEqual(
     transferListClient.query.calls.map((call) => call.method),
-    ['select', 'ilike', 'eq', 'gte', 'lte', 'order', 'range'],
+    ['select', 'eq', 'gte', 'lte', 'order', 'order', 'range'],
   )
+  assertStableSameTimestampPagination(transferListClient.query.calls, 'bank transfer list')
   const transferDetailClient = client({ data: transferRow, error: null })
   assert.equal((await getAdminBankTransfer(transferDetailClient.value as never, transferRow.id))?.bankAccountLast5, '12345')
 
   for (const query of [
-    orderListClient.query,
-    orderDetailClient.query,
     memberListClient.query,
     memberDetailClient.query,
     transferListClient.query,

@@ -33,7 +33,10 @@ assert.equal(
   'children 只能在 authorized gate 內進入 Admin Shell',
 )
 assert.match(shellSource, /返回前台/)
-assert.match(navigationSource, /aria-current=\{current\(pathname, item\.href\) \? 'page' : undefined\}/)
+assert.match(
+  navigationSource,
+  /aria-current=\{isAdminModuleActive\(item, pathname\) \? 'page' : undefined\}/,
+)
 assert.match(navigationSource, /手機版後台導覽/)
 assert.match(navigationSource, /<details/)
 assert.match(navigationSource, /唯讀紀錄/)

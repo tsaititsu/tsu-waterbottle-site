@@ -1,29 +1,13 @@
 import Link from 'next/link'
 import AdminStatusBadge from './AdminStatusBadge'
+import {
+  getAdminModulesBySection,
+  isAdminModuleActive,
+} from './adminModules'
 
-const readOnlyItems = [
-  { href: '/admin', label: '能力總覽' },
-  { href: '/admin/bookings', label: '預約紀錄' },
-  { href: '/admin/product-orders', label: '商品訂單' },
-  { href: '/admin/members', label: '會員名錄' },
-  { href: '/admin/bank-transfers', label: '歷史匯款回報' },
-]
-
-const toolItems = [{ href: '/admin/booking-slots', label: '預約時段工具' }]
-
-const unavailableItems = [
-  '金流營運中心',
-  'AI 命盤營運中心',
-  '占卜營運中心',
-  '退款／取消／補單',
-  'Webhook 重送與對帳',
-  '會員角色管理',
-  '稽核紀錄',
-]
-
-function current(pathname: string, href: string) {
-  return href === '/admin' ? pathname === href : pathname === href || pathname.startsWith(`${href}/`)
-}
+const readOnlyItems = getAdminModulesBySection('readonly')
+const toolItems = getAdminModulesBySection('tool')
+const unavailableItems = getAdminModulesBySection('unavailable')
 
 function NavigationLinks({ idPrefix, pathname }: { idPrefix: string; pathname: string }) {
   const readonlyHeadingId = `${idPrefix}-readonly-navigation`
@@ -40,21 +24,37 @@ function NavigationLinks({ idPrefix, pathname }: { idPrefix: string; pathname: s
           <AdminStatusBadge tone="readonly">唯讀</AdminStatusBadge>
         </div>
         <ul className="mt-3 grid gap-1">
-          {readOnlyItems.map((item) => (
-            <li key={item.href}>
-              <Link
-                aria-current={current(pathname, item.href) ? 'page' : undefined}
-                className={`focus-ring block rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
-                  current(pathname, item.href)
-                    ? 'bg-deepPurple text-white'
-                    : 'text-textDark hover:bg-softPurple hover:text-deepPurple'
-                }`}
-                href={item.href}
-              >
-                {item.label}
-              </Link>
-            </li>
-          ))}
+          <li>
+            <Link
+              aria-current={pathname === '/admin' ? 'page' : undefined}
+              className={`focus-ring block rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
+                pathname === '/admin'
+                  ? 'bg-deepPurple text-white'
+                  : 'text-textDark hover:bg-softPurple hover:text-deepPurple'
+              }`}
+              href="/admin"
+            >
+              能力總覽
+            </Link>
+          </li>
+          {readOnlyItems.map((item) => {
+            if (!item.href) return null
+            return (
+              <li key={item.key}>
+                <Link
+                  aria-current={isAdminModuleActive(item, pathname) ? 'page' : undefined}
+                  className={`focus-ring block rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
+                    isAdminModuleActive(item, pathname)
+                      ? 'bg-deepPurple text-white'
+                      : 'text-textDark hover:bg-softPurple hover:text-deepPurple'
+                  }`}
+                  href={item.href}
+                >
+                  {item.label}
+                </Link>
+              </li>
+            )
+          })}
         </ul>
       </section>
 
@@ -66,21 +66,24 @@ function NavigationLinks({ idPrefix, pathname }: { idPrefix: string; pathname: s
           <AdminStatusBadge tone="tool">含資料寫入</AdminStatusBadge>
         </div>
         <ul className="mt-3 grid gap-1">
-          {toolItems.map((item) => (
-            <li key={item.href}>
-              <Link
-                aria-current={current(pathname, item.href) ? 'page' : undefined}
-                className={`focus-ring block rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
-                  current(pathname, item.href)
-                    ? 'bg-[#7d5a00] text-white'
-                    : 'text-textDark hover:bg-[#fff4d9]'
-                }`}
-                href={item.href}
-              >
-                {item.label}
-              </Link>
-            </li>
-          ))}
+          {toolItems.map((item) => {
+            if (!item.href) return null
+            return (
+              <li key={item.key}>
+                <Link
+                  aria-current={isAdminModuleActive(item, pathname) ? 'page' : undefined}
+                  className={`focus-ring block rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
+                    isAdminModuleActive(item, pathname)
+                      ? 'bg-[#7d5a00] text-white'
+                      : 'text-textDark hover:bg-[#fff4d9]'
+                  }`}
+                  href={item.href}
+                >
+                  {item.label}
+                </Link>
+              </li>
+            )
+          })}
         </ul>
       </section>
 
@@ -96,9 +99,9 @@ function NavigationLinks({ idPrefix, pathname }: { idPrefix: string; pathname: s
             <li
               className="rounded-xl border border-dashed border-borderSoft px-3 py-2 text-sm text-textMuted"
               data-admin-module-state="unavailable"
-              key={item}
+              key={item.key}
             >
-              {item}
+              {item.label}
             </li>
           ))}
         </ul>

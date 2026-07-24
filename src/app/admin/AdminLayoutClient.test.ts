@@ -5,14 +5,14 @@ import { join } from 'node:path'
 const source = readFileSync(join(process.cwd(), 'src/app/admin/AdminLayoutClient.tsx'), 'utf8')
 const sessionRoute = readFileSync(join(process.cwd(), 'src/app/api/admin/session/route.ts'), 'utf8')
 
-assert.match(source, /type AdminAccessState = 'checking' \| 'unauthenticated' \| 'forbidden' \| 'authorized'/)
-assert.match(source, /const user = getMockUser\(\)\s*\n\s*if \(!user\) \{[\s\S]*setAccessState\('unauthenticated'\)[\s\S]*return/)
-assert.ok(source.indexOf('if (!user)') < source.indexOf("fetch('/api/admin/session'"))
-assert.match(source, /fetch\('\/api\/admin\/session'/)
-assert.match(source, /headers: \{ authorization: `Bearer \$\{accessToken\}` \}/)
-assert.match(source, /if \(response\.ok\) \{\s*setAccessState\('authorized'\)/)
-assert.match(source, /response\.status === 401/)
-assert.match(source, /setAccessState\('forbidden'\)/)
+assert.match(source, /createAdminPageAccessController/)
+assert.match(source, /getAccessToken: getAuthAccessToken/)
+assert.match(source, /fetchSession: \(input, init\) => fetch\(input, init\)/)
+assert.match(source, /\(snapshot\) => setAccessState\(snapshot\.state\)/)
+assert.match(source, /controller\.run\(getMockUser\(\)\)/)
+assert.match(source, /subscribeAuthChange/)
+assert.match(source, /controller\.cancel\(\)/)
+assert.doesNotMatch(source, /fetch\('\/api\/admin\/session'/)
 assert.match(
   source,
   /if \(accessState === 'authorized'\) \{\s*return <AdminShell pathname=\{pathname\}>\{children\}<\/AdminShell>/,

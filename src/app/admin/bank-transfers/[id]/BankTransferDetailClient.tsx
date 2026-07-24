@@ -5,7 +5,10 @@ import AdminPageHeader from '@/components/admin/AdminPageHeader'
 import AdminRecordDetail from '@/components/admin/AdminRecordDetail'
 import AdminStatusBadge from '@/components/admin/AdminStatusBadge'
 import { formatAdminDateTime, formatAdminTwd } from '@/lib/admin/format'
-import type { AdminBankTransferDetail } from '@/lib/admin/bankTransfers'
+import {
+  isAdminBankTransferDetail,
+  type AdminBankTransferDetail,
+} from '@/lib/admin/bankTransfers'
 
 export default function BankTransferDetailClient({ id }: { id: string }) {
   return (
@@ -36,6 +39,7 @@ export default function BankTransferDetailClient({ id }: { id: string }) {
           </AdminDetailSection>
         )}
         responseKey="bankTransfer"
+        validateRecord={isAdminBankTransferDetail}
       />
     </main>
   )

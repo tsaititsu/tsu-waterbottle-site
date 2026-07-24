@@ -8,6 +8,13 @@ function characters(value: string) {
   return Array.from(value)
 }
 
+function graphemes(value: string) {
+  if (typeof Intl.Segmenter !== 'function') return value ? [value] : []
+
+  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+  return Array.from(segmenter.segment(value), ({ segment }) => segment)
+}
+
 export function maskIdentifier(value: string | null | undefined) {
   const normalized = normalize(value)
   if (!normalized) return MISSING_VALUE
@@ -27,9 +34,15 @@ export function maskEmail(value: string | null | undefined) {
     return maskIdentifier(normalized)
   }
 
-  const local = characters(normalized.slice(0, atIndex))
+  const local = graphemes(normalized.slice(0, atIndex))
   const domain = normalized.slice(atIndex + 1)
-  const maskedLocal = local.length === 1 ? '*' : `${local[0]}***${local.at(-1)}`
+  const maskedLocal = local.length === 1
+    ? '*'
+    : local.length === 2
+      ? `${local[0]}*`
+      : local.length === 3
+        ? `${local[0]}*${local.at(-1)}`
+        : `${local[0]}***${local.at(-1)}`
   return `${maskedLocal}@${domain}`
 }
 
@@ -38,17 +51,8 @@ export function maskPhone(value: string | null | undefined) {
   if (!normalized) return MISSING_VALUE
 
   const digits = normalized.replace(/\D/gu, '')
-  if (digits.length < 4) return maskIdentifier(normalized)
-  return `${digits.slice(0, 2)}••••${digits.slice(-4)}`
-}
-
-export function summarizeAddress(value: string | null | undefined) {
-  const normalized = normalize(value)
-  if (!normalized) return MISSING_VALUE
-
-  const taiwanRegion = normalized.match(/^(.{2,3}[縣市])(.{1,4}(?:區|鄉|鎮|市))/u)
-  if (taiwanRegion) return `${taiwanRegion[1]}${taiwanRegion[2]}（其餘已遮蔽）`
-
-  const prefix = characters(normalized).slice(0, 3).join('')
-  return `${prefix}…（其餘已遮蔽）`
+  if (digits.length === 0) return '•'.repeat(Math.max(1, characters(normalized).length))
+  if (digits.length <= 2) return '•'.repeat(digits.length)
+  if (digits.length <= 6) return `${'•'.repeat(digits.length - 1)}${digits.at(-1)}`
+  return `${digits.slice(0, 2)}${'•'.repeat(digits.length - 4)}${digits.slice(-2)}`
 }

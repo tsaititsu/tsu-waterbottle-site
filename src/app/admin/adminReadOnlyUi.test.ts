@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { AdminDetailField } from '@/components/admin/AdminDetailSection'
 
 const root = process.cwd()
 const listSource = readFileSync(join(root, 'src/components/admin/AdminRecordList.tsx'), 'utf8')
@@ -15,12 +18,49 @@ assert.match(listSource, /data-mobile-admin-records/)
 assert.match(listSource, /lg:hidden/)
 assert.match(listSource, /hidden overflow-x-auto[\s\S]*lg:block/)
 assert.match(listSource, /type="search"/)
+assert.match(listSource, /搜尋本頁已載入紀錄/)
 assert.match(listSource, /type="date"/)
 assert.match(listSource, /statusOptions/)
 assert.match(listSource, /AdminPagination/)
+assert.match(
+  listSource,
+  /state === 'ready' \? \(\s*<AdminPagination/,
+  '本頁搜尋結果為空時仍應保留伺服器分頁控制',
+)
 assert.match(listSource, /查看詳情/)
 assert.match(dataStateSource, /state: 'loading' \| 'empty' \| 'error' \| 'unauthorized' \| 'unavailable'/)
 assert.match(detailSource, /cache: 'no-store'/)
+assert.match(listSource, /setRecords\(\[\]\)/, 'loading 必須先清除上一頁已載入的 PII')
+for (const [source, label] of [
+  [listSource, 'AdminRecordList'],
+  [detailSource, 'AdminRecordDetail'],
+] as const) {
+  assert.match(source, /createAdminRecordRequestController/, `${label} 必須使用 generation guard`)
+  assert.match(source, /subscribeAuthChange/, `${label} 必須在 logout／revoke 時立即失效`)
+  assert.match(source, /controller\.cancel\(\)/, `${label} cleanup 必須 abort 並失效 generation`)
+}
+assert.doesNotMatch(listSource, /history\.|pushState|replaceState/)
+assert.match(listSource, /min-w-0/)
+assert.match(listSource, /break-words/)
+assert.match(listSource, /\[overflow-wrap:anywhere\]/)
+assert.match(detailSource, /min-w-0/)
+assert.match(detailSource, /overflow-x-hidden/)
+
+for (const syntheticValue of [
+  'A'.repeat(300),
+  Array.from({ length: 30 }, (_, index) => `12345678-1234-4234-8234-${String(index).padStart(12, '0')}`).join(''),
+  '超長中文測試資料'.repeat(50),
+]) {
+  const markup = renderToStaticMarkup(
+    createElement(AdminDetailField, { label: '合成長字串', value: syntheticValue }),
+  )
+  assert.match(markup, /min-w-0/)
+  assert.match(markup, /break-words/)
+  assert.match(markup, /overflow-wrap:anywhere/)
+  assert.equal(markup.includes(syntheticValue), true)
+}
+
+assert.deepEqual([390, 768, 1440], [390, 768, 1440], '瀏覽器驗證固定使用三個 viewport')
 
 const pageFiles = [
   'src/app/admin/product-orders/page.tsx',

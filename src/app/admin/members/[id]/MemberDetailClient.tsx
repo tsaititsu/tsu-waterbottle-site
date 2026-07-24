@@ -4,7 +4,7 @@ import AdminDetailSection, { AdminDetailField } from '@/components/admin/AdminDe
 import AdminPageHeader from '@/components/admin/AdminPageHeader'
 import AdminRecordDetail from '@/components/admin/AdminRecordDetail'
 import { formatAdminDateTime } from '@/lib/admin/format'
-import type { AdminMemberRecord } from '@/lib/admin/members'
+import { isAdminMemberDetail, type AdminMemberRecord } from '@/lib/admin/members'
 
 export default function MemberDetailClient({ id }: { id: string }) {
   return (
@@ -26,6 +26,7 @@ export default function MemberDetailClient({ id }: { id: string }) {
           </AdminDetailSection>
         )}
         responseKey="member"
+        validateRecord={isAdminMemberDetail}
       />
     </main>
   )

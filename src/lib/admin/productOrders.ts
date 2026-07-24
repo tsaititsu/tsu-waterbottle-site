@@ -1,4 +1,12 @@
 import { maskEmail, maskPhone } from './pii'
+import {
+  hasExactKeys,
+  isFiniteNumber,
+  isNullableString,
+  isPlainRecord,
+  isPositiveSafeInteger,
+  isString,
+} from './validation'
 
 export const PRODUCT_ORDER_STATUSES = [
   'pending_payment',
@@ -23,23 +31,33 @@ export const ADMIN_PRODUCT_ORDER_LIST_COLUMNS = [
   'order_status',
   'shipping_status',
   'created_at',
-  'product_order_items(product_name,quantity)',
 ].join(',')
 
 export const ADMIN_PRODUCT_ORDER_DETAIL_COLUMNS = [
-  'id',
-  'order_no',
-  'customer_name',
-  'customer_email',
-  'customer_phone',
-  'total_amount_twd',
-  'payment_status',
-  'order_status',
-  'shipping_status',
+  ADMIN_PRODUCT_ORDER_LIST_COLUMNS,
+  'updated_at',
+].join(',')
+
+export const ADMIN_PRODUCT_ORDER_LIST_ITEM_COLUMNS =
+  'id,order_id,product_name,quantity,created_at'
+
+export const ADMIN_PRODUCT_ORDER_DETAIL_ITEM_COLUMNS =
+  'id,order_id,product_name,unit_price_twd,quantity,subtotal_twd,created_at'
+
+export const ADMIN_PRODUCT_ORDER_SHIPPING_COLUMNS = [
+  'order_id',
+  'recipient_name',
+  'recipient_phone',
+  'recipient_email',
+  'shipping_method',
+  'postal_code',
+  'address',
+  'store_type',
+  'store_name',
+  'store_address',
+  'store_phone',
   'created_at',
   'updated_at',
-  'product_order_items(id,product_name,unit_price_twd,quantity,subtotal_twd)',
-  'product_shipping_info(recipient_name,recipient_phone,recipient_email,shipping_method,postal_code,address,store_type,store_name,store_address,store_phone,created_at,updated_at)',
 ].join(',')
 
 export type AdminProductOrderItem = {
@@ -85,6 +103,127 @@ export type AdminProductOrderDetail = AdminProductOrderListItem & {
   shipping: AdminProductShippingInfo | null
 }
 
+const ADMIN_PRODUCT_ORDER_LIST_KEYS = [
+  'id',
+  'orderNumber',
+  'createdAt',
+  'customerName',
+  'customerEmail',
+  'customerPhone',
+  'productSummary',
+  'totalAmountTwd',
+  'orderStatus',
+  'paymentStatus',
+  'shippingStatus',
+] as const
+
+const ADMIN_PRODUCT_ORDER_ITEM_KEYS = [
+  'id',
+  'productName',
+  'unitPriceTwd',
+  'quantity',
+  'subtotalTwd',
+] as const
+
+const ADMIN_PRODUCT_SHIPPING_KEYS = [
+  'recipientName',
+  'recipientPhone',
+  'recipientEmail',
+  'shippingMethod',
+  'postalCode',
+  'address',
+  'storeType',
+  'storeName',
+  'storeAddress',
+  'storePhone',
+  'createdAt',
+  'updatedAt',
+] as const
+
+const ADMIN_PRODUCT_ORDER_DETAIL_KEYS = [
+  ...ADMIN_PRODUCT_ORDER_LIST_KEYS,
+  'updatedAt',
+  'items',
+  'shipping',
+] as const
+
+function isAdminProductOrderItem(value: unknown): value is AdminProductOrderItem {
+  return (
+    isPlainRecord(value) &&
+    hasExactKeys(value, ADMIN_PRODUCT_ORDER_ITEM_KEYS) &&
+    isString(value.id) &&
+    isString(value.productName) &&
+    isFiniteNumber(value.unitPriceTwd) &&
+    isPositiveSafeInteger(value.quantity) &&
+    isFiniteNumber(value.subtotalTwd)
+  )
+}
+
+function isAdminProductShippingInfo(
+  value: unknown,
+): value is AdminProductShippingInfo {
+  return (
+    isPlainRecord(value) &&
+    hasExactKeys(value, ADMIN_PRODUCT_SHIPPING_KEYS) &&
+    isNullableString(value.recipientName) &&
+    isNullableString(value.recipientPhone) &&
+    isNullableString(value.recipientEmail) &&
+    isString(value.shippingMethod) &&
+    isNullableString(value.postalCode) &&
+    isNullableString(value.address) &&
+    isNullableString(value.storeType) &&
+    isNullableString(value.storeName) &&
+    isNullableString(value.storeAddress) &&
+    isNullableString(value.storePhone) &&
+    isString(value.createdAt) &&
+    isString(value.updatedAt)
+  )
+}
+
+export function isAdminProductOrderListItem(
+  value: unknown,
+): value is AdminProductOrderListItem {
+  return (
+    isPlainRecord(value) &&
+    hasExactKeys(value, ADMIN_PRODUCT_ORDER_LIST_KEYS) &&
+    isString(value.id) &&
+    isString(value.orderNumber) &&
+    isString(value.createdAt) &&
+    isString(value.customerName) &&
+    isString(value.customerEmail) &&
+    isString(value.customerPhone) &&
+    isString(value.productSummary) &&
+    isFiniteNumber(value.totalAmountTwd) &&
+    isString(value.orderStatus) &&
+    isString(value.paymentStatus) &&
+    isString(value.shippingStatus)
+  )
+}
+
+export function isAdminProductOrderDetail(
+  value: unknown,
+): value is AdminProductOrderDetail {
+  return (
+    isPlainRecord(value) &&
+    hasExactKeys(value, ADMIN_PRODUCT_ORDER_DETAIL_KEYS) &&
+    isString(value.id) &&
+    isString(value.orderNumber) &&
+    isString(value.createdAt) &&
+    isString(value.customerName) &&
+    isString(value.customerEmail) &&
+    isString(value.customerPhone) &&
+    isString(value.productSummary) &&
+    isFiniteNumber(value.totalAmountTwd) &&
+    isString(value.orderStatus) &&
+    isString(value.paymentStatus) &&
+    isString(value.shippingStatus) &&
+    isString(value.updatedAt) &&
+    Array.isArray(value.items) &&
+    value.items.every(isAdminProductOrderItem) &&
+    (value.shipping === null || isAdminProductShippingInfo(value.shipping))
+  )
+}
+
 function record(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
 }
@@ -107,8 +246,19 @@ function number(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
+function compareItems(left: Record<string, unknown>, right: Record<string, unknown>) {
+  return (
+    text(left.created_at).localeCompare(text(right.created_at)) ||
+    text(left.id).localeCompare(text(right.id))
+  )
+}
+
+export function sortAdminProductOrderItemRows(value: unknown) {
+  return records(value).sort(compareItems)
+}
+
 function productSummary(value: unknown) {
-  const items = records(value)
+  const items = sortAdminProductOrderItemRows(value)
   if (items.length === 0) return '商品資料未提供'
 
   const visible = items.slice(0, 2).map((item) => {
@@ -119,7 +269,7 @@ function productSummary(value: unknown) {
 }
 
 function mapItems(value: unknown): AdminProductOrderItem[] {
-  return records(value).map((item) => ({
+  return sortAdminProductOrderItemRows(value).map((item) => ({
     id: text(item.id),
     productName: text(item.product_name) || '未命名商品',
     unitPriceTwd: number(item.unit_price_twd),
@@ -148,7 +298,10 @@ function mapShipping(value: unknown): AdminProductShippingInfo | null {
   }
 }
 
-export function mapAdminProductOrderListRow(value: unknown): AdminProductOrderListItem {
+export function mapAdminProductOrderListRow(
+  value: unknown,
+  itemRows: unknown = [],
+): AdminProductOrderListItem {
   const row = record(value)
   return {
     id: text(row.id),
@@ -157,7 +310,7 @@ export function mapAdminProductOrderListRow(value: unknown): AdminProductOrderLi
     customerName: text(row.customer_name) || '未提供',
     customerEmail: maskEmail(nullableText(row.customer_email)),
     customerPhone: maskPhone(nullableText(row.customer_phone)),
-    productSummary: productSummary(row.product_order_items),
+    productSummary: productSummary(itemRows),
     totalAmountTwd: number(row.total_amount_twd),
     orderStatus: text(row.order_status) || 'unknown',
     paymentStatus: text(row.payment_status) || 'unknown',
@@ -165,12 +318,16 @@ export function mapAdminProductOrderListRow(value: unknown): AdminProductOrderLi
   }
 }
 
-export function mapAdminProductOrderDetailRow(value: unknown): AdminProductOrderDetail {
+export function mapAdminProductOrderDetailRow(
+  value: unknown,
+  itemRows: unknown = [],
+  shippingRow: unknown = null,
+): AdminProductOrderDetail {
   const row = record(value)
   return {
-    ...mapAdminProductOrderListRow(row),
+    ...mapAdminProductOrderListRow(row, itemRows),
     updatedAt: text(row.updated_at),
-    items: mapItems(row.product_order_items),
-    shipping: mapShipping(row.product_shipping_info),
+    items: mapItems(itemRows),
+    shipping: mapShipping(shippingRow),
   }
 }
