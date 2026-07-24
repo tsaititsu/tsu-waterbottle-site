@@ -36,9 +36,9 @@ import {
 } from './d1P1PromptPackageTestSupport'
 
 const PREVIOUS_INSTRUCTIONS_SHA256 =
-  'ca33e13f130000b86d21749edce417f3ca075721e58ebad189fed664649d520e'
-const EXPECTED_INSTRUCTIONS_SHA256 =
   'd5e6d8bba5d809e2dcf9c7a726f97888d643a79a9a968a6996f5b9d67c174d59'
+const EXPECTED_INSTRUCTIONS_SHA256 =
+  '7a636a1aa1aee614bb2408893994e75dd6407e35ace116eb3470d7bc63f4b626'
 const EXPECTED_OUTPUT_SCHEMA_SHA256 =
   'fcd63048ff242fbfd12e195722d3065def0960497efbcdb7162893e271052da1'
 
@@ -424,10 +424,56 @@ async function run() {
       /usedRuleIds 只能使用 knowledgeContext\.rules\[\]\.ruleId/u,
     )
   })
-  check('instructions bind direct meaning coverage to target meanings', () => {
+  check('instructions bind direct meaning coverage to exact target meaning IDs', () => {
     assert.match(
       AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
-      /coverage\.directMeaningsConsidered 必須對應本次已提供的 target meanings/u,
+      /coverage\.directMeaningsConsidered 的每個元素必須逐字複製自 userInput\.knowledgeContext\.meanings\[\]\.meaningId/u,
+    )
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /該 meaning 的 palaceRole 必須逐字等於 target/u,
+    )
+  })
+  check('instructions forbid semantic text and unrelated IDs in direct meaning coverage', () => {
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /不得填入 meaning 文字、text、title、summary、中文說明、ruleId、placementId、palaceId、hash 或模型自行產生的 ID/u,
+    )
+  })
+  check('instructions forbid duplicate direct meaning IDs', () => {
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /directMeaningsConsidered 不得有重複值/u,
+    )
+  })
+  check('instructions require the exact complete target meaning ID set', () => {
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /status=complete 時，directMeaningsConsidered 必須精確列出全部 target meaningId，每個恰好一次，不得缺少或增加/u,
+    )
+  })
+  check('instructions bind partial omissions to exact missing target meaning IDs', () => {
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /status=partial 或 incomplete 時，directMeaningsConsidered 只能列出實際處理的 target meaningId/u,
+    )
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /每個未列入的 target meaningId 都必須逐字出現在 coverage\.omittedItems 的 item 或 reason/u,
+    )
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /omittedItems 必須說明合法省略原因/u,
+    )
+  })
+  check('instructions require a silent direct meaning coverage set check', () => {
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /輸出 JSON 前，必須自行比對 target meaningId 集合、directMeaningsConsidered 集合與 omittedItems 追蹤/u,
+    )
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /不得輸出這個檢查過程/u,
     )
   })
   check('instructions contain the authority order', () => {
