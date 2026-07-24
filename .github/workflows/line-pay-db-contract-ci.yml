@@ -4,10 +4,13 @@ on:
   pull_request:
     paths:
       - ".github/workflows/line-pay-db-contract-ci.yml"
+      - ".github/workflows/supabase-production-line-pay-diagnostic.yml"
       - ".github/workflows/supabase-production-line-pay-migration.yml"
       - "package.json"
       - "package-lock.json"
       - "scripts/supabase/run-line-pay-production-exact-file.mjs"
+      - "scripts/supabase/run-line-pay-production-diagnostic.mjs"
+      - "scripts/supabase/validate-line-pay-production-diagnostic.mjs"
       - "scripts/supabase/validate-line-pay-production-deployment.mjs"
       - "src/lib/supabase/linePayDatabaseContracts.ts"
       - "src/lib/supabase/linePayDatabaseContracts.test.ts"
@@ -16,12 +19,16 @@ on:
       - "supabase/deployment/line_pay_remediation_postflight.sql"
       - "supabase/deployment/line_pay_remediation_preflight.sql"
       - "supabase/deployment/line_pay_remediation_deploy.sql"
+      - "supabase/deployment/line_pay_remediation_diagnostic.sql"
       - "supabase/line_pay_remediation_contracts.test.ts"
+      - "supabase/line_pay_production_diagnostic_runner.test.ts"
+      - "supabase/line_pay_production_diagnostic_workflow.test.ts"
       - "supabase/line_pay_production_deployment_workflow.test.ts"
       - "supabase/line_pay_production_exact_file_runner.test.ts"
       - "supabase/migrations/*_retire_bank_transfer_submissions_writes.sql"
       - "supabase/migrations/20260719033404_line_pay_remediation_contracts.sql"
       - "supabase/tests/run_bank_transfer_submissions_readonly_fence.mjs"
+      - "supabase/tests/run_line_pay_production_diagnostic_contracts.mjs"
       - "supabase/tests/run_line_pay_production_exact_file_contracts.mjs"
       - "supabase/tests/line_pay_*.sql"
       - "supabase/tests/run_line_pay_remediation_*.mjs"
@@ -60,12 +67,17 @@ jobs:
         run: |
           node --test supabase/bank_transfer_submissions_readonly_fence.test.ts
           node --test supabase/line_pay_remediation_contracts.test.ts
+          node --test supabase/line_pay_production_diagnostic_workflow.test.ts
+          node --test supabase/line_pay_production_diagnostic_runner.test.ts
           node --test supabase/line_pay_production_exact_file_runner.test.ts
           node --test supabase/line_pay_production_deployment_workflow.test.ts
           node --test src/lib/supabase/linePayDatabaseContracts.test.ts
 
       - name: Run LINE Pay Production exact-file contracts
         run: node supabase/tests/run_line_pay_production_exact_file_contracts.mjs
+
+      - name: Run LINE Pay Production read-only diagnostic contracts
+        run: node supabase/tests/run_line_pay_production_diagnostic_contracts.mjs
 
       - name: Run bank transfer read-only fence contracts
         run: node supabase/tests/run_bank_transfer_submissions_readonly_fence.mjs
@@ -101,4 +113,10 @@ jobs:
           docker volume ls -q --filter label=task=line-pay-production-exact-file-runner |
             xargs -r docker volume rm
           docker network ls -q --filter label=task=line-pay-production-exact-file-runner |
+            xargs -r docker network rm
+          docker ps -aq --filter label=task=line-pay-production-data-drift-diagnostic |
+            xargs -r docker rm --force
+          docker volume ls -q --filter label=task=line-pay-production-data-drift-diagnostic |
+            xargs -r docker volume rm
+          docker network ls -q --filter label=task=line-pay-production-data-drift-diagnostic |
             xargs -r docker network rm
