@@ -21,6 +21,14 @@ export const AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS = Object.freeze({
   COVERAGE_BINDING_MISMATCH: 'COVERAGE_BINDING_MISMATCH',
   COVERAGE_DIRECT_MEANINGS_MISMATCH:
     'COVERAGE_DIRECT_MEANINGS_MISMATCH',
+  COVERAGE_DIRECT_MEANINGS_DUPLICATE:
+    'COVERAGE_DIRECT_MEANINGS_DUPLICATE',
+  COVERAGE_DIRECT_MEANINGS_UNEXPECTED:
+    'COVERAGE_DIRECT_MEANINGS_UNEXPECTED',
+  COVERAGE_DIRECT_MEANINGS_COMPLETE_SET_MISSING:
+    'COVERAGE_DIRECT_MEANINGS_COMPLETE_SET_MISSING',
+  COVERAGE_DIRECT_MEANINGS_OMISSION_TRACE_MISSING:
+    'COVERAGE_DIRECT_MEANINGS_OMISSION_TRACE_MISSING',
   COVERAGE_MAJOR_STARS_MISMATCH: 'COVERAGE_MAJOR_STARS_MISMATCH',
   COVERAGE_MINOR_STARS_MISMATCH: 'COVERAGE_MINOR_STARS_MISMATCH',
   COVERAGE_MUTAGENS_MISMATCH: 'COVERAGE_MUTAGENS_MISMATCH',
@@ -47,6 +55,8 @@ export function isAiChartD1P1SourceBoundValidationReasonCode(
   return AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASON_SET.has(value)
 }
 
+const AI_CHART_D1_P1_RESULT_INVALID_ERROR_INSTANCES = new WeakSet<object>()
+
 export class AiChartD1P1AdapterBridgeResultInvalidError extends Error {
   readonly code = AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID
   declare readonly reasonCode: AiChartD1P1SourceBoundValidationReasonCode
@@ -64,6 +74,7 @@ export class AiChartD1P1AdapterBridgeResultInvalidError extends Error {
       configurable: false,
       writable: false,
     })
+    AI_CHART_D1_P1_RESULT_INVALID_ERROR_INSTANCES.add(this)
     Object.freeze(this)
   }
 }
@@ -71,10 +82,21 @@ export class AiChartD1P1AdapterBridgeResultInvalidError extends Error {
 export function getAiChartD1P1SourceBoundValidationReasonCode(
   error: unknown,
 ): AiChartD1P1SourceBoundValidationReasonCode | null {
-  if (!(error instanceof AiChartD1P1AdapterBridgeResultInvalidError)) {
+  try {
+    if (
+      typeof error !== 'object' ||
+      error === null ||
+      !AI_CHART_D1_P1_RESULT_INVALID_ERROR_INSTANCES.has(error)
+    ) {
+      return null
+    }
+    const reasonCode = (
+      error as AiChartD1P1AdapterBridgeResultInvalidError
+    ).reasonCode
+    return isAiChartD1P1SourceBoundValidationReasonCode(reasonCode)
+      ? reasonCode
+      : null
+  } catch {
     return null
   }
-  return isAiChartD1P1SourceBoundValidationReasonCode(error.reasonCode)
-    ? error.reasonCode
-    : null
 }

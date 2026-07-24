@@ -49,6 +49,9 @@ import {
   recalculateAdapterBridgeDescriptorFingerprint,
   type Mutable,
 } from './d1P1AdapterBridgeTestSupport'
+import {
+  getAiChartD1P1SourceBoundValidationReasonCode,
+} from './d1P1SourceBoundDiagnostics'
 
 let checks = 0
 
@@ -206,6 +209,10 @@ async function run() {
         'RULE_PALACE_STAR_BINDING_MISMATCH',
         'COVERAGE_BINDING_MISMATCH',
         'COVERAGE_DIRECT_MEANINGS_MISMATCH',
+        'COVERAGE_DIRECT_MEANINGS_DUPLICATE',
+        'COVERAGE_DIRECT_MEANINGS_UNEXPECTED',
+        'COVERAGE_DIRECT_MEANINGS_COMPLETE_SET_MISSING',
+        'COVERAGE_DIRECT_MEANINGS_OMISSION_TRACE_MISSING',
         'COVERAGE_MAJOR_STARS_MISMATCH',
         'COVERAGE_MINOR_STARS_MISMATCH',
         'COVERAGE_MUTAGENS_MISMATCH',
@@ -219,6 +226,10 @@ async function run() {
   })
   for (const reasonCode of [
     AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_MISMATCH,
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_DUPLICATE,
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_UNEXPECTED,
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_COMPLETE_SET_MISSING,
+    AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_OMISSION_TRACE_MISSING,
     AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
     AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
     AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
@@ -246,6 +257,87 @@ async function run() {
         ),
       { message: AI_CHART_D1_P1_ADAPTER_BRIDGE_RESULT_INVALID },
     )
+  })
+  check('source-bound reason lookup accepts only a fixed internal error', () => {
+    const reasonCode =
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_OMISSION_TRACE_MISSING
+    const error = new AiChartD1P1AdapterBridgeResultInvalidError(reasonCode)
+    assert.equal(
+      getAiChartD1P1SourceBoundValidationReasonCode(error),
+      reasonCode,
+    )
+  })
+  check('source-bound reason lookup rejects hostile runtime values', () => {
+    const sensitiveValue = 'synthetic-model-value-must-not-be-saved'
+    let getterExecuted = false
+    let changingProxyReads = 0
+    let forgedGetterExecuted = false
+    const accessorValue = Object.defineProperty({}, 'reasonCode', {
+      enumerable: true,
+      get() {
+        getterExecuted = true
+        return sensitiveValue
+      },
+    })
+    const hostilePrototypeProxy = new Proxy({}, {
+      getPrototypeOf() {
+        throw new Error(sensitiveValue)
+      },
+    })
+    const validError = new AiChartD1P1AdapterBridgeResultInvalidError(
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID,
+    )
+    const hostileReasonProxy = new Proxy(validError, {
+      get(target, property, receiver) {
+        if (property === 'reasonCode') throw new Error(sensitiveValue)
+        return Reflect.get(target, property, receiver)
+      },
+    })
+    const transparentProxy = new Proxy(validError, {})
+    const changingReasonProxy = new Proxy(validError, {
+      get(target, property, receiver) {
+        if (property !== 'reasonCode') {
+          return Reflect.get(target, property, receiver)
+        }
+        changingProxyReads += 1
+        return changingProxyReads === 1
+          ? AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID
+          : sensitiveValue
+      },
+    })
+    const forgedPrototypeValue = Object.defineProperty(
+      Object.create(AiChartD1P1AdapterBridgeResultInvalidError.prototype),
+      'reasonCode',
+      {
+        enumerable: true,
+        get() {
+          forgedGetterExecuted = true
+          return AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID
+        },
+      },
+    )
+
+    for (const hostileValue of [
+      sensitiveValue,
+      new String(
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID,
+      ),
+      Symbol(sensitiveValue),
+      accessorValue,
+      hostilePrototypeProxy,
+      hostileReasonProxy,
+      transparentProxy,
+      changingReasonProxy,
+      forgedPrototypeValue,
+    ]) {
+      assert.equal(
+        getAiChartD1P1SourceBoundValidationReasonCode(hostileValue),
+        null,
+      )
+    }
+    assert.equal(getterExecuted, false)
+    assert.equal(changingProxyReads, 0)
+    assert.equal(forgedGetterExecuted, false)
   })
 
   check('Descriptor has exactly the locked fields', () => {

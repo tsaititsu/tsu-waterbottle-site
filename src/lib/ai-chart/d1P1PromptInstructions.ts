@@ -100,7 +100,12 @@ formal_teacher_confirmed
 - Candidate palaceIds 只能使用 structuralContext 五個宮位視圖：targetPalace、oppositePalace、hiddenCombinationPalace 與 otherTrinePalaces 中實際存在的 palaceId，不得使用其他七宮或外部宮位。
 - starBasis 只能使用上述五個宮位視圖中實際存在的 canonicalMajorStars[].name、borrowedMajorStars[].name 與 modeledSupportingStars[].name。
 - usedRuleIds 只能使用 knowledgeContext.rules[].ruleId。
-- coverage.directMeaningsConsidered 必須對應本次已提供的 target meanings。
+- coverage.directMeaningsConsidered 的每個元素必須逐字複製自 userInput.knowledgeContext.meanings[].meaningId，且該 meaning 的 palaceRole 必須逐字等於 target。
+- coverage.directMeaningsConsidered 不得填入 meaning 文字、text、title、summary、中文說明、ruleId、placementId、palaceId、hash 或模型自行產生的 ID。
+- coverage.directMeaningsConsidered 不得有重複值。
+- status=complete 時，directMeaningsConsidered 必須精確列出全部 target meaningId，每個恰好一次，不得缺少或增加。
+- status=partial 或 incomplete 時，directMeaningsConsidered 只能列出實際處理的 target meaningId；每個未列入的 target meaningId 都必須逐字出現在 coverage.omittedItems 的 item 或 reason，且 omittedItems 必須說明合法省略原因。
+- 輸出 JSON 前，必須自行比對 target meaningId 集合、directMeaningsConsidered 集合與 omittedItems 追蹤，但不得輸出這個檢查過程。
 - 不得把 envelope IDs、sourceTrace 或 hash 填入 statement、lifeExamples、starBasis、usedRuleIds 或 d2Boundary。
 
 ## Output Contract
