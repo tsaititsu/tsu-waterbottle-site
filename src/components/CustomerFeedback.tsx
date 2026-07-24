@@ -13,8 +13,9 @@ import { createPortal } from 'react-dom'
 import { TrackedPublicCtaLink } from './analytics/TrackedPublicCtaLink'
 import { HOME_FEEDBACKS, type HomeFeedback } from './homeFeedbacks'
 
-const AUTOPLAY_INTERVAL_MS = 4500
-const MANUAL_RESUME_DELAY_MS = 6500
+const CONTINUOUS_SCROLL_SPEED_PX_PER_SECOND = 28
+const MANUAL_RESUME_DELAY_MS = 2500
+const MAX_ANIMATION_FRAME_MS = 50
 const CAROUSEL_COPIES = [0, 1, 2] as const
 const focusableSelector = [
   'button:not([disabled])',
@@ -29,14 +30,16 @@ export function CustomerFeedback() {
   const closeButtonRef = useRef<HTMLButtonElement | null>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
   const manualPauseUntilRef = useRef(0)
+  const continuousScrollPositionRef = useRef<number | null>(null)
   const dialogTitleId = useId()
   const dialogDescriptionId = useId()
   const [selectedFeedback, setSelectedFeedback] = useState<HomeFeedback | null>(null)
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
-  const [isPointerPaused, setIsPointerPaused] = useState(false)
+  const [isHoverPaused, setIsHoverPaused] = useState(false)
   const [isFocusPaused, setIsFocusPaused] = useState(false)
-  const [manualInteractionVersion, setManualInteractionVersion] = useState(0)
-  const isPaused = isPointerPaused || isFocusPaused
+  const [isPointerDown, setIsPointerDown] = useState(false)
+  const isPaused =
+    isHoverPaused || isFocusPaused || isPointerDown || selectedFeedback !== null
 
   const getCarouselAnchor = useCallback((copy: number, index = 0) => {
     return carouselRef.current?.querySelector<HTMLElement>(
@@ -61,8 +64,12 @@ export function CustomerFeedback() {
 
   const pauseAfterManualInteraction = useCallback(() => {
     manualPauseUntilRef.current = Date.now() + MANUAL_RESUME_DELAY_MS
-    setManualInteractionVersion((version) => version + 1)
   }, [])
+
+  const finishPointerInteraction = useCallback(() => {
+    setIsPointerDown(false)
+    pauseAfterManualInteraction()
+  }, [pauseAfterManualInteraction])
 
   const handleManualScroll = useCallback(
     (direction: -1 | 1) => {
@@ -89,8 +96,10 @@ export function CustomerFeedback() {
     const copyWidth = middleCopyStart - firstCopyStart
     if (viewport.scrollLeft <= firstCopyStart + 1) {
       viewport.scrollLeft += copyWidth
+      continuousScrollPositionRef.current = viewport.scrollLeft
     } else if (viewport.scrollLeft >= lastCopyStart - 1) {
       viewport.scrollLeft -= copyWidth
+      continuousScrollPositionRef.current = viewport.scrollLeft
     }
   }, [getCarouselAnchor])
 
@@ -111,6 +120,7 @@ export function CustomerFeedback() {
     const middleCopyStart = getCarouselAnchor(1)?.offsetLeft
     if (middleCopyStart === undefined || !carouselRef.current) return
     carouselRef.current.scrollLeft = middleCopyStart
+    continuousScrollPositionRef.current = middleCopyStart
   }, [getCarouselAnchor])
 
   useEffect(() => {
@@ -122,28 +132,53 @@ export function CustomerFeedback() {
   }, [])
 
   useEffect(() => {
-    if (prefersReducedMotion || isPaused) return
+    if (prefersReducedMotion) return
 
-    let timeoutId = 0
-    const scheduleNextScroll = () => {
-      const resumeDelay = Math.max(0, manualPauseUntilRef.current - Date.now())
-      timeoutId = window.setTimeout(
-        () => {
-          scrollByCard(1, 'smooth')
-          scheduleNextScroll()
-        },
-        Math.max(AUTOPLAY_INTERVAL_MS, resumeDelay),
+    let animationFrameId = 0
+    let previousTimestamp: number | null = null
+    const animate = (timestamp: number) => {
+      if (previousTimestamp === null) previousTimestamp = timestamp
+      const elapsedMs = Math.min(
+        timestamp - previousTimestamp,
+        MAX_ANIMATION_FRAME_MS,
       )
+      previousTimestamp = timestamp
+
+      const viewport = carouselRef.current
+      const isManualDelayActive =
+        manualPauseUntilRef.current > Date.now()
+      if (viewport && !isPaused && !isManualDelayActive) {
+        const nextScrollPosition =
+          (continuousScrollPositionRef.current ?? viewport.scrollLeft) +
+          CONTINUOUS_SCROLL_SPEED_PX_PER_SECOND * (elapsedMs / 1000)
+        continuousScrollPositionRef.current = nextScrollPosition
+        viewport.scrollLeft = nextScrollPosition
+        handleInfiniteScroll()
+      } else if (viewport) {
+        continuousScrollPositionRef.current = viewport.scrollLeft
+      }
+
+      animationFrameId = window.requestAnimationFrame(animate)
     }
 
-    scheduleNextScroll()
-    return () => window.clearTimeout(timeoutId)
+    animationFrameId = window.requestAnimationFrame(animate)
+    return () => window.cancelAnimationFrame(animationFrameId)
   }, [
+    handleInfiniteScroll,
     isPaused,
-    manualInteractionVersion,
     prefersReducedMotion,
-    scrollByCard,
   ])
+
+  useEffect(() => {
+    if (!isPointerDown) return
+
+    window.addEventListener('pointerup', finishPointerInteraction)
+    window.addEventListener('pointercancel', finishPointerInteraction)
+    return () => {
+      window.removeEventListener('pointerup', finishPointerInteraction)
+      window.removeEventListener('pointercancel', finishPointerInteraction)
+    }
+  }, [finishPointerInteraction, isPointerDown])
 
   useEffect(() => {
     if (!selectedFeedback) return
@@ -192,6 +227,7 @@ export function CustomerFeedback() {
   const handleCarouselBlur = (event: FocusEvent<HTMLDivElement>) => {
     if (!carouselRegionRef.current?.contains(event.relatedTarget as Node | null)) {
       setIsFocusPaused(false)
+      pauseAfterManualInteraction()
     }
   }
 
@@ -276,9 +312,12 @@ export function CustomerFeedback() {
           data-home-feedback-carousel
           onBlurCapture={handleCarouselBlur}
           onFocusCapture={() => setIsFocusPaused(true)}
-          onMouseEnter={() => setIsPointerPaused(true)}
-          onMouseLeave={() => setIsPointerPaused(false)}
-          onPointerDown={pauseAfterManualInteraction}
+          onMouseEnter={() => setIsHoverPaused(true)}
+          onMouseLeave={() => {
+            setIsHoverPaused(false)
+            pauseAfterManualInteraction()
+          }}
+          onPointerDown={() => setIsPointerDown(true)}
           role="region"
         >
           <div className="mb-4 flex items-center justify-between gap-4">
@@ -308,7 +347,7 @@ export function CustomerFeedback() {
           <div className="relative">
             <div
               ref={carouselRef}
-              className="grid auto-cols-[100%] grid-flow-col items-stretch gap-4 overflow-x-auto overscroll-x-contain snap-x snap-mandatory pb-2 [scrollbar-width:none] sm:auto-cols-[calc((100%_-_1rem)/2)] lg:auto-cols-[calc((100%_-_2.5rem)/3)] lg:gap-5 [&::-webkit-scrollbar]:hidden"
+              className="grid auto-cols-[100%] grid-flow-col items-stretch gap-4 overflow-x-auto overscroll-x-contain pb-2 [scrollbar-width:none] sm:auto-cols-[calc((100%_-_1rem)/2)] lg:auto-cols-[calc((100%_-_2.5rem)/3)] lg:gap-5 [&::-webkit-scrollbar]:hidden"
               data-feedback-carousel-viewport
               onScroll={handleInfiniteScroll}
             >
@@ -316,7 +355,7 @@ export function CustomerFeedback() {
                 HOME_FEEDBACKS.map((feedback, index) => (
                   <article
                     aria-hidden={copy === 1 ? undefined : true}
-                    className="flex min-h-[260px] min-w-0 snap-start flex-col rounded-2xl border border-borderSoft bg-white p-5 shadow-soft sm:p-6"
+                    className="flex min-h-[260px] min-w-0 flex-col rounded-2xl border border-borderSoft bg-white p-5 shadow-soft sm:p-6"
                     data-carousel-copy={copy}
                     data-feedback-card
                     data-feedback-id={feedback.id}
