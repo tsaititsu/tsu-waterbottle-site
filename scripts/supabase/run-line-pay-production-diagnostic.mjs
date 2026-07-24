@@ -65,6 +65,59 @@ export const DATABASE_CONNECTION_STATES = Object.freeze({
   UNKNOWN: 'UNKNOWN',
 })
 
+const FAILURE_CODE_PHASES = Object.freeze({
+  DIAGNOSTIC_DOCKER_IMAGE_PULL_FAILED: Object.freeze(['docker_pull']),
+  DIAGNOSTIC_TEMP_CREDENTIAL_CREATE_FAILED: Object.freeze([
+    'credential_create',
+  ]),
+  DIAGNOSTIC_CONTAINER_START_FAILED: Object.freeze(['docker_run_start']),
+  DIAGNOSTIC_CONTAINER_EXEC_FAILED: Object.freeze(['docker_run_start']),
+  DIAGNOSTIC_DB_CONNECT_FAILED: Object.freeze(['psql_connection']),
+  DIAGNOSTIC_SQL_EXECUTION_FAILED: Object.freeze(['diagnostic_sql']),
+  DIAGNOSTIC_OUTPUT_INVALID: Object.freeze(['diagnostic_output']),
+  DIAGNOSTIC_CAPTURE_LIMIT_EXCEEDED: Object.freeze([
+    'docker_pull',
+    'diagnostic_output',
+  ]),
+  PROCESS_INTERRUPTED: Object.freeze(['process_signal']),
+  TEMP_CREDENTIAL_CLEANUP_FAILED: Object.freeze(['credential_cleanup']),
+})
+
+const STATE_FAILURES = Object.freeze({
+  [DIAGNOSTIC_STATES.SOURCE_VALIDATED]: Object.freeze({
+    code: 'DIAGNOSTIC_TEMP_CREDENTIAL_CREATE_FAILED',
+    phase: 'credential_create',
+  }),
+  [DIAGNOSTIC_STATES.CREDENTIAL_CREATED]: Object.freeze({
+    code: 'DIAGNOSTIC_DOCKER_IMAGE_PULL_FAILED',
+    phase: 'docker_pull',
+  }),
+  [DIAGNOSTIC_STATES.IMAGE_PULL_STARTED]: Object.freeze({
+    code: 'DIAGNOSTIC_DOCKER_IMAGE_PULL_FAILED',
+    phase: 'docker_pull',
+  }),
+  [DIAGNOSTIC_STATES.IMAGE_PULL_COMPLETED]: Object.freeze({
+    code: 'DIAGNOSTIC_CONTAINER_START_FAILED',
+    phase: 'docker_run_start',
+  }),
+  [DIAGNOSTIC_STATES.CONTAINER_STARTED]: Object.freeze({
+    code: 'DIAGNOSTIC_CONTAINER_EXEC_FAILED',
+    phase: 'docker_run_start',
+  }),
+  [DIAGNOSTIC_STATES.PSQL_COMPLETED]: Object.freeze({
+    code: 'DIAGNOSTIC_OUTPUT_INVALID',
+    phase: 'diagnostic_output',
+  }),
+  [DIAGNOSTIC_STATES.OUTPUT_VALIDATED]: Object.freeze({
+    code: 'TEMP_CREDENTIAL_CLEANUP_FAILED',
+    phase: 'credential_cleanup',
+  }),
+  [DIAGNOSTIC_STATES.CREDENTIAL_CLEANED]: Object.freeze({
+    code: 'TEMP_CREDENTIAL_CLEANUP_FAILED',
+    phase: 'credential_cleanup',
+  }),
+})
+
 const FAILURE_ATTESTATION_KEYS = Object.freeze([
   'status',
   'phase',
@@ -89,6 +142,49 @@ function fail(code) {
   throw new Error(code)
 }
 
+export function validateFailureAttestation(attestation) {
+  const allowedPhases = FAILURE_CODE_PHASES[attestation?.failure_code]
+  if (
+    !attestation ||
+    typeof attestation !== 'object' ||
+    Object.keys(attestation).length !== FAILURE_ATTESTATION_KEYS.length ||
+    FAILURE_ATTESTATION_KEYS.some((key) => !(key in attestation)) ||
+    attestation.status !== 'DIAGNOSTIC_EXECUTION_FAILED' ||
+    !allowedPhases?.includes(attestation.phase) ||
+    !Object.values(DATABASE_CONNECTION_STATES).includes(
+      attestation.database_connection,
+    ) ||
+    [
+      'docker_pull_completed',
+      'container_started',
+      'sql_completed',
+      'output_validated',
+      'credential_cleanup_completed',
+    ].some((key) => typeof attestation[key] !== 'boolean')
+  ) {
+    fail('DIAGNOSTIC_CONTAINER_EXEC_FAILED')
+  }
+  return true
+}
+
+export function classifyFailureForState(state, error) {
+  if (
+    error instanceof Error &&
+    error.message === 'TEMP_CREDENTIAL_CLEANUP_FAILED'
+  ) {
+    return {
+      code: 'TEMP_CREDENTIAL_CLEANUP_FAILED',
+      phase: 'credential_cleanup',
+    }
+  }
+  const failure = STATE_FAILURES[state]
+  if (!failure) fail('DIAGNOSTIC_CONTAINER_EXEC_FAILED')
+  return {
+    code: failure.code,
+    phase: failure.phase,
+  }
+}
+
 function createFailureAttestation(failure, execution) {
   const attestation = {
     status: 'DIAGNOSTIC_EXECUTION_FAILED',
@@ -101,12 +197,7 @@ function createFailureAttestation(failure, execution) {
     output_validated: execution.outputValidated,
     credential_cleanup_completed: execution.credentialCleanupCompleted,
   }
-  if (
-    Object.keys(attestation).length !== FAILURE_ATTESTATION_KEYS.length ||
-    FAILURE_ATTESTATION_KEYS.some((key) => !(key in attestation))
-  ) {
-    throw new Error('DIAGNOSTIC_CONTAINER_EXEC_FAILED')
-  }
+  validateFailureAttestation(attestation)
   return Object.freeze(attestation)
 }
 
@@ -751,39 +842,21 @@ export async function runDiagnostic({
         execution.containerStarted
           ? DATABASE_CONNECTION_STATES.UNKNOWN
           : DATABASE_CONNECTION_STATES.NOT_ESTABLISHED
-    } else if (!failure) {
-      const code = error instanceof Error ? error.message : ''
-      if (code === 'TEMP_CREDENTIAL_CLEANUP_FAILED') {
-        failure = {
-          code: 'TEMP_CREDENTIAL_CLEANUP_FAILED',
-          phase: 'credential_cleanup',
-        }
-      } else if (
-        execution.state === DIAGNOSTIC_STATES.SOURCE_VALIDATED
-      ) {
-        failure = {
-          code: 'DIAGNOSTIC_TEMP_CREDENTIAL_CREATE_FAILED',
-          phase: 'credential_create',
-        }
-      } else if (
-        execution.state === DIAGNOSTIC_STATES.PSQL_COMPLETED
-      ) {
-        failure = {
-          code: 'DIAGNOSTIC_OUTPUT_INVALID',
-          phase: 'diagnostic_output',
-        }
-      } else {
-        failure = {
-          code: 'DIAGNOSTIC_CONTAINER_EXEC_FAILED',
-          phase: 'docker_run_start',
-        }
-      }
+    }
+    if (!failure) {
+      failure = classifyFailureForState(execution.state, error)
     }
   } finally {
     try {
       await terminateActiveChild()
     } catch {
-      if (!operationError) operationError = new Error('PROCESS_INTERRUPTED')
+      if (!operationError) {
+        operationError = new Error('PROCESS_INTERRUPTED')
+        failure = {
+          code: 'PROCESS_INTERRUPTED',
+          phase: 'process_signal',
+        }
+      }
     }
     try {
       await cleanupCredentialsOnce()

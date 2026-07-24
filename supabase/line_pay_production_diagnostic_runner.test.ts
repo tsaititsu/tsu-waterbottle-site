@@ -477,6 +477,12 @@ test('runner source mutations cannot weaken image, shell, retry, fallback, sessi
       /DIAGNOSTIC_SQL_INVALID/,
     )
   }
+  assert.doesNotMatch(source, /else if \(!failure\)/u)
+  assert.match(source, /validateFailureAttestation\(attestation\)/u)
+  assert.match(
+    source,
+    /classifyFailureForState\(execution[.]state, error\)/u,
+  )
 })
 
 test('runner exposes the exact monotonic execution state machine', () => {
@@ -495,6 +501,93 @@ test('runner exposes the exact monotonic execution state machine', () => {
     NOT_ESTABLISHED: 'NOT_ESTABLISHED',
     UNKNOWN: 'UNKNOWN',
   })
+})
+
+test('failure attestation enums and state-only fallback mapping are exact', () => {
+  const validAttestation = {
+    status: 'DIAGNOSTIC_EXECUTION_FAILED',
+    phase: 'psql_connection',
+    failure_code: 'DIAGNOSTIC_DB_CONNECT_FAILED',
+    docker_pull_completed: true,
+    container_started: true,
+    database_connection: 'NOT_ESTABLISHED',
+    sql_completed: false,
+    output_validated: false,
+    credential_cleanup_completed: true,
+  }
+  assert.equal(
+    runner.validateFailureAttestation(validAttestation),
+    true,
+  )
+  for (const mutation of [
+    { ...validAttestation, status: 'OTHER' },
+    { ...validAttestation, phase: 'other_phase' },
+    {
+      ...validAttestation,
+      failure_code: 'DIAGNOSTIC_CONTAINER_EXEC_FAILED',
+    },
+    { ...validAttestation, database_connection: 'MAYBE' },
+    { ...validAttestation, sql_completed: 'false' },
+    { ...validAttestation, extra: true },
+  ]) {
+    assert.throws(
+      () => runner.validateFailureAttestation(mutation),
+      /DIAGNOSTIC_CONTAINER_EXEC_FAILED/,
+    )
+  }
+
+  for (const [state, expected] of [
+    [
+      runner.DIAGNOSTIC_STATES.SOURCE_VALIDATED,
+      {
+        code: 'DIAGNOSTIC_TEMP_CREDENTIAL_CREATE_FAILED',
+        phase: 'credential_create',
+      },
+    ],
+    [
+      runner.DIAGNOSTIC_STATES.IMAGE_PULL_STARTED,
+      {
+        code: 'DIAGNOSTIC_DOCKER_IMAGE_PULL_FAILED',
+        phase: 'docker_pull',
+      },
+    ],
+    [
+      runner.DIAGNOSTIC_STATES.IMAGE_PULL_COMPLETED,
+      {
+        code: 'DIAGNOSTIC_CONTAINER_START_FAILED',
+        phase: 'docker_run_start',
+      },
+    ],
+    [
+      runner.DIAGNOSTIC_STATES.CONTAINER_STARTED,
+      {
+        code: 'DIAGNOSTIC_CONTAINER_EXEC_FAILED',
+        phase: 'docker_run_start',
+      },
+    ],
+    [
+      runner.DIAGNOSTIC_STATES.PSQL_COMPLETED,
+      {
+        code: 'DIAGNOSTIC_OUTPUT_INVALID',
+        phase: 'diagnostic_output',
+      },
+    ],
+    [
+      runner.DIAGNOSTIC_STATES.OUTPUT_VALIDATED,
+      {
+        code: 'TEMP_CREDENTIAL_CLEANUP_FAILED',
+        phase: 'credential_cleanup',
+      },
+    ],
+  ]) {
+    assert.deepEqual(
+      runner.classifyFailureForState(
+        state,
+        new Error('unexpected internal detail'),
+      ),
+      expected,
+    )
+  }
 })
 
 test('validator source mutation cannot remove the output allowlist', () => {

@@ -440,6 +440,20 @@ function runRobustnessScenarios(source, baselineResult) {
   results.push('migration_history_missing')
 
   psql(
+    'alter table supabase_migrations.schema_migrations rename column version to version_missing;',
+    'temporarily hide migration history version column',
+  )
+  const noHistoryVersion = parseSuccessfulDiagnosticAttempt(
+    attemptDiagnostic(source),
+  )
+  assert.deepEqual(noHistoryVersion, baselineResult)
+  psql(
+    'alter table supabase_migrations.schema_migrations rename column version_missing to version;',
+    'restore migration history version column',
+  )
+  results.push('migration_history_column_missing')
+
+  psql(
     `
       create role diagnostic_reader nologin;
       grant usage on schema public, supabase_migrations to diagnostic_reader;
@@ -851,7 +865,7 @@ async function main() {
     source,
     baselineResult,
   )
-  assert.equal(robustnessScenarios.length, 6)
+  assert.equal(robustnessScenarios.length, 7)
   assert.deepEqual(readFingerprints(), baselineFingerprints)
   return {
     driftScenarios: scenarios.length,

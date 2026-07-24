@@ -27,7 +27,7 @@ export const MIGRATION_FILE =
 export const FENCE_MIGRATION_FILE =
   'supabase/migrations/20260722065311_retire_bank_transfer_submissions_writes.sql'
 export const EXPECTED_DIAGNOSTIC_SHA256 =
-  '4db0e01794cde4fe907256ec52c4a1cf46a5dc582116726c7d1efd757673148c'
+  'b35e7ef87ef59570cf7a71d8182174115af4560d96d101498da4432b04ffbb97'
 export const EXPECTED_MIGRATION_SHA256 =
   '370984c499d93f602b3dccf876becd030085e88ccd9a17106fee8b0009d84046'
 export const EXPECTED_FENCE_SHA256 =
@@ -386,6 +386,9 @@ export function assertRunnerSource(source) {
     'execution.state = DIAGNOSTIC_STATES.PSQL_COMPLETED',
     'execution.state = DIAGNOSTIC_STATES.OUTPUT_VALIDATED',
     'execution.state = DIAGNOSTIC_STATES.CREDENTIAL_CLEANED',
+    'export function validateFailureAttestation(attestation)',
+    '  validateFailureAttestation(attestation)\n  return Object.freeze',
+    'classifyFailureForState(execution.state, error)',
     'await cleanupCredentialsOnce()',
     'JSON.stringify(toSafeFailureAttestation(error))',
   ])
@@ -396,6 +399,7 @@ export function assertRunnerSource(source) {
     /console[.](?:log|error)\s*\([^)]*(?:stdout|stderr)|\blet\s+stderr\b|\bstderr\s*[,}]/iu.test(
       source,
     ) ||
+    /else if \(!failure\)/u.test(source) ||
     !/shell:\s*false/u.test(source) ||
     !/POSTGRES_IMAGE/u.test(source) ||
     !/DIAGNOSTIC_FILE/u.test(source)

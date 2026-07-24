@@ -9,6 +9,14 @@ select
     where namespace.nspname = 'supabase_migrations'
       and relation.relname = 'schema_migrations'
       and relation.relkind in ('r', 'p')
+      and exists (
+        select 1
+        from pg_catalog.pg_attribute as attribute
+        where attribute.attrelid = relation.oid
+          and attribute.attname = 'version'
+          and attribute.attnum > 0
+          and not attribute.attisdropped
+      )
   ) as migration_history_ready,
   (
     (
