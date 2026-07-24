@@ -5,6 +5,10 @@ import { join } from 'node:path'
 const root = process.cwd()
 const pageSource = readFileSync(join(root, 'src/app/admin/bookings/page.tsx'), 'utf8')
 const adminPageSource = readFileSync(join(root, 'src/app/admin/page.tsx'), 'utf8')
+const adminModulesSource = readFileSync(
+  join(root, 'src/components/admin/adminModules.ts'),
+  'utf8',
+)
 const routeSource = readFileSync(join(root, 'src/app/api/admin/bookings/route.ts'), 'utf8')
 
 assert.match(pageSource, /fetch\('\/api\/admin\/bookings'/)
@@ -41,8 +45,10 @@ assert.doesNotMatch(pageSource, /method:\s*['"](?:POST|PUT|PATCH|DELETE)['"]/)
 assert.equal(pageSource.includes('/api/admin/booking-slots/batch'), false)
 assert.equal(pageSource.includes('/api/admin/booking-slots/bulk-close'), false)
 
-assert.match(adminPageSource, /label: '預約紀錄'.*href: '\/admin\/bookings'/)
-assert.match(adminPageSource, /label: '預約時段'.*href: '\/admin\/booking-slots'/)
+assert.match(adminPageSource, /getAdminModulesBySection\('readonly'\)/)
+assert.match(adminPageSource, /getAdminModulesBySection\('tool'\)/)
+assert.match(adminModulesSource, /key: 'bookings'[\s\S]*label: '預約紀錄'[\s\S]*href: '\/admin\/bookings'/)
+assert.match(adminModulesSource, /key: 'booking-slots'[\s\S]*href: '\/admin\/booking-slots'/)
 assert.equal(routeSource.includes("export const dynamic = 'force-dynamic'"), true)
 assert.equal(routeSource.includes('handleAdminBookingsRequest(request)'), true)
 
