@@ -477,9 +477,9 @@ test('runner source mutations cannot weaken image, shell, retry, fallback, sessi
       'String(error)',
     ),
     source.replace(
-      'sanitizedResult = parseAndValidateDiagnosticOutput(result.stdout)',
+      'sanitizedResult = parseDiagnosticOutput(result.stdout)',
       'console.error(result.stderr)\\n' +
-        'sanitizedResult = parseAndValidateDiagnosticOutput(result.stdout)',
+        'sanitizedResult = parseDiagnosticOutput(result.stdout)',
     ),
   ]
   for (const mutation of mutations) {
