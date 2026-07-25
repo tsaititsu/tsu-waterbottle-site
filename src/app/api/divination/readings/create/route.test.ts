@@ -77,7 +77,9 @@ test('interpret route does not write user_id (ownership is set at create time on
 test('divination client sends the auth token when logged in and stays anonymous otherwise', () => {
   assert.equal(localPreviewSource.includes('getAuthAccessToken'), true)
   assert.equal(localPreviewSource.includes('Authorization: `Bearer ${accessToken}`'), true)
-  assert.equal(localPreviewSource.includes('localUserStorageKey'), true)
+  assert.equal(localPreviewSource.includes('getLocalUserId'), true)
+  assert.equal(localPreviewSource.includes('localStorage'), false)
+  assert.equal(localPreviewSource.includes('sessionStorage'), false)
 })
 
 test('follow-up context is included in the safety check before a reading can be persisted', () => {

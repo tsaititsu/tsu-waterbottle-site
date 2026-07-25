@@ -19,7 +19,7 @@ export function maskIdentifier(value: string | null | undefined) {
   const normalized = normalize(value)
   if (!normalized) return MISSING_VALUE
 
-  const parts = characters(normalized)
+  const parts = graphemes(normalized)
   if (parts.length <= 2) return '•'.repeat(parts.length)
   if (parts.length <= 8) return `${parts[0]}…${parts.at(-1)}`
   return `${parts.slice(0, 4).join('')}…${parts.slice(-4).join('')}`

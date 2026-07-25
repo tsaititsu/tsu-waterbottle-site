@@ -581,16 +581,17 @@ test('cart page prevents duplicate NewebPay checkout while loading', () => {
   assert.equal(source.includes('disabled={isNewebPayCheckingOut}'), true)
 })
 
-test('post office shipping data remains intact after transfer payment retirement', () => {
+test('post office shipping data remains in memory and is not persisted in browser storage', () => {
   const source = readCartPageSource()
 
   assert.equal(source.includes('type PostOfficeShippingInfo'), true)
   assert.equal(source.includes('postOfficeShippingInfo'), true)
-  assert.equal(source.includes('postOfficeShippingStorageKey'), true)
   assert.equal(source.includes('emptyPostOfficeShippingInfo'), true)
   assert.equal(source.includes('getValidatedShippingInfo'), true)
-  assert.equal(source.includes('savePostOfficeShippingInfo'), true)
-  assert.equal(source.includes("shipping_method: 'post_office'"), true)
+  assert.equal(source.includes('postOfficeShippingStorageKey'), false)
+  assert.equal(source.includes('savePostOfficeShippingInfo'), false)
+  assert.equal(source.includes('window.localStorage'), false)
+  assert.equal(source.includes('window.sessionStorage'), false)
   assert.equal(source.includes('郵局寄送資料'), true)
   assert.equal(source.includes('收件人姓名'), true)
   assert.equal(source.includes('收件人電話'), true)

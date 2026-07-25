@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const root = process.cwd()
@@ -102,6 +102,7 @@ const trackedRuntimeSources = execFileSync('git', ['ls-files'], {
   .filter((path) => !path.endsWith('.d.ts'))
   .filter((path) => !path.includes('.test.'))
   .filter((path) => path !== 'src/features/ziwei-chart/package/index.js')
+  .filter((path) => existsSync(join(root, path)))
 
 const runtimeSources = trackedRuntimeSources.map((path) => ({ path, source: readSource(path) }))
 const embedConsumers = runtimeSources.filter(({ source }) => /\bZiweiChartEmbed\b/.test(source))

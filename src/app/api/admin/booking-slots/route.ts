@@ -34,16 +34,13 @@ export async function GET(request: Request) {
     if (error) {
       console.error('Failed to list consultation availability slots', {
         code: error.code,
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
       })
       return NextResponse.json({ ok: false, error: '讀取預約時段失敗。' }, { status: 500 })
     }
 
     return NextResponse.json({ ok: true, slots: data ?? [] })
-  } catch (error) {
-    console.error('Unexpected booking slots list error', error)
+  } catch {
+    console.error('Unexpected booking slots list error')
     return NextResponse.json({ ok: false, error: '讀取預約時段失敗。' }, { status: 500 })
   }
 }
@@ -85,16 +82,13 @@ export async function POST(request: Request) {
     if (error) {
       console.error('Failed to create consultation availability slot', {
         code: error.code,
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
       })
       return NextResponse.json({ ok: false, error: '新增預約時段失敗。' }, { status: 500 })
     }
 
     return NextResponse.json({ ok: true, slot: data })
-  } catch (error) {
-    console.error('Unexpected booking slot create error', error)
+  } catch {
+    console.error('Unexpected booking slot create error')
     return NextResponse.json({ ok: false, error: '新增預約時段失敗。' }, { status: 500 })
   }
 }

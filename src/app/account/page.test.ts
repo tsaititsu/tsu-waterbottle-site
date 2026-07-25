@@ -30,5 +30,7 @@ assert.deepEqual(mockPaymentExports, ['hasJoinedWaitlist', 'joinCourseWaitlist']
 assert.equal(mockPayment.includes('joinCourseWaitlist'), true)
 assert.equal(mockPayment.includes('hasJoinedWaitlist'), true)
 assert.equal(mockPayment.includes('waterbottle_course_waitlist'), true)
+assert.equal(mockPayment.includes('user.id'), false)
+assert.equal(mockPayment.includes('JSON.stringify'), false)
 
 console.log('✓ account no longer renders local mock payment history')

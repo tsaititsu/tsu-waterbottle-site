@@ -42,11 +42,8 @@ export async function handleListAccountDivinationReadings(
     const readings = await deps.listReadingsForUser(userId, { limit })
 
     return NextResponse.json({ ok: true, readings })
-  } catch (error) {
-    console.error(
-      'Failed to list account divination readings',
-      error instanceof Error ? error.message : '未知錯誤',
-    )
+  } catch {
+    console.error('Failed to list account divination readings')
     return NextResponse.json({ ok: false, message: '讀取占卜紀錄失敗，請稍後再試。' }, { status: 500 })
   }
 }
@@ -83,11 +80,8 @@ export async function handleGetAccountDivinationReading(
     }
 
     return NextResponse.json({ ok: true, reading })
-  } catch (error) {
-    console.error(
-      'Failed to read account divination reading',
-      error instanceof Error ? error.message : '未知錯誤',
-    )
+  } catch {
+    console.error('Failed to read account divination reading')
     return NextResponse.json({ ok: false, message: '讀取占卜紀錄失敗，請稍後再試。' }, { status: 500 })
   }
 }

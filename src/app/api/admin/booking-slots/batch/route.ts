@@ -110,9 +110,6 @@ export async function POST(request: Request) {
     if (existingError) {
       console.error('Failed to check existing consultation availability slots', {
         code: existingError.code,
-        message: existingError.message,
-        details: existingError.details,
-        hint: existingError.hint,
       })
       return NextResponse.json({ ok: false, error: '檢查重複時段失敗。' }, { status: 500 })
     }
@@ -143,9 +140,6 @@ export async function POST(request: Request) {
     if (error) {
       console.error('Failed to batch create consultation availability slots', {
         code: error.code,
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
       })
       return NextResponse.json({ ok: false, error: '批次新增預約時段失敗。' }, { status: 500 })
     }
@@ -156,8 +150,8 @@ export async function POST(request: Request) {
       skippedCount: generated.length - (data?.length ?? 0),
       slots: data ?? [],
     })
-  } catch (error) {
-    console.error('Unexpected booking slots batch create error', error)
+  } catch {
+    console.error('Unexpected booking slots batch create error')
     return NextResponse.json({ ok: false, error: '批次新增預約時段失敗。' }, { status: 500 })
   }
 }

@@ -11,7 +11,8 @@ type TestPaymentState = {
 }
 
 function getStartErrorMessage(status: number, fallback?: string) {
-  if (status === 401) return '請先登入會員後再建立測試付款。'
+  if (status === 401) return '請先登入管理員帳號後再建立測試付款。'
+  if (status === 403) return '目前帳號沒有管理員測試付款權限。'
   if (status >= 500) return '建立測試付款失敗，請稍後再試。'
   return fallback ?? '建立測試付款失敗，請稍後再試。'
 }
@@ -69,7 +70,7 @@ export default function NewebPayTestPage() {
           <p className="text-sm font-semibold text-darkGold">NewebPay Test</p>
           <h1 className="mt-3 font-serifTC text-3xl font-semibold text-deepPurple">藍新金流 1 元測試</h1>
           <p className="mt-4 leading-7 text-textMuted">
-            這個隱藏測試商品只用來確認藍新付款、NotifyURL 與 ReturnURL 流程。付款成功只會更新 payments，不會開通課程，也不會寫入 course_purchases。
+            這個管理員限定的隱藏測試商品只用來確認藍新付款、NotifyURL 與 ReturnURL 流程。付款成功只會更新 payments，不會開通課程，也不會寫入 course_purchases。
           </p>
           <div className="mt-6 rounded-xl bg-softPurple px-5 py-4">
             <p className="font-semibold text-deepPurple">測試金額：NT$1</p>

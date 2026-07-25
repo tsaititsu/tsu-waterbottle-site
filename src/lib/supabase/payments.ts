@@ -1,3 +1,4 @@
+import { readExactRecord } from '@/lib/contracts/exactRecord'
 import { getSupabaseAdmin } from './admin'
 
 export type PaymentProvider = 'newebpay' | 'line_pay'
@@ -132,6 +133,85 @@ export type ExistingPaymentTarget = {
   id: string
   status: PaymentStatus | string
   merchantOrderNo: string | null
+}
+
+const PAYMENT_COLUMN_NAMES = [
+  'id',
+  'user_id',
+  'booking_id',
+  'provider',
+  'provider_payment_id',
+  'item_type',
+  'item_id',
+  'item_name',
+  'amount_twd',
+  'currency',
+  'status',
+  'paid_at',
+  'refunded_at',
+  'raw_payload',
+  'merchant_order_no',
+  'provider_trade_no',
+  'notify_received_at',
+  'failure_reason',
+  'created_at',
+  'updated_at',
+] as const
+const PAYMENT_COLUMNS = PAYMENT_COLUMN_NAMES.join(',')
+
+export function readPaymentRow(value: unknown): PaymentRow {
+  const row = readExactRecord(value, PAYMENT_COLUMN_NAMES, 'payment_row')
+  const requiredStrings = [
+    'id',
+    'item_type',
+    'item_name',
+    'created_at',
+    'updated_at',
+  ] as const
+  const nullableStrings = [
+    'user_id',
+    'booking_id',
+    'provider_payment_id',
+    'item_id',
+    'merchant_order_no',
+    'provider_trade_no',
+    'failure_reason',
+  ] as const
+  const nullableDates = [
+    'paid_at',
+    'refunded_at',
+    'notify_received_at',
+  ] as const
+  const rawPayloadIsValid =
+    row.raw_payload === null ||
+    (typeof row.raw_payload === 'object' &&
+      !Array.isArray(row.raw_payload) &&
+      row.raw_payload !== null)
+  const invalid =
+    requiredStrings.some(
+      (key) => typeof row[key] !== 'string' || row[key].length === 0,
+    ) ||
+    nullableStrings.some(
+      (key) => row[key] !== null && typeof row[key] !== 'string',
+    ) ||
+    nullableDates.some(
+      (key) =>
+        row[key] !== null &&
+        (typeof row[key] !== 'string' || Number.isNaN(Date.parse(row[key]))),
+    ) ||
+    !['newebpay', 'line_pay'].includes(String(row.provider)) ||
+    !['pending', 'paid', 'failed', 'cancelled'].includes(String(row.status)) ||
+    typeof row.amount_twd !== 'number' ||
+    !Number.isSafeInteger(row.amount_twd) ||
+    row.amount_twd <= 0 ||
+    row.currency !== 'TWD' ||
+    !rawPayloadIsValid ||
+    [row.created_at, row.updated_at].some(
+      (dateValue) => Number.isNaN(Date.parse(String(dateValue))),
+    )
+
+  if (invalid) throw new Error('payment_row_invalid')
+  return row as unknown as PaymentRow
 }
 
 function assertRequiredText(value: string, fieldName: string) {
@@ -300,15 +380,15 @@ export async function getPaymentByMerchantOrderNo(merchantOrderNo: string) {
   const supabase = getSupabaseAdmin()
   const { data, error } = await supabase
     .from('payments')
-    .select('*')
+    .select(PAYMENT_COLUMNS)
     .eq('merchant_order_no', merchantOrderNo)
     .maybeSingle()
 
   if (error) {
-    throw new Error(error.message)
+    throw new PaymentRepositoryError(classifyPaymentRepositoryError(error))
   }
 
-  return data ? mapPaymentRow(data as PaymentRow) : null
+  return data ? mapPaymentRow(readPaymentRow(data)) : null
 }
 
 export async function getPaymentById(paymentId: string) {
@@ -317,15 +397,15 @@ export async function getPaymentById(paymentId: string) {
   const supabase = getSupabaseAdmin()
   const { data, error } = await supabase
     .from('payments')
-    .select('*')
+    .select(PAYMENT_COLUMNS)
     .eq('id', paymentId.trim())
     .maybeSingle()
 
   if (error) {
-    throw new Error(error.message)
+    throw new PaymentRepositoryError(classifyPaymentRepositoryError(error))
   }
 
-  return data ? mapPaymentRow(data as PaymentRow) : null
+  return data ? mapPaymentRow(readPaymentRow(data)) : null
 }
 
 export async function markPaymentPaidByMerchantOrderNo(input: MarkPaymentPaidInput): Promise<MarkPaymentPaidResult> {
@@ -346,12 +426,12 @@ export async function markPaymentPaidByMerchantOrderNo(input: MarkPaymentPaidInp
     .from('payments')
     .update(updatePayload)
     .eq('merchant_order_no', input.merchantOrderNo)
-    .select('*')
+    .select(PAYMENT_COLUMNS)
     .single()
 
   if (error) {
-    throw new Error(error.message)
+    throw new PaymentRepositoryError(classifyPaymentRepositoryError(error))
   }
 
-  return { result: 'updated', payment: mapPaymentPaidContext(mapPaymentRow(data as PaymentRow)) }
+  return { result: 'updated', payment: mapPaymentPaidContext(mapPaymentRow(readPaymentRow(data))) }
 }

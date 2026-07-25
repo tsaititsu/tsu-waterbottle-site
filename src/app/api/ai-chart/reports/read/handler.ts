@@ -46,10 +46,8 @@ function buildReadyResponse(report: AiChartReportResultContext, reportContent: s
   })
 }
 
-function buildReadFailedResponse(error: unknown) {
-  console.error('讀取 AI 命盤 report 失敗', {
-    error: error instanceof Error ? error.message : 'unknown_error',
-  })
+function buildReadFailedResponse() {
+  console.error('讀取 AI 命盤 report 失敗')
 
   return NextResponse.json(
     {
@@ -154,7 +152,7 @@ export async function handleReadAiChartReportRequest(
       },
       { status: 409 },
     )
-  } catch (error) {
-    return buildReadFailedResponse(error)
+  } catch {
+    return buildReadFailedResponse()
   }
 }

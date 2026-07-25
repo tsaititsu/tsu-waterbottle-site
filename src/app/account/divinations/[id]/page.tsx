@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { LoginModal } from '@/components/LoginModal'
 import { PageHero } from '@/components/PageHero'
 import { formatTaipeiDateTime } from '@/lib/date/formatTaipeiDateTime'
@@ -56,36 +56,50 @@ export default function AccountDivinationDetailPage() {
   const [reading, setReading] = useState<AccountDivinationReadingDetail | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState('')
+  const requestGenerationRef = useRef(0)
 
   useEffect(() => {
-    let cancelled = false
+    async function loadReading(nextUser: UserProfile | null) {
+      requestGenerationRef.current += 1
+      const requestGeneration = requestGenerationRef.current
+      const requestedReadingId = readingId
+      const isCurrentRequest = () =>
+        requestGenerationRef.current === requestGeneration &&
+        requestedReadingId === readingId &&
+        getMockUser()?.id === nextUser?.id
 
-    async function loadReading() {
       setIsLoading(true)
       setErrorMessage('')
 
+      if (!nextUser || !requestedReadingId) {
+        if (isCurrentRequest()) {
+          setReading(null)
+          setIsLoading(false)
+        }
+        return
+      }
+
       try {
         const accessToken = await getAuthAccessToken()
+        if (!isCurrentRequest()) return
 
-        if (!accessToken || !readingId) {
-          if (!cancelled) {
-            setReading(null)
-            setIsLoading(false)
-          }
+        if (!accessToken) {
+          setReading(null)
           return
         }
 
-        const response = await fetch(`/api/account/divination-readings/${encodeURIComponent(readingId)}`, {
+        const response = await fetch(`/api/account/divination-readings/${encodeURIComponent(requestedReadingId)}`, {
           cache: 'no-store',
           headers: { Authorization: `Bearer ${accessToken}` },
         })
+        if (!isCurrentRequest()) return
         const data = (await response.json().catch(() => ({}))) as {
           ok?: boolean
           reading?: AccountDivinationReadingDetail
           message?: string
         }
 
-        if (cancelled) return
+        if (!isCurrentRequest()) return
 
         if (!response.ok || data.ok === false || !data.reading) {
           setReading(null)
@@ -95,12 +109,12 @@ export default function AccountDivinationDetailPage() {
 
         setReading(data.reading)
       } catch {
-        if (!cancelled) {
+        if (isCurrentRequest()) {
           setReading(null)
           setErrorMessage('讀取占卜紀錄失敗，請稍後再試。')
         }
       } finally {
-        if (!cancelled) setIsLoading(false)
+        if (isCurrentRequest()) setIsLoading(false)
       }
     }
 
@@ -108,14 +122,15 @@ export default function AccountDivinationDetailPage() {
       const nextUser = getMockUser()
       setUser(nextUser)
       setLoginOpen(!nextUser)
-      void loadReading()
+      setReading(null)
+      void loadReading(nextUser)
     }
 
     sync()
     const unsubscribe = subscribeAuthChange(sync)
     return () => {
       unsubscribe()
-      cancelled = true
+      requestGenerationRef.current += 1
     }
   }, [readingId])
 

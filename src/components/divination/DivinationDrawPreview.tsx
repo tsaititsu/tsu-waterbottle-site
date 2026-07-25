@@ -11,6 +11,12 @@ import {
   saveDivinationFollowUpDisplayReading,
   saveDivinationFollowUpDraft,
 } from "@/lib/divination/followUpStorage"
+import {
+  clearDivinationReadingDrawState,
+  clearDivinationReadingSession,
+  updateDivinationReadingDrawState,
+  updateDivinationReadingMerchantOrderNo,
+} from "@/lib/divination/readingSessionMemory"
 import type {
   DivinationDrawMode,
   DivinationFollowUpDisplayThread,
@@ -61,10 +67,6 @@ type NewebPayCreateResponse =
       message?: string
     }
 
-type StoredReadingSession = DivinationReadingSession & {
-  autoMockPaid?: boolean
-}
-
 const lineInAppBrowserPaymentNotice =
   "目前正在 LINE 內建瀏覽器。為提高付款與返回解讀頁的穩定性，建議點右上角「⋯」，選擇「以預設瀏覽器開啟」後再付款。"
 
@@ -82,13 +84,11 @@ function LineInAppBrowserPaymentNotice({ visible }: { visible: boolean }) {
 }
 
 const initialMessage = "請先依照抽牌方式開始抽牌。"
-const shufflingMessage = "洗牌中..."
 const autoShufflingMessage = "系統正在為你洗牌與抽牌..."
 const readyMessage = "洗牌完成，請憑直覺點選一張牌。"
 const pendingMessage = "你選到一張牌。請確認是不是這張。"
 const resultReadyMessage = "已產生牌義解讀預覽。"
 const blockedMessage = "請先在上方填寫問題，並選擇手動抽牌或自動抽牌。"
-const readingSessionStorageKey = "divination_reading_session"
 const isNewebPayEnabled = process.env.NEXT_PUBLIC_ENABLE_NEWEBPAY === "true"
 
 const positionLabels: Record<DivinationPosition, string> = {
@@ -137,24 +137,6 @@ function getRandomCardIndex() {
   return Math.floor(Math.random() * ziweiCards.length)
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
-function readStoredReadingSession(): Partial<StoredReadingSession> | null {
-  if (typeof window === "undefined") return null
-
-  const rawSession = window.sessionStorage.getItem(readingSessionStorageKey)
-  if (!rawSession) return null
-
-  try {
-    const parsed = JSON.parse(rawSession)
-    return isRecord(parsed) ? (parsed as Partial<StoredReadingSession>) : null
-  } catch {
-    return null
-  }
-}
-
 function updateStoredReadingSessionDrawState(input: {
   readingId: string
   question: string
@@ -164,52 +146,18 @@ function updateStoredReadingSessionDrawState(input: {
   cardId: string
   position: DivinationPosition
 }) {
-  if (typeof window === "undefined") return
-
-  const existing = readStoredReadingSession()
-  const base = existing?.readingId === input.readingId ? existing : null
-  const nextSession: StoredReadingSession = {
-    ...(base ?? {}),
-    readingId: input.readingId,
-    question: input.question,
-    drawMode: input.drawMode,
-    localUserId: input.localUserId,
-    persisted: input.persisted,
-    cardId: input.cardId,
-    position: input.position,
-  }
-
-  window.sessionStorage.setItem(readingSessionStorageKey, JSON.stringify(nextSession))
+  updateDivinationReadingDrawState(input)
 }
 
 function clearStoredReadingSessionDrawState(readingId: string) {
-  if (typeof window === "undefined") return
-
-  const existing = readStoredReadingSession()
-  if (!existing || existing.readingId !== readingId) return
-
-  const nextSession = { ...existing }
-  delete nextSession.cardId
-  delete nextSession.position
-  window.sessionStorage.setItem(readingSessionStorageKey, JSON.stringify(nextSession))
+  clearDivinationReadingDrawState(readingId)
 }
 
 function updateStoredReadingSessionMerchantOrderNo(input: {
   readingId: string
   merchantOrderNo: string
 }) {
-  if (typeof window === "undefined") return
-
-  const existing = readStoredReadingSession()
-  if (!existing || existing.readingId !== input.readingId) return
-
-  window.sessionStorage.setItem(
-    readingSessionStorageKey,
-    JSON.stringify({
-      ...existing,
-      merchantOrderNo: input.merchantOrderNo,
-    })
-  )
+  updateDivinationReadingMerchantOrderNo(input)
 }
 
 function getNewebPayCheckoutErrorMessage(error?: string) {
@@ -762,9 +710,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
           return
         }
 
-        throw new Error(
-          interpretData.ok === false ? interpretData.message || interpretData.error : "解讀預覽產生失敗"
-        )
+        throw new Error("解讀預覽產生失敗，請稍後再試。")
       }
 
       if (interpretRequestRef.current !== requestId) return
@@ -781,10 +727,9 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
       setPaymentRequired(null)
       setErrorMessage("")
       setMessage(resultReadyMessage)
-    } catch (error) {
+    } catch {
       if (interpretRequestRef.current !== requestId) return
 
-      console.error(error)
       setConfirmedCard(null)
       setConfirmedPosition(null)
       setConfirmedReadingId("")
@@ -793,7 +738,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
       setIsSafetyResult(false)
       setHasFollowUpDraft(false)
       setDisplayThread(null)
-      setErrorMessage(error instanceof Error ? error.message : "解讀預覽產生失敗，請稍後再試。")
+      setErrorMessage("解讀預覽產生失敗，請稍後再試。")
       setMessage(pendingMessage)
     } finally {
       if (interpretRequestRef.current === requestId) {
@@ -922,7 +867,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
   }
 
   function returnToDivinationStart() {
-    window.sessionStorage.removeItem(readingSessionStorageKey)
+    clearDivinationReadingSession()
     clearDivinationFollowUpDraft()
     clearDivinationFollowUpDisplayThread()
     setDisplayThread(null)
@@ -930,7 +875,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
   }
 
   function continueFollowUp() {
-    window.sessionStorage.removeItem(readingSessionStorageKey)
+    clearDivinationReadingSession()
     router.push(`/ai-divination?followUp=${Date.now()}`)
   }
 

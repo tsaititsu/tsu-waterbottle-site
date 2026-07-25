@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   AI_CHART_TEST_NODE_VERSION,
+  AI_CHART_REACT_SERVER_TEST_FILES,
   AiChartTestRunnerError,
   REMOVED_TEST_ENVIRONMENT_KEYS,
   assertCanonicalNodeVersion,
@@ -15,7 +16,7 @@ import {
   validateLocalTsx,
 } from './test-runner.mjs'
 
-const EXPECTED_CURRENT_AI_CHART_TEST_FILE_COUNT = 26
+const EXPECTED_CURRENT_AI_CHART_TEST_FILE_COUNT = 27
 const THIS_FILE = fileURLToPath(import.meta.url)
 const DEFAULT_REPOSITORY_ROOT = resolve(dirname(THIS_FILE), '../..')
 
@@ -182,6 +183,14 @@ export async function runTestRunnerContract(
   await check('tsx is local and exactly pinned', async () => {
     assert.equal(/^\d+\.\d+\.\d+$/u.test(tsx.version), true)
     assert.equal(tsx.importUrl.startsWith('file:'), true)
+  })
+  checks += 1
+
+  await check('react-server condition is limited to the server-only report test', async () => {
+    assert.deepEqual(AI_CHART_REACT_SERVER_TEST_FILES, [
+      'src/lib/ai-chart/reportCompletion.test.ts',
+    ])
+    assert.equal(Object.isFrozen(AI_CHART_REACT_SERVER_TEST_FILES), true)
   })
   checks += 1
 

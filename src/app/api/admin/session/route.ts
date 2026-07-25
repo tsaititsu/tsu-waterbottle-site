@@ -9,8 +9,8 @@ export async function GET(request: Request) {
     if ('error' in auth) return auth.error
 
     return NextResponse.json({ ok: true, isAdmin: true })
-  } catch (error) {
-    console.error('Unexpected admin session check error', error instanceof Error ? error.message : error)
+  } catch {
+    console.error('Unexpected admin session check error')
     return NextResponse.json({ ok: false, error: '確認管理權限失敗。' }, { status: 500 })
   }
 }

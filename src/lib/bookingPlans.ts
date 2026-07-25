@@ -8,7 +8,7 @@ export type BookingPlan = {
 
 export const bookingPlans: BookingPlan[] = [
   {
-    id: 'ziwei-consultation-60',
+    id: 'waterbottle-consultation-60',
     name: '水瓶先生論命',
     durationMinutes: 60,
     price: 3600,

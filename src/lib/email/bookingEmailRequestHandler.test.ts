@@ -91,8 +91,8 @@ test('parseBookingEmailRequestBody rejects missing bookingId', () => {
   assert.equal(parseBookingEmailRequestBody({ to: 'attacker@example.com' }), null)
 })
 
-test('parseBookingEmailRequestBody ignores to / cc / bcc / subject / html fields', () => {
-  const parsed = parseBookingEmailRequestBody({
+test('parseBookingEmailRequestBody rejects unknown recipient or content fields', () => {
+  assert.equal(parseBookingEmailRequestBody({
     bookingId: 'booking-1',
     to: 'attacker@example.com',
     cc: ['attacker2@example.com'],
@@ -100,18 +100,16 @@ test('parseBookingEmailRequestBody ignores to / cc / bcc / subject / html fields
     subject: '任意標題',
     html: '<script>x</script>',
     customerEmail: 'attacker4@example.com',
-  })
-
-  assert.deepEqual(parsed, { bookingId: 'booking-1' })
+  }), null)
 })
 
-test('parseBookingEmailRequestBody truncates cancellationReason and rejects non-string reasons', () => {
+test('parseBookingEmailRequestBody rejects client supplied cancellationReason', () => {
   const longReason = 'a'.repeat(MAX_CANCELLATION_REASON_LENGTH + 100)
-  const parsed = parseBookingEmailRequestBody({ bookingId: 'booking-1', cancellationReason: longReason })
-  assert.equal(parsed?.cancellationReason?.length, MAX_CANCELLATION_REASON_LENGTH)
-
-  const nonString = parseBookingEmailRequestBody({ bookingId: 'booking-1', cancellationReason: { html: 'x' } })
-  assert.equal(nonString?.cancellationReason, undefined)
+  assert.equal(parseBookingEmailRequestBody({ bookingId: 'booking-1', cancellationReason: longReason }), null)
+  assert.equal(parseBookingEmailRequestBody({
+    bookingId: 'booking-1',
+    cancellationReason: { html: 'x' },
+  }), null)
 })
 
 // --- resolveBookingEmailAccess ---
@@ -126,16 +124,16 @@ test('resolveBookingEmailAccess returns 404 for unknown booking', () => {
   assert.deepEqual(decision, { allowed: false, status: 404 })
 })
 
-test('resolveBookingEmailAccess blocks other logged-in users (403)', () => {
+test('resolveBookingEmailAccess hides other users bookings behind 404', () => {
   const decision = resolveBookingEmailAccess({
     requester: { id: 'someone-else', email: 'other@example.com' },
     booking: makeBooking(),
     adminEmailsRaw: '',
   })
-  assert.deepEqual(decision, { allowed: false, status: 403 })
+  assert.deepEqual(decision, { allowed: false, status: 404 })
 })
 
-test('resolveBookingEmailAccess allows the booking owner by user id or email', () => {
+test('resolveBookingEmailAccess allows only the booking owner by user id', () => {
   assert.deepEqual(
     resolveBookingEmailAccess({ requester: ownerRequester, booking: makeBooking(), adminEmailsRaw: '' }),
     { allowed: true, isAdmin: false },
@@ -147,7 +145,7 @@ test('resolveBookingEmailAccess allows the booking owner by user id or email', (
       booking: makeBooking({ userId: null }),
       adminEmailsRaw: '',
     }),
-    { allowed: true, isAdmin: false },
+    { allowed: false, status: 404 },
   )
 })
 
@@ -162,18 +160,26 @@ test('resolveBookingEmailAccess allows ADMIN_EMAILS members to resend any bookin
 
 // --- handleBookingEmailRequest：API 行為 ---
 
-test('unauthenticated requests cannot trigger any email (401, nothing sent)', async () => {
-  const { deps, sentPayloads } = makeDeps({ getRequesterFromRequest: async () => null })
+test('unauthenticated requests cannot read a booking or trigger email', async () => {
+  let bookingReads = 0
+  const { deps, sentPayloads } = makeDeps({
+    getRequesterFromRequest: async () => null,
+    getBookingById: async () => {
+      bookingReads += 1
+      return makeBooking()
+    },
+  })
   const response = await handleBookingEmailRequest(
-    makeRequest({ bookingId: 'booking-1', to: 'attacker@example.com' }),
+    makeRequest({ bookingId: 'booking-1' }),
     deps,
   )
 
   assert.equal(response.status, 401)
+  assert.equal(bookingReads, 0)
   assert.equal(sentPayloads.length, 0)
 })
 
-test('request body "to" is never used as a recipient', async () => {
+test('request body recipient and content fields fail closed', async () => {
   const { deps, sentPayloads } = makeDeps()
   const response = await handleBookingEmailRequest(
     makeRequest({
@@ -187,15 +193,8 @@ test('request body "to" is never used as a recipient', async () => {
     deps,
   )
 
-  assert.equal(response.status, 200)
-  assert.equal(sentPayloads.length, 1)
-  assert.equal(sentPayloads[0].customerEmail, 'customer@example.com')
-
-  const serialized = JSON.stringify(sentPayloads[0])
-  assert.equal(serialized.includes('attacker@example.com'), false)
-  assert.equal('to' in sentPayloads[0], false)
-  assert.equal('cc' in sentPayloads[0], false)
-  assert.equal('bcc' in sentPayloads[0], false)
+  assert.equal(response.status, 400)
+  assert.equal(sentPayloads.length, 0)
 })
 
 test('missing bookingId sends nothing (400)', async () => {
@@ -216,7 +215,7 @@ test('unknown bookingId sends nothing (404)', async () => {
 
 test('customer email is derived from the booking record only', async () => {
   const { deps, sentPayloads } = makeDeps()
-  await handleBookingEmailRequest(makeRequest({ bookingId: 'booking-1', customerEmail: 'attacker@example.com' }), deps)
+  await handleBookingEmailRequest(makeRequest({ bookingId: 'booking-1' }), deps)
 
   assert.equal(sentPayloads.length, 1)
   assert.equal(sentPayloads[0].customerEmail, 'customer@example.com')
@@ -232,13 +231,13 @@ test('payload contains no admin recipient field (admin email comes from server e
   assert.equal('to' in sentPayloads[0], false)
 })
 
-test('a logged-in non-admin cannot resend another user booking email (403)', async () => {
+test('a logged-in non-admin cannot infer or resend another user booking email', async () => {
   const { deps, sentPayloads } = makeDeps({
     getRequesterFromRequest: async () => ({ id: 'someone-else', email: 'other@example.com' }),
   })
   const response = await handleBookingEmailRequest(makeRequest({ bookingId: 'booking-1' }), deps)
 
-  assert.equal(response.status, 403)
+  assert.equal(response.status, 404)
   assert.equal(sentPayloads.length, 0)
 })
 
@@ -281,6 +280,19 @@ test('successful send marks booking flags via injected function', async () => {
   assert.deepEqual(markedBookingIds, ['booking-1'])
 })
 
+test('marking sent flags is part of success and fails closed', async () => {
+  const { deps } = makeDeps({
+    markEmailsSent: async () => {
+      throw new Error('database secret detail')
+    },
+  })
+  const response = await handleBookingEmailRequest(makeRequest({ bookingId: 'booking-1' }), deps)
+  const body = JSON.stringify(await readJson(response))
+
+  assert.equal(response.status, 500)
+  assert.equal(body.includes('database secret detail'), false)
+})
+
 test('unpaid bookings cannot trigger confirmation email', async () => {
   const unpaidBooking = makeBooking({ status: 'pending_payment', paymentStatus: 'pending' })
   const { deps, sentPayloads, markedBookingIds } = makeDeps({
@@ -302,21 +314,34 @@ test('trusted paid booking can trigger confirmation email', async () => {
   assert.equal(sentPayloads.length, 1)
 })
 
-test('cancellation reason from body is passed through truncated, confirmation ignores it', async () => {
-  const cancellation = makeDeps({ kind: 'cancellation' })
-  await handleBookingEmailRequest(
-    makeRequest({ bookingId: 'booking-1', cancellationReason: `  改期需求 ${'x'.repeat(400)}` }),
-    cancellation.deps,
-  )
+test('cancellation email requires cancelled state and derives stored reason', async () => {
+  const cancellation = makeDeps({
+    kind: 'cancellation',
+    getBookingById: async () => makeBooking({
+      status: 'cancelled',
+      cancellationReason: '資料庫中的取消原因',
+    }),
+  })
+  const response = await handleBookingEmailRequest(makeRequest({ bookingId: 'booking-1' }), cancellation.deps)
+  assert.equal(response.status, 200)
   assert.equal(cancellation.sentPayloads.length, 1)
-  assert.equal(cancellation.sentPayloads[0].cancellationReason?.length, MAX_CANCELLATION_REASON_LENGTH)
+  assert.equal(cancellation.sentPayloads[0].cancellationReason, '資料庫中的取消原因')
 
-  const confirmation = makeDeps()
-  await handleBookingEmailRequest(
-    makeRequest({ bookingId: 'booking-1', cancellationReason: '不該出現在確認信' }),
-    confirmation.deps,
+  const notCancelled = makeDeps({ kind: 'cancellation' })
+  const rejected = await handleBookingEmailRequest(makeRequest({ bookingId: 'booking-1' }), notCancelled.deps)
+  assert.equal(rejected.status, 409)
+  assert.equal(notCancelled.sentPayloads.length, 0)
+
+  const injectedReason = makeDeps({
+    kind: 'cancellation',
+    getBookingById: async () => makeBooking({ status: 'cancelled', cancellationReason: '可信原因' }),
+  })
+  const invalid = await handleBookingEmailRequest(
+    makeRequest({ bookingId: 'booking-1', cancellationReason: '攻擊者原因' }),
+    injectedReason.deps,
   )
-  assert.equal(confirmation.sentPayloads[0].cancellationReason, undefined)
+  assert.equal(invalid.status, 400)
+  assert.equal(injectedReason.sentPayloads.length, 0)
 })
 
 test('send failures return a fixed message without key / env / stack details', async () => {
@@ -335,7 +360,7 @@ test('send failures return a fixed message without key / env / stack details', a
   assert.equal(serialized.includes('RESEND_API_KEY'), false)
 })
 
-test('error responses for 400/401/403/404 contain no env details', async () => {
+test('error responses for 400/401/404 contain no env details', async () => {
   const cases: Array<{ deps: HandleBookingEmailRequestDeps; body: unknown }> = [
     { deps: makeDeps().deps, body: {} },
     { deps: makeDeps({ getRequesterFromRequest: async () => null }).deps, body: { bookingId: 'booking-1' } },
@@ -366,6 +391,26 @@ test('buildBookingEmailPayload derives every field from the booking record', () 
   assert.equal(payload.amount, 3600)
   assert.equal(payload.startTimeText.includes('2026'), true)
   assert.equal(payload.endTimeText.includes('2026'), true)
+  assert.deepEqual(Object.keys(payload).sort(), [
+    'amount',
+    'bookingId',
+    'customerEmail',
+    'customerName',
+    'endTimeText',
+    'planName',
+    'startTimeText',
+  ])
+  for (const forbidden of [
+    'customerPhone',
+    'birthDate',
+    'birthTime',
+    'birthPlace',
+    'gender',
+    'isBirthTimeAccurate',
+    'question',
+  ]) {
+    assert.equal(forbidden in payload, false)
+  }
 })
 
 // --- 路由與寄信模組 source-level 檢查 ---

@@ -1,99 +1,57 @@
 import { NextResponse } from 'next/server'
 import { resolveBookingAccess, type BookingRequestUser } from '../../../../lib/bookings/bookingAccess'
-import type { BookingRecord } from '../../../../lib/mockBooking'
-import type { BookingMemberUpdate } from '../../../../lib/supabase/bookings'
+import { isAdminEmail } from '../../../../lib/auth/admin'
+import type { BookingRecord } from '../../../../lib/bookings/types'
+import type { CancelSupabaseBookingInput } from '../../../../lib/supabase/bookings'
 
-const FORBIDDEN_PAYMENT_FIELDS = new Set([
-  'paymentId',
-  'payment_id',
-  'paymentStatus',
-  'payment_status',
-  'paid',
-  'paidAt',
-  'paid_at',
-  'transactionId',
-  'transaction_id',
-  'tradeNo',
-  'trade_no',
-])
-
-const ALLOWED_UPDATE_FIELDS = new Set([
-  'status',
-  'googleCalendarCancelled',
-  'cancellationEmailSentToCustomer',
-  'cancellationEmailSentToAdmin',
-  'cancelledAt',
-  'cancellationReason',
-])
-
-const BOOLEAN_FIELDS = new Set([
-  'googleCalendarCancelled',
-  'cancellationEmailSentToCustomer',
-  'cancellationEmailSentToAdmin',
-])
+const CANCELLATION_REASON_MAX_LENGTH = 300
+const CANCELLATION_WINDOW_MILLISECONDS = 24 * 60 * 60 * 1000
+const CANCELLATION_REQUEST_FIELDS = new Set(['bookingId', 'cancellationReason'])
 
 export type BookingUpdateHandlerDeps = {
   getRequesterFromRequest: (request: Request) => Promise<BookingRequestUser | null>
-  getBookingById: (bookingId: string) => Promise<BookingRecord | null>
-  updateBookingById: (bookingId: string, updates: BookingMemberUpdate) => Promise<BookingRecord | null>
+  getBookingById: (
+    bookingId: string,
+    requesterId: string,
+    requesterIsAdmin: boolean,
+  ) => Promise<BookingRecord | null>
+  cancelBooking: (input: CancelSupabaseBookingInput) => Promise<BookingRecord | null>
+  now: () => Date
   adminEmailsRaw?: string | null
 }
 
-export type ParseBookingMemberUpdateResult =
-  | { ok: true; updates: BookingMemberUpdate }
-  | { ok: false; error: 'forbidden_payment_field' | 'unknown_field' | 'invalid_update' }
+export type ParseBookingCancellationResult =
+  | { ok: true; bookingId: string; cancellationReason: string }
+  | { ok: false; error: 'invalid_request' | 'unknown_field' }
 
-export function parseBookingMemberUpdate(value: unknown): ParseBookingMemberUpdateResult {
+export function parseBookingCancellationRequest(value: unknown): ParseBookingCancellationResult {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return { ok: false, error: 'invalid_update' }
+    return { ok: false, error: 'invalid_request' }
   }
 
   const input = value as Record<string, unknown>
-  const keys = Object.keys(input)
-  if (keys.length === 0) return { ok: false, error: 'invalid_update' }
-  if (keys.some((key) => FORBIDDEN_PAYMENT_FIELDS.has(key))) {
-    return { ok: false, error: 'forbidden_payment_field' }
-  }
-  if (keys.some((key) => !ALLOWED_UPDATE_FIELDS.has(key))) {
+  if (Object.keys(input).some((key) => !CANCELLATION_REQUEST_FIELDS.has(key))) {
     return { ok: false, error: 'unknown_field' }
   }
 
-  if ('status' in input && input.status !== 'cancelled') {
-    return { ok: false, error: 'forbidden_payment_field' }
+  const bookingId = typeof input.bookingId === 'string' ? input.bookingId.trim() : ''
+  const cancellationReason =
+    typeof input.cancellationReason === 'string' ? input.cancellationReason.trim() : ''
+
+  if (
+    !bookingId ||
+    !cancellationReason ||
+    cancellationReason.length > CANCELLATION_REASON_MAX_LENGTH
+  ) {
+    return { ok: false, error: 'invalid_request' }
   }
 
-  for (const key of BOOLEAN_FIELDS) {
-    if (key in input && typeof input[key] !== 'boolean') {
-      return { ok: false, error: 'invalid_update' }
-    }
-  }
+  return { ok: true, bookingId, cancellationReason }
+}
 
-  for (const key of ['cancelledAt', 'cancellationReason']) {
-    if (key in input && typeof input[key] !== 'string') {
-      return { ok: false, error: 'invalid_update' }
-    }
-  }
-
-  const cancellationReason = typeof input.cancellationReason === 'string' ? input.cancellationReason.trim() : undefined
-  if (cancellationReason !== undefined && (!cancellationReason || cancellationReason.length > 300)) {
-    return { ok: false, error: 'invalid_update' }
-  }
-
-  return {
-    ok: true,
-    updates: {
-      ...(input.status === 'cancelled' ? { status: 'cancelled' as const } : {}),
-      ...(typeof input.googleCalendarCancelled === 'boolean' ? { googleCalendarCancelled: input.googleCalendarCancelled } : {}),
-      ...(typeof input.cancellationEmailSentToCustomer === 'boolean'
-        ? { cancellationEmailSentToCustomer: input.cancellationEmailSentToCustomer }
-        : {}),
-      ...(typeof input.cancellationEmailSentToAdmin === 'boolean'
-        ? { cancellationEmailSentToAdmin: input.cancellationEmailSentToAdmin }
-        : {}),
-      ...(typeof input.cancelledAt === 'string' ? { cancelledAt: input.cancelledAt } : {}),
-      ...(cancellationReason !== undefined ? { cancellationReason } : {}),
-    },
-  }
+function isCancellationWindowOpen(booking: BookingRecord, now: Date) {
+  const startsAt = new Date(booking.startTime).getTime()
+  return Number.isFinite(startsAt) && startsAt - now.getTime() > CANCELLATION_WINDOW_MILLISECONDS
 }
 
 export async function handleBookingUpdateRequest(request: Request, deps: BookingUpdateHandlerDeps) {
@@ -103,40 +61,65 @@ export async function handleBookingUpdateRequest(request: Request, deps: Booking
       return NextResponse.json({ ok: false, message: '請先登入後再更新預約。' }, { status: 401 })
     }
 
-    const body = await request.json().catch(() => null)
-    if (!body || typeof body !== 'object') {
-      return NextResponse.json({ ok: false, message: '預約更新資料不完整。' }, { status: 400 })
+    const parsed = parseBookingCancellationRequest(await request.json().catch(() => null))
+    if (!parsed.ok) {
+      return NextResponse.json(
+        { ok: false, error: parsed.error, message: '取消預約資料不合法。' },
+        { status: 400 },
+      )
     }
 
-    const record = body as Record<string, unknown>
-    const bookingId = typeof record.bookingId === 'string' ? record.bookingId.trim() : ''
-    if (!bookingId) {
-      return NextResponse.json({ ok: false, message: '預約更新資料不完整。' }, { status: 400 })
-    }
-
-    const booking = await deps.getBookingById(bookingId)
+    const adminEmailsRaw = deps.adminEmailsRaw !== undefined ? deps.adminEmailsRaw : process.env.ADMIN_EMAILS
+    const requesterIsAdmin = isAdminEmail(requester.email, adminEmailsRaw)
+    const booking = await deps.getBookingById(parsed.bookingId, requester.id, requesterIsAdmin)
     const access = resolveBookingAccess({
       requester,
       booking,
-      adminEmailsRaw: deps.adminEmailsRaw !== undefined ? deps.adminEmailsRaw : process.env.ADMIN_EMAILS,
+      adminEmailsRaw,
     })
     if (!access.allowed) {
       return NextResponse.json({ ok: false, message: '找不到這筆預約。' }, { status: access.status })
     }
 
-    const parsed = parseBookingMemberUpdate(record.updates)
-    if (!parsed.ok) {
-      const message =
-        parsed.error === 'forbidden_payment_field'
-          ? '這支 API 不允許修改付款狀態。'
-          : '預約更新欄位不合法。'
-      return NextResponse.json({ ok: false, error: parsed.error, message }, { status: 400 })
+    const safeBooking = booking as BookingRecord
+    if (safeBooking.status === 'cancelled') {
+      return NextResponse.json({ ok: true, alreadyCancelled: true, booking: safeBooking })
     }
 
-    const updated = await deps.updateBookingById(bookingId, parsed.updates)
+    if (safeBooking.status !== 'confirmed' || safeBooking.paymentStatus !== 'paid') {
+      return NextResponse.json(
+        { ok: false, error: 'cancellation_not_allowed', message: '這筆預約目前不能取消。' },
+        { status: 409 },
+      )
+    }
+
+    const now = deps.now()
+    if (!isCancellationWindowOpen(safeBooking, now)) {
+      return NextResponse.json(
+        { ok: false, error: 'cancellation_window_closed', message: '距離預約開始 24 小時內不能自行取消。' },
+        { status: 409 },
+      )
+    }
+
+    const updated = await deps.cancelBooking({
+      bookingId: parsed.bookingId,
+      requesterId: requester.id,
+      requesterIsAdmin,
+      expectedStartTime: safeBooking.startTime,
+      expectedUpdatedAt: safeBooking.updatedAt,
+      cancelledAt: now.toISOString(),
+      cancellationReason: parsed.cancellationReason,
+    })
+    if (!updated) {
+      return NextResponse.json(
+        { ok: false, error: 'booking_changed', message: '預約狀態已變更，請重新整理後再試。' },
+        { status: 409 },
+      )
+    }
+
     return NextResponse.json({ ok: true, booking: updated })
-  } catch (error) {
-    console.error('Booking update failed', error instanceof Error ? error.message : 'unknown_error')
+  } catch {
+    console.error('Booking cancellation failed')
     return NextResponse.json({ ok: false, message: '更新預約失敗，請稍後再試。' }, { status: 500 })
   }
 }

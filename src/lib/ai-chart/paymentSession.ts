@@ -30,14 +30,6 @@ function normalizeOptionalText(value: string | null | undefined) {
   return trimmed.length > 0 ? trimmed : null
 }
 
-function getSessionStorage(): Storage | null {
-  try {
-    return globalThis.sessionStorage ?? null
-  } catch {
-    return null
-  }
-}
-
 function isValidCreatedAt(value: string) {
   return value.trim().length > 0 && !Number.isNaN(Date.parse(value))
 }
@@ -66,6 +58,8 @@ export function isAiChartPaymentSession(value: unknown): value is AiChartPayment
   )
 }
 
+let currentPaymentSession: AiChartPaymentSession | null = null
+
 export function saveAiChartPaymentSession(input: {
   reportId: string
   merchantOrderNo?: string | null
@@ -91,34 +85,16 @@ export function saveAiChartPaymentSession(input: {
     createdAt: new Date().toISOString(),
   }
 
-  const storage = getSessionStorage()
-  if (!storage) {
-    throw new Error('session_storage_unavailable')
-  }
-
-  storage.setItem(AI_CHART_PAYMENT_SESSION_KEY, JSON.stringify(session))
-  return session
+  currentPaymentSession = { ...session }
+  return { ...session }
 }
 
 export function getAiChartPaymentSession(): AiChartPaymentSession | null {
-  const storage = getSessionStorage()
-  if (!storage) {
-    return null
-  }
-
-  const raw = storage.getItem(AI_CHART_PAYMENT_SESSION_KEY)
-  if (!raw) {
-    return null
-  }
-
-  try {
-    const parsed = JSON.parse(raw)
-    return isAiChartPaymentSession(parsed) ? parsed : null
-  } catch {
-    return null
-  }
+  return currentPaymentSession && isAiChartPaymentSession(currentPaymentSession)
+    ? { ...currentPaymentSession }
+    : null
 }
 
 export function clearAiChartPaymentSession(): void {
-  getSessionStorage()?.removeItem(AI_CHART_PAYMENT_SESSION_KEY)
+  currentPaymentSession = null
 }

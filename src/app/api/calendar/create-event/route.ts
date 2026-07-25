@@ -1,12 +1,12 @@
 import { handleBookingCalendarRequest } from './handler'
 import { createBookingCalendarEvent } from '@/lib/google/createBookingCalendarEvent'
 import { getUserWithEmailFromRequest } from '@/lib/supabase/auth'
-import { getSupabaseBooking, updateSupabaseBooking } from '@/lib/supabase/bookings'
+import { getSupabaseBookingForRequester, updateSupabaseBooking } from '@/lib/supabase/bookings'
 
 export async function POST(req: Request) {
   return handleBookingCalendarRequest(req, {
     getRequesterFromRequest: getUserWithEmailFromRequest,
-    getBookingById: getSupabaseBooking,
+    getBookingById: getSupabaseBookingForRequester,
     createCalendarEvent: createBookingCalendarEvent,
     markCalendarCreated: async (bookingId, result) => {
       await updateSupabaseBooking(bookingId, {

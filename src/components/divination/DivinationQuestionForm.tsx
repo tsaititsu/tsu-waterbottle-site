@@ -5,17 +5,18 @@ import { useState } from 'react'
 type DrawMode = 'manual' | 'auto'
 
 type DivinationQuestionFormProps = {
+  disabled?: boolean
   onQuestionSubmit?: (payload: {
     question: string
     mode: DrawMode
     mockPaid?: boolean
-  }) => void
+  }) => void | Promise<void>
 }
 
 const questionPlaceholder = `請問一個你現在最想知道的具體問題。
 例如：這段關係接下來要注意什麼？這個工作選擇適合我嗎？`
 
-export function DivinationQuestionForm({ onQuestionSubmit }: DivinationQuestionFormProps) {
+export function DivinationQuestionForm({ disabled = false, onQuestionSubmit }: DivinationQuestionFormProps) {
   const [question, setQuestion] = useState('')
   const [message, setMessage] = useState('')
   const [messageType, setMessageType] = useState<'error' | 'info'>('info')
@@ -73,6 +74,7 @@ export function DivinationQuestionForm({ onQuestionSubmit }: DivinationQuestionF
           <p className="text-sm font-semibold text-textDark">抽牌方式</p>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <button
+              disabled={disabled}
               type="button"
               onClick={() => {
                 setSelectedMode('manual')
@@ -87,6 +89,7 @@ export function DivinationQuestionForm({ onQuestionSubmit }: DivinationQuestionF
               手動抽牌
             </button>
             <button
+              disabled={disabled}
               type="button"
               onClick={() => {
                 setSelectedMode('auto')
@@ -114,6 +117,7 @@ export function DivinationQuestionForm({ onQuestionSubmit }: DivinationQuestionF
               自動抽牌會在付款後建立占卜紀錄，接著自動洗牌、抽牌並開始 AI 解讀。
             </p>
             <button
+              disabled={disabled}
               type="button"
               onClick={() => handlePreviewDraw('auto', { mockPaid: true })}
               className="mt-3 rounded-full bg-deepPurple px-5 py-3 text-sm font-semibold text-white transition hover:bg-purpleMain"

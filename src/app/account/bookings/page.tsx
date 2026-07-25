@@ -1,20 +1,29 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { LoginModal } from '@/components/LoginModal'
 import { PageHero } from '@/components/PageHero'
 import { CancelBookingModal, type CancelBookingSummary } from '@/components/bookings/CancelBookingModal'
+import { createAsyncIdentityGuard } from '@/lib/auth/asyncIdentityGuard'
+import type { BookingMemberListItem } from '@/lib/bookings/types'
 import { getAuthAccessToken, getMockUser, subscribeAuthChange, type UserProfile } from '@/lib/mockAuth'
-import { getUserBookingRecords, subscribeBookingChange, updateBookingRecord, type BookingRecord } from '@/lib/mockBooking'
 
 const cancellationLimitHours = 24
 const lineSupportUrl = 'https://lin.ee/6Tpje1P'
 
-function canCancelBooking(booking: BookingRecord) {
-  if (booking.status !== 'confirmed') return false
+function canCancelBooking(booking: BookingMemberListItem) {
+  if (booking.status !== 'confirmed' || booking.paymentStatus !== 'paid') return false
   const start = new Date(booking.startTime).getTime()
   return start - Date.now() > cancellationLimitHours * 60 * 60 * 1000
+}
+
+function paymentStatusLabel(paymentStatus: BookingMemberListItem['paymentStatus']) {
+  if (paymentStatus === 'paid') return '已付款'
+  if (paymentStatus === 'pending') return '待付款'
+  if (paymentStatus === 'failed') return '失敗'
+  if (paymentStatus === 'refunded') return '已退款'
+  return '狀態未確認'
 }
 
 async function postJson(path: string, body: unknown, accessToken?: string | null) {
@@ -35,57 +44,92 @@ async function postJson(path: string, body: unknown, accessToken?: string | null
 
 export default function AccountBookingsPage() {
   const [user, setUser] = useState<UserProfile | null>(null)
-  const [bookings, setBookings] = useState<BookingRecord[]>([])
+  const [bookings, setBookings] = useState<BookingMemberListItem[]>([])
+  const [totalBookings, setTotalBookings] = useState(0)
   const [loginOpen, setLoginOpen] = useState(false)
   const [cancelingId, setCancelingId] = useState('')
-  const [bookingToCancel, setBookingToCancel] = useState<BookingRecord | null>(null)
+  const [bookingToCancel, setBookingToCancel] = useState<BookingMemberListItem | null>(null)
   const [cancellationError, setCancellationError] = useState('')
   const [statusMessage, setStatusMessage] = useState<ReactNode>('')
+  const [loadStatus, setLoadStatus] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle')
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
+  const loadRequestGenerationRef = useRef(0)
+  const cancelInFlightRef = useRef(false)
+  const cancelBookingIdRef = useRef('')
+  const [cancelGuard] = useState(() => createAsyncIdentityGuard())
+
+  const loadBookings = useCallback(async (requestGeneration: number, offset = 0) => {
+    if (offset > 0) setIsLoadingMore(true)
+    try {
+      const accessToken = await getAuthAccessToken()
+      if (requestGeneration !== loadRequestGenerationRef.current || !accessToken) return
+      const response = await fetch(`/api/bookings/list?limit=20&offset=${offset}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      const data = await response.json().catch(() => ({}))
+      if (requestGeneration !== loadRequestGenerationRef.current) return
+
+      if (response.ok && data.ok !== false && Array.isArray(data.bookings)) {
+        setBookings((current) => offset === 0 ? data.bookings : [...current, ...data.bookings])
+        setTotalBookings(Number.isSafeInteger(data.meta?.total) ? data.meta.total : data.bookings.length)
+        setLoadStatus('loaded')
+        return
+      }
+      if (offset === 0) {
+        setBookings([])
+        setLoadStatus('error')
+      }
+    } catch {
+      if (requestGeneration === loadRequestGenerationRef.current) {
+        if (offset === 0) {
+          setBookings([])
+          setLoadStatus('error')
+        } else {
+          setStatusMessage('無法載入更多預約，請稍後再試。')
+        }
+      }
+    } finally {
+      if (requestGeneration === loadRequestGenerationRef.current) {
+        setIsLoadingMore(false)
+      }
+    }
+  }, [])
 
   useEffect(() => {
-    let cancelled = false
-
-    async function loadBookings() {
-      try {
-        const accessToken = await getAuthAccessToken()
-        const response = await fetch('/api/bookings/list', {
-          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {}
-        })
-        const data = await response.json().catch(() => ({}))
-        if (!cancelled && response.ok && data.ok !== false && Array.isArray(data.bookings)) {
-          setBookings(data.bookings)
-          return
-        }
-      } catch {
-        // Keep local fallback below.
-      }
-
-      if (!cancelled) setBookings(getUserBookingRecords())
-    }
-
     const sync = () => {
+      const requestGeneration = ++loadRequestGenerationRef.current
       const nextUser = getMockUser()
       setUser(nextUser)
       setLoginOpen(!nextUser)
-      void loadBookings()
+      setBookings([])
+      setTotalBookings(0)
+      setBookingToCancel(null)
+      cancelBookingIdRef.current = ''
+      cancelGuard.invalidate()
+      cancelInFlightRef.current = false
+      setCancellationError('')
+      setStatusMessage('')
+      setIsLoadingMore(false)
+      setLoadStatus(nextUser ? 'loading' : 'idle')
+      if (nextUser) void loadBookings(requestGeneration)
     }
 
     sync()
     const unsubscribeAuth = subscribeAuthChange(sync)
-    const unsubscribeBooking = subscribeBookingChange(sync)
     return () => {
       unsubscribeAuth()
-      unsubscribeBooking()
-      cancelled = true
+      loadRequestGenerationRef.current += 1
+      cancelGuard.invalidate()
+      cancelInFlightRef.current = false
     }
-  }, [])
+  }, [cancelGuard, loadBookings])
 
   const closeCancellationModal = useCallback(() => {
     setBookingToCancel(null)
     setCancellationError('')
   }, [])
 
-  function openCancellationModal(booking: BookingRecord) {
+  function openCancellationModal(booking: BookingMemberListItem) {
     if (!canCancelBooking(booking)) {
       setStatusMessage(
         <>
@@ -101,83 +145,99 @@ export default function AccountBookingsPage() {
 
     setCancellationError('')
     setBookingToCancel(booking)
+    cancelBookingIdRef.current = booking.id
   }
 
-  async function cancelBooking(booking: BookingRecord, reason: string) {
+  async function cancelBooking(booking: BookingMemberListItem, reason: string) {
+    if (cancelInFlightRef.current) return
+    cancelBookingIdRef.current = booking.id
+    const currentIdentity = () => ({
+      resourceKey: cancelBookingIdRef.current,
+      subjectId: getMockUser()?.id ?? null,
+    })
+    const requestToken = cancelGuard.begin(currentIdentity())
+    if (!requestToken) return
+    const isCurrentRequest = () =>
+      cancelGuard.isCurrent(requestToken, currentIdentity())
+    cancelInFlightRef.current = true
     setCancelingId(booking.id)
     setCancellationError('')
     setStatusMessage('正在取消預約...')
 
-    const errors: string[] = []
-    let calendarCancelled = Boolean(booking.googleCalendarCancelled)
-    let emailsSent = Boolean(booking.cancellationEmailSentToCustomer && booking.cancellationEmailSentToAdmin)
+    let cancelledBooking: BookingMemberListItem
+    let accessToken = ''
+    try {
+      accessToken = await getAuthAccessToken() ?? ''
+      if (!isCurrentRequest()) return
+      if (!accessToken) throw new Error('booking_access_token_missing')
+      const result = await postJson(
+        '/api/bookings/update',
+        {
+          bookingId: booking.id,
+          cancellationReason: reason,
+        },
+        accessToken,
+      ) as { booking?: BookingMemberListItem }
+      if (!isCurrentRequest()) return
+      if (!result.booking) throw new Error('取消預約失敗')
+      cancelledBooking = result.booking
+    } catch {
+      if (!isCurrentRequest()) return
+      setCancelingId('')
+      setStatusMessage('')
+      setCancellationError('取消預約失敗，請稍後再試；已輸入的取消原因會保留。')
+      cancelInFlightRef.current = false
+      return
+    }
 
-    if (booking.googleCalendarEventId && !calendarCancelled) {
+    if (!isCurrentRequest()) return
+    setBookings((current) => current.map((item) => (
+      item.id === cancelledBooking.id ? cancelledBooking : item
+    )))
+
+    const errors: string[] = []
+    let calendarCancelled = Boolean(cancelledBooking.googleCalendarCancelled)
+    let emailsSent = Boolean(
+      cancelledBooking.cancellationEmailSentToCustomer &&
+      cancelledBooking.cancellationEmailSentToAdmin
+    )
+
+    if (!calendarCancelled) {
       try {
-        await postJson('/api/calendar/cancel-event', {
-          eventId: booking.googleCalendarEventId
-        })
+        if (!isCurrentRequest()) return
+        await postJson('/api/calendar/cancel-event', { bookingId: booking.id }, accessToken)
+        if (!isCurrentRequest()) return
         calendarCancelled = true
       } catch (error) {
         errors.push(error instanceof Error ? error.message : 'Google Calendar 取消失敗')
       }
-    } else {
-      calendarCancelled = true
     }
 
     if (!emailsSent) {
       try {
-        // 安全設計：只傳 bookingId 與純文字取消原因，收件人與內容由後端從 booking record 推導。
-        const accessToken = await getAuthAccessToken()
-        await postJson(
-          '/api/email/send-booking-cancellation',
-          { bookingId: booking.id, cancellationReason: reason },
-          accessToken
-        )
+        if (!isCurrentRequest()) return
+        await postJson('/api/email/send-booking-cancellation', { bookingId: booking.id }, accessToken)
+        if (!isCurrentRequest()) return
         emailsSent = true
       } catch (error) {
         errors.push(error instanceof Error ? error.message : '取消通知信寄送失敗')
       }
     }
 
-    const cancelledAt = new Date().toISOString()
-    const cancellationUpdates: Partial<BookingRecord> = {
-      status: 'cancelled',
-      googleCalendarCancelled: calendarCancelled,
-      cancellationEmailSentToCustomer: emailsSent,
-      cancellationEmailSentToAdmin: emailsSent,
-      cancelledAt,
-      cancellationReason: reason
-    }
-    try {
-      const accessToken = await getAuthAccessToken()
-      await postJson(
-        '/api/bookings/update',
-        {
-          bookingId: booking.id,
-          updates: {
-            status: 'cancelled',
+    if (!isCurrentRequest()) return
+    setBookings((current) => current.map((item) => (
+      item.id === cancelledBooking.id
+        ? {
+            ...item,
             googleCalendarCancelled: calendarCancelled,
             cancellationEmailSentToCustomer: emailsSent,
             cancellationEmailSentToAdmin: emailsSent,
-            cancelledAt,
-            cancellationReason: reason
           }
-        },
-        accessToken,
-      )
-    } catch {
-      setCancelingId('')
-      setStatusMessage('')
-      setCancellationError('取消預約失敗，請稍後再試；已輸入的取消原因會保留。')
-      return
-    }
-
-    const updated = updateBookingRecord(booking.id, cancellationUpdates)
-    const nextBooking = updated ?? { ...booking, ...cancellationUpdates, updatedAt: new Date().toISOString() }
-    setBookings((current) => current.map((item) => (item.id === nextBooking.id ? nextBooking : item)))
+        : item
+    )))
 
     setCancelingId('')
+    cancelInFlightRef.current = false
     closeCancellationModal()
     if (errors.length > 0) {
       setStatusMessage(`預約已標記取消，但部分同步失敗：${errors.join('；')}`)
@@ -195,9 +255,18 @@ export default function AccountBookingsPage() {
       />
       <section className="bg-white py-12 md:py-16">
         <div className="section-shell grid gap-5">
-          {statusMessage && <div className="rounded-2xl border border-borderSoft bg-softPurple p-4 text-sm font-semibold text-deepPurple">{statusMessage}</div>}
+          {statusMessage && <div aria-live="polite" className="rounded-2xl border border-borderSoft bg-softPurple p-4 text-sm font-semibold text-deepPurple">{statusMessage}</div>}
+          {user && loadStatus === 'loaded' ? (
+            <p className="text-sm text-textMuted">
+              目前顯示最近 {bookings.length} 筆，共 {totalBookings} 筆預約。
+            </p>
+          ) : null}
           {!user ? (
             <div className="rounded-2xl border border-borderSoft bg-softPurple p-6 text-textMuted">請先登入會員查看預約紀錄。</div>
+          ) : loadStatus === 'loading' ? (
+            <div aria-live="polite" className="rounded-2xl border border-borderSoft bg-softPurple p-6 text-textMuted">正在讀取預約紀錄...</div>
+          ) : loadStatus === 'error' ? (
+            <div role="alert" className="rounded-2xl border border-borderSoft bg-softPurple p-6 text-textMuted">暫時無法讀取預約紀錄，請稍後重新整理再試。</div>
           ) : bookings.length === 0 ? (
             <div className="rounded-2xl border border-borderSoft bg-softPurple p-6">
               <p className="text-textMuted">目前尚無水瓶先生論命預約。</p>
@@ -206,8 +275,9 @@ export default function AccountBookingsPage() {
               </Link>
             </div>
           ) : (
-            bookings.map((booking) => (
-              <article key={booking.id} className="grid gap-4 rounded-2xl border border-borderSoft bg-white p-5 shadow-soft lg:grid-cols-[1fr_auto] lg:items-center">
+            <>
+              {bookings.map((booking) => (
+                <article key={booking.id} className="grid gap-4 rounded-2xl border border-borderSoft bg-white p-5 shadow-soft lg:grid-cols-[1fr_auto] lg:items-center">
                 <div>
                   <p className="font-serifTC text-xl font-semibold text-deepPurple">{booking.planName}</p>
                   <p className="mt-2 text-sm text-textMuted">
@@ -217,7 +287,7 @@ export default function AccountBookingsPage() {
                   <p className="mt-2 text-xs text-textMuted">建立時間：{new Date(booking.createdAt).toLocaleString('zh-TW')}</p>
                 </div>
                 <div className="flex flex-wrap gap-2 lg:justify-end">
-                  <span className="rounded-full bg-lightGold px-3 py-1 text-xs font-semibold text-darkGold">付款：已付款</span>
+                  <span className="rounded-full bg-lightGold px-3 py-1 text-xs font-semibold text-darkGold">付款：{paymentStatusLabel(booking.paymentStatus)}</span>
                   <span className="rounded-full bg-softPurple px-3 py-1 text-xs font-semibold text-deepPurple">預約：{booking.status === 'confirmed' ? '已確認' : booking.status === 'cancelled' ? '已取消' : booking.status}</span>
                   <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-textMuted ring-1 ring-borderSoft">
                     Calendar：{booking.googleCalendarCancelled ? '已取消' : booking.googleCalendarEventId ? '已建立' : '未建立'}
@@ -225,16 +295,6 @@ export default function AccountBookingsPage() {
                   <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-textMuted ring-1 ring-borderSoft">
                     Email：{booking.emailSentToCustomer ? '已寄出' : '未寄出'}
                   </span>
-                  {booking.status !== 'cancelled' && booking.googleCalendarEventLink && (
-                    <a
-                      className="rounded-full bg-deepPurple px-3 py-1 text-xs font-semibold text-white"
-                      href={booking.googleCalendarEventLink}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      開啟日曆
-                    </a>
-                  )}
                   {booking.status === 'cancelled' ? (
                     <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-textMuted ring-1 ring-borderSoft">
                       取消時間：{booking.cancelledAt ? new Date(booking.cancelledAt).toLocaleString('zh-TW') : '已取消'}
@@ -258,8 +318,19 @@ export default function AccountBookingsPage() {
                     </span>
                   )}
                 </div>
-              </article>
-            ))
+                </article>
+              ))}
+              {bookings.length < totalBookings ? (
+                <button
+                  className="focus-ring mx-auto min-h-11 rounded-lg border border-deepPurple bg-white px-5 py-3 font-semibold text-deepPurple disabled:opacity-60"
+                  disabled={isLoadingMore}
+                  onClick={() => void loadBookings(loadRequestGenerationRef.current, bookings.length)}
+                  type="button"
+                >
+                  {isLoadingMore ? '載入中...' : '載入更多預約'}
+                </button>
+              ) : null}
+            </>
           )}
         </div>
       </section>

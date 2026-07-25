@@ -4,9 +4,8 @@ import {
   LINE_SESSION_COOKIE,
   readLineSessionCookieValue,
 } from '@/lib/auth/line'
-import type { BookingFormInput } from '@/lib/mockBooking'
+import type { BookingFormInput } from '@/lib/bookings/types'
 import { getUserIdFromRequest } from '@/lib/supabase/auth'
-import { getSupabaseAdmin } from '@/lib/supabase/admin'
 import {
   createSupabaseBooking,
   type CreateSupabaseBookingInput,
@@ -18,32 +17,31 @@ const INVALID_OWNER_MESSAGE = '預約資料不得包含會員識別欄位。'
 const STRICT_BEARER_PATTERN = /^Bearer [^\s]+$/
 const SUPABASE_USER_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-
-type BookingSlotClaim = {
-  id: string | null
-  startAt: string
-  endAt: string
-  restore: () => Promise<void>
-}
+const DATABASE_SLOT_ID_PATTERN =
+  /^db:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const BOOKING_CREATE_FIELDS = new Set([
+  'slotId',
+  'planId',
+  'startTime',
+  'endTime',
+  'customerName',
+  'customerEmail',
+  'customerPhone',
+  'lineDisplayName',
+  'gender',
+  'birthDate',
+  'birthTime',
+  'birthPlace',
+  'isBirthTimeAccurate',
+  'question',
+  'note',
+])
 
 type BookingCreateDependencies = {
   getBearerUserId: typeof getUserIdFromRequest
   readLineSession: typeof readLineSessionCookieValue
   getPlan: typeof getBookingPlan
-  getServiceClient: typeof getSupabaseAdmin
-  claimDbSlot: (
-    supabase: ReturnType<typeof getSupabaseAdmin>,
-    slotId: string,
-    now: string,
-  ) => Promise<BookingSlotClaim | null>
-  claimDefaultSlot: (
-    supabase: ReturnType<typeof getSupabaseAdmin>,
-    slotId: string,
-    now: Date,
-  ) => Promise<BookingSlotClaim | null>
   createBooking: typeof createSupabaseBooking
-  createPaymentId: () => string
-  now: () => Date
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -130,6 +128,12 @@ export async function handleBookingCreateRequest(
         { status: 400 },
       )
     }
+    if (Object.keys(body).some((key) => !BOOKING_CREATE_FIELDS.has(key))) {
+      return NextResponse.json(
+        { ok: false, message: '預約資料包含不允許的欄位。' },
+        { status: 400 },
+      )
+    }
 
     const planId = typeof body.planId === 'string' ? body.planId : ''
     const plan = deps.getPlan(planId)
@@ -137,23 +141,17 @@ export async function handleBookingCreateRequest(
     if (!plan) {
       return NextResponse.json({ ok: false, message: '方案不存在' }, { status: 400 })
     }
-    if (!body.slotId || typeof body.slotId !== 'string') {
+    if (
+      typeof body.slotId !== 'string' ||
+      !DATABASE_SLOT_ID_PATTERN.test(body.slotId)
+    ) {
       return NextResponse.json({ ok: false, message: SLOT_UNAVAILABLE_MESSAGE }, { status: 409 })
     }
     if (!body.customerName || !body.customerEmail || !body.birthDate || !body.birthTime || !body.question) {
       return NextResponse.json({ ok: false, message: '預約資料不完整' }, { status: 400 })
     }
 
-    const supabase = deps.getServiceClient()
-    const now = deps.now()
     const slotId = body.slotId as string
-    const claimedSlot = slotId.startsWith('default:')
-      ? await deps.claimDefaultSlot(supabase, slotId, now)
-      : await deps.claimDbSlot(supabase, slotId, now.toISOString())
-
-    if (!claimedSlot) {
-      return NextResponse.json({ ok: false, message: SLOT_UNAVAILABLE_MESSAGE }, { status: 409 })
-    }
 
     let booking
     try {
@@ -161,8 +159,6 @@ export async function handleBookingCreateRequest(
         userId,
         slotId,
         planId,
-        startTime: claimedSlot.startAt,
-        endTime: claimedSlot.endAt,
         customerName: body.customerName as string,
         customerEmail: body.customerEmail as string,
         customerPhone:
@@ -178,37 +174,44 @@ export async function handleBookingCreateRequest(
         note: typeof body.note === 'string' ? body.note : undefined,
       }
       booking = await deps.createBooking(bookingInput)
+      if (!booking) {
+        return NextResponse.json(
+          { ok: false, message: '預約服務暫時無法使用。' },
+          { status: 503 },
+        )
+      }
     } catch (error) {
-      await claimedSlot.restore()
+      const errorCode =
+        error &&
+        typeof error === 'object' &&
+        'code' in error &&
+        typeof error.code === 'string'
+          ? error.code
+          : null
+      if (errorCode === 'booking_slot_unavailable') {
+        return NextResponse.json(
+          { ok: false, message: SLOT_UNAVAILABLE_MESSAGE },
+          { status: 409 },
+        )
+      }
+      if (errorCode === 'booking_plan_unavailable') {
+        return NextResponse.json(
+          { ok: false, message: '此方案目前無法預約。' },
+          { status: 409 },
+        )
+      }
       throw error
     }
 
-    const bookingId = booking?.id ?? `mock-booking-${Date.now()}`
-    const paymentId = deps.createPaymentId()
-
+    const bookingId = booking.id
     return NextResponse.json({
       ok: true,
       bookingId,
-      paymentId,
-      planName: plan.name,
-      amount: plan.price,
-      persisted: Boolean(booking),
-      mockCheckoutUrl: `/booking/checkout?bookingId=${bookingId}`
+      planName: booking.planName,
+      amount: booking.amount,
     })
-  } catch (error) {
-    const err = error as {
-      message?: string
-      code?: string
-      details?: string
-      hint?: string
-      stack?: string
-    }
-    console.error('建立預約失敗', {
-      message: err?.message,
-      code: err?.code,
-      details: err?.details,
-      hint: err?.hint
-    })
+  } catch {
+    console.error('建立預約失敗')
 
     return NextResponse.json(
       {

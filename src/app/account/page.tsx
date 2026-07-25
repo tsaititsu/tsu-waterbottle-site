@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { LoginModal } from '@/components/LoginModal'
 import { PageHero } from '@/components/PageHero'
 import { accountStats } from '@/lib/mockData'
@@ -13,45 +13,80 @@ export default function AccountPage() {
   const [user, setUser] = useState<UserProfile | null>(null)
   const [loginOpen, setLoginOpen] = useState(false)
   const [purchasedCourseIds, setPurchasedCourseIds] = useState<CourseId[]>([])
+  const [courseLoadStatus, setCourseLoadStatus] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle')
+  const requestGenerationRef = useRef(0)
   const hideConsultationServices = shouldHideConsultationServices()
   const hideCoursesServices = shouldHideCoursesServices()
 
   useEffect(() => {
-    async function loadCoursePurchases(nextUser: UserProfile | null) {
+    async function loadCoursePurchases(nextUser: UserProfile | null, requestGeneration: number) {
+      const isCurrentRequest = () =>
+        requestGenerationRef.current === requestGeneration &&
+        getMockUser()?.id === nextUser?.id
+
       if (!nextUser || hideCoursesServices) {
-        setPurchasedCourseIds([])
+        if (isCurrentRequest()) {
+          setPurchasedCourseIds([])
+          setCourseLoadStatus('idle')
+        }
         return
       }
 
-      const accessToken = await getAuthAccessToken()
-      if (!accessToken) {
-        setPurchasedCourseIds([])
-        return
+      try {
+        const accessToken = await getAuthAccessToken()
+        if (!isCurrentRequest()) return
+        if (!accessToken) {
+          setPurchasedCourseIds([])
+          setCourseLoadStatus('error')
+          return
+        }
+
+        const response = await fetch('/api/account/course-purchases', {
+          headers: { authorization: `Bearer ${accessToken}` },
+        })
+        if (!isCurrentRequest()) return
+
+        if (!response.ok) {
+          setPurchasedCourseIds([])
+          setCourseLoadStatus('error')
+          return
+        }
+
+        const data = (await response.json().catch(() => null)) as { courseIds?: CourseId[] } | null
+        if (!isCurrentRequest()) return
+        if (!data || !Array.isArray(data.courseIds)) {
+          setPurchasedCourseIds([])
+          setCourseLoadStatus('error')
+          return
+        }
+        setPurchasedCourseIds(data.courseIds)
+        setCourseLoadStatus('loaded')
+      } catch {
+        if (isCurrentRequest()) {
+          setPurchasedCourseIds([])
+          setCourseLoadStatus('error')
+        }
       }
-
-      const response = await fetch('/api/account/course-purchases', {
-        headers: { authorization: `Bearer ${accessToken}` },
-      })
-
-      if (!response.ok) {
-        setPurchasedCourseIds([])
-        return
-      }
-
-      const data = (await response.json()) as { courseIds?: CourseId[] }
-      setPurchasedCourseIds(data.courseIds ?? [])
     }
 
     const sync = () => {
       const nextUser = getMockUser()
+      requestGenerationRef.current += 1
+      const requestGeneration = requestGenerationRef.current
       setUser(nextUser)
       setLoginOpen(!nextUser)
-      void loadCoursePurchases(nextUser)
+      setPurchasedCourseIds([])
+      setCourseLoadStatus(nextUser && !hideCoursesServices ? 'loading' : 'idle')
+      void loadCoursePurchases(nextUser, requestGeneration)
     }
 
     sync()
-    return subscribeAuthChange(sync)
-  }, [])
+    const unsubscribe = subscribeAuthChange(sync)
+    return () => {
+      requestGenerationRef.current += 1
+      unsubscribe()
+    }
+  }, [hideCoursesServices])
 
   return (
     <>
@@ -84,7 +119,13 @@ export default function AccountPage() {
                 <article key={stat.title} className="rounded-2xl border border-borderSoft bg-white p-5 shadow-soft">
                   <h3 className="font-serifTC text-xl font-semibold text-deepPurple">{stat.title}</h3>
                   <p className="mt-3 text-textMuted">
-                    {stat.title === '我的課程' ? `已購買 ${purchasedCourseIds.length} / 3 門課` : stat.value}
+                    {stat.title === '我的課程'
+                      ? courseLoadStatus === 'loading'
+                        ? '正在讀取課程...'
+                        : courseLoadStatus === 'error'
+                          ? '暫時無法讀取課程'
+                          : `已購買 ${purchasedCourseIds.length} / 3 門課`
+                      : stat.value}
                   </p>
                   {stat.title === '我的課程' ? (
                     <Link className="focus-ring mt-4 inline-flex rounded-lg border border-deepPurple bg-white px-4 py-2 text-sm font-semibold text-deepPurple" href="/account/courses">
