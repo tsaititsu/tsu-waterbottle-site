@@ -66,29 +66,40 @@ const SAFE_ERROR_CODES = new Set([
   'UNSUPPORTED_PSQL_VERSION',
 ])
 
-export const HISTORICAL_FINGERPRINTS = Object.freeze({
-  bank_transfer: Object.freeze({
-    rows: 3,
-    pending_review: 3,
-    pk_digest:
-      'e6a67042ff04db27bea56f76d9d983e6762ba4122e67fe54c30d740e458f5fec',
-    content_digest:
-      'e87a8425def35ac99bb054b4b2e0fee3efe985d5b3376ab6011d30e730c3bc40',
+const BANK_TRANSFER_MATCH_GROUPS = Object.freeze({
+  identity_and_amount: true,
+  payer_contact: true,
+  transfer_details: true,
+  review_and_confirmation: true,
+  full_canonical_row: true,
+})
+
+const BANK_TRANSFER_ORDINAL_MATCH = Object.freeze({
+  identity_group_match: true,
+  contact_group_match: true,
+  transfer_group_match: true,
+  review_group_match: true,
+  full_row_match: true,
+})
+
+export const BANK_TRANSFER_HISTORICAL_CONTRACT = Object.freeze({
+  schema_signature_match: true,
+  row_count_match: true,
+  pending_review_count_match: true,
+  pk_digest_match: true,
+  group_matches: BANK_TRANSFER_MATCH_GROUPS,
+  ordinal_matches: Object.freeze({
+    ordinal_1: BANK_TRANSFER_ORDINAL_MATCH,
+    ordinal_2: BANK_TRANSFER_ORDINAL_MATCH,
+    ordinal_3: BANK_TRANSFER_ORDINAL_MATCH,
   }),
-  payments: Object.freeze({
-    rows: 18,
-    pk_digest:
-      'bc3bd47469b3d4c199be57d54c18195f9869d9b1c94527fee445d8cf83f2fa79',
-    content_digest:
-      'da6b440446bde8d5816f06a610baba34140a21dbd9d58e9c8ffbc0867395d1ab',
-  }),
-  product_orders: Object.freeze({
-    rows: 5,
-    pk_digest:
-      '5b2aa41738c901750a2bb752ce23f7e18743631e941476e84a86336e874b55cd',
-    content_digest:
-      'eb133b3808572d8ae76829ba87edc33ae04725609cd1d82e3e1a2db0d502f853',
-  }),
+})
+
+const ACTIVE_TABLE_MANIFEST_CONTRACT = Object.freeze({
+  manifest_complete: true,
+  no_missing_rows: true,
+  no_unexpected_rows: true,
+  business_fields_unchanged: true,
 })
 
 export const FENCE_CONTRACT = Object.freeze({
@@ -422,18 +433,94 @@ export function assertDeployOrchestrationSql(sql) {
     '\\ir line_pay_remediation_preflight.sql',
     '\\ir ../migrations/20260719033404_line_pay_remediation_contracts.sql',
     '\\ir line_pay_remediation_postflight.sql',
-    'lock table public.product_orders, public.payments in access exclusive mode;',
-    'set local lock_timeout = \'15s\';',
-    'set local statement_timeout = \'120s\';',
-    'set local idle_in_transaction_session_timeout = \'30s\';',
     '\\set line_pay_locked_guard 1',
     '\\if :line_pay_locked_guard_ready',
     'baseline_payments_manifest',
     'baseline_product_orders_manifest',
+    'baseline_payments_row_count',
+    'baseline_product_orders_row_count',
     '\\set line_pay_baseline_manifest 1',
+    "'provider', row_value.provider",
+    "'payment_status', row_value.payment_status",
   ]
   for (const token of requiredOnce) {
     if (sql.split(token).length !== 2) fail('FIXED_FILE_INVALID')
+  }
+  for (const token of [
+    'begin;',
+    'lock table public.product_orders, public.payments in access exclusive mode;',
+    'set local lock_timeout = \'15s\';',
+    'set local statement_timeout = \'120s\';',
+    'set local idle_in_transaction_session_timeout = \'30s\';',
+  ]) {
+    if (sql.split(token).length !== 3) fail('FIXED_FILE_INVALID')
+  }
+  if (sql.split('commit;').length !== 2) fail('FIXED_FILE_INVALID')
+  const migrationIndex = sql.indexOf(
+    '\\ir ../migrations/20260719033404_line_pay_remediation_contracts.sql',
+  )
+  const secondTransactionIndex = sql.indexOf('begin;', migrationIndex)
+  const secondLockIndex = sql.indexOf(
+    'lock table public.product_orders, public.payments in access exclusive mode;',
+    secondTransactionIndex,
+  )
+  const postflightIndex = sql.indexOf(
+    '\\ir line_pay_remediation_postflight.sql',
+  )
+  const postflightCommitIndex = sql.indexOf('commit;', postflightIndex)
+  if (
+    migrationIndex < 0 ||
+    secondTransactionIndex <= migrationIndex ||
+    secondLockIndex <= secondTransactionIndex ||
+    postflightIndex <= secondLockIndex ||
+    postflightCommitIndex <= postflightIndex
+  ) {
+    fail('FIXED_FILE_INVALID')
+  }
+  const requiredManifestFields = [
+    "'id', row_value.id",
+    "'user_id', row_value.user_id",
+    "'booking_id', row_value.booking_id",
+    "'provider', row_value.provider",
+    "'provider_payment_id', row_value.provider_payment_id",
+    "'item_type', row_value.item_type",
+    "'item_name', row_value.item_name",
+    "'amount_twd', row_value.amount_twd",
+    "'currency', row_value.currency",
+    "'status', row_value.status",
+    "'paid_at', row_value.paid_at",
+    "'refunded_at', row_value.refunded_at",
+    "'raw_payload', row_value.raw_payload",
+    "'created_at', row_value.created_at",
+    "'item_id', row_value.item_id",
+    "'merchant_order_no', row_value.merchant_order_no",
+    "'provider_trade_no', row_value.provider_trade_no",
+    "'notify_received_at', row_value.notify_received_at",
+    "'failure_reason', row_value.failure_reason",
+    "'order_no', row_value.order_no",
+    "'customer_name', row_value.customer_name",
+    "'customer_email', row_value.customer_email",
+    "'customer_phone', row_value.customer_phone",
+    "'total_amount_twd', row_value.total_amount_twd",
+    "'payment_method', row_value.payment_method",
+    "'payment_status', row_value.payment_status",
+    "'order_status', row_value.order_status",
+    "'shipping_status', row_value.shipping_status",
+    "'payment_id', row_value.payment_id",
+    "'bank_transfer_submission_id',",
+    'row_value.bank_transfer_submission_id',
+    "'note', row_value.note",
+    "'updated_at', row_value.updated_at",
+  ]
+  if (requiredManifestFields.some((token) => !sql.includes(token))) {
+    fail('FIXED_FILE_INVALID')
+  }
+  for (const token of [
+    "'id', row_value.id",
+    "'user_id', row_value.user_id",
+    "'created_at', row_value.created_at",
+  ]) {
+    if (sql.split(token).length !== 3) fail('FIXED_FILE_INVALID')
   }
   const includeLines = sql
     .split(/\r?\n/u)
@@ -642,7 +729,6 @@ export function buildExpectedAuditFixture(phase) {
   const common = {
     database: databaseContract(),
     fence: clone(FENCE_CONTRACT),
-    historical: clone(HISTORICAL_FINGERPRINTS),
     migration_history: {
       line_pay_version_present: false,
     },
@@ -651,6 +737,9 @@ export function buildExpectedAuditFixture(phase) {
     return {
       status: 'READY_EXPECTED',
       ...common,
+      historical: {
+        bank_transfer: clone(BANK_TRANSFER_HISTORICAL_CONTRACT),
+      },
       line_pay: preflightLinePayContract(),
       locks: lockContract(),
     }
@@ -658,6 +747,11 @@ export function buildExpectedAuditFixture(phase) {
   return {
     status: 'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED',
     ...common,
+    historical: {
+      bank_transfer: clone(BANK_TRANSFER_HISTORICAL_CONTRACT),
+      payments: clone(ACTIVE_TABLE_MANIFEST_CONTRACT),
+      product_orders: clone(ACTIVE_TABLE_MANIFEST_CONTRACT),
+    },
     line_pay: postflightLinePayContract(),
     runtime_enabled: false,
   }
