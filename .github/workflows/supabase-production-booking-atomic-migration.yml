@@ -1,0 +1,168 @@
+name: Supabase Production Booking Atomic Migration
+run-name: Booking atomic exact-file migration at ${{ github.sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      authorized_workflow_commit:
+        description: Exact main commit SHA authorized for this execution
+        required: true
+        type: string
+      current_pr_head:
+        description: Exact current PR 89 head containing the approved source commit
+        required: true
+        type: string
+      project_ref:
+        description: Exact authorized Supabase project ref
+        required: true
+        type: string
+      migration_sha256:
+        description: Exact authorized Booking Migration SHA-256
+        required: true
+        type: string
+      confirmation:
+        description: Exact deployment confirmation phrase
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-production-booking-atomic-migration
+  cancel-in-progress: false
+
+jobs:
+  source-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the exact workflow commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Check out the fixed approved Booking source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: cdc2a4fa49300a62782a7171ac9ab77a95a9a602
+          path: approved-source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up fixed Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24.16.0"
+
+      - name: Validate exact Node.js runtime
+        run: node scripts/supabase/validate-booking-atomic-production-deployment.mjs node
+
+      - name: Validate the locked PR head is still open
+        env:
+          CURRENT_PR_HEAD_INPUT: ${{ inputs.current_pr_head }}
+        run: node scripts/supabase/validate-booking-atomic-production-deployment.mjs pr
+
+      - name: Validate fixed source identity
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_SHA: ${{ github.sha }}
+          AUTHORIZED_WORKFLOW_COMMIT: ${{ inputs.authorized_workflow_commit }}
+          CURRENT_PR_HEAD_INPUT: ${{ inputs.current_pr_head }}
+          PROJECT_REF_INPUT: ${{ inputs.project_ref }}
+          MIGRATION_SHA256_INPUT: ${{ inputs.migration_sha256 }}
+          DEPLOY_CONFIRMATION: ${{ inputs.confirmation }}
+          APPROVED_SOURCE_ROOT: ${{ github.workspace }}/approved-source
+        run: node scripts/supabase/validate-booking-atomic-production-deployment.mjs source
+
+      - name: Run fixed runner and workflow contracts
+        env:
+          APPROVED_SOURCE_ROOT: ${{ github.workspace }}/approved-source
+        run: node --test supabase/booking_atomic_production_pipeline.test.mjs
+
+      - name: Prepare fixed PostgreSQL 17 image for offline regression
+        run: node scripts/supabase/run-booking-atomic-production-exact-file.mjs image
+
+      - name: Run offline PostgreSQL 17 pipeline regression
+        env:
+          APPROVED_SOURCE_ROOT: ${{ github.workspace }}/approved-source
+        run: node supabase/tests/run_booking_atomic_production_pipeline_postgres17.mjs
+
+  deploy-production:
+    needs: source-validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: supabase-production
+    steps:
+      - name: Check out the exact workflow commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Check out the fixed approved Booking source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: cdc2a4fa49300a62782a7171ac9ab77a95a9a602
+          path: approved-source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up fixed Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24.16.0"
+
+      - name: Validate exact Node.js runtime
+        run: node scripts/supabase/validate-booking-atomic-production-deployment.mjs node
+
+      - name: Revalidate the locked PR head is still open
+        env:
+          CURRENT_PR_HEAD_INPUT: ${{ inputs.current_pr_head }}
+        run: node scripts/supabase/validate-booking-atomic-production-deployment.mjs pr
+
+      - name: Revalidate fixed source identity
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_SHA: ${{ github.sha }}
+          AUTHORIZED_WORKFLOW_COMMIT: ${{ inputs.authorized_workflow_commit }}
+          CURRENT_PR_HEAD_INPUT: ${{ inputs.current_pr_head }}
+          PROJECT_REF_INPUT: ${{ inputs.project_ref }}
+          MIGRATION_SHA256_INPUT: ${{ inputs.migration_sha256 }}
+          DEPLOY_CONFIRMATION: ${{ inputs.confirmation }}
+          APPROVED_SOURCE_ROOT: ${{ github.workspace }}/approved-source
+        run: node scripts/supabase/validate-booking-atomic-production-deployment.mjs source
+
+      - name: Validate protected channel gate
+        env:
+          SUPABASE_PRODUCTION_CHANNEL_READY: ${{ vars.SUPABASE_PRODUCTION_CHANNEL_READY }}
+          SUPABASE_PRODUCTION_DB_URL: ${{ secrets.SUPABASE_PRODUCTION_DB_URL }}
+          SUPABASE_PROJECT_ID: ndbqoznvobmpkgxkiezz
+        run: node scripts/supabase/validate-booking-atomic-production-deployment.mjs channel
+
+      - name: Prepare the fixed PostgreSQL 17 client image
+        run: node scripts/supabase/run-booking-atomic-production-exact-file.mjs image
+
+      - name: Run read-only preflight
+        env:
+          APPROVED_SOURCE_ROOT: ${{ github.workspace }}/approved-source
+          SUPABASE_PRODUCTION_CHANNEL_READY: ${{ vars.SUPABASE_PRODUCTION_CHANNEL_READY }}
+          SUPABASE_PRODUCTION_DB_URL: ${{ secrets.SUPABASE_PRODUCTION_DB_URL }}
+          SUPABASE_PROJECT_ID: ndbqoznvobmpkgxkiezz
+        run: node scripts/supabase/run-booking-atomic-production-exact-file.mjs preflight
+
+      - name: Run locked exact Migration and rollback-only atomic postflight
+        env:
+          APPROVED_SOURCE_ROOT: ${{ github.workspace }}/approved-source
+          SUPABASE_PRODUCTION_CHANNEL_READY: ${{ vars.SUPABASE_PRODUCTION_CHANNEL_READY }}
+          SUPABASE_PRODUCTION_DB_URL: ${{ secrets.SUPABASE_PRODUCTION_DB_URL }}
+          SUPABASE_PROJECT_ID: ndbqoznvobmpkgxkiezz
+        run: node scripts/supabase/run-booking-atomic-production-exact-file.mjs deploy

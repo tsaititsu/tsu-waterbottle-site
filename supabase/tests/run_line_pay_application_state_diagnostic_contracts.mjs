@@ -1,0 +1,551 @@
+import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+import {
+  assertApplicationStateDiagnosticSql,
+  assertRunnerSource,
+  assertSharedRunnerSource,
+  parseAndValidateDiagnosticOutput,
+} from '../../scripts/supabase/validate-line-pay-application-state-diagnostic.mjs'
+import { LINE_PAY_POSTGRES_IMAGE } from './line_pay_postgres_image.mjs'
+
+const scriptDirectory = dirname(fileURLToPath(import.meta.url))
+const root = resolve(scriptDirectory, '../..')
+const taskLabel = 'line-pay-application-state-diagnostic'
+const suffix = randomBytes(6).toString('hex')
+const containerName = `${taskLabel}-${suffix}`
+const networkName = `${containerName}-network`
+const volumeName = `${containerName}-data`
+const password = randomBytes(32).toString('base64url')
+const diagnosticPath = join(
+  root,
+  'supabase/deployment/line_pay_application_state_diagnostic.sql',
+)
+const migrationPath = join(
+  root,
+  'supabase/migrations/20260719033404_line_pay_remediation_contracts.sql',
+)
+const fencePath = join(
+  root,
+  'supabase/migrations/20260722065311_retire_bank_transfer_submissions_writes.sql',
+)
+const runnerPath = join(
+  root,
+  'scripts/supabase/run-line-pay-application-state-diagnostic.mjs',
+)
+const sharedRunnerPath = join(
+  root,
+  'scripts/supabase/run-line-pay-production-diagnostic.mjs',
+)
+const baselineFiles = [
+  'supabase/schema.sql',
+  'supabase/bank_transfer_submissions_patch.sql',
+  'supabase/newebpay_payments_patch.sql',
+  'supabase/payments_service_role_grants.sql',
+  'supabase/product_orders_schema_draft.sql',
+  'supabase/migrations/20260707_line_pay_provider_schema_draft.sql',
+  'supabase/tests/line_pay_upgrade_fixture.sql',
+]
+const fixedReadOnlyOptions =
+  '-c default_transaction_read_only=on ' +
+  '-c statement_timeout=120000 ' +
+  '-c lock_timeout=15000 ' +
+  '-c idle_in_transaction_session_timeout=30000'
+const diagnosticSql = readFileSync(diagnosticPath, 'utf8')
+
+let scenariosPassed = 0
+let mutationsCaught = 0
+let cleanupPassed = false
+
+function runDocker(args, options = {}) {
+  const result = spawnSync('docker', args, {
+    cwd: root,
+    encoding: 'utf8',
+    ...options,
+  })
+  if (result.error?.code === 'ENOENT') {
+    throw new Error('LOCAL_DB_RUNTIME_UNAVAILABLE')
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      `LOCAL_DB_COMMAND_FAILED:${args[0]}:${result.status}\n${
+        result.stderr || result.stdout
+      }`,
+    )
+  }
+  return result.stdout.trim()
+}
+
+function psql(
+  sql,
+  label,
+  { readOnly = false, database = 'postgres' } = {},
+) {
+  const result = spawnSync(
+    'docker',
+    [
+      'exec',
+      '-i',
+      ...(readOnly
+        ? ['--env', `PGOPTIONS=${fixedReadOnlyOptions}`]
+        : []),
+      containerName,
+      'psql',
+      '-X',
+      '--set=ON_ERROR_STOP=1',
+      '--quiet',
+      '--no-align',
+      '--tuples-only',
+      '-U',
+      'postgres',
+      '-d',
+      database,
+    ],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      input: sql,
+    },
+  )
+  if (result.status !== 0) {
+    throw new Error(`${label}:FAILED\n${result.stderr || result.stdout}`)
+  }
+  return result.stdout.trim()
+}
+
+function psqlFile(relativePath) {
+  psql(
+    readFileSync(join(root, relativePath), 'utf8'),
+    relativePath,
+  )
+}
+
+function waitForPostgres() {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const result = spawnSync(
+      'docker',
+      [
+        'exec',
+        containerName,
+        'pg_isready',
+        '-U',
+        'postgres',
+        '-d',
+        'postgres',
+      ],
+      { cwd: root, encoding: 'utf8' },
+    )
+    if (result.status === 0) return
+    spawnSync('sleep', ['1'])
+  }
+  throw new Error('POSTGRES_START_TIMEOUT')
+}
+
+function prepareBaseline() {
+  psqlFile('supabase/tests/line_pay_local_postgres_bootstrap.sql')
+  for (const file of baselineFiles) psqlFile(file)
+  psql(
+    `
+      create schema supabase_migrations;
+      create table supabase_migrations.schema_migrations (
+        version text primary key,
+        statements text[],
+        name text
+      );
+    `,
+    'migration history baseline',
+  )
+  psql(readFileSync(fencePath, 'utf8'), 'bank transfer fence')
+}
+
+function createDatabaseTemplate(name) {
+  psql(
+    `create database ${name} with template postgres owner postgres;`,
+    `create ${name}`,
+    { database: 'template1' },
+  )
+}
+
+function restoreDatabaseFromTemplate(name) {
+  psql(
+    `
+      drop database postgres with (force);
+      create database postgres with template ${name} owner postgres;
+    `,
+    `restore postgres from ${name}`,
+    { database: 'template1' },
+  )
+}
+
+function runApplicationStateScenario(
+  name,
+  expectedState,
+  fixtureSql = '',
+  restoreTemplate = '',
+  cleanupSql = '',
+) {
+  try {
+    if (fixtureSql) psql(fixtureSql, `${name} fixture`)
+    const result = parseAndValidateDiagnosticOutput(
+      `${psql(diagnosticSql, name, { readOnly: true })}\n`,
+    )
+    assert.equal(
+      result.application_state,
+      expectedState,
+      `${name}:${JSON.stringify(result.inventory)}`,
+    )
+    scenariosPassed += 1
+    return result
+  } finally {
+    if (cleanupSql) psql(cleanupSql, `${name} fixture cleanup`)
+    if (restoreTemplate) restoreDatabaseFromTemplate(restoreTemplate)
+  }
+}
+
+function catchMutation(name, callback) {
+  assert.throws(callback, undefined, name)
+  mutationsCaught += 1
+}
+
+function runStaticMutations() {
+  const runnerSource = readFileSync(runnerPath, 'utf8')
+  const sharedRunnerSource = readFileSync(sharedRunnerPath, 'utf8')
+  const mutations = [
+    [
+      'remove read only',
+      () =>
+        assertApplicationStateDiagnosticSql(
+          diagnosticSql.replace(
+            'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY;',
+            'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;',
+          ),
+        ),
+    ],
+    [
+      'remove rollback',
+      () =>
+        assertApplicationStateDiagnosticSql(
+          diagnosticSql.replace('\nROLLBACK;\n', '\nCOMMIT;\n'),
+        ),
+    ],
+    [
+      'add DML',
+      () =>
+        assertApplicationStateDiagnosticSql(
+          diagnosticSql.replace(
+            '\nROLLBACK;\n',
+            '\nupdate public.payments set status = status;\nROLLBACK;\n',
+          ),
+        ),
+    ],
+    [
+      'omit relation',
+      () =>
+        assertApplicationStateDiagnosticSql(
+          diagnosticSql.replace(
+            "    ('public', 'line_pay_callback_events'),\n",
+            '',
+          ),
+        ),
+    ],
+    [
+      'omit column',
+      () =>
+        assertApplicationStateDiagnosticSql(
+          diagnosticSql.replace(
+            "    ('payments', 'line_pay_transaction_id'),\n",
+            '',
+          ),
+        ),
+    ],
+    [
+      'count only',
+      () =>
+        assertApplicationStateDiagnosticSql(
+          diagnosticSql.replace(
+            'and actual.digest = expected.digest',
+            'and true',
+          ),
+        ),
+    ],
+    [
+      'ignore history only',
+      () =>
+        assertApplicationStateDiagnosticSql(
+          diagnosticSql.replace(
+            "then 'HISTORY_ONLY'",
+            "then 'INCONSISTENT'",
+          ),
+        ),
+    ],
+    [
+      'partial as unapplied',
+      () =>
+        assertApplicationStateDiagnosticSql(
+          diagnosticSql.replace("then 'PARTIAL'", "then 'UNAPPLIED'"),
+        ),
+    ],
+    [
+      'expose sensitive definition',
+      () =>
+        assertApplicationStateDiagnosticSql(
+          diagnosticSql.replace(
+            'pg_catalog.pg_get_expr(policy.polqual, policy.polrelid, false)',
+            'pg_catalog.pg_get_functiondef(policy.polrelid)',
+          ),
+        ),
+    ],
+    [
+      'emit raw stderr',
+      () =>
+        assertRunnerSource(
+          `${runnerSource}\nconsole.error(raw_stderr)\n`,
+        ),
+    ],
+    [
+      'second database session',
+      () =>
+        assertSharedRunnerSource(
+          sharedRunnerSource.replace(
+            'databaseSessionExecutions += 1',
+            'databaseSessionExecutions += 1\ndatabaseSessionExecutions += 1',
+          ),
+        ),
+    ],
+    [
+      'add retry fallback',
+      () =>
+        assertRunnerSource(`${runnerSource}\nconst retry = true\n`),
+    ],
+  ]
+  for (const [name, mutation] of mutations) {
+    catchMutation(name, mutation)
+  }
+}
+
+function cleanup() {
+  spawnSync('docker', ['rm', '--force', containerName], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+  spawnSync('docker', ['volume', 'rm', volumeName], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+  spawnSync('docker', ['network', 'rm', networkName], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+  const residualContainers = runDocker([
+    'ps',
+    '-aq',
+    '--filter',
+    `label=task=${taskLabel}`,
+  ])
+  const residualVolumes = runDocker([
+    'volume',
+    'ls',
+    '-q',
+    '--filter',
+    `label=task=${taskLabel}`,
+  ])
+  const residualNetworks = runDocker([
+    'network',
+    'ls',
+    '-q',
+    '--filter',
+    `label=task=${taskLabel}`,
+  ])
+  cleanupPassed =
+    !residualContainers && !residualVolumes && !residualNetworks
+  if (!cleanupPassed) throw new Error('DOCKER_CLEANUP_FAILED')
+}
+
+try {
+  runDocker([
+    'network',
+    'create',
+    '--label',
+    `task=${taskLabel}`,
+    networkName,
+  ])
+  runDocker([
+    'volume',
+    'create',
+    '--label',
+    `task=${taskLabel}`,
+    volumeName,
+  ])
+  runDocker([
+    'run',
+    '--detach',
+    '--name',
+    containerName,
+    '--network',
+    networkName,
+    '--label',
+    `task=${taskLabel}`,
+    '--mount',
+    `type=volume,source=${volumeName},target=/var/lib/postgresql/data`,
+    '--env',
+    `POSTGRES_PASSWORD=${password}`,
+    '--env',
+    'POSTGRES_USER=postgres',
+    '--env',
+    'POSTGRES_DB=postgres',
+    LINE_PAY_POSTGRES_IMAGE,
+  ])
+  waitForPostgres()
+  assert.match(
+    psql('show server_version_num;', 'PostgreSQL version'),
+    /^17[0-9]{4}$/u,
+  )
+  prepareBaseline()
+  createDatabaseTemplate('line_pay_unapplied_template')
+
+  runApplicationStateScenario('unapplied', 'UNAPPLIED')
+  runApplicationStateScenario(
+    'one relation',
+    'PARTIAL',
+    'create table public.app_environment_attestation (id integer);',
+    'line_pay_unapplied_template',
+  )
+  runApplicationStateScenario(
+    'partial columns',
+    'PARTIAL',
+    'alter table public.payments add column environment text;',
+    'line_pay_unapplied_template',
+  )
+  runApplicationStateScenario(
+    'roles only',
+    'PARTIAL',
+    `
+      create role line_pay_payment_executor noinherit nologin;
+      create role line_pay_payment_function_owner noinherit nologin;
+    `,
+    'line_pay_unapplied_template',
+    `
+      drop role line_pay_payment_executor;
+      drop role line_pay_payment_function_owner;
+    `,
+  )
+  runApplicationStateScenario(
+    'function only',
+    'PARTIAL',
+    `
+      create function public.line_pay_sanitized_result_is_valid(jsonb)
+      returns boolean language sql immutable as 'select true';
+    `,
+    'line_pay_unapplied_template',
+  )
+  runApplicationStateScenario(
+    'history only',
+    'HISTORY_ONLY',
+    `
+      insert into supabase_migrations.schema_migrations (
+        version, statements, name
+      ) values ('20260719033404', array[]::text[], 'synthetic');
+    `,
+    'line_pay_unapplied_template',
+  )
+  runApplicationStateScenario(
+    'history with partial schema',
+    'INCONSISTENT',
+    `
+      insert into supabase_migrations.schema_migrations (
+        version, statements, name
+      ) values ('20260719033404', array[]::text[], 'synthetic');
+      create table public.app_environment_attestation (id integer);
+    `,
+    'line_pay_unapplied_template',
+  )
+
+  psql(readFileSync(migrationPath, 'utf8'), 'full LINE Pay fixture')
+  createDatabaseTemplate('line_pay_applied_template')
+  runApplicationStateScenario(
+    'full without history',
+    'FULL_WITHOUT_HISTORY',
+  )
+  runApplicationStateScenario(
+    'full with history',
+    'FULL_WITH_HISTORY',
+    `
+      insert into supabase_migrations.schema_migrations (
+        version, statements, name
+      ) values ('20260719033404', array[]::text[], 'synthetic');
+    `,
+    'line_pay_applied_template',
+  )
+  runApplicationStateScenario(
+    'ACL mismatch',
+    'PARTIAL',
+    'grant select on public.line_pay_checkout_attempts to anon;',
+    'line_pay_applied_template',
+  )
+  runApplicationStateScenario(
+    'ownership mismatch',
+    'PARTIAL',
+    'alter table public.line_pay_checkout_attempts owner to service_role;',
+    'line_pay_applied_template',
+  )
+  runApplicationStateScenario(
+    'policy mismatch',
+    'PARTIAL',
+    `
+      alter policy line_pay_payment_function_owner_payments_select
+      on public.payments using (false);
+    `,
+    'line_pay_applied_template',
+  )
+  runApplicationStateScenario(
+    'trigger mismatch',
+    'PARTIAL',
+    `
+      alter table public.line_pay_checkout_attempts
+      disable trigger line_pay_checkout_attempts_touch_updated_at;
+    `,
+    'line_pay_applied_template',
+  )
+  runApplicationStateScenario(
+    'constraint mismatch',
+    'PARTIAL',
+    `
+      alter table public.payments
+      drop constraint payments_line_pay_contract_check;
+    `,
+    'line_pay_applied_template',
+  )
+  runApplicationStateScenario(
+    'index mismatch',
+    'PARTIAL',
+    'drop index public.payments_line_pay_transaction_idx;',
+    'line_pay_applied_template',
+  )
+  runApplicationStateScenario(
+    'history with contract mismatch',
+    'INCONSISTENT',
+    `
+      insert into supabase_migrations.schema_migrations (
+        version, statements, name
+      ) values ('20260719033404', array[]::text[], 'synthetic');
+      drop index public.payments_line_pay_transaction_idx;
+    `,
+    'line_pay_applied_template',
+  )
+
+  runStaticMutations()
+  assert.equal(scenariosPassed, 16)
+  assert.equal(mutationsCaught, 12)
+} finally {
+  cleanup()
+}
+
+console.log(`Application state scenarios: ${scenariosPassed}/16 PASS`)
+console.log(`Mutations: ${mutationsCaught}/12 caught`)
+console.log('Uncaught mutations: 0')
+console.log('PostgreSQL: 17 PASS')
+console.log(`Docker cleanup: ${cleanupPassed ? 'PASS' : 'FAIL'}`)
