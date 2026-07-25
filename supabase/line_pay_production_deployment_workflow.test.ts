@@ -78,6 +78,10 @@ test('workflow actions and both Node runtimes are pinned exactly', () => {
 })
 
 test('workflow has one fixed deploy database invocation and no stale migration phase', () => {
+  assert.match(
+    workflow,
+    /name: Run attested locked guard, exact Migration, and manifest postflight/,
+  )
   assert.equal(
     (
       workflow.match(

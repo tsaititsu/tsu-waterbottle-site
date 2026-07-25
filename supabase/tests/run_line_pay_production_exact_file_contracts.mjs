@@ -16,6 +16,13 @@ const volumeName = `${containerName}-data`
 const password = randomBytes(32).toString('base64url')
 const image = LINE_PAY_POSTGRES_IMAGE
 let measuredLockedDeployMs = 0
+const deployAttestationMarkers = Object.freeze([
+  'LINE_PAY_DEPLOY_MIGRATION_STARTED',
+  'LINE_PAY_DEPLOY_MIGRATION_COMMITTED',
+  'LINE_PAY_DEPLOY_POSTFLIGHT_STARTED',
+  'LINE_PAY_DEPLOY_POSTFLIGHT_STATE_EMITTED',
+  'LINE_PAY_DEPLOY_POSTFLIGHT_COMMITTED',
+])
 const migrationPath = join(
   root,
   'supabase/migrations/20260719033404_line_pay_remediation_contracts.sql',
@@ -584,8 +591,26 @@ function useFixtureContract(source, _fixture, database) {
   return output
 }
 
-function assertAuditStatus(output, expected) {
+function stripDeployAttestationMarkers(output) {
   const rows = output.split(/\r?\n/u).filter(Boolean)
+  const markerSet = new Set(deployAttestationMarkers)
+  const observedMarkers = rows.filter((row) => markerSet.has(row))
+  if (observedMarkers.length === 0) return output
+  if (
+    observedMarkers.length !== deployAttestationMarkers.length ||
+    observedMarkers.some(
+      (marker, index) => marker !== deployAttestationMarkers[index],
+    )
+  ) {
+    throw new Error('DEPLOY_TRANSACTION_ATTESTATION_INVALID')
+  }
+  return rows.filter((row) => !markerSet.has(row)).join('\n')
+}
+
+function assertAuditStatus(output, expected) {
+  const rows = stripDeployAttestationMarkers(output)
+    .split(/\r?\n/u)
+    .filter(Boolean)
   if (rows.length !== 1) throw new Error('AUDIT_OUTPUT_ROW_COUNT_INVALID')
   const result = JSON.parse(rows[0])
   if (result.status !== expected) {
@@ -604,7 +629,9 @@ function assertAuditStatus(output, expected) {
 }
 
 function assertAuditFailureStatus(output, expected) {
-  const rows = output.split(/\r?\n/u).filter(Boolean)
+  const rows = stripDeployAttestationMarkers(output)
+    .split(/\r?\n/u)
+    .filter(Boolean)
   if (rows.length !== 1) throw new Error('AUDIT_OUTPUT_ROW_COUNT_INVALID')
   const result = JSON.parse(rows[0])
   if (result.status !== expected) {

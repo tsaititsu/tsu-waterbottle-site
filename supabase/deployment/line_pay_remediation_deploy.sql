@@ -100,12 +100,15 @@ select pg_catalog.count(*)::integer as baseline_product_orders_row_count
 from public.product_orders
 \gset
 
+\echo LINE_PAY_DEPLOY_MIGRATION_STARTED
 \ir ../migrations/20260719033404_line_pay_remediation_contracts.sql
+\echo LINE_PAY_DEPLOY_MIGRATION_COMMITTED
 
 -- The exact Migration owns its transaction and commits before returning to
 -- psql. Reacquire both table locks before postflight so any write racing that
 -- commit is either included in the manifest comparison or blocked until the
 -- postflight transaction completes.
+\echo LINE_PAY_DEPLOY_POSTFLIGHT_STARTED
 begin;
 set local lock_timeout = '15s';
 set local statement_timeout = '120s';
@@ -116,5 +119,7 @@ lock table public.product_orders, public.payments in access exclusive mode;
 \set line_pay_baseline_manifest 1
 \ir line_pay_remediation_postflight.sql
 \unset line_pay_baseline_manifest
+\echo LINE_PAY_DEPLOY_POSTFLIGHT_STATE_EMITTED
 
 commit;
+\echo LINE_PAY_DEPLOY_POSTFLIGHT_COMMITTED

@@ -363,10 +363,19 @@ test('preflight and postflight SQL are fixed read-only single-statement queries'
   }
 })
 
-test('deploy orchestration mutations cannot remove guard, manifest, timeout, or duplicate Migration', async () => {
+test('deploy orchestration mutations cannot remove transaction attestations, guard, manifest, timeout, or duplicate Migration', async () => {
   const validator = await import(pathToFileURL(validatorPath).href)
   const deploy = readFileSync(join(root, validator.DEPLOY_FILE), 'utf8')
   assert.equal(validator.assertDeployOrchestrationSql(deploy), true)
+  for (const marker of [
+    'LINE_PAY_DEPLOY_MIGRATION_STARTED',
+    'LINE_PAY_DEPLOY_MIGRATION_COMMITTED',
+    'LINE_PAY_DEPLOY_POSTFLIGHT_STARTED',
+    'LINE_PAY_DEPLOY_POSTFLIGHT_STATE_EMITTED',
+    'LINE_PAY_DEPLOY_POSTFLIGHT_COMMITTED',
+  ]) {
+    assert.equal(deploy.split(marker).length, 2, marker)
+  }
   const manifestFields = [
     "'id', row_value.id",
     "'user_id', row_value.user_id",
@@ -428,8 +437,8 @@ test('deploy orchestration mutations cannot remove guard, manifest, timeout, or 
       '\\set line_pay_baseline_manifest 1',
     ),
     deploy.replace(
-      '\\set line_pay_baseline_manifest 1\n\\ir line_pay_remediation_postflight.sql\n\\unset line_pay_baseline_manifest\n\ncommit;',
-      'commit;\n\\set line_pay_baseline_manifest 1\n\\ir line_pay_remediation_postflight.sql\n\\unset line_pay_baseline_manifest',
+      '\\set line_pay_baseline_manifest 1\n\\ir line_pay_remediation_postflight.sql\n\\unset line_pay_baseline_manifest\n\\echo LINE_PAY_DEPLOY_POSTFLIGHT_STATE_EMITTED\n\ncommit;',
+      'commit;\n\\set line_pay_baseline_manifest 1\n\\ir line_pay_remediation_postflight.sql\n\\unset line_pay_baseline_manifest\n\\echo LINE_PAY_DEPLOY_POSTFLIGHT_STATE_EMITTED',
     ),
     deploy.replace('\\if :line_pay_locked_guard_ready\n', ''),
     deploy.replace('baseline_payments_manifest', 'removed_manifest'),
@@ -438,6 +447,15 @@ test('deploy orchestration mutations cannot remove guard, manifest, timeout, or 
       "'failure_reason', null",
     ),
     deploy.replace("set local statement_timeout = '120s';\n", ''),
+    deploy.replace('\\echo LINE_PAY_DEPLOY_MIGRATION_COMMITTED\n', ''),
+    deploy.replace(
+      '\\echo LINE_PAY_DEPLOY_POSTFLIGHT_STATE_EMITTED\n',
+      '',
+    ),
+    deploy.replace(
+      '\\echo LINE_PAY_DEPLOY_POSTFLIGHT_COMMITTED\n',
+      '',
+    ),
     deploy.replace(
       '\\ir ../migrations/20260719033404_line_pay_remediation_contracts.sql',
       '\\ir ../migrations/20260719033404_line_pay_remediation_contracts.sql\n\\ir ../migrations/20260719033404_line_pay_remediation_contracts.sql',
@@ -496,6 +514,40 @@ test('signal lifecycle source contract catches fail-open mutations', async () =>
   ]) {
     assert.throws(
       () => validator.assertSignalLifecycleSource(mutated),
+      /FIXED_FILE_INVALID/,
+    )
+  }
+})
+
+test('deploy attestation source contract catches boundary and raw-output mutations', async () => {
+  const validator = await import(pathToFileURL(validatorPath).href)
+  const source = readFileSync(runnerPath, 'utf8')
+  assert.equal(validator.assertDeployAttestationSource(source), true)
+
+  for (const mutated of [
+    source.replace(
+      'const evidence = inspectDeployOutput(result.stdout)',
+      'const evidence = { migrationCommitted: true }',
+    ),
+    source.replace(
+      'migrationTransactionCommitted = evidence.migrationCommitted',
+      'migrationTransactionCommitted = true',
+    ),
+    source.replace(
+      'completedResult = validateDeployExecutionResult(result, evidence)',
+      'completedResult = DEPLOY_SUCCESS_ATTESTATION',
+    ),
+    source.replace(
+      "? 'CREDENTIAL_CLEANUP_FAILED_AFTER_COMMIT'",
+      "? 'TEMP_CREDENTIAL_CLEANUP_FAILED'",
+    ),
+    source.replace(
+      "typeof result === 'string' ? result : JSON.stringify(result)",
+      'result.stdout',
+    ),
+  ]) {
+    assert.throws(
+      () => validator.assertDeployAttestationSource(mutated),
       /FIXED_FILE_INVALID/,
     )
   }
@@ -876,7 +928,7 @@ test('credential creation cleanup failure outranks a concurrent signal', async (
   }
 })
 
-test('runner executes one fixed phase and cleans credentials on success and failure', async () => {
+test('runner attests deploy commits and classifies failures by the last proven boundary', async () => {
   const runner = await import(pathToFileURL(runnerPath).href)
   const validator = await import(pathToFileURL(validatorPath).href)
   const testTempRoot = join(writableTestRoot, '.line-pay-production-test-tmp')
@@ -890,7 +942,13 @@ test('runner executes one fixed phase and cleans credentials on success and fail
     SUPABASE_PROJECT_ID: 'ndbqoznvobmpkgxkiezz',
   }
 
-  const makeSpawn = (phaseExitCode: number) => {
+  const makeSpawn = ({
+    phaseExitCode,
+    phaseStdout,
+  }: {
+    phaseExitCode: number
+    phaseStdout: string
+  }) => {
     const calls: Array<{ args: string[]; options: Record<string, unknown> }> = []
     const fakeSpawn = (
       _binary: string,
@@ -913,11 +971,7 @@ test('runner executes one fixed phase and cleans credentials on success and fail
           child.emit('close', 0, null)
           return
         }
-        child.stdout.end(
-          `${JSON.stringify(
-            validator.buildExpectedAuditFixture('postflight'),
-          )}\n`,
-        )
+        child.stdout.end(phaseStdout)
         child.stderr.end('synthetic failure detail\n')
         child.emit('close', phaseExitCode, null)
       })
@@ -926,14 +980,56 @@ test('runner executes one fixed phase and cleans credentials on success and fail
     return { calls, fakeSpawn }
   }
 
+  const markers = runner.DEPLOY_ATTESTATION_MARKERS
+  const validPostflight = JSON.stringify(
+    validator.buildExpectedAuditFixture('postflight'),
+  )
+  const successfulOutput = [
+    markers.migrationStarted,
+    markers.migrationCommitted,
+    markers.postflightStarted,
+    validPostflight,
+    markers.postflightStateEmitted,
+    markers.postflightCommitted,
+    '',
+  ].join('\n')
+
   try {
-    const success = makeSpawn(0)
+    const success = makeSpawn({
+      phaseExitCode: 0,
+      phaseStdout: successfulOutput,
+    })
+    const successAttestation = await runner.runDatabasePhase('deploy', {
+      environment,
+      spawnImplementation: success.fakeSpawn,
+    })
+    assert.deepEqual(successAttestation, {
+      status: 'DEPLOYMENT_VALIDATED',
+      transaction_completion_attestation: {
+        migration_committed: true,
+        postflight_committed: true,
+      },
+      migration_history_attestation: {
+        version_present: false,
+        state: 'ABSENT_EXPECTED',
+      },
+      postflight_state_attestation: {
+        status: 'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED',
+        runtime_enabled: false,
+      },
+    })
+    assert.equal(Object.isFrozen(successAttestation), true)
     assert.equal(
-      await runner.runDatabasePhase('deploy', {
-        environment,
-        spawnImplementation: success.fakeSpawn,
-      }),
-      'DEPLOYMENT_VALIDATED',
+      Object.isFrozen(successAttestation.transaction_completion_attestation),
+      true,
+    )
+    assert.equal(
+      Object.isFrozen(successAttestation.migration_history_attestation),
+      true,
+    )
+    assert.equal(
+      Object.isFrozen(successAttestation.postflight_state_attestation),
+      true,
     )
     assert.equal(success.calls.length, 2)
     assert.equal(
@@ -947,18 +1043,126 @@ test('runner executes one fixed phase and cleans credentials on success and fail
       [],
     )
 
-    const failure = makeSpawn(9)
+    const migrationFailure = makeSpawn({
+      phaseExitCode: 9,
+      phaseStdout: `${markers.migrationStarted}\n`,
+    })
     await assert.rejects(
       runner.runDatabasePhase('deploy', {
         environment,
-        spawnImplementation: failure.fakeSpawn,
+        spawnImplementation: migrationFailure.fakeSpawn,
       }),
-      /DEPLOY_PSQL_FAILED/,
+      /MIGRATION_SQL_FAILED/,
     )
-    assert.equal(failure.calls.length, 2)
-    assert.deepEqual(
-      await (await import('node:fs/promises')).readdir(runnerTemp),
-      [],
+
+    const postflightFailure = makeSpawn({
+      phaseExitCode: 9,
+      phaseStdout: [
+        markers.migrationStarted,
+        markers.migrationCommitted,
+        markers.postflightStarted,
+        '',
+      ].join('\n'),
+    })
+    await assert.rejects(
+      runner.runDatabasePhase('deploy', {
+        environment,
+        spawnImplementation: postflightFailure.fakeSpawn,
+      }),
+      /POSTFLIGHT_FAILED_BEFORE_COMMIT/,
+    )
+
+    const outputValidationFailure = makeSpawn({
+      phaseExitCode: 0,
+      phaseStdout: [
+        markers.migrationStarted,
+        markers.migrationCommitted,
+        markers.postflightStarted,
+        '{}',
+        markers.postflightStateEmitted,
+        markers.postflightCommitted,
+        '',
+      ].join('\n'),
+    })
+    await assert.rejects(
+      runner.runDatabasePhase('deploy', {
+        environment,
+        spawnImplementation: outputValidationFailure.fakeSpawn,
+      }),
+      /OUTPUT_VALIDATION_FAILED_AFTER_COMMIT/,
+    )
+
+    const missingCommitAttestation = makeSpawn({
+      phaseExitCode: 0,
+      phaseStdout: [
+        markers.migrationStarted,
+        markers.migrationCommitted,
+        markers.postflightStarted,
+        validPostflight,
+        markers.postflightStateEmitted,
+        '',
+      ].join('\n'),
+    })
+    await assert.rejects(
+      runner.runDatabasePhase('deploy', {
+        environment,
+        spawnImplementation: missingCommitAttestation.fakeSpawn,
+      }),
+      /DEPLOY_COMMIT_STATE_UNKNOWN/,
+    )
+
+    const reorderedAttestation = makeSpawn({
+      phaseExitCode: 0,
+      phaseStdout: [
+        markers.migrationStarted,
+        markers.postflightStarted,
+        markers.migrationCommitted,
+        validPostflight,
+        markers.postflightStateEmitted,
+        markers.postflightCommitted,
+        '',
+      ].join('\n'),
+    })
+    await assert.rejects(
+      runner.runDatabasePhase('deploy', {
+        environment,
+        spawnImplementation: reorderedAttestation.fakeSpawn,
+      }),
+      /DEPLOY_COMMIT_STATE_UNKNOWN/,
+    )
+
+    const realFilesystem = await import('node:fs/promises')
+    const cleanupFailure = makeSpawn({
+      phaseExitCode: 0,
+      phaseStdout: successfulOutput,
+    })
+    await assert.rejects(
+      runner.runDatabasePhase('deploy', {
+        environment,
+        filesystem: {
+          ...realFilesystem,
+          unlink: async () => {
+            throw new Error('synthetic cleanup failure')
+          },
+        },
+        spawnImplementation: cleanupFailure.fakeSpawn,
+      }),
+      /CREDENTIAL_CLEANUP_FAILED_AFTER_COMMIT/,
+    )
+
+    for (const code of [
+      'MIGRATION_SQL_FAILED',
+      'POSTFLIGHT_FAILED_BEFORE_COMMIT',
+      'OUTPUT_VALIDATION_FAILED_AFTER_COMMIT',
+      'CREDENTIAL_CLEANUP_FAILED_AFTER_COMMIT',
+      'DEPLOY_COMMIT_STATE_UNKNOWN',
+    ]) {
+      assert.equal(runner.safeFailureCode(new Error(code)), code)
+    }
+
+    assert.equal(
+      (await (await import('node:fs/promises')).readdir(runnerTemp)).length,
+      1,
     )
   } finally {
     await rm(runnerTemp, { recursive: true })

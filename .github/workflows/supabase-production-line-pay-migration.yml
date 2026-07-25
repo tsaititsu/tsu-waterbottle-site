@@ -113,7 +113,7 @@ jobs:
           SUPABASE_PROJECT_ID: ndbqoznvobmpkgxkiezz
         run: node scripts/supabase/run-line-pay-production-exact-file.mjs preflight
 
-      - name: Run locked guard, exact Migration, and manifest postflight
+      - name: Run attested locked guard, exact Migration, and manifest postflight
         env:
           SUPABASE_PRODUCTION_CHANNEL_READY: ${{ vars.SUPABASE_PRODUCTION_CHANNEL_READY }}
           SUPABASE_PRODUCTION_DB_URL: ${{ secrets.SUPABASE_PRODUCTION_DB_URL }}

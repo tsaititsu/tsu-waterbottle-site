@@ -442,6 +442,11 @@ export function assertDeployOrchestrationSql(sql) {
     '\\set line_pay_baseline_manifest 1',
     "'provider', row_value.provider",
     "'payment_status', row_value.payment_status",
+    '\\echo LINE_PAY_DEPLOY_MIGRATION_STARTED',
+    '\\echo LINE_PAY_DEPLOY_MIGRATION_COMMITTED',
+    '\\echo LINE_PAY_DEPLOY_POSTFLIGHT_STARTED',
+    '\\echo LINE_PAY_DEPLOY_POSTFLIGHT_STATE_EMITTED',
+    '\\echo LINE_PAY_DEPLOY_POSTFLIGHT_COMMITTED',
   ]
   for (const token of requiredOnce) {
     if (sql.split(token).length !== 2) fail('FIXED_FILE_INVALID')
@@ -459,6 +464,15 @@ export function assertDeployOrchestrationSql(sql) {
   const migrationIndex = sql.indexOf(
     '\\ir ../migrations/20260719033404_line_pay_remediation_contracts.sql',
   )
+  const migrationStartedIndex = sql.indexOf(
+    '\\echo LINE_PAY_DEPLOY_MIGRATION_STARTED',
+  )
+  const migrationCommittedIndex = sql.indexOf(
+    '\\echo LINE_PAY_DEPLOY_MIGRATION_COMMITTED',
+  )
+  const postflightStartedIndex = sql.indexOf(
+    '\\echo LINE_PAY_DEPLOY_POSTFLIGHT_STARTED',
+  )
   const secondTransactionIndex = sql.indexOf('begin;', migrationIndex)
   const secondLockIndex = sql.indexOf(
     'lock table public.product_orders, public.payments in access exclusive mode;',
@@ -467,13 +481,24 @@ export function assertDeployOrchestrationSql(sql) {
   const postflightIndex = sql.indexOf(
     '\\ir line_pay_remediation_postflight.sql',
   )
+  const postflightStateEmittedIndex = sql.indexOf(
+    '\\echo LINE_PAY_DEPLOY_POSTFLIGHT_STATE_EMITTED',
+  )
   const postflightCommitIndex = sql.indexOf('commit;', postflightIndex)
+  const postflightCommittedIndex = sql.indexOf(
+    '\\echo LINE_PAY_DEPLOY_POSTFLIGHT_COMMITTED',
+  )
   if (
-    migrationIndex < 0 ||
-    secondTransactionIndex <= migrationIndex ||
+    migrationStartedIndex < 0 ||
+    migrationIndex <= migrationStartedIndex ||
+    migrationCommittedIndex <= migrationIndex ||
+    postflightStartedIndex <= migrationCommittedIndex ||
+    secondTransactionIndex <= postflightStartedIndex ||
     secondLockIndex <= secondTransactionIndex ||
     postflightIndex <= secondLockIndex ||
-    postflightCommitIndex <= postflightIndex
+    postflightStateEmittedIndex <= postflightIndex ||
+    postflightCommitIndex <= postflightStateEmittedIndex ||
+    postflightCommittedIndex <= postflightCommitIndex
   ) {
     fail('FIXED_FILE_INVALID')
   }
@@ -604,6 +629,51 @@ export function assertSignalLifecycleSource(source) {
       containerGateIndex < finallyIndex &&
       finallyIndex < cleanupIndex &&
       cleanupIndex < removeHandlersIndex
+    )
+  ) {
+    fail('FIXED_FILE_INVALID')
+  }
+  return true
+}
+
+export function assertDeployAttestationSource(source) {
+  if (typeof source !== 'string') fail('FIXED_FILE_INVALID')
+  const requiredOnce = [
+    'export const DEPLOY_ATTESTATION_MARKERS = Object.freeze({',
+    'export const DEPLOY_SUCCESS_ATTESTATION = Object.freeze({',
+    'const evidence = inspectDeployOutput(result.stdout)',
+    'migrationTransactionCommitted = evidence.migrationCommitted',
+    'completedResult = validateDeployExecutionResult(result, evidence)',
+    "? 'CREDENTIAL_CLEANUP_FAILED_AFTER_COMMIT'",
+    "typeof result === 'string' ? result : JSON.stringify(result)",
+  ]
+  for (const token of requiredOnce) {
+    if (source.split(token).length !== 2) fail('FIXED_FILE_INVALID')
+  }
+  const inspectIndex = source.indexOf(
+    'const evidence = inspectDeployOutput(result.stdout)',
+  )
+  const commitEvidenceIndex = source.indexOf(
+    'migrationTransactionCommitted = evidence.migrationCommitted',
+    inspectIndex,
+  )
+  const validationIndex = source.indexOf(
+    'completedResult = validateDeployExecutionResult(result, evidence)',
+    commitEvidenceIndex,
+  )
+  const cleanupClassificationIndex = source.indexOf(
+    "? 'CREDENTIAL_CLEANUP_FAILED_AFTER_COMMIT'",
+    validationIndex,
+  )
+  if (
+    !(
+      inspectIndex >= 0 &&
+      inspectIndex < commitEvidenceIndex &&
+      commitEvidenceIndex < validationIndex &&
+      validationIndex < cleanupClassificationIndex
+    ) ||
+    /console[.](?:log|error)[(](?:result[.](?:stdout|stderr)|evidence[.]auditOutput)/u.test(
+      source,
     )
   ) {
     fail('FIXED_FILE_INVALID')
@@ -859,6 +929,7 @@ export function validateSource(
   assertReadOnlyAuditSql(postflight)
   assertDeployOrchestrationSql(deploy)
   assertSignalLifecycleSource(runner)
+  assertDeployAttestationSource(runner)
   validatePostgresImage(POSTGRES_IMAGE)
 
   const githubSha = environment.GITHUB_SHA

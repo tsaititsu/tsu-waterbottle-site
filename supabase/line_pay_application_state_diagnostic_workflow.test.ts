@@ -140,7 +140,7 @@ test('static mutations cannot weaken the read-only or inventory contract', () =>
   }
 })
 
-test('existing deploy boundary makes DEPLOY_PSQL_FAILED commit state unknown', () => {
+test('deploy boundary now attests both commits and classifies the exact failure stage', () => {
   assert.deepEqual(
     deploySql.match(/^\\ir [^\r\n]+$/gmu),
     [
@@ -163,12 +163,36 @@ test('existing deploy boundary makes DEPLOY_PSQL_FAILED commit state unknown', (
     [deploySql, migrationSql, preflightSql, postflightSql].join('\n'),
     /\binsert\s+into\s+supabase_migrations[.]schema_migrations\b/iu,
   )
+  const orderedMarkers = [
+    'LINE_PAY_DEPLOY_MIGRATION_STARTED',
+    'LINE_PAY_DEPLOY_MIGRATION_COMMITTED',
+    'LINE_PAY_DEPLOY_POSTFLIGHT_STARTED',
+    'LINE_PAY_DEPLOY_POSTFLIGHT_STATE_EMITTED',
+    'LINE_PAY_DEPLOY_POSTFLIGHT_COMMITTED',
+  ]
+  let previousMarkerIndex = -1
+  for (const marker of orderedMarkers) {
+    const markerIndex = deploySql.indexOf(`\\echo ${marker}`)
+    assert.ok(markerIndex > previousMarkerIndex, marker)
+    previousMarkerIndex = markerIndex
+  }
+  for (const failureCode of [
+    'MIGRATION_SQL_FAILED',
+    'POSTFLIGHT_FAILED_BEFORE_COMMIT',
+    'OUTPUT_VALIDATION_FAILED_AFTER_COMMIT',
+    'CREDENTIAL_CLEANUP_FAILED_AFTER_COMMIT',
+    'DEPLOY_COMMIT_STATE_UNKNOWN',
+  ]) {
+    assert.match(exactFileRunner, new RegExp(`'${failureCode}'`, 'u'))
+  }
   assert.match(
     exactFileRunner,
-    /if \(result[.]code !== 0 \|\| result[.]signal\) fail\(phaseFailureCode\(phase\)\)/u,
+    /migration_history_attestation:[\s\S]*version_present: false[\s\S]*state: 'ABSENT_EXPECTED'/u,
   )
-  assert.match(exactFileRunner, /'DEPLOY_PSQL_FAILED'/u)
-  assert.match(exactFileRunner, /'DEPLOY_CONTRACT_FAILED'/u)
+  assert.match(
+    exactFileRunner,
+    /postflight_state_attestation:[\s\S]*status: 'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED'[\s\S]*runtime_enabled: false/u,
+  )
 })
 
 test('LINE Pay DB CI owns the application-state contracts and cleanup', () => {
