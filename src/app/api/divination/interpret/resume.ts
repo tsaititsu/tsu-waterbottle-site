@@ -118,11 +118,8 @@ export async function resumePersistedDivinationReadingFromDb(
 
   try {
     reading = await deps.getReadingForUser(input.readingId, userId)
-  } catch (error) {
-    console.warn('Divination reading resume lookup failed:', {
-      readingId: input.readingId,
-      error: error instanceof Error ? error.message : 'unknown_error',
-    })
+  } catch {
+    console.warn('Divination reading resume lookup failed')
     return NextResponse.json(
       { ok: false, error: 'DIVINATION_READING_LOOKUP_FAILED', message: '占卜紀錄讀取失敗，請稍後再試。' },
       { status: 500 },
@@ -224,11 +221,8 @@ export async function resumePersistedDivinationReadingFromDb(
 
   try {
     payment = await deps.getPaymentById(reading.paymentId)
-  } catch (error) {
-    console.warn('Divination resume payment lookup failed:', {
-      readingId: reading.id,
-      error: error instanceof Error ? error.message : 'unknown_error',
-    })
+  } catch {
+    console.warn('Divination resume payment lookup failed')
     return NextResponse.json(
       { ok: false, error: 'DIVINATION_PAYMENT_LOOKUP_FAILED', message: '付款狀態讀取失敗，請稍後再試。' },
       { status: 500 },
@@ -277,11 +271,8 @@ export async function resumePersistedDivinationReadingFromDb(
         { status: 409 },
       )
     }
-  } catch (error) {
-    console.warn('Divination reading resume interpreting update failed:', {
-      readingId: reading.id,
-      error: error instanceof Error ? error.message : 'unknown_error',
-    })
+  } catch {
+    console.warn('Divination reading resume interpreting update failed')
     return NextResponse.json(
       { ok: false, error: 'DIVINATION_READING_UPDATE_FAILED', message: '占卜紀錄更新失敗，請稍後再試。' },
       { status: 500 },
@@ -299,11 +290,9 @@ export async function resumePersistedDivinationReadingFromDb(
   if (!openAiResult.ok) {
     try {
       await deps.markFailed({ readingId: reading.id, errorMessage: openAiResult.error })
-    } catch (error) {
+    } catch {
       console.warn('Divination reading failed update failed:', {
-        readingId: reading.id,
         errorCode: openAiResult.error,
-        error: error instanceof Error ? error.message : 'unknown_error',
       })
     }
     return NextResponse.json(
@@ -318,11 +307,8 @@ export async function resumePersistedDivinationReadingFromDb(
       interpretation: openAiResult.interpretation,
       resultSummary: openAiResult.interpretation.finalAnswer ?? openAiResult.interpretation.summary,
     })
-  } catch (error) {
-    console.warn('Divination reading completed update failed:', {
-      readingId: reading.id,
-      error: error instanceof Error ? error.message : 'unknown_error',
-    })
+  } catch {
+    console.warn('Divination reading completed update failed')
     return NextResponse.json(
       {
         ok: false,

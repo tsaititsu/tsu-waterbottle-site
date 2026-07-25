@@ -5,6 +5,12 @@ import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useState } from 'react'
 import { createZiweiGptPayload, type ChartInput, type ZiweiGptPayload } from '@/features/ziwei-chart/package'
 import { randomAnonName, RANDOM_NAME_PREFIX } from '@/features/ziwei-chart/lib/anonName'
+import {
+  getAiChartDraftWorkspace,
+  setAiChartDraftSession,
+  setAiChartDraftWorkspace,
+  type AiChartDraftWorkspace,
+} from '@/lib/ai-chart/chartDraftMemory'
 
 const timeOptions = [
   { label: '早子時　00:00-00:59', value: 0 },
@@ -32,24 +38,9 @@ type SavedChart = {
   payload: ZiweiGptPayload
 }
 
-type StoredSavedChart = {
-  id: string
-  input: ChartInput
-}
-
-type StoredChartState = {
-  categories: string[]
-  selectedCategory: string
-  selectedChartId?: string
-  charts: Record<string, StoredSavedChart[] | ChartInput>
-}
-
 type ChartBirthFormProps = {
   resetKey?: string
 }
-
-const CHART_STORAGE_KEY = 'waterbottle-chart-categories'
-const CHART_SESSION_STORAGE_KEY = 'waterbottle-chart-current-session'
 
 function normalizeCategories(categories: string[]) {
   const unique = Array.from(new Set(['自己', ...categories.map((category) => category.trim()).filter(Boolean)]))
@@ -91,10 +82,9 @@ function randomName() {
   return `${RANDOM_NAME_PREFIX}${randomAnonName()}`
 }
 
-function restoreSavedCharts(storedCharts: StoredChartState['charts']) {
+function restoreSavedCharts(storedCharts: AiChartDraftWorkspace['charts']) {
   return Object.entries(storedCharts).reduce<Record<string, SavedChart[]>>((result, [category, stored]) => {
-    const records = Array.isArray(stored) ? stored : [{ id: chartId(stored), input: stored }]
-    const savedCharts = records.reduce<SavedChart[]>((items, record) => {
+    const savedCharts = stored.reduce<SavedChart[]>((items, record) => {
       try {
         items.push(toSavedChart(record.input, record.id))
       } catch {
@@ -187,7 +177,7 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
 
   const deleteSelectedSavedChart = () => {
     if (!selectedChartId) return
-    const confirmed = window.confirm('確定要刪除這張命盤嗎？此動作只會刪除本機儲存資料。')
+    const confirmed = window.confirm('確定要刪除這張命盤嗎？此動作只會刪除目前分頁中的資料。')
     if (!confirmed) return
 
     setChartsByCategory((current) => {
@@ -203,22 +193,17 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
 
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(CHART_STORAGE_KEY)
-      if (!raw) {
-        setHasLoadedSavedCharts(true)
-        return
-      }
-
-      const stored = JSON.parse(raw) as StoredChartState
-      const nextCategories = normalizeCategories(stored.categories ?? [])
-      const nextCharts = restoreSavedCharts(stored.charts ?? {})
+      const stored = getAiChartDraftWorkspace()
+      const nextCategories = normalizeCategories(stored.categories)
+      const nextCharts = restoreSavedCharts(stored.charts)
 
       setCategories(nextCategories)
       setChartsByCategory(nextCharts)
       setSelectedCategory('自己')
       setSelectedChartId('')
     } catch {
-      window.localStorage.removeItem(CHART_STORAGE_KEY)
+      setCategories(['自己'])
+      setChartsByCategory({})
     } finally {
       setHasLoadedSavedCharts(true)
     }
@@ -231,7 +216,7 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
   useEffect(() => {
     if (!hasLoadedSavedCharts) return
 
-    const charts: StoredChartState['charts'] = Object.fromEntries(
+    const charts: AiChartDraftWorkspace['charts'] = Object.fromEntries(
       Object.entries(chartsByCategory).map(([category, savedCharts]) => [
         category,
         savedCharts.map((saved) => ({
@@ -241,14 +226,14 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
       ])
     )
 
-    const stored: StoredChartState = {
+    const stored: AiChartDraftWorkspace = {
       categories,
       selectedCategory,
       selectedChartId,
       charts
     }
 
-    window.localStorage.setItem(CHART_STORAGE_KEY, JSON.stringify(stored))
+    setAiChartDraftWorkspace(stored)
   }, [categories, chartsByCategory, hasLoadedSavedCharts, selectedCategory, selectedChartId])
 
   const addCategory = () => {
@@ -345,7 +330,7 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
         ...chartsByCategory,
         [selectedCategory]: savedCharts
       }
-      const storedCharts: StoredChartState['charts'] = Object.fromEntries(
+      const storedCharts: AiChartDraftWorkspace['charts'] = Object.fromEntries(
         Object.entries(nextChartsByCategory).map(([category, charts]) => [
           category,
           charts.map((chart) => ({
@@ -354,7 +339,7 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
           }))
         ])
       )
-      const storedState: StoredChartState = {
+      const storedState: AiChartDraftWorkspace = {
         categories,
         selectedCategory,
         selectedChartId: id,
@@ -362,13 +347,13 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
       }
       setSelectedChartId(id)
       setChartsByCategory(nextChartsByCategory)
-      window.localStorage.setItem(CHART_STORAGE_KEY, JSON.stringify(storedState))
-      window.sessionStorage.setItem(CHART_SESSION_STORAGE_KEY, JSON.stringify({
+      setAiChartDraftWorkspace(storedState)
+      setAiChartDraftSession({
         input: result.input,
         chartId: id,
         selectedCategory,
         birthOrder: selectedBirthOrder
-      }))
+      })
       setFormError('')
       router.push('/ai-chart/result')
     } catch (error) {

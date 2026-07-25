@@ -12,6 +12,11 @@ import {
   loadDivinationFollowUpDraft,
   toDivinationFollowUpContext,
 } from "@/lib/divination/followUpStorage"
+import {
+  clearDivinationReadingSession,
+  getOrCreateDivinationLocalUserId,
+  setDivinationReadingSession,
+} from "@/lib/divination/readingSessionMemory"
 import type {
   CreateDivinationReadingResponse,
   DivinationDrawMode,
@@ -29,49 +34,24 @@ type QuestionSubmitPayload = {
   mockPaid?: boolean
 }
 
-const localUserStorageKey = "divination_local_user_id"
-const readingSessionStorageKey = "divination_reading_session"
-
 type DivinationLocalPreviewProps = {
   resetKey?: string
   followUpKey?: string
 }
 
-function createLocalUserId() {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID()
-  }
-
-  return `local-${Date.now()}-${Math.random().toString(36).slice(2)}`
-}
-
 function getLocalUserId() {
-  if (typeof window === "undefined") return "local-dev-user"
-
-  const existingLocalUserId = window.localStorage.getItem(localUserStorageKey)
-
-  if (existingLocalUserId) return existingLocalUserId
-
-  const localUserId = createLocalUserId()
-  window.localStorage.setItem(localUserStorageKey, localUserId)
-
-  return localUserId
+  return getOrCreateDivinationLocalUserId()
 }
 
 function saveReadingSession(session: DivinationReadingSession, options?: { autoMockPaid?: boolean }) {
-  if (typeof window === "undefined") return
-  window.sessionStorage.setItem(
-    readingSessionStorageKey,
-    JSON.stringify({
-      ...session,
-      autoMockPaid: options?.autoMockPaid === true,
-    })
-  )
+  setDivinationReadingSession({
+    ...session,
+    autoMockPaid: options?.autoMockPaid === true,
+  })
 }
 
 function clearReadingSession() {
-  if (typeof window === "undefined") return
-  window.sessionStorage.removeItem(readingSessionStorageKey)
+  clearDivinationReadingSession()
 }
 
 export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: DivinationLocalPreviewProps) {
@@ -82,6 +62,7 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
   const [followUpDraft, setFollowUpDraft] = useState<DivinationFollowUpDraft | null>(null)
   const [followUpDisplayThread, setFollowUpDisplayThread] = useState<DivinationFollowUpDisplayThread | null>(null)
   const resetVersionRef = useRef(0)
+  const createReadingInFlightRef = useRef(false)
 
   async function createReadingSession(input: {
     question: string
@@ -134,6 +115,10 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
   }
 
   async function handleQuestionSubmit(payload: QuestionSubmitPayload) {
+    if (createReadingInFlightRef.current) {
+      return
+    }
+    createReadingInFlightRef.current = true
     const requestResetVersion = resetVersionRef.current
     setIsCreatingReading(true)
     setErrorMessage("")
@@ -173,6 +158,7 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
       }
     } finally {
       if (requestResetVersion === resetVersionRef.current) {
+        createReadingInFlightRef.current = false
         setIsCreatingReading(false)
       }
     }
@@ -180,6 +166,7 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
 
   useEffect(() => {
     resetVersionRef.current += 1
+    createReadingInFlightRef.current = false
     setIsCreatingReading(false)
     setErrorMessage("")
     setSafetyInterpretation(null)
@@ -191,6 +178,13 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
       clearDivinationFollowUpDisplayThread()
     }
   }, [resetKey])
+
+  useEffect(() => {
+    return () => {
+      resetVersionRef.current += 1
+      createReadingInFlightRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
     if (!followUpKey) {
@@ -215,6 +209,7 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
         <p className="mt-3 max-w-3xl leading-7 text-textMuted">
           請先寫下你想詢問的問題，再選擇手動抽牌或自動抽牌。抽牌本身不收費，開始 AI 解讀時每次 NT$50。
         </p>
+        <p className="mt-2 text-sm text-textMuted">私人問題只保留在目前分頁記憶體；重新整理或切換帳號後需重新輸入。</p>
       </div>
       <section className="grid gap-4">
         <DivinationQuestionContextPanel
@@ -222,14 +217,18 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
           followUpReading={latestFollowUpReading}
           displayReading={latestDisplayReading}
         />
-        <DivinationQuestionForm key={resetKey || "initial"} onQuestionSubmit={handleQuestionSubmit} />
+        <DivinationQuestionForm
+          key={resetKey || "initial"}
+          disabled={isCreatingReading}
+          onQuestionSubmit={handleQuestionSubmit}
+        />
         {isCreatingReading ? (
-          <p className="rounded-xl border border-purple-100 bg-purple-50 px-4 py-3 text-sm leading-7 text-textMuted">
+          <p aria-live="polite" className="rounded-xl border border-purple-100 bg-purple-50 px-4 py-3 text-sm leading-7 text-textMuted">
             正在建立占卜紀錄，請稍候...
           </p>
         ) : null}
         {errorMessage ? (
-          <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-7 text-red-700">
+          <p aria-live="polite" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-7 text-red-700">
             {errorMessage}
           </p>
         ) : null}

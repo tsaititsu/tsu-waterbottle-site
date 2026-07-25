@@ -21,13 +21,11 @@ const syntheticRow: AdminBookingRow = {
   starts_at: '2026-08-01T02:00:00.000Z',
   ends_at: '2026-08-01T03:00:00.000Z',
   timezone: 'Asia/Taipei',
-  note: null,
   confirmation_email_sent_to_customer: true,
   confirmation_email_sent_to_admin: false,
   cancellation_email_sent_to_customer: false,
   cancellation_email_sent_to_admin: false,
   cancelled_at: null,
-  cancellation_reason: null,
   created_at: '2026-07-20T02:00:00.000Z',
   updated_at: '2026-07-20T02:00:00.000Z',
 }
@@ -46,7 +44,7 @@ const forbiddenKeys = [
 ]
 
 assert.equal(ADMIN_BOOKING_COLUMNS.includes('*'), false)
-assert.equal(ADMIN_BOOKING_LIMIT, 100)
+assert.equal(ADMIN_BOOKING_LIMIT, 50)
 
 const injectedRow = {
   ...syntheticRow,
@@ -60,15 +58,26 @@ const injectedRow = {
   injected_unknown_field: 'should-not-leak',
 } as AdminBookingRow
 
-const mapped = mapAdminBookingRow(injectedRow) as unknown as Record<string, unknown>
+assert.throws(() => mapAdminBookingRow(injectedRow), /admin_booking_row_invalid/)
+
+const mapped = mapAdminBookingRow(syntheticRow) as unknown as Record<string, unknown>
 for (const key of forbiddenKeys) assert.equal(key in mapped, false, `${key} 不得出現在輸出`)
 assert.equal('injected_unknown_field' in mapped, false)
-assert.equal(mapped.customerPhone, null)
-assert.equal(mapped.lineDisplayName, null)
-assert.equal(mapped.note, null)
+assert.equal(mapped.customerName, '合…戶')
+assert.equal(mapped.customerEmail, 's***c@example.test')
+assert.equal(mapped.customerPhone, '未提供')
+assert.equal(mapped.lineDisplayName, '未提供')
 assert.equal(mapped.cancelledAt, null)
-assert.equal(mapped.cancellationReason, null)
 assert.equal(JSON.stringify(mapped).includes('undefined'), false)
+for (const invalidRow of [
+  { ...syntheticRow, amount_twd: 1.5 },
+  { ...syntheticRow, currency: 'USD' },
+  { ...syntheticRow, timezone: 'UTC' },
+  { ...syntheticRow, status: 'admin_override' },
+  { ...syntheticRow, payment_status: 'manual_paid' },
+]) {
+  assert.throws(() => mapAdminBookingRow(invalidRow), /admin_booking_row_invalid/)
+}
 
 async function runListTest() {
   const calls = {
@@ -76,23 +85,25 @@ async function runListTest() {
     columns: '',
     orderColumn: '',
     ascending: true,
-    limit: 0,
+    selectOptions: null as { count: string } | null,
+    range: [] as number[],
   }
 
   const mockClient = {
     from(table: string) {
       calls.table = table
       return {
-        select(columns: string) {
+        select(columns: string, options: { count: string }) {
           calls.columns = columns
+          calls.selectOptions = options
           return {
             order(column: string, options: { ascending: boolean }) {
               calls.orderColumn = column
               calls.ascending = options.ascending
               return {
-                limit(limit: number) {
-                  calls.limit = limit
-                  return Promise.resolve({ data: [injectedRow], error: null })
+                range(from: number, to: number) {
+                  calls.range = [from, to]
+                  return Promise.resolve({ data: [syntheticRow], error: null, count: 1 })
                 },
               }
             },
@@ -102,19 +113,21 @@ async function runListTest() {
     },
   } as unknown as Parameters<typeof listAdminBookings>[0]
 
-  const result = await listAdminBookings(mockClient)
+  const result = await listAdminBookings(mockClient, { limit: 25, offset: 50 })
 
   assert.deepEqual(calls, {
     table: 'bookings',
     columns: ADMIN_BOOKING_COLUMNS,
     orderColumn: 'starts_at',
     ascending: false,
-    limit: 100,
+    selectOptions: { count: 'exact' },
+    range: [50, 74],
   })
-  assert.equal(result.length, 1)
-  assert.equal('injected_unknown_field' in (result[0] as unknown as Record<string, unknown>), false)
+  assert.equal(result.total, 1)
+  assert.equal(result.bookings.length, 1)
+  assert.equal('injected_unknown_field' in (result.bookings[0] as unknown as Record<string, unknown>), false)
   for (const key of forbiddenKeys) {
-    assert.equal(key in (result[0] as unknown as Record<string, unknown>), false, `${key} 不得由查詢 helper 輸出`)
+    assert.equal(key in (result.bookings[0] as unknown as Record<string, unknown>), false, `${key} 不得由查詢 helper 輸出`)
   }
 
   console.log('✓ admin booking mapper and query allowlist tests passed')

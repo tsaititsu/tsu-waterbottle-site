@@ -1,5 +1,13 @@
 import { getBookingPlan } from '@/lib/bookingPlans'
-import type { BookingFormInput, BookingRecord, BookingStatus } from '@/lib/mockBooking'
+import type {
+  BookingFormInput,
+  BookingMemberListItem,
+  BookingPaymentStatus,
+  BookingRecord,
+  BookingStatus,
+} from '@/lib/bookings/types'
+import { MEMBER_BOOKING_MAX_PAGE_SIZE } from '@/lib/bookings/types'
+import { readExactRecord } from '@/lib/contracts/exactRecord'
 import { getSupabaseAdmin, hasSupabaseAdminConfig } from './admin'
 
 type BookingRow = {
@@ -10,7 +18,7 @@ type BookingRow = {
   amount_twd: number
   currency: 'TWD'
   status: BookingStatus
-  payment_status: string
+  payment_status: BookingPaymentStatus
   customer_name: string
   customer_email: string
   customer_phone: string | null
@@ -38,12 +46,170 @@ type BookingRow = {
   updated_at: string
 }
 
-type ConsultationPlanRow = {
+const BOOKING_COLUMN_NAMES = [
+  'id',
+  'user_id',
+  'plan_id',
+  'plan_name',
+  'amount_twd',
+  'currency',
+  'status',
+  'payment_status',
+  'customer_name',
+  'customer_email',
+  'customer_phone',
+  'line_display_name',
+  'gender',
+  'birth_date',
+  'birth_time',
+  'birth_place',
+  'is_birth_time_accurate',
+  'question',
+  'note',
+  'starts_at',
+  'ends_at',
+  'timezone',
+  'google_calendar_event_id',
+  'google_calendar_event_link',
+  'google_calendar_cancelled',
+  'confirmation_email_sent_to_customer',
+  'confirmation_email_sent_to_admin',
+  'cancellation_email_sent_to_customer',
+  'cancellation_email_sent_to_admin',
+  'cancelled_at',
+  'cancellation_reason',
+  'created_at',
+  'updated_at',
+] as const
+const BOOKING_COLUMNS = BOOKING_COLUMN_NAMES.join(',')
+const MEMBER_BOOKING_COLUMN_NAMES = [
+  'id',
+  'plan_name',
+  'status',
+  'payment_status',
+  'question',
+  'starts_at',
+  'ends_at',
+  'google_calendar_event_id',
+  'google_calendar_cancelled',
+  'confirmation_email_sent_to_customer',
+  'cancellation_email_sent_to_customer',
+  'cancellation_email_sent_to_admin',
+  'cancelled_at',
+  'cancellation_reason',
+  'created_at',
+  'updated_at',
+] as const
+export const MEMBER_BOOKING_COLUMNS = MEMBER_BOOKING_COLUMN_NAMES.join(',')
+
+type MemberBookingRow = {
   id: string
-  name: string
-  duration_minutes: number | null
-  price_twd: number
-  is_active: boolean | null
+  plan_name: string
+  status: BookingStatus
+  payment_status: BookingPaymentStatus
+  question: string
+  starts_at: string
+  ends_at: string
+  google_calendar_event_id: string | null
+  google_calendar_cancelled: boolean
+  confirmation_email_sent_to_customer: boolean
+  cancellation_email_sent_to_customer: boolean
+  cancellation_email_sent_to_admin: boolean
+  cancelled_at: string | null
+  cancellation_reason: string | null
+  created_at: string
+  updated_at: string
+}
+const BOOKING_STATUS_VALUES = new Set<BookingStatus>([
+  'pending_payment',
+  'paid',
+  'confirmed',
+  'cancelled',
+  'failed',
+])
+const BOOKING_GENDER_VALUES = new Set<BookingFormInput['gender']>([
+  'male',
+  'female',
+  'other',
+])
+const BOOKING_PAYMENT_STATUS_VALUES = new Set<BookingPaymentStatus>([
+  'pending',
+  'paid',
+  'failed',
+  'cancelled',
+  'refunded',
+])
+const DATABASE_SLOT_ID_PATTERN =
+  /^db:([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i
+
+const BOOKING_STRING_FIELDS = [
+  'id',
+  'plan_name',
+  'currency',
+  'status',
+  'payment_status',
+  'customer_name',
+  'customer_email',
+  'gender',
+  'birth_date',
+  'birth_time',
+  'question',
+  'starts_at',
+  'ends_at',
+  'timezone',
+  'created_at',
+  'updated_at',
+] as const
+const BOOKING_NULLABLE_STRING_FIELDS = [
+  'user_id',
+  'plan_id',
+  'customer_phone',
+  'line_display_name',
+  'birth_place',
+  'note',
+  'google_calendar_event_id',
+  'google_calendar_event_link',
+  'cancelled_at',
+  'cancellation_reason',
+] as const
+const BOOKING_BOOLEAN_FIELDS = [
+  'is_birth_time_accurate',
+  'google_calendar_cancelled',
+  'confirmation_email_sent_to_customer',
+  'confirmation_email_sent_to_admin',
+  'cancellation_email_sent_to_customer',
+  'cancellation_email_sent_to_admin',
+] as const
+
+export function readBookingRow(value: unknown): BookingRow {
+  const row = readExactRecord(value, BOOKING_COLUMN_NAMES, 'booking_row')
+  const mismatch = () => {
+    throw new Error('booking_row_contract_mismatch')
+  }
+
+  for (const field of BOOKING_STRING_FIELDS) {
+    if (typeof row[field] !== 'string' || row[field].length === 0) mismatch()
+  }
+  for (const field of BOOKING_NULLABLE_STRING_FIELDS) {
+    if (row[field] !== null && typeof row[field] !== 'string') mismatch()
+  }
+  for (const field of BOOKING_BOOLEAN_FIELDS) {
+    if (typeof row[field] !== 'boolean') mismatch()
+  }
+  if (!Number.isSafeInteger(row.amount_twd) || Number(row.amount_twd) < 0) mismatch()
+  if (row.currency !== 'TWD' || row.timezone !== 'Asia/Taipei') mismatch()
+  if (!BOOKING_STATUS_VALUES.has(row.status as BookingStatus)) mismatch()
+  if (!BOOKING_PAYMENT_STATUS_VALUES.has(row.payment_status as BookingPaymentStatus)) mismatch()
+  if (!BOOKING_GENDER_VALUES.has(row.gender as BookingFormInput['gender'])) mismatch()
+  for (const field of ['starts_at', 'ends_at', 'created_at', 'updated_at'] as const) {
+    if (Number.isNaN(Date.parse(String(row[field])))) mismatch()
+  }
+  if (
+    row.cancelled_at !== null &&
+    Number.isNaN(Date.parse(String(row.cancelled_at)))
+  ) mismatch()
+
+  return row as unknown as BookingRow
 }
 
 export type BookingPaymentContext = {
@@ -67,24 +233,40 @@ export type BookingMemberUpdate = {
   cancellationReason?: string
 }
 
-export type CreateSupabaseBookingInput = Omit<BookingFormInput, 'userId'> & {
+export type CreateSupabaseBookingInput = Omit<
+  BookingFormInput,
+  'userId' | 'startTime' | 'endTime'
+> & {
   userId: string
 }
 
 type CreateSupabaseBookingDependencies = {
   hasAdminConfig: typeof hasSupabaseAdminConfig
   getAdminClient: typeof getSupabaseAdmin
-  now: () => Date
+}
+
+type BookingRepositoryDependencies = Pick<
+  CreateSupabaseBookingDependencies,
+  'hasAdminConfig' | 'getAdminClient'
+>
+
+const bookingRepositoryDependencies: BookingRepositoryDependencies = {
+  hasAdminConfig: hasSupabaseAdminConfig,
+  getAdminClient: getSupabaseAdmin,
 }
 
 const createSupabaseBookingDependencies: CreateSupabaseBookingDependencies = {
   hasAdminConfig: hasSupabaseAdminConfig,
   getAdminClient: getSupabaseAdmin,
-  now: () => new Date(),
 }
 
-function normalizeBirthTime(value: string) {
-  return value.length === 5 ? `${value}:00` : value
+type BookingCreateErrorCode =
+  | 'booking_plan_unavailable'
+  | 'booking_slot_unavailable'
+  | 'booking_repository_error'
+
+function bookingCreateError(code: BookingCreateErrorCode) {
+  return Object.assign(new Error(code), { code })
 }
 
 export function mapBookingRow(row: BookingRow): BookingRecord {
@@ -135,97 +317,191 @@ export async function createSupabaseBooking(
 
   if (!deps.hasAdminConfig()) return null
 
-  const plan = getBookingPlan(input.planId)
-  if (!plan) throw new Error('方案不存在')
+  if (!getBookingPlan(input.planId)) throw bookingCreateError('booking_plan_unavailable')
+
+  const slotIdMatch = DATABASE_SLOT_ID_PATTERN.exec(input.slotId ?? '')
+  if (!slotIdMatch) throw bookingCreateError('booking_slot_unavailable')
 
   const supabase = deps.getAdminClient()
 
-  const { data: planRecord, error: planLookupError } = await supabase
-    .from('consultation_plans')
-    .select('id,name,duration_minutes,price_twd,is_active')
-    .eq('id', input.planId)
-    .single<ConsultationPlanRow>()
-
-  console.info('consultation_plans 查詢結果', {
-    planId: input.planId,
-    found: !!planRecord,
-    isActive: planRecord?.is_active ?? null
-  })
-
-  if (planLookupError) {
-    console.error('consultation_plans 查詢失敗', {
-      message: planLookupError.message,
-      code: planLookupError.code,
-      details: planLookupError.details,
-      hint: planLookupError.hint,
-      planId: input.planId
-    })
-    throw planLookupError
-  }
-
   const { data, error } = await supabase
-    .from('bookings')
-    .insert({
-      plan_id: input.planId,
-      user_id: userId,
-      plan_name: plan.name,
-      amount_twd: plan.price,
-      currency: 'TWD',
-      status: 'pending_payment',
-      payment_status: 'pending',
-      customer_name: input.customerName,
-      customer_email: input.customerEmail,
-      customer_phone: input.customerPhone ?? null,
-      line_display_name: input.lineDisplayName ?? null,
-      gender: input.gender,
-      birth_date: input.birthDate,
-      birth_time: normalizeBirthTime(input.birthTime),
-      birth_place: input.birthPlace ?? null,
-      is_birth_time_accurate: input.isBirthTimeAccurate,
-      question: input.question,
-      note: input.note ?? null,
-      starts_at: input.startTime,
-      ends_at: input.endTime,
-      timezone: 'Asia/Taipei',
-      accepted_notice_at: deps.now().toISOString()
+    .rpc('create_booking_with_available_slot', {
+      p_user_id: userId,
+      p_slot_id: slotIdMatch[1],
+      p_plan_id: input.planId,
+      p_customer_name: input.customerName,
+      p_customer_email: input.customerEmail,
+      p_customer_phone: input.customerPhone ?? null,
+      p_line_display_name: input.lineDisplayName ?? null,
+      p_gender: input.gender,
+      p_birth_date: input.birthDate,
+      p_birth_time: input.birthTime,
+      p_birth_place: input.birthPlace ?? null,
+      p_is_birth_time_accurate: input.isBirthTimeAccurate,
+      p_question: input.question,
+      p_note: input.note ?? null,
     })
-    .select('*')
     .single()
 
   if (error) {
-    throw error
+    if (error.code === 'WB001') throw bookingCreateError('booking_plan_unavailable')
+    if (error.code === 'WB002') throw bookingCreateError('booking_slot_unavailable')
+    console.error('Atomic booking transaction failed')
+    throw bookingCreateError('booking_repository_error')
   }
-  return mapBookingRow(data as BookingRow)
+  return mapBookingRow(readBookingRow(data))
 }
 
-export async function listSupabaseBookings(userId?: string) {
-  if (!hasSupabaseAdminConfig()) return []
+function readMemberBookingRow(value: unknown): MemberBookingRow {
+  const row = readExactRecord(value, MEMBER_BOOKING_COLUMN_NAMES, 'member_booking_row')
+  const valid =
+    ['id', 'plan_name', 'payment_status', 'question', 'starts_at', 'ends_at', 'created_at', 'updated_at']
+      .every((key) => typeof row[key] === 'string' && String(row[key]).length > 0) &&
+    ['google_calendar_event_id', 'cancelled_at', 'cancellation_reason']
+      .every((key) => row[key] === null || typeof row[key] === 'string') &&
+    ['google_calendar_cancelled', 'confirmation_email_sent_to_customer', 'cancellation_email_sent_to_customer', 'cancellation_email_sent_to_admin']
+      .every((key) => typeof row[key] === 'boolean') &&
+    BOOKING_STATUS_VALUES.has(row.status as BookingStatus) &&
+    BOOKING_PAYMENT_STATUS_VALUES.has(row.payment_status as BookingPaymentStatus) &&
+    [row.starts_at, row.ends_at, row.created_at, row.updated_at]
+      .every((dateValue) => !Number.isNaN(Date.parse(String(dateValue))))
+  if (!valid) throw new Error('member_booking_row_invalid')
+  return row as unknown as MemberBookingRow
+}
 
-  const supabase = getSupabaseAdmin()
-  let query = supabase
-    .from('bookings')
-    .select('*')
-    .order('starts_at', { ascending: false })
-    .limit(100)
-
-  if (userId) {
-    query = query.eq('user_id', userId)
+function mapMemberBookingRow(row: MemberBookingRow): BookingMemberListItem {
+  return {
+    id: row.id,
+    planName: row.plan_name,
+    status: row.status,
+    paymentStatus: row.payment_status,
+    question: row.question,
+    startTime: row.starts_at,
+    endTime: row.ends_at,
+    googleCalendarEventId: row.google_calendar_event_id ?? undefined,
+    googleCalendarCancelled: row.google_calendar_cancelled,
+    emailSentToCustomer: row.confirmation_email_sent_to_customer,
+    cancellationEmailSentToCustomer: row.cancellation_email_sent_to_customer,
+    cancellationEmailSentToAdmin: row.cancellation_email_sent_to_admin,
+    cancelledAt: row.cancelled_at ?? undefined,
+    cancellationReason: row.cancellation_reason ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   }
+}
 
-  const { data, error } = await query
+export async function listSupabaseBookings(
+  userId: string,
+  pagination: { limit: number; offset: number },
+  deps: BookingRepositoryDependencies = bookingRepositoryDependencies,
+) {
+  if (!deps.hasAdminConfig()) return { bookings: [], total: 0 }
+  const normalizedUserId = userId.trim()
+  if (!normalizedUserId) throw new Error('booking_user_id_required')
+  const limit = Math.min(
+    MEMBER_BOOKING_MAX_PAGE_SIZE,
+    Math.max(1, Math.trunc(pagination.limit)),
+  )
+  const offset = Math.max(0, Math.trunc(pagination.offset))
 
-  if (error) throw new Error(error.message)
-  return (data as BookingRow[]).map(mapBookingRow)
+  const supabase = deps.getAdminClient()
+  const query = supabase
+    .from('bookings')
+    .select(MEMBER_BOOKING_COLUMNS, { count: 'exact' })
+    .eq('user_id', normalizedUserId)
+    .order('starts_at', { ascending: false })
+    .range(offset, offset + limit - 1)
+
+  const { data, error, count } = await query
+
+  if (error) throw new Error('booking_repository_error')
+  return {
+    bookings: (data ?? []).map((row) => mapMemberBookingRow(readMemberBookingRow(row))),
+    total: count ?? 0,
+  }
 }
 
 export async function getSupabaseBooking(bookingId: string) {
   if (!hasSupabaseAdminConfig()) return null
 
   const supabase = getSupabaseAdmin()
-  const { data, error } = await supabase.from('bookings').select('*').eq('id', bookingId).maybeSingle()
+  const { data, error } = await supabase
+    .from('bookings')
+    .select(BOOKING_COLUMNS)
+    .eq('id', bookingId)
+    .maybeSingle()
 
-  if (error) throw new Error(error.message)
-  return data ? mapBookingRow(data as BookingRow) : null
+  if (error) throw new Error('booking_repository_error')
+  return data ? mapBookingRow(readBookingRow(data)) : null
+}
+
+export async function getSupabaseBookingForRequester(
+  bookingId: string,
+  requesterId: string,
+  requesterIsAdmin: boolean,
+  deps: BookingRepositoryDependencies = bookingRepositoryDependencies,
+) {
+  if (!deps.hasAdminConfig()) return null
+  const normalizedBookingId = bookingId.trim()
+  const normalizedRequesterId = requesterId.trim()
+  if (!normalizedBookingId || !normalizedRequesterId) return null
+
+  const supabase = deps.getAdminClient()
+  let query = supabase
+    .from('bookings')
+    .select(BOOKING_COLUMNS)
+    .eq('id', normalizedBookingId)
+
+  if (!requesterIsAdmin) {
+    query = query.eq('user_id', normalizedRequesterId)
+  }
+
+  const { data, error } = await query.maybeSingle()
+  if (error) throw new Error('booking_repository_error')
+  return data ? mapBookingRow(readBookingRow(data)) : null
+}
+
+export type CancelSupabaseBookingInput = {
+  bookingId: string
+  requesterId: string
+  requesterIsAdmin: boolean
+  expectedStartTime: string
+  expectedUpdatedAt: string
+  cancelledAt: string
+  cancellationReason: string
+}
+
+export async function cancelSupabaseBooking(
+  input: CancelSupabaseBookingInput,
+  deps: BookingRepositoryDependencies = bookingRepositoryDependencies,
+) {
+  if (!deps.hasAdminConfig()) return null
+
+  const supabase = deps.getAdminClient()
+  const cutoff = new Date(
+    new Date(input.cancelledAt).getTime() + 24 * 60 * 60 * 1000,
+  ).toISOString()
+  let query = supabase
+    .from('bookings')
+    .update({
+      status: 'cancelled',
+      cancelled_at: input.cancelledAt,
+      cancellation_reason: input.cancellationReason,
+    })
+    .eq('id', input.bookingId)
+    .eq('status', 'confirmed')
+    .eq('payment_status', 'paid')
+    .eq('starts_at', input.expectedStartTime)
+    .eq('updated_at', input.expectedUpdatedAt)
+    .gt('starts_at', cutoff)
+
+  if (!input.requesterIsAdmin) {
+    query = query.eq('user_id', input.requesterId)
+  }
+
+  const { data, error } = await query.select(BOOKING_COLUMNS).maybeSingle()
+  if (error) throw new Error('booking_repository_error')
+  return data ? mapBookingRow(readBookingRow(data)) : null
 }
 
 export async function getSupabaseBookingPaymentContext(bookingId: string): Promise<BookingPaymentContext | null> {
@@ -238,7 +514,7 @@ export async function getSupabaseBookingPaymentContext(bookingId: string): Promi
     .eq('id', bookingId)
     .maybeSingle()
 
-  if (error) throw new Error(error.message)
+  if (error) throw new Error('booking_repository_error')
   if (!data) return null
 
   const row = data as {
@@ -276,8 +552,13 @@ export async function updateSupabaseBooking(bookingId: string, updates: BookingM
   if (Object.keys(patch).length === 0) return getSupabaseBooking(bookingId)
 
   const supabase = getSupabaseAdmin()
-  const { data, error } = await supabase.from('bookings').update(patch).eq('id', bookingId).select('*').single()
+  const { data, error } = await supabase
+    .from('bookings')
+    .update(patch)
+    .eq('id', bookingId)
+    .select(BOOKING_COLUMNS)
+    .single()
 
-  if (error) throw new Error(error.message)
-  return mapBookingRow(data as BookingRow)
+  if (error) throw new Error('booking_repository_error')
+  return mapBookingRow(readBookingRow(data))
 }

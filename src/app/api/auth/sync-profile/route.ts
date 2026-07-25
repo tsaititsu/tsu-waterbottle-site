@@ -99,7 +99,8 @@ export async function POST(req: Request) {
   )
 
   if (upsertError) {
-    return NextResponse.json({ ok: false, message: upsertError.message }, { status: 500 })
+    console.error('Profile synchronization failed', { code: upsertError.code })
+    return NextResponse.json({ ok: false, message: '會員資料同步失敗，請稍後再試。' }, { status: 500 })
   }
 
   return NextResponse.json({ ok: true })

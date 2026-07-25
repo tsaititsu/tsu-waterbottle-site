@@ -4,9 +4,10 @@ import Link from 'next/link'
 import { CheckCircle2, Clock3, CircleAlert } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useEffect, useRef, useState } from 'react'
+import { createAsyncIdentityGuard } from '@/lib/auth/asyncIdentityGuard'
 import { isTrustedPaidBooking } from '@/lib/bookings/bookingSuccess'
-import { getAuthAccessToken } from '@/lib/mockAuth'
-import { updateBookingRecord, type BookingRecord } from '@/lib/mockBooking'
+import type { BookingRecord } from '@/lib/bookings/types'
+import { getAuthAccessToken, getMockUser, subscribeAuthChange } from '@/lib/mockAuth'
 
 async function postJson(path: string, body: unknown, accessToken?: string | null) {
   const response = await fetch(path, {
@@ -31,30 +32,59 @@ function BookingSuccessContent() {
   const [loadStatus, setLoadStatus] = useState<'loading' | 'loaded' | 'error'>('loading')
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'partial' | 'error'>('idle')
   const [syncMessage, setSyncMessage] = useState('')
-  const syncStartedRef = useRef(false)
+  const syncBookingIdRef = useRef('')
+  const bookingIdRef = useRef(bookingId ?? '')
+  const [requestGuard] = useState(() => createAsyncIdentityGuard())
 
   useEffect(() => {
-    if (!bookingId) {
-      setLoadStatus('error')
-      return
+    const nextBookingId = bookingId ?? ''
+    if (bookingIdRef.current !== nextBookingId) {
+      bookingIdRef.current = nextBookingId
+      requestGuard.invalidate()
     }
-    let cancelled = false
+  }, [bookingId, requestGuard])
+
+  useEffect(() => {
     const loadBooking = async () => {
+      requestGuard.invalidate()
+      setBooking(null)
+      setSyncStatus('idle')
+      setSyncMessage('')
+      syncBookingIdRef.current = ''
+
+      if (!bookingId || !getMockUser()) {
+        setLoadStatus('error')
+        return
+      }
+
+      const currentIdentity = () => ({
+        resourceKey: bookingIdRef.current,
+        subjectId: getMockUser()?.id ?? null,
+      })
+      const requestToken = requestGuard.begin(currentIdentity())
+      if (!requestToken) {
+        setLoadStatus('error')
+        return
+      }
+      setLoadStatus('loading')
+
       try {
         const accessToken = await getAuthAccessToken()
+        if (!requestGuard.isCurrent(requestToken, currentIdentity()) || !accessToken) return
         const response = await fetch(`/api/bookings/read?bookingId=${encodeURIComponent(bookingId)}`, {
-          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+          headers: { Authorization: `Bearer ${accessToken}` },
         })
         const data = await response.json().catch(() => ({}))
-        if (!cancelled && response.ok && data.ok !== false && data.booking) {
+        if (!requestGuard.isCurrent(requestToken, currentIdentity())) return
+        if (response.ok && data.ok !== false && data.booking) {
           setBooking(data.booking)
           setLoadStatus('loaded')
-        } else if (!cancelled) {
+        } else {
           setBooking(null)
           setLoadStatus('error')
         }
       } catch {
-        if (!cancelled) {
+        if (requestGuard.isCurrent(requestToken, currentIdentity())) {
           setBooking(null)
           setLoadStatus('error')
         }
@@ -62,23 +92,33 @@ function BookingSuccessContent() {
     }
 
     void loadBooking()
+    const unsubscribeAuth = subscribeAuthChange(() => {
+      void loadBooking()
+    })
     return () => {
-      cancelled = true
+      unsubscribeAuth()
+      requestGuard.invalidate()
     }
-  }, [bookingId])
+  }, [bookingId, requestGuard])
 
   useEffect(() => {
-    if (!booking || !isTrustedPaidBooking(booking) || syncStartedRef.current) return
+    if (!booking || !isTrustedPaidBooking(booking) || syncBookingIdRef.current === booking.id) return
     if (booking.googleCalendarEventId && booking.emailSentToCustomer && booking.emailSentToAdmin) {
+      syncBookingIdRef.current = booking.id
       setSyncStatus('success')
       setSyncMessage('Google Calendar 與 Email 已完成。')
       return
     }
 
-    syncStartedRef.current = true
-    let cancelled = false
+    syncBookingIdRef.current = booking.id
 
     const syncBooking = async () => {
+      const currentIdentity = () => ({
+        resourceKey: bookingIdRef.current,
+        subjectId: getMockUser()?.id ?? null,
+      })
+      const requestToken = requestGuard.begin(currentIdentity())
+      if (!requestToken) return
       setSyncStatus('syncing')
       setSyncMessage('正在建立 Google Calendar 事件與寄出確認信...')
 
@@ -86,16 +126,28 @@ function BookingSuccessContent() {
       let calendarDone = Boolean(booking.googleCalendarEventId)
       let emailDone = booking.emailSentToCustomer && booking.emailSentToAdmin
       const errors: string[] = []
-      const accessToken = await getAuthAccessToken()
+      let accessToken = ''
+      try {
+        accessToken = await getAuthAccessToken() ?? ''
+      } catch {
+        if (requestGuard.isCurrent(requestToken, currentIdentity())) {
+          setSyncStatus('error')
+          setSyncMessage('同步失敗，請稍後再試。')
+        }
+        return
+      }
+      if (!requestGuard.isCurrent(requestToken, currentIdentity()) || !accessToken) return
 
       if (!calendarDone) {
         try {
+          if (!requestGuard.isCurrent(requestToken, currentIdentity())) return
           const calendarResult = await postJson('/api/calendar/create-event', { bookingId: booking.id }, accessToken)
-          const updated = updateBookingRecord(booking.id, {
+          if (!requestGuard.isCurrent(requestToken, currentIdentity())) return
+          nextBooking = {
+            ...nextBooking,
             googleCalendarEventId: calendarResult.eventId,
-            googleCalendarEventLink: calendarResult.htmlLink
-          })
-          if (updated) nextBooking = updated
+            googleCalendarEventLink: calendarResult.htmlLink,
+          }
           calendarDone = true
         } catch (error) {
           errors.push(error instanceof Error ? error.message : 'Google Calendar 建立失敗')
@@ -104,20 +156,22 @@ function BookingSuccessContent() {
 
       if (!emailDone) {
         try {
+          if (!requestGuard.isCurrent(requestToken, currentIdentity())) return
           // 安全設計：只傳 bookingId，信件收件人與內容由後端從 booking record 推導。
           await postJson('/api/email/send-booking-confirmation', { bookingId: booking.id }, accessToken)
-          const updated = updateBookingRecord(booking.id, {
+          if (!requestGuard.isCurrent(requestToken, currentIdentity())) return
+          nextBooking = {
+            ...nextBooking,
             emailSentToCustomer: true,
-            emailSentToAdmin: true
-          })
-          if (updated) nextBooking = updated
+            emailSentToAdmin: true,
+          }
           emailDone = true
         } catch (error) {
           errors.push(error instanceof Error ? error.message : 'Email 寄送失敗')
         }
       }
 
-      if (cancelled) return
+      if (!requestGuard.isCurrent(requestToken, currentIdentity())) return
       setBooking(nextBooking)
 
       if (calendarDone && emailDone) {
@@ -135,9 +189,11 @@ function BookingSuccessContent() {
     void syncBooking()
 
     return () => {
-      cancelled = true
+      requestGuard.invalidate()
     }
-  }, [booking])
+  }, [booking, requestGuard])
+
+  useEffect(() => () => requestGuard.invalidate(), [requestGuard])
 
   const trustedPaid = isTrustedPaidBooking(booking)
   const title = loadStatus === 'error' ? '無法確認預約' : trustedPaid ? '預約成功' : '付款確認中'

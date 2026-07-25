@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server'
-import { getNewebPayConfig } from '@/lib/newebpay/config'
-import { createCoursePaymentMpgForm, generateMerchantOrderNo } from '@/lib/newebpay/mpg'
-import { getSupabaseAdmin, hasSupabaseAdminConfig } from '@/lib/supabase/admin'
-import { getUserIdFromRequest } from '@/lib/supabase/auth'
+import { requireAdminUser } from '@/lib/auth/admin'
+import { generateMerchantOrderNo } from '@/lib/newebpay/mpg'
 
 const testPayment = {
   itemType: 'newebpay_test',
@@ -22,24 +20,16 @@ export async function POST(request: Request) {
     )
   }
 
-  if (!hasSupabaseAdminConfig()) {
-    return NextResponse.json({ ok: false, message: 'Supabase 管理端尚未設定' }, { status: 500 })
-  }
-
-  const userId = await getUserIdFromRequest(request)
-  if (!userId) {
-    return NextResponse.json({ ok: false, message: '尚未登入' }, { status: 401 })
-  }
-
   try {
-    const config = getNewebPayConfig()
-    const merchantOrderNo = generateMerchantOrderNo('NPTEST')
-    const supabase = getSupabaseAdmin()
+    const auth = await requireAdminUser(request)
+    if ('error' in auth) return auth.error
 
-    const { data: payment, error } = await supabase
+    const merchantOrderNo = generateMerchantOrderNo('NPTEST')
+
+    const { data: payment, error } = await auth.supabase
       .from('payments')
       .insert({
-        user_id: userId,
+        user_id: auth.user.id,
         provider: 'newebpay',
         item_type: testPayment.itemType,
         item_id: testPayment.itemId,
@@ -57,29 +47,16 @@ export async function POST(request: Request) {
       .single()
 
     if (error) {
-      return NextResponse.json({ ok: false, message: error.message }, { status: 500 })
+      console.error('NewebPay test payment insert failed')
+      return NextResponse.json({ ok: false, message: '建立測試付款失敗。' }, { status: 500 })
     }
-
-    const mpgForm = createCoursePaymentMpgForm(
-      {
-        merchantOrderNo,
-        amount: testPayment.amount,
-        itemDesc: testPayment.itemName,
-        notifyUrl: `${config.siteUrl}/api/payments/newebpay/notify`,
-        returnUrl: `${config.siteUrl}/api/payments/newebpay/return`,
-        clientBackUrl: `${config.siteUrl}/payment/newebpay/test`,
-      },
-      config,
-    )
 
     return NextResponse.json({
       ok: true,
       paymentId: payment.id,
-      merchantOrderNo,
-      form: mpgForm,
     })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '建立測試付款失敗'
-    return NextResponse.json({ ok: false, message }, { status: 500 })
+  } catch {
+    console.error('Unexpected NewebPay test payment creation failure')
+    return NextResponse.json({ ok: false, message: '建立測試付款失敗。' }, { status: 500 })
   }
 }

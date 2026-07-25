@@ -5,7 +5,7 @@ import { isAdminEmail } from '../auth/admin'
  * 預約通知信 API 的安全 handler。
  *
  * 安全原則：
- * - 只接受 bookingId（取消信可另帶 cancellationReason 純文字，會截斷長度）。
+ * - 只接受 bookingId；取消原因只能從已取消的 booking record 推導。
  * - 完全忽略 request body 的 to / cc / bcc / subject / html，收件人一律由
  *   booking record（customer email）與 server env（ADMIN_NOTIFY_EMAIL，於
  *   sendBookingEmails 內讀取）推導。
@@ -53,50 +53,35 @@ export type BookingEmailPayloadFromRecord = {
   bookingId: string
   customerName: string
   customerEmail: string
-  customerPhone?: string
   planName: string
   amount: number
   startTimeText: string
   endTimeText: string
-  birthDate?: string
-  birthTime?: string
-  birthPlace?: string
-  gender?: string
-  isBirthTimeAccurate?: boolean
-  question?: string
   cancellationReason?: string
 }
 
 export type ParsedBookingEmailRequest = {
   bookingId: string
-  cancellationReason?: string
 }
 
 /**
- * 只取出 bookingId 與 cancellationReason，其他欄位（to / cc / bcc / subject /
- * html / customerEmail...）一律忽略。
+ * request contract 只允許 bookingId。任何額外欄位都 fail closed，避免未來新增
+ * 敏感欄位時被舊 handler 靜默接受。
  */
 export function parseBookingEmailRequestBody(body: unknown): ParsedBookingEmailRequest | null {
-  if (!body || typeof body !== 'object') return null
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null
 
   const record = body as Record<string, unknown>
+  if (Object.keys(record).some((key) => key !== 'bookingId')) return null
   const bookingId = typeof record.bookingId === 'string' ? record.bookingId.trim() : ''
   if (!bookingId) return null
 
-  const cancellationReason =
-    typeof record.cancellationReason === 'string'
-      ? record.cancellationReason.trim().slice(0, MAX_CANCELLATION_REASON_LENGTH)
-      : undefined
-
-  return {
-    bookingId,
-    ...(cancellationReason ? { cancellationReason } : {}),
-  }
+  return { bookingId }
 }
 
 export type BookingEmailAccessDecision =
   | { allowed: true; isAdmin: boolean }
-  | { allowed: false; status: 401 | 403 | 404 }
+  | { allowed: false; status: 401 | 404 }
 
 /**
  * 誰可以觸發這封信：
@@ -104,8 +89,7 @@ export type BookingEmailAccessDecision =
  * - booking 不存在 → 404
  * - ADMIN_EMAILS 內的帳號 → 允許（任何 booking）
  * - booking 的 user_id 與登入者相同 → 允許
- * - 登入者 email 與 booking 的 customer email 相同 → 允許
- * - 其他 → 403
+ * - 其他 → 404，避免透露其他會員的 booking 是否存在
  */
 export function resolveBookingEmailAccess(input: {
   requester: BookingEmailRequester | null
@@ -125,13 +109,7 @@ export function resolveBookingEmailAccess(input: {
     return { allowed: true, isAdmin: false }
   }
 
-  const requesterEmail = requester.email?.trim().toLowerCase()
-  const bookingEmail = booking.customerEmail?.trim().toLowerCase()
-  if (requesterEmail && bookingEmail && requesterEmail === bookingEmail) {
-    return { allowed: true, isAdmin: false }
-  }
-
-  return { allowed: false, status: 403 }
+  return { allowed: false, status: 404 }
 }
 
 export function hasBookingEmailAlreadyBeenSent(kind: BookingEmailKind, booking: BookingEmailSourceRecord): boolean {
@@ -156,7 +134,7 @@ function formatTaipeiDateTimeText(value: string) {
 
 /**
  * 信件內容全部由 booking record 推導，不使用外部 request 的任何內容
- * （唯一例外：取消原因純文字，已截斷長度並經固定 template escape）。
+ * 取消原因同樣只能來自 booking record。
  */
 export function buildBookingEmailPayload(
   booking: BookingEmailSourceRecord,
@@ -168,17 +146,10 @@ export function buildBookingEmailPayload(
     bookingId: booking.id,
     customerName: booking.customerName,
     customerEmail: booking.customerEmail,
-    customerPhone: booking.customerPhone,
     planName: booking.planName,
     amount: booking.amount,
     startTimeText: formatTaipeiDateTimeText(booking.startTime),
     endTimeText: formatTaipeiDateTimeText(booking.endTime),
-    birthDate: booking.birthDate,
-    birthTime: booking.birthTime,
-    birthPlace: booking.birthPlace,
-    gender: booking.gender,
-    isBirthTimeAccurate: booking.isBirthTimeAccurate,
-    question: booking.question,
     ...(cancellationReason ? { cancellationReason } : {}),
   }
 }
@@ -186,8 +157,12 @@ export function buildBookingEmailPayload(
 export type HandleBookingEmailRequestDeps = {
   kind: BookingEmailKind
   getRequesterFromRequest: (request: Request) => Promise<BookingEmailRequester | null>
-  getBookingById: (bookingId: string) => Promise<BookingEmailSourceRecord | null>
-  sendEmails: (payload: BookingEmailPayloadFromRecord) => Promise<{ mocked?: boolean }>
+  getBookingById: (
+    bookingId: string,
+    requesterId: string,
+    requesterIsAdmin: boolean,
+  ) => Promise<BookingEmailSourceRecord | null>
+  sendEmails: (payload: BookingEmailPayloadFromRecord) => Promise<unknown>
   markEmailsSent?: (bookingId: string) => Promise<void>
   hasBookingDataSource: () => boolean
   adminEmailsRaw?: string | null
@@ -213,27 +188,39 @@ export async function handleBookingEmailRequest(
       return NextResponse.json({ ok: false, message: '請提供有效的預約編號。' }, { status: 400 })
     }
 
+    const requester = await deps.getRequesterFromRequest(request).catch(() => null)
+    if (!requester) {
+      return NextResponse.json({ ok: false, message: '請先登入後再操作。' }, { status: 401 })
+    }
+
     if (!deps.hasBookingDataSource()) {
       // 無法從可信資料來源推導收件人時，一律不寄信。
       return NextResponse.json({ ok: false, message: '寄信服務暫時無法使用。' }, { status: 503 })
     }
 
-    const requester = await deps.getRequesterFromRequest(request).catch(() => null)
-    const booking = await deps.getBookingById(parsed.bookingId).catch(() => null)
-
     const adminEmailsRaw = deps.adminEmailsRaw !== undefined ? deps.adminEmailsRaw : process.env.ADMIN_EMAILS
+    const requesterIsAdmin = isAdminEmail(requester.email, adminEmailsRaw)
+    const booking = await deps
+      .getBookingById(parsed.bookingId, requester.id, requesterIsAdmin)
+      .catch(() => null)
     const access = resolveBookingEmailAccess({ requester, booking, adminEmailsRaw })
 
     if (!access.allowed) {
-      const messages: Record<401 | 403 | 404, string> = {
+      const messages: Record<401 | 404, string> = {
         401: '請先登入後再操作。',
-        403: '沒有權限寄送這筆預約的通知信。',
         404: '找不到這筆預約。',
       }
       return NextResponse.json({ ok: false, message: messages[access.status] }, { status: access.status })
     }
 
     const safeBooking = booking as BookingEmailSourceRecord
+
+    if (deps.kind === 'cancellation' && safeBooking.status !== 'cancelled') {
+      return NextResponse.json(
+        { ok: false, error: 'booking_not_cancelled', message: '預約尚未取消，無法寄出取消通知信。' },
+        { status: 409 },
+      )
+    }
 
     if (
       deps.requireTrustedPaidBooking &&
@@ -249,39 +236,27 @@ export async function handleBookingEmailRequest(
       return NextResponse.json({ ok: true, alreadySent: true })
     }
 
-    const payload = buildBookingEmailPayload(safeBooking, {
-      cancellationReason: deps.kind === 'cancellation' ? parsed.cancellationReason : undefined,
-    })
+    const payload = buildBookingEmailPayload(safeBooking)
 
-    let mocked = false
     try {
-      const result = await deps.sendEmails(payload)
-      mocked = result?.mocked === true
-    } catch (error) {
-      console.error(
-        `Failed to send booking ${deps.kind} emails`,
-        error instanceof Error ? error.message : '未知錯誤',
-      )
+      await deps.sendEmails(payload)
+    } catch {
+      console.error(`Failed to send booking ${deps.kind} emails`)
       return NextResponse.json({ ok: false, message: genericErrorMessage }, { status: 500 })
     }
 
     if (deps.markEmailsSent) {
       try {
         await deps.markEmailsSent(safeBooking.id)
-      } catch (error) {
-        console.error(
-          `Failed to mark booking ${deps.kind} emails as sent`,
-          error instanceof Error ? error.message : '未知錯誤',
-        )
+      } catch {
+        console.error(`Failed to mark booking ${deps.kind} emails as sent`)
+        return NextResponse.json({ ok: false, message: genericErrorMessage }, { status: 500 })
       }
     }
 
-    return NextResponse.json({ ok: true, mocked })
-  } catch (error) {
-    console.error(
-      `Unexpected booking ${deps.kind} email request error`,
-      error instanceof Error ? error.message : '未知錯誤',
-    )
+    return NextResponse.json({ ok: true })
+  } catch {
+    console.error(`Unexpected booking ${deps.kind} email request error`)
     return NextResponse.json({ ok: false, message: genericErrorMessage }, { status: 500 })
   }
 }

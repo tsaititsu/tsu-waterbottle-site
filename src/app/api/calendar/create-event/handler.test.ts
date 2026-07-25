@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { handleBookingCalendarRequest, type BookingCalendarHandlerDeps } from './handler'
-import type { BookingRecord } from '../../../../lib/mockBooking'
+import type { BookingRecord } from '../../../../lib/bookings/types'
 
 function makeBooking(overrides: Partial<BookingRecord> = {}) {
   return {
@@ -18,11 +18,11 @@ function makeBooking(overrides: Partial<BookingRecord> = {}) {
   } as BookingRecord
 }
 
-function request() {
+function request(body: Record<string, unknown> = { bookingId: 'booking-1' }) {
   return new Request('http://localhost/api/calendar/create-event', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ bookingId: 'booking-1', customerEmail: 'attacker@example.com' }),
+    body: JSON.stringify(body),
   })
 }
 
@@ -51,6 +51,15 @@ async function run() {
   assert.equal(response.status, 401)
   assert.equal(context.calls.created, 0)
 
+  context = makeDeps(makeBooking())
+  response = await handleBookingCalendarRequest(
+    request({ bookingId: 'booking-1', customerEmail: 'attacker@example.com' }),
+    context.deps,
+  )
+  assert.equal(response.status, 400)
+  assert.equal(context.calls.created, 0)
+  assert.equal(context.calls.marked, 0)
+
   context = makeDeps(makeBooking({ status: 'pending_payment', paymentStatus: 'pending' }))
   response = await handleBookingCalendarRequest(request(), context.deps)
   assert.equal(response.status, 409)
@@ -62,7 +71,15 @@ async function run() {
   assert.equal(response.status, 200)
   assert.equal(context.calls.created, 1)
   assert.equal(context.calls.marked, 1)
-  assert.equal(context.calls.payload?.customerEmail, 'member@example.com')
+  assert.deepEqual(context.calls.payload, {
+    bookingId: 'booking-1',
+    planName: '水瓶先生論命',
+    startTime: '2026-08-01T02:00:00.000Z',
+    endTime: '2026-08-01T03:00:00.000Z',
+    timezone: 'Asia/Taipei',
+  })
+  assert.equal(JSON.stringify(context.calls.payload).includes('member@example.com'), false)
+  assert.equal(JSON.stringify(context.calls.payload).includes('測試會員'), false)
   assert.equal(JSON.stringify(context.calls.payload).includes('attacker@example.com'), false)
 
   console.log('booking calendar handler tests passed')

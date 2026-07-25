@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { RefreshCw, Search, ShieldCheck } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getAuthAccessToken } from '@/lib/mockAuth'
 import type { AdminBookingListItem } from '@/lib/supabase/adminBookings'
 import { classifyAdminBookingStatus } from './bookingStatus'
@@ -13,7 +13,7 @@ type TimeFilter = 'all' | 'future' | 'past'
 type AdminBookingsResponse = {
   ok?: boolean
   bookings?: AdminBookingListItem[]
-  meta?: { count: number; limit: number }
+  meta?: { count: number; total: number; limit: number; offset: number }
   error?: string
 }
 
@@ -121,36 +121,55 @@ export default function AdminBookingsPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('all')
   const [referenceTime, setReferenceTime] = useState(0)
+  const [totalBookings, setTotalBookings] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
+  const requestSequenceRef = useRef(0)
 
-  const loadBookings = useCallback(async () => {
-    setIsLoading(true)
+  const loadBookings = useCallback(async (offset = 0) => {
+    const requestSequence = ++requestSequenceRef.current
+    if (offset === 0) {
+      setIsLoading(true)
+      setIsLoadingMore(false)
+    } else {
+      setIsLoadingMore(true)
+    }
     setErrorMessage('')
 
     try {
       const accessToken = await getAuthAccessToken()
+      if (requestSequence !== requestSequenceRef.current) return
       if (!accessToken) throw new Error('請先登入後再使用後台。')
 
-      const response = await fetch('/api/admin/bookings', {
+      const response = await fetch(`/api/admin/bookings?limit=50&offset=${offset}`, {
         cache: 'no-store',
         headers: { authorization: `Bearer ${accessToken}` },
       })
       const data = (await response.json()) as AdminBookingsResponse
+      if (requestSequence !== requestSequenceRef.current) return
 
       if (!response.ok || !data.ok) {
         setErrorMessage(data.error ?? '讀取預約紀錄失敗。')
-        setBookings([])
+        if (offset === 0) setBookings([])
         return
       }
 
-      setBookings(data.bookings ?? [])
+      setBookings((current) => offset === 0 ? data.bookings ?? [] : [...current, ...(data.bookings ?? [])])
+      setTotalBookings(
+        Number.isSafeInteger(data.meta?.total)
+          ? data.meta?.total ?? 0
+          : offset + (data.bookings?.length ?? 0),
+      )
       setReferenceTime(Date.now())
     } catch (error) {
-      setBookings([])
+      if (requestSequence !== requestSequenceRef.current) return
+      if (offset === 0) setBookings([])
       setErrorMessage(error instanceof Error ? error.message : '讀取預約紀錄失敗。')
     } finally {
+      if (requestSequence !== requestSequenceRef.current) return
       setIsLoading(false)
+      setIsLoadingMore(false)
     }
   }, [])
 
@@ -199,13 +218,13 @@ export default function AdminBookingsPage() {
             <p className="mt-4 text-sm font-semibold text-darkGold">Booking Records</p>
             <h1 className="mt-2 font-serifTC text-3xl font-semibold text-deepPurple">預約紀錄</h1>
             <p className="mt-3 max-w-3xl leading-8 text-textMuted">
-              本頁為唯讀管理頁，只顯示最近 100 筆預約。修改、取消與退款功能尚未開放。
+              本頁為唯讀管理頁，以每批 50 筆載入遮蔽後預約摘要。修改、取消與退款功能尚未開放。
             </p>
           </div>
           <button
             type="button"
-            onClick={() => void loadBookings()}
-            disabled={isLoading}
+            onClick={() => void loadBookings(0)}
+            disabled={isLoading || isLoadingMore}
             className="focus-ring inline-flex w-fit shrink-0 items-center gap-2 rounded-xl border border-borderSoft bg-white px-4 py-3 font-semibold text-deepPurple disabled:opacity-60"
           >
             <RefreshCw size={18} aria-hidden="true" />
@@ -253,6 +272,7 @@ export default function AdminBookingsPage() {
 
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-borderSoft pt-4 text-sm text-textMuted">
               <span>符合條件 {visibleBookings.length} 筆</span>
+              <span>已載入 {bookings.length}／{totalBookings} 筆</span>
               <span className="inline-flex items-center gap-2 rounded-full bg-softPurple px-3 py-2 font-semibold text-deepPurple">
                 <ShieldCheck size={16} aria-hidden="true" />
                 Read-only
@@ -305,7 +325,6 @@ export default function AdminBookingsPage() {
                         <td className="max-w-[190px] py-4 pr-5">
                           <p className="break-words font-semibold text-textDark">{booking.customerName || '未提供姓名'}</p>
                           <p className="mt-1 break-words text-xs text-textMuted">LINE：{booking.lineDisplayName || '未提供'}</p>
-                          {booking.note ? <p className="mt-2 line-clamp-2 break-words text-xs text-textMuted">備註：{booking.note}</p> : null}
                         </td>
                         <td className="max-w-[220px] py-4 pr-5">{contactDetails(booking)}</td>
                         <td className="py-4 pr-5">
@@ -349,13 +368,21 @@ export default function AdminBookingsPage() {
                         <dt className="font-semibold text-textMuted">寄信狀態</dt>
                         <dd className="mt-2"><EmailStatus booking={booking} /></dd>
                       </div>
-                      {booking.note ? <MobileDetail label="備註" value={booking.note} truncate /> : null}
-                      {booking.cancellationReason ? <MobileDetail label="取消原因" value={booking.cancellationReason} truncate /> : null}
                       <MobileDetail label="建立時間" value={formatTaipeiDateTime(booking.createdAt)} />
                     </dl>
                   </article>
                 ))}
               </div>
+              {bookings.length < totalBookings ? (
+                <button
+                  className="focus-ring mx-auto mt-6 flex min-h-11 rounded-xl border border-deepPurple bg-white px-5 py-3 font-semibold text-deepPurple disabled:opacity-60"
+                  disabled={isLoading || isLoadingMore}
+                  onClick={() => void loadBookings(bookings.length)}
+                  type="button"
+                >
+                  {isLoadingMore ? '載入中...' : '載入更多預約'}
+                </button>
+              ) : null}
             </>
           ) : null}
         </section>
@@ -417,20 +444,10 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function contactDetails(booking: AdminBookingListItem) {
-  const phoneHref = booking.customerPhone?.replace(/[^+\d]/g, '')
-
   return (
     <div className="grid min-w-0 gap-1">
-      {booking.customerEmail ? (
-        <a className="min-w-0 break-all text-deepPurple underline-offset-2 hover:underline" href={`mailto:${booking.customerEmail}`}>
-          {booking.customerEmail}
-        </a>
-      ) : <span className="text-textMuted">未提供 Email</span>}
-      {booking.customerPhone && phoneHref ? (
-        <a className="break-words text-deepPurple underline-offset-2 hover:underline" href={`tel:${phoneHref}`}>
-          {booking.customerPhone}
-        </a>
-      ) : <span className="text-textMuted">未提供電話</span>}
+      <span className="min-w-0 break-all text-textDark">{booking.customerEmail}</span>
+      <span className="break-words text-textDark">{booking.customerPhone}</span>
     </div>
   )
 }

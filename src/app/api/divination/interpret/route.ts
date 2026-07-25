@@ -34,7 +34,6 @@ import type {
   DivinationDrawMode,
   DivinationInterpretRequest,
   DivinationInterpretResponse,
-  DivinationInterpretation,
   DivinationMockPaymentGate,
   DivinationPosition,
 } from "@/lib/divination/types"
@@ -77,33 +76,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-function isValidInterpretation(value: unknown): value is DivinationInterpretation {
-  if (!isRecord(value)) return false
-
-  return (
-    typeof value.summary === "string" &&
-    value.summary.trim().length > 0 &&
-    typeof value.cardMessage === "string" &&
-    value.cardMessage.trim().length > 0 &&
-    typeof value.situationAnalysis === "string" &&
-    value.situationAnalysis.trim().length > 0 &&
-    typeof value.advice === "string" &&
-    value.advice.trim().length > 0 &&
-    typeof value.reminder === "string" &&
-    value.reminder.trim().length > 0
-  )
-}
-
-function normalizeInterpretation(value: DivinationInterpretation): DivinationInterpretation {
-  return {
-    summary: value.summary.trim(),
-    cardMessage: value.cardMessage.trim(),
-    situationAnalysis: value.situationAnalysis.trim(),
-    advice: value.advice.trim(),
-    reminder: value.reminder.trim(),
-  }
-}
-
 function extractResponseText(value: unknown) {
   if (!isRecord(value)) return ""
 
@@ -128,20 +100,6 @@ function extractResponseText(value: unknown) {
   }
 
   return textParts.join("\n").trim()
-}
-
-function parseOpenAiInterpretation(text: string) {
-  try {
-    const parsed = JSON.parse(text)
-
-    if (!isValidInterpretation(parsed)) {
-      return null
-    }
-
-    return normalizeInterpretation(parsed)
-  } catch {
-    return null
-  }
 }
 
 async function requestOpenAiText(input: {
@@ -170,8 +128,8 @@ async function requestOpenAiText(input: {
         ...(input.textFormat ? { text: { format: input.textFormat } } : {}),
       }),
     })
-  } catch (error) {
-    console.error("OpenAI divination request failed:", error)
+  } catch {
+    console.error("OpenAI divination request failed")
 
     return {
       ok: false as const,
@@ -184,7 +142,6 @@ async function requestOpenAiText(input: {
   if (!response.ok) {
     console.error("OpenAI divination request failed:", {
       status: response.status,
-      statusText: response.statusText,
     })
 
     return {
@@ -329,11 +286,8 @@ async function interpretPersistedDivinationReading(input: {
 
   try {
     reading = await getDivinationReadingForInterpretation(input.readingId)
-  } catch (error) {
-    console.warn("Divination reading lookup failed:", {
-      readingId: input.readingId,
-      error: error instanceof Error ? error.message : "unknown_error",
-    })
+  } catch {
+    console.warn("Divination reading lookup failed")
 
     return NextResponse.json(
       {
@@ -415,11 +369,8 @@ async function interpretPersistedDivinationReading(input: {
         { status: 404 }
       )
     }
-  } catch (error) {
-    console.warn("Divination reading interpreting update failed:", {
-      readingId: input.readingId,
-      error: error instanceof Error ? error.message : "unknown_error",
-    })
+  } catch {
+    console.warn("Divination reading interpreting update failed")
 
     return NextResponse.json(
       {
@@ -445,11 +396,9 @@ async function interpretPersistedDivinationReading(input: {
         readingId: input.readingId,
         errorMessage: openAiResult.error,
       })
-    } catch (error) {
+    } catch {
       console.warn("Divination reading failed update failed:", {
-        readingId: input.readingId,
         errorCode: openAiResult.error,
-        error: error instanceof Error ? error.message : "unknown_error",
       })
     }
 
@@ -480,11 +429,8 @@ async function interpretPersistedDivinationReading(input: {
         { status: 404 }
       )
     }
-  } catch (error) {
-    console.warn("Divination reading completed update failed:", {
-      readingId: input.readingId,
-      error: error instanceof Error ? error.message : "unknown_error",
-    })
+  } catch {
+    console.warn("Divination reading completed update failed")
 
     return NextResponse.json(
       {

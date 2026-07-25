@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   buildPaidPaymentUpdate,
   buildPendingPaymentInsert,
@@ -6,6 +8,7 @@ import {
   getMarkPaymentPaidDecision,
   mapPaymentPaidContext,
   mapPaymentRow,
+  readPaymentRow,
   type PaymentRecord,
   type PaymentRow,
 } from './payments'
@@ -122,6 +125,31 @@ const row: PaymentRow = {
   created_at: '2026-07-03T12:00:00.000Z',
   updated_at: '2026-07-03T12:00:00.000Z',
 }
+assert.throws(
+  () => readPaymentRow({ ...row, customer_email: 'must-not-cross-payment-contract@example.com' }),
+  /payment_row_contract_mismatch/,
+)
+assert.throws(
+  () => {
+    const missingPayload: Record<string, unknown> = { ...row }
+    Reflect.deleteProperty(missingPayload, 'raw_payload')
+    return readPaymentRow(missingPayload)
+  },
+  /payment_row_contract_mismatch/,
+)
+for (const invalidRow of [
+  { ...row, provider: 'attacker-provider' },
+  { ...row, status: 'refunded' },
+  { ...row, amount_twd: '3600' },
+  { ...row, amount_twd: 0 },
+  { ...row, currency: 'USD' },
+  { ...row, raw_payload: ['not', 'an', 'object'] },
+  { ...row, paid_at: 'not-a-date' },
+  { ...row, created_at: 'not-a-date' },
+]) {
+  assert.throws(() => readPaymentRow(invalidRow), /payment_row_invalid/)
+}
+assert.deepEqual(readPaymentRow(row), row)
 const record = mapPaymentRow(row)
 
 assert.deepEqual(record, {
@@ -204,6 +232,9 @@ const paidRecord: Pick<PaymentRecord, 'status'> = { status: 'paid' }
 assert.equal(getMarkPaymentPaidDecision(null), 'not_found')
 assert.equal(getMarkPaymentPaidDecision(paidRecord), 'already_paid')
 assert.equal(getMarkPaymentPaidDecision(pendingRecord), 'should_update')
+
+const repositorySource = readFileSync(join(process.cwd(), 'src/lib/supabase/payments.ts'), 'utf8')
+assert.doesNotMatch(repositorySource, /\.select\(['"]\*['"]\)/)
 
 assert.throws(
   () =>

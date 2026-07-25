@@ -1,10 +1,15 @@
 import { NextResponse } from 'next/server'
 import { resolveBookingAccess, type BookingRequestUser } from '../../../../lib/bookings/bookingAccess'
-import type { BookingRecord } from '../../../../lib/mockBooking'
+import { isAdminEmail } from '../../../../lib/auth/admin'
+import type { BookingRecord } from '../../../../lib/bookings/types'
 
 export type BookingReadHandlerDeps = {
   getRequesterFromRequest: (request: Request) => Promise<BookingRequestUser | null>
-  getBookingById: (bookingId: string) => Promise<BookingRecord | null>
+  getBookingById: (
+    bookingId: string,
+    requesterId: string,
+    requesterIsAdmin: boolean,
+  ) => Promise<BookingRecord | null>
   adminEmailsRaw?: string | null
 }
 
@@ -20,11 +25,13 @@ export async function handleBookingReadRequest(request: Request, deps: BookingRe
       return NextResponse.json({ ok: false, message: '缺少預約編號。' }, { status: 400 })
     }
 
-    const booking = await deps.getBookingById(bookingId)
+    const adminEmailsRaw = deps.adminEmailsRaw !== undefined ? deps.adminEmailsRaw : process.env.ADMIN_EMAILS
+    const requesterIsAdmin = isAdminEmail(requester.email, adminEmailsRaw)
+    const booking = await deps.getBookingById(bookingId, requester.id, requesterIsAdmin)
     const access = resolveBookingAccess({
       requester,
       booking,
-      adminEmailsRaw: deps.adminEmailsRaw !== undefined ? deps.adminEmailsRaw : process.env.ADMIN_EMAILS,
+      adminEmailsRaw,
     })
 
     if (!access.allowed) {
@@ -32,8 +39,8 @@ export async function handleBookingReadRequest(request: Request, deps: BookingRe
     }
 
     return NextResponse.json({ ok: true, booking })
-  } catch (error) {
-    console.error('Booking read failed', error instanceof Error ? error.message : 'unknown_error')
+  } catch {
+    console.error('Booking read failed')
     return NextResponse.json({ ok: false, message: '讀取預約失敗，請稍後再試。' }, { status: 500 })
   }
 }

@@ -121,9 +121,6 @@ export async function PATCH(request: Request) {
     if (selectError) {
       console.error('Failed to find consultation slots for bulk close', {
         code: selectError.code,
-        message: selectError.message,
-        details: selectError.details,
-        hint: selectError.hint,
       })
       return NextResponse.json({ ok: false, error: '查詢可關閉時段失敗。' }, { status: 500 })
     }
@@ -177,9 +174,6 @@ export async function PATCH(request: Request) {
       if (error) {
         console.error('Failed to bulk close consultation slots', {
           code: error.code,
-          message: error.message,
-          details: error.details,
-          hint: error.hint,
         })
         return NextResponse.json({ ok: false, error: '批次關閉時段失敗。' }, { status: 500 })
       }
@@ -196,9 +190,6 @@ export async function PATCH(request: Request) {
       if (error) {
         console.error('Failed to create default consultation slot close markers', {
           code: error.code,
-          message: error.message,
-          details: error.details,
-          hint: error.hint,
         })
         return NextResponse.json({ ok: false, error: '批次關閉時段失敗。' }, { status: 500 })
       }
@@ -207,8 +198,8 @@ export async function PATCH(request: Request) {
     }
 
     return NextResponse.json({ ok: true, updatedCount })
-  } catch (error) {
-    console.error('Unexpected booking slots bulk close error', error)
+  } catch {
+    console.error('Unexpected booking slots bulk close error')
     return NextResponse.json({ ok: false, error: '批次關閉時段失敗。' }, { status: 500 })
   }
 }

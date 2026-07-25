@@ -77,8 +77,8 @@ export async function requireAdminUser(
   let user: AdminRequestUser | null = null
   try {
     user = await verifyAccessToken(token)
-  } catch (error) {
-    console.error('Admin access token verification failed', error instanceof Error ? error.message : error)
+  } catch {
+    console.error('Admin access token verification failed')
     user = null
   }
 

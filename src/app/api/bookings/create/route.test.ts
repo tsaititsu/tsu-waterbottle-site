@@ -2,25 +2,20 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { UserProfile } from '@/lib/auth/types'
-import type { BookingRecord } from '@/lib/mockBooking'
+import type { BookingRecord } from '@/lib/bookings/types'
 import * as bookingCreateRoute from './route'
 import { handleBookingCreateRequest } from './handler'
 
 const tests: Array<{ name: string; fn: () => Promise<void> }> = []
 const BEARER_USER_ID = '5f0b8f2e-1234-4c56-9abc-def012345678'
 const LINE_USER_ID = '6f0b8f2e-1234-4c56-9abc-def012345678'
-const TRUSTED_START_TIME = '2026-08-01T05:00:00.000Z'
-const TRUSTED_END_TIME = '2026-08-01T06:00:00.000Z'
 
 type RouteDependencies = Parameters<typeof handleBookingCreateRequest>[1]
 
 type Calls = {
   bearer: number
   line: number
-  serviceClient: number
-  slotClaim: number
   booking: number
-  payment: number
   bookingInputs: Array<Record<string, unknown>>
 }
 
@@ -30,8 +25,8 @@ function test(name: string, fn: () => Promise<void>) {
 
 function validBody(overrides: Record<string, unknown> = {}) {
   return {
-    slotId: 'db:slot-1',
-    planId: 'ziwei-consultation-60',
+    slotId: 'db:11111111-1111-4111-8111-111111111111',
+    planId: 'waterbottle-consultation-60',
     startTime: 'attacker-start-time',
     endTime: 'attacker-end-time',
     customerName: '測試會員',
@@ -82,13 +77,9 @@ function dependencies(input: {
   const calls: Calls = {
     bearer: 0,
     line: 0,
-    serviceClient: 0,
-    slotClaim: 0,
     booking: 0,
-    payment: 0,
     bookingInputs: [],
   }
-  const serviceClient = {} as ReturnType<RouteDependencies['getServiceClient']>
 
   const deps: RouteDependencies = {
     getBearerUserId: async () => {
@@ -99,7 +90,7 @@ function dependencies(input: {
       calls.line += 1
       return input.lineCookieResult === undefined ? lineUser() : input.lineCookieResult
     },
-    getPlan: (planId) => planId === 'ziwei-consultation-60'
+    getPlan: (planId) => planId === 'waterbottle-consultation-60'
       ? {
           id: planId,
           name: '水瓶先生論命',
@@ -108,38 +99,15 @@ function dependencies(input: {
           description: '測試方案',
         }
       : undefined,
-    getServiceClient: () => {
-      calls.serviceClient += 1
-      return serviceClient
-    },
-    claimDbSlot: async () => {
-      calls.slotClaim += 1
-      return {
-        id: 'slot-1',
-        startAt: TRUSTED_START_TIME,
-        endAt: TRUSTED_END_TIME,
-        restore: async () => undefined,
-      }
-    },
-    claimDefaultSlot: async () => {
-      calls.slotClaim += 1
-      return {
-        id: 'default-slot-1',
-        startAt: TRUSTED_START_TIME,
-        endAt: TRUSTED_END_TIME,
-        restore: async () => undefined,
-      }
-    },
     createBooking: async (bookingInput) => {
       calls.booking += 1
       calls.bookingInputs.push(bookingInput as unknown as Record<string, unknown>)
-      return { id: 'booking-1' } as BookingRecord
+      return {
+        id: 'booking-1',
+        planName: '資料庫正式方案',
+        amount: 4100,
+      } as BookingRecord
     },
-    createPaymentId: () => {
-      calls.payment += 1
-      return 'mock-payment-1'
-    },
-    now: () => new Date('2026-07-15T00:00:00.000Z'),
   }
 
   return { calls, deps }
@@ -199,10 +167,7 @@ async function assertSafeInternalErrorResponse(response: Response) {
 }
 
 function assertNoWriteSideEffects(calls: Calls) {
-  assert.equal(calls.serviceClient, 0)
-  assert.equal(calls.slotClaim, 0)
   assert.equal(calls.booking, 0)
-  assert.equal(calls.payment, 0)
 }
 
 test('有效 Bearer 使用驗證後 owner 並維持成功 response contract', async () => {
@@ -216,14 +181,14 @@ test('有效 Bearer 使用驗證後 owner 並維持成功 response contract', as
   assert.equal(calls.bearer, 1)
   assert.equal(calls.line, 0)
   assert.equal(calls.bookingInputs[0].userId, BEARER_USER_ID)
+  assert.equal(calls.bookingInputs[0].slotId, 'db:11111111-1111-4111-8111-111111111111')
+  assert.equal('startTime' in calls.bookingInputs[0], false)
+  assert.equal('endTime' in calls.bookingInputs[0], false)
   assert.deepEqual(await readJson(response), {
     ok: true,
     bookingId: 'booking-1',
-    paymentId: 'mock-payment-1',
-    planName: '水瓶先生論命',
-    amount: 3600,
-    persisted: true,
-    mockCheckoutUrl: '/booking/checkout?bookingId=booking-1',
+    planName: '資料庫正式方案',
+    amount: 4100,
   })
 })
 
@@ -338,7 +303,7 @@ test('未登入即使 body 帶 userId 仍先回 401', async () => {
   assertNoWriteSideEffects(calls)
 })
 
-test('Route 傳給 helper 的 payload 是後端 owner 與明確白名單', async () => {
+test('Route 對未知欄位 fail closed 且不建立資料', async () => {
   const { calls, deps } = dependencies()
   const response = await handleBookingCreateRequest(
     request(validBody({
@@ -354,25 +319,8 @@ test('Route 傳給 helper 的 payload 是後端 owner 與明確白名單', async
     deps,
   )
 
-  assert.equal(response.status, 200)
-  assert.deepEqual(calls.bookingInputs[0], {
-    userId: BEARER_USER_ID,
-    slotId: 'db:slot-1',
-    planId: 'ziwei-consultation-60',
-    startTime: TRUSTED_START_TIME,
-    endTime: TRUSTED_END_TIME,
-    customerName: '測試會員',
-    customerEmail: 'member@example.test',
-    customerPhone: undefined,
-    lineDisplayName: undefined,
-    gender: 'female',
-    birthDate: '1990-01-01',
-    birthTime: '12:00',
-    birthPlace: undefined,
-    isBirthTimeAccurate: true,
-    question: '想詢問近期方向',
-    note: undefined,
-  })
+  assert.equal(response.status, 400)
+  assertNoWriteSideEffects(calls)
 })
 
 test('Debug flag 開啟且方案依賴失敗時 500 仍固定且不洩漏', async () => {
@@ -394,23 +342,14 @@ test('Debug flag 開啟且方案依賴失敗時 500 仍固定且不洩漏', asyn
   })
 })
 
-test('Debug flag 開啟且 Booking 寫入失敗時 500 仍固定並還原時段', async () => {
+test('Debug flag 開啟且 atomic Booking RPC 失敗時 500 仍固定', async () => {
   await withDebugErrorsEnabled(async () => {
     const { deps } = dependencies()
-    let restoreCalls = 0
 
     const response = await handleBookingCreateRequest(
       request(validBody(), { authorization: 'Bearer valid-token' }),
       {
         ...deps,
-        claimDbSlot: async () => ({
-          id: 'slot-1',
-          startAt: TRUSTED_START_TIME,
-          endAt: TRUSTED_END_TIME,
-          restore: async () => {
-            restoreCalls += 1
-          },
-        }),
         createBooking: async () => {
           throw internalTestError()
         },
@@ -418,7 +357,47 @@ test('Debug flag 開啟且 Booking 寫入失敗時 500 仍固定並還原時段'
     )
 
     await assertSafeInternalErrorResponse(response)
-    assert.equal(restoreCalls, 1)
+  })
+})
+
+test('Booking data source unavailable returns 503 without a separate slot mutation', async () => {
+  const { deps } = dependencies()
+
+  const response = await handleBookingCreateRequest(
+    request(validBody(), { authorization: 'Bearer valid-token' }),
+    {
+      ...deps,
+      createBooking: async () => null,
+    },
+  )
+
+  assert.equal(response.status, 503)
+  assert.equal(JSON.stringify(await readJson(response)).includes('mock-booking'), false)
+})
+
+test('Atomic RPC 回報 slot unavailable 時固定映射 409 且只呼叫單一寫入邊界', async () => {
+  const { calls, deps } = dependencies()
+  const error = Object.assign(new Error('internal database detail'), {
+    code: 'booking_slot_unavailable',
+  })
+
+  const response = await handleBookingCreateRequest(
+    request(validBody(), { authorization: 'Bearer valid-token' }),
+    {
+      ...deps,
+      createBooking: async (bookingInput) => {
+        calls.booking += 1
+        calls.bookingInputs.push(bookingInput as unknown as Record<string, unknown>)
+        throw error
+      },
+    },
+  )
+
+  assert.equal(response.status, 409)
+  assert.equal(calls.booking, 1)
+  assert.deepEqual(await readJson(response), {
+    ok: false,
+    message: '此時段已無法預約，請重新選擇其他時段。',
   })
 })
 
@@ -435,6 +414,24 @@ test('Route entry 只匯出合法 POST 且 production POST 使用受測 handler'
     ok: false,
     message: '請先登入會員，再建立預約。',
   })
+
+  const source = readFileSync(join(process.cwd(), 'src/app/api/bookings/create/route.ts'), 'utf8')
+  assert.doesNotMatch(source, /\.from\(|\.insert\(|\.update\(|\.delete\(/)
+  assert.match(source, /defaultBookingCreateDependencies/)
+
+  const dependencySource = readFileSync(
+    join(process.cwd(), 'src/lib/bookings/createBookingDependencies.server.ts'),
+    'utf8',
+  )
+  assert.doesNotMatch(dependencySource, /claimDbSlot|claimDefaultSlot|\.from\(/)
+  assert.match(dependencySource, /createSupabaseBooking/)
+
+  const publicSlotSource = readFileSync(
+    join(process.cwd(), 'src/app/api/booking-slots/route.ts'),
+    'utf8',
+  )
+  assert.doesNotMatch(publicSlotSource, /listDefaultBookingSlots|default:/)
+  assert.match(publicSlotSource, /id:\s*`db:\$\{slot\.id\}`/)
 })
 
 test('BookingForm create request 不再傳 userId 且保留 Bearer 邏輯與 API 路徑', async () => {

@@ -1,12 +1,13 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   trackGoogleAnalyticsCtaClick,
   type GoogleAnalyticsCtaClickInput,
 } from '@/lib/analytics/googleAnalytics'
-import { getMockUser } from '@/lib/mockAuth'
+import { createAsyncIdentityGuard } from '@/lib/auth/asyncIdentityGuard'
+import { getMockUser, subscribeAuthChange } from '@/lib/mockAuth'
 import { LoginModal } from './LoginModal'
 
 type ActionItemType = 'ai-chart' | 'ai-divination' | 'booking' | 'course'
@@ -42,15 +43,57 @@ export function ActionButton({
   const router = useRouter()
   const [loginOpen, setLoginOpen] = useState(false)
   const [starting, setStarting] = useState(false)
+  const startingRef = useRef(false)
   const destination = href ?? serviceEntryByItemType[itemType]
+  const destinationRef = useRef(destination)
+  const [identityGuard] = useState(() => createAsyncIdentityGuard())
+
+  useEffect(() => {
+    if (destinationRef.current !== destination) {
+      destinationRef.current = destination
+      identityGuard.invalidate()
+      startingRef.current = false
+      setStarting(false)
+    }
+  }, [destination, identityGuard])
+
+  useEffect(() => {
+    const unsubscribeAuth = subscribeAuthChange(() => {
+      identityGuard.invalidate()
+      startingRef.current = false
+      setStarting(false)
+    })
+    return () => {
+      unsubscribeAuth()
+      identityGuard.invalidate()
+      startingRef.current = false
+    }
+  }, [identityGuard])
 
   const continueToService = async () => {
+    if (startingRef.current) return
+    startingRef.current = true
+    const currentIdentity = () => ({
+      resourceKey: destinationRef.current,
+      subjectId: getMockUser()?.id ?? null,
+    })
+    const requestToken = identityGuard.begin(currentIdentity())
+    if (!requestToken) {
+      startingRef.current = false
+      setLoginOpen(true)
+      return
+    }
     setStarting(true)
     try {
       const canStart = beforeStart ? await beforeStart() : true
-      if (canStart) router.push(destination)
+      if (canStart && identityGuard.isCurrent(requestToken, currentIdentity())) {
+        router.push(destination)
+      }
     } finally {
-      setStarting(false)
+      if (identityGuard.isCurrent(requestToken, currentIdentity())) {
+        startingRef.current = false
+        setStarting(false)
+      }
     }
   }
 

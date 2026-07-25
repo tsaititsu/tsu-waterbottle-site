@@ -17,6 +17,7 @@ export const TYPESCRIPT_DISCOVERY_ROOTS = Object.freeze([
   'supabase/',
 ])
 export const OPT_IN_TYPESCRIPT_INTEGRATIONS = Object.freeze([
+  'supabase/booking_atomic_create_postgres17.test.ts',
   'supabase/profiles_admin_audit_postgres16.test.ts',
 ])
 export const NATIVE_NODE_TEST_FILES = Object.freeze([
@@ -24,8 +25,46 @@ export const NATIVE_NODE_TEST_FILES = Object.freeze([
   'src/lib/supabase/linePayDatabaseContracts.test.ts',
 ])
 export const REACT_SERVER_TEST_FILES = Object.freeze([
+  'src/app/api/account/divination-readings/[id]/route.test.ts',
+  'src/app/api/account/divination-readings/route.test.ts',
+  'src/app/api/admin/adminReadOnlyHandlers.test.ts',
+  'src/app/api/admin/bookings/handler.test.ts',
+  'src/app/api/admin/divination-one-dollar-test/handler.test.ts',
+  'src/app/api/ai-chart/reports/create/route.test.ts',
+  'src/app/api/ai-chart/reports/read/route.test.ts',
   'src/app/api/bookings/create/route.test.ts',
+  'src/app/api/bookings/read/handler.test.ts',
+  'src/app/api/bookings/update/handler.test.ts',
+  'src/app/api/calendar/create-event/handler.test.ts',
+  'src/app/api/calendar/cancel-event/handler.test.ts',
+  'src/app/api/divination/interpret/resume.test.ts',
+  'src/app/api/payments/newebpay/create/divinationOneDollarTest.test.ts',
+  'src/app/api/payments/newebpay/create/route.test.ts',
+  'src/app/api/payments/newebpay/return/handler.test.ts',
+  'src/app/api/product-orders/create/route.test.ts',
+  'src/app/payment/newebpay/return/route.test.ts',
+  'src/lib/ai-chart/reportCompletion.test.ts',
+  'src/lib/auth/admin.test.ts',
   'src/lib/auth/line.test.ts',
+  'src/lib/bookings/bookingAccess.test.ts',
+  'src/lib/email/bookingEmailRequestHandler.test.ts',
+  'src/lib/email/sendBookingEmails.test.ts',
+  'src/lib/google/createBookingCalendarEvent.test.ts',
+  'src/lib/newebpay/aiChartSync.test.ts',
+  'src/lib/newebpay/divinationOneDollarTest.test.ts',
+  'src/lib/newebpay/divinationSync.test.ts',
+  'src/lib/newebpay/notify.test.ts',
+  'src/lib/newebpay/paymentForm.test.ts',
+  'src/lib/payments/productOrderPayment.test.ts',
+  'src/lib/supabase/adminBookings.test.ts',
+  'src/lib/supabase/aiChartReports.test.ts',
+  'src/lib/supabase/bookingPayments.test.ts',
+  'src/lib/supabase/bookings.test.ts',
+  'src/lib/supabase/coursePurchases.test.ts',
+  'src/lib/supabase/divinationReadings.test.ts',
+  'src/lib/supabase/payments.test.ts',
+  'src/lib/supabase/productOrderSync.test.ts',
+  'src/lib/supabase/productOrders.test.ts',
 ])
 export const OFFLINE_CONTRACT_DEFINITIONS = Object.freeze([
   Object.freeze({

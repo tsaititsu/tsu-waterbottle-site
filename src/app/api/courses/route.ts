@@ -43,7 +43,8 @@ export async function GET() {
     .order('level', { ascending: true })
 
   if (error) {
-    return NextResponse.json({ ok: false, message: error.message }, { status: 500 })
+    console.error('Failed to list courses', { code: error.code })
+    return NextResponse.json({ ok: false, message: '讀取課程資料失敗，請稍後再試。' }, { status: 500 })
   }
 
   const courses = (data ?? []).map((row) => mergeCourseRow(row as CourseRow)).filter(Boolean)

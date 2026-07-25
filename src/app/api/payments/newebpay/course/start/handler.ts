@@ -106,8 +106,7 @@ export async function handleCourseStartRequest(request: Request, dependencies: C
       merchantOrderNo,
       form: mpgForm,
     })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '建立課程付款失敗'
-    return NextResponse.json({ ok: false, message }, { status: 500 })
+  } catch {
+    return NextResponse.json({ ok: false, message: '建立課程付款失敗' }, { status: 500 })
   }
 }
