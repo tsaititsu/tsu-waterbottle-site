@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { LoginModal } from '@/components/LoginModal'
 import { PageHero } from '@/components/PageHero'
 import { formatTaipeiDateTime } from '@/lib/date/formatTaipeiDateTime'
@@ -58,22 +58,33 @@ export default function AccountDivinationsPage() {
   const [readings, setReadings] = useState<AccountDivinationReading[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState('')
+  const requestGenerationRef = useRef(0)
 
   useEffect(() => {
-    let cancelled = false
+    async function loadReadings(nextUser: UserProfile | null) {
+      requestGenerationRef.current += 1
+      const requestGeneration = requestGenerationRef.current
+      const isCurrentRequest = () =>
+        requestGenerationRef.current === requestGeneration &&
+        getMockUser()?.id === nextUser?.id
 
-    async function loadReadings() {
       setIsLoading(true)
       setErrorMessage('')
 
+      if (!nextUser) {
+        if (isCurrentRequest()) {
+          setReadings([])
+          setIsLoading(false)
+        }
+        return
+      }
+
       try {
         const accessToken = await getAuthAccessToken()
+        if (!isCurrentRequest()) return
 
         if (!accessToken) {
-          if (!cancelled) {
-            setReadings([])
-            setIsLoading(false)
-          }
+          setReadings([])
           return
         }
 
@@ -81,13 +92,14 @@ export default function AccountDivinationsPage() {
           cache: 'no-store',
           headers: { Authorization: `Bearer ${accessToken}` },
         })
+        if (!isCurrentRequest()) return
         const data = (await response.json().catch(() => ({}))) as {
           ok?: boolean
           readings?: AccountDivinationReading[]
           message?: string
         }
 
-        if (cancelled) return
+        if (!isCurrentRequest()) return
 
         if (!response.ok || data.ok === false || !Array.isArray(data.readings)) {
           setReadings([])
@@ -97,12 +109,12 @@ export default function AccountDivinationsPage() {
 
         setReadings(data.readings)
       } catch {
-        if (!cancelled) {
+        if (isCurrentRequest()) {
           setReadings([])
           setErrorMessage('讀取占卜紀錄失敗，請稍後再試。')
         }
       } finally {
-        if (!cancelled) setIsLoading(false)
+        if (isCurrentRequest()) setIsLoading(false)
       }
     }
 
@@ -110,15 +122,16 @@ export default function AccountDivinationsPage() {
       const nextUser = getMockUser()
       setUser(nextUser)
       setLoginOpen(!nextUser)
-      void loadReadings()
+      setReadings([])
+      void loadReadings(nextUser)
     }
 
     sync()
     const unsubscribe = subscribeAuthChange(sync)
     const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') void loadReadings()
+      if (document.visibilityState === 'visible') void loadReadings(getMockUser())
     }
-    const refreshAfterPageRestore = () => void loadReadings()
+    const refreshAfterPageRestore = () => void loadReadings(getMockUser())
 
     document.addEventListener('visibilitychange', refreshWhenVisible)
     window.addEventListener('pageshow', refreshAfterPageRestore)
@@ -127,7 +140,7 @@ export default function AccountDivinationsPage() {
       unsubscribe()
       document.removeEventListener('visibilitychange', refreshWhenVisible)
       window.removeEventListener('pageshow', refreshAfterPageRestore)
-      cancelled = true
+      requestGenerationRef.current += 1
     }
   }, [])
 

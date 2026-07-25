@@ -21,13 +21,11 @@ const booking: AdminBookingListItem = {
   startsAt: '2026-08-01T02:00:00.000Z',
   endsAt: '2026-08-01T03:00:00.000Z',
   timezone: 'Asia/Taipei',
-  note: null,
   confirmationEmailSentToCustomer: true,
   confirmationEmailSentToAdmin: false,
   cancellationEmailSentToCustomer: false,
   cancellationEmailSentToAdmin: false,
   cancelledAt: null,
-  cancellationReason: null,
   createdAt: '2026-07-20T02:00:00.000Z',
   updatedAt: '2026-07-20T02:00:00.000Z',
 }
@@ -52,7 +50,7 @@ async function main() {
       requireAdmin: async () => authError(status),
       listBookings: async () => {
         listCalls += 1
-        return [booking]
+        return { bookings: [booking], total: 1 }
       },
     }
 
@@ -65,9 +63,10 @@ async function main() {
   let receivedClient: AdminBookingsClient | null = null
   const success = await handleAdminBookingsRequest(request, {
     requireAdmin: async () => authorized(),
-    listBookings: async (supabase) => {
+    listBookings: async (supabase, pagination) => {
       receivedClient = supabase
-      return [booking]
+      assert.deepEqual(pagination, { limit: 50, offset: 0 })
+      return { bookings: [booking], total: 1 }
     },
   })
   const successBody = await readJson(success)
@@ -77,7 +76,7 @@ async function main() {
   assert.deepEqual(successBody, {
     ok: true,
     bookings: [booking],
-    meta: { count: 1, limit: 100 },
+    meta: { count: 1, total: 1, limit: 50, offset: 0 },
   })
   assert.match(success.headers.get('cache-control') ?? '', /no-store/)
 

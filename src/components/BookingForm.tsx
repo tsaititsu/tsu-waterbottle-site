@@ -2,11 +2,12 @@
 
 import { CalendarDays, CheckCircle2 } from 'lucide-react'
 import Link from 'next/link'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActionButton } from './ActionButton'
+import { createAsyncIdentityGuard } from '@/lib/auth/asyncIdentityGuard'
 import { bookingPlans, getBookingPlan } from '@/lib/bookingPlans'
-import { getAuthAccessToken, getMockUser } from '@/lib/mockAuth'
-import { savePendingBooking, type BookingFormInput } from '@/lib/mockBooking'
+import { getAuthAccessToken, getMockUser, subscribeAuthChange } from '@/lib/mockAuth'
+import type { BookingFormInput } from '@/lib/bookings/types'
 
 const officialLineUrl = 'https://lin.ee/6Tpje1P'
 
@@ -135,6 +136,50 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
   const [formStatus, setFormStatus] = useState('')
   const [createdBookingId, setCreatedBookingId] = useState('')
   const [createdBookingSignature, setCreatedBookingSignature] = useState('')
+  const authSubjectIdRef = useRef(getMockUser()?.id ?? null)
+  const formResourceKey = useMemo(
+    () =>
+      JSON.stringify({
+        birthDay,
+        birthMonth,
+        birthPlace,
+        birthTime,
+        birthYear,
+        customerEmail,
+        customerName,
+        customerPhone,
+        gender,
+        hasAcceptedNotice,
+        isBirthTimeAccurate,
+        lineDisplayName,
+        note,
+        planId,
+        question,
+        resetKey,
+        selectedSlotId,
+      }),
+    [
+      birthDay,
+      birthMonth,
+      birthPlace,
+      birthTime,
+      birthYear,
+      customerEmail,
+      customerName,
+      customerPhone,
+      gender,
+      hasAcceptedNotice,
+      isBirthTimeAccurate,
+      lineDisplayName,
+      note,
+      planId,
+      question,
+      resetKey,
+      selectedSlotId,
+    ],
+  )
+  const formResourceKeyRef = useRef(formResourceKey)
+  const [bookingGuard] = useState(() => createAsyncIdentityGuard())
   const resetFormToBlank = useCallback(() => {
     setPlanId(bookingPlans[0].id)
     setSelectedBookingDate('')
@@ -159,6 +204,28 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
     setCreatedBookingId('')
     setCreatedBookingSignature('')
   }, [])
+
+  useEffect(() => {
+    if (formResourceKeyRef.current !== formResourceKey) {
+      formResourceKeyRef.current = formResourceKey
+      bookingGuard.invalidate()
+    }
+  }, [bookingGuard, formResourceKey])
+
+  useEffect(() => {
+    const unsubscribeAuth = subscribeAuthChange(() => {
+      const nextSubjectId = getMockUser()?.id ?? null
+      if (nextSubjectId === authSubjectIdRef.current) return
+      authSubjectIdRef.current = nextSubjectId
+      bookingGuard.invalidate()
+      resetFormToBlank()
+    })
+
+    return () => {
+      unsubscribeAuth()
+      bookingGuard.invalidate()
+    }
+  }, [bookingGuard, resetFormToBlank])
 
   const selectedPlan = getBookingPlan(planId) ?? bookingPlans[0]
   const bookingDateOptions = useMemo(() => {
@@ -272,6 +339,17 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
   const prepareBookingPayment = async () => {
     const input = buildInput()
     if (!input) return false
+    const currentIdentity = () => ({
+      resourceKey: formResourceKeyRef.current,
+      subjectId: getMockUser()?.id ?? null,
+    })
+    const requestToken = bookingGuard.begin(currentIdentity())
+    if (!requestToken) {
+      setFormError('請先登入會員，再進行水瓶先生論命預約。')
+      return false
+    }
+    const isCurrentRequest = () =>
+      bookingGuard.isCurrent(requestToken, currentIdentity())
 
     setFormStatus('')
     if (!isNewebPayEnabled) {
@@ -285,6 +363,7 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
     if (!bookingId) {
       try {
         const accessToken = await getAuthAccessToken()
+        if (!isCurrentRequest() || !accessToken) return false
         const response = await fetch('/api/bookings/create', {
           method: 'POST',
           headers: {
@@ -294,6 +373,7 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
           body: JSON.stringify(input)
         })
         const data = (await response.json().catch(() => ({}))) as { ok?: boolean; message?: string; bookingId?: string }
+        if (!isCurrentRequest()) return false
         if (!response.ok || data.ok === false) {
           throw new Error(data.message || '建立預約失敗')
         }
@@ -304,21 +384,19 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
         setCreatedBookingId(bookingId)
         setCreatedBookingSignature(bookingSignature)
       } catch (error) {
-        setFormError(error instanceof Error ? error.message : '建立預約失敗，請稍後再試。')
+        if (isCurrentRequest()) {
+          setFormError(error instanceof Error ? error.message : '建立預約失敗，請稍後再試。')
+        }
         return false
       }
     }
 
-    const pending = savePendingBooking(input, bookingId)
-    if (!pending) {
-      setFormError('預約資料暫存失敗，請確認是否已登入。')
-      return false
-    }
-
     try {
+      if (!isCurrentRequest()) return false
       setFormError('')
       setFormStatus('正在前往藍新金流付款頁，請稍候。')
       const accessToken = await getAuthAccessToken()
+      if (!isCurrentRequest() || !accessToken) return false
       const response = await fetch('/api/payments/newebpay/create', {
         method: 'POST',
         headers: {
@@ -333,15 +411,19 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
         })
       })
       const data = (await response.json().catch(() => null)) as NewebPayCreateResponse | null
+      if (!isCurrentRequest()) return false
 
       if (!response.ok || !data || data.ok !== true) {
         throw new Error(data?.ok === false ? data.error || '建立線上付款資料失敗' : '建立線上付款資料失敗')
       }
 
+      if (!isCurrentRequest()) return false
       submitNewebPayForm(data.action, data.fields)
     } catch {
-      setFormStatus('')
-      setFormError('預約已建立，但付款頁建立失敗。請稍後重試；如仍無法付款，請聯繫客服，勿重複建立預約。')
+      if (isCurrentRequest()) {
+        setFormStatus('')
+        setFormError('預約已建立，但付款頁建立失敗。請稍後重試；如仍無法付款，請聯繫客服，勿重複建立預約。')
+      }
     }
 
     return false

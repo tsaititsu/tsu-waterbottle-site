@@ -2,7 +2,7 @@ import { handleBookingEmailRequest } from '@/lib/email/bookingEmailRequestHandle
 import { sendBookingCancellationEmails } from '@/lib/email/sendBookingEmails'
 import { hasSupabaseAdminConfig } from '@/lib/supabase/admin'
 import { getUserWithEmailFromRequest } from '@/lib/supabase/auth'
-import { getSupabaseBooking, updateSupabaseBooking } from '@/lib/supabase/bookings'
+import { getSupabaseBookingForRequester, updateSupabaseBooking } from '@/lib/supabase/bookings'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,7 +13,7 @@ export async function POST(req: Request) {
   return handleBookingEmailRequest(req, {
     kind: 'cancellation',
     getRequesterFromRequest: getUserWithEmailFromRequest,
-    getBookingById: getSupabaseBooking,
+    getBookingById: getSupabaseBookingForRequester,
     sendEmails: sendBookingCancellationEmails,
     markEmailsSent: async (bookingId) => {
       await updateSupabaseBooking(bookingId, {

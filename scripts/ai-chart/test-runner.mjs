@@ -6,6 +6,9 @@ import { pathToFileURL } from 'node:url'
 export const AI_CHART_TEST_DIRECTORY = 'src/lib/ai-chart'
 export const AI_CHART_TEST_FILE_SUFFIX = '.test.ts'
 export const AI_CHART_TEST_NODE_VERSION = '24.16.0'
+export const AI_CHART_REACT_SERVER_TEST_FILES = Object.freeze([
+  'src/lib/ai-chart/reportCompletion.test.ts',
+])
 
 export const REMOVED_TEST_ENVIRONMENT_KEYS = Object.freeze([
   'OPENAI_API_KEY',
@@ -225,12 +228,18 @@ export async function runSequentialTestFiles(
 }
 
 export function createLocalTsxExecutor({ repositoryRoot, tsxImportUrl }) {
-  const environment = createIsolatedTestEnvironment(process.env)
+  const environment = {
+    ...createIsolatedTestEnvironment(process.env),
+    NODE_PATH: resolve(repositoryRoot, 'node_modules/next/dist/compiled'),
+  }
   return (testFile) => {
     const absoluteTestPath = resolve(repositoryRoot, testFile)
+    const args = AI_CHART_REACT_SERVER_TEST_FILES.includes(testFile)
+      ? ['--conditions=react-server', '--import', tsxImportUrl, absoluteTestPath]
+      : ['--import', tsxImportUrl, absoluteTestPath]
     const result = spawnSync(
       process.execPath,
-      ['--import', tsxImportUrl, absoluteTestPath],
+      args,
       {
         cwd: repositoryRoot,
         env: environment,

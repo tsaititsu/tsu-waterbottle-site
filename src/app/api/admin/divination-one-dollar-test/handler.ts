@@ -17,11 +17,8 @@ export async function handleDivinationOneDollarTestStatus(input: {
       ok: true,
       enabled: isDivinationOneDollarTestModeEnabled(input.env),
     })
-  } catch (error) {
-    console.error(
-      'Unexpected divination one dollar test status error',
-      error instanceof Error ? error.message : 'unknown_error',
-    )
+  } catch {
+    console.error('Unexpected divination one dollar test status error')
     return NextResponse.json({ ok: false, error: '確認測試模式狀態失敗。' }, { status: 500 })
   }
 }

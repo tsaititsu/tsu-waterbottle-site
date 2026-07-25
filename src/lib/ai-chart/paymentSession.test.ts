@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   AI_CHART_PAYMENT_SESSION_DEFAULT_AMOUNT_TWD,
-  AI_CHART_PAYMENT_SESSION_KEY,
   clearAiChartPaymentSession,
   getAiChartPaymentSession,
   isAiChartPaymentSession,
@@ -16,46 +17,6 @@ function test(name: string, fn: () => void) {
     console.error(`✗ ${name}`)
     throw error
   }
-}
-
-function createMockSessionStorage() {
-  const store = new Map<string, string>()
-
-  return {
-    getItem(key: string) {
-      return store.has(key) ? store.get(key)! : null
-    },
-    setItem(key: string, value: string) {
-      store.set(key, String(value))
-    },
-    removeItem(key: string) {
-      store.delete(key)
-    },
-    clear() {
-      store.clear()
-    },
-    key(index: number) {
-      return Array.from(store.keys())[index] ?? null
-    },
-    get length() {
-      return store.size
-    },
-  } satisfies Storage
-}
-
-function installMockSessionStorage() {
-  const storage = createMockSessionStorage()
-  Object.defineProperty(globalThis, 'sessionStorage', {
-    value: storage,
-    configurable: true,
-  })
-  return storage
-}
-
-function readSavedSession(): Record<string, unknown> {
-  const raw = sessionStorage.getItem(AI_CHART_PAYMENT_SESSION_KEY)
-  assert.equal(typeof raw, 'string')
-  return JSON.parse(raw!)
 }
 
 function assertNoUnsafeKeys(payload: Record<string, unknown>) {
@@ -84,25 +45,22 @@ function assertNoUnsafeKeys(payload: Record<string, unknown>) {
 const reportId = '2df1a8da-3893-4b81-8d00-774a9cc0e472'
 const merchantOrderNo = 'WB20260706172000AICH'
 
-test('saveAiChartPaymentSession stores reportId with the default amount and fixed source', () => {
-  installMockSessionStorage()
-
+test('saveAiChartPaymentSession keeps reportId in memory with the default amount and fixed source', () => {
+  clearAiChartPaymentSession()
   const session = saveAiChartPaymentSession({ reportId })
-  const saved = readSavedSession()
+  const saved = getAiChartPaymentSession()
 
   assert.equal(session.reportId, reportId)
   assert.equal(session.amountTwd, AI_CHART_PAYMENT_SESSION_DEFAULT_AMOUNT_TWD)
   assert.equal(session.source, 'ai_chart_report')
-  assert.equal(saved.reportId, reportId)
-  assert.equal(saved.amountTwd, 100)
-  assert.equal(saved.source, 'ai_chart_report')
-  assert.equal(typeof saved.createdAt, 'string')
-  assert.equal(Number.isNaN(Date.parse(saved.createdAt as string)), false)
+  assert.equal(saved?.reportId, reportId)
+  assert.equal(saved?.amountTwd, 100)
+  assert.equal(saved?.source, 'ai_chart_report')
+  assert.equal(typeof saved?.createdAt, 'string')
+  assert.equal(Number.isNaN(Date.parse(saved?.createdAt ?? '')), false)
 })
 
 test('saveAiChartPaymentSession can store merchantOrderNo and returnPath', () => {
-  installMockSessionStorage()
-
   const session = saveAiChartPaymentSession({
     reportId,
     merchantOrderNo,
@@ -111,15 +69,11 @@ test('saveAiChartPaymentSession can store merchantOrderNo and returnPath', () =>
 
   assert.equal(session.merchantOrderNo, merchantOrderNo)
   assert.equal(session.returnPath, '/ai-chart/result')
-
-  const saved = readSavedSession()
-  assert.equal(saved.merchantOrderNo, merchantOrderNo)
-  assert.equal(saved.returnPath, '/ai-chart/result')
+  assert.equal(getAiChartPaymentSession()?.merchantOrderNo, merchantOrderNo)
+  assert.equal(getAiChartPaymentSession()?.returnPath, '/ai-chart/result')
 })
 
 test('saveAiChartPaymentSession rejects invalid reportId', () => {
-  installMockSessionStorage()
-
   assert.throws(
     () =>
       saveAiChartPaymentSession({
@@ -129,9 +83,7 @@ test('saveAiChartPaymentSession rejects invalid reportId', () => {
   )
 })
 
-test('saveAiChartPaymentSession does not persist unsafe extra fields', () => {
-  installMockSessionStorage()
-
+test('saveAiChartPaymentSession does not retain unsafe extra fields', () => {
   saveAiChartPaymentSession({
     reportId,
     merchantOrderNo,
@@ -146,39 +98,15 @@ test('saveAiChartPaymentSession does not persist unsafe extra fields', () => {
     reportContent: 'unsafe report content',
   } as Parameters<typeof saveAiChartPaymentSession>[0] & Record<string, unknown>)
 
-  assertNoUnsafeKeys(readSavedSession())
+  assertNoUnsafeKeys(getAiChartPaymentSession() as unknown as Record<string, unknown>)
 })
 
 test('getAiChartPaymentSession returns null when no session exists', () => {
-  installMockSessionStorage()
-
+  clearAiChartPaymentSession()
   assert.equal(getAiChartPaymentSession(), null)
 })
 
-test('getAiChartPaymentSession returns null for invalid JSON', () => {
-  installMockSessionStorage()
-  sessionStorage.setItem(AI_CHART_PAYMENT_SESSION_KEY, '{not-json')
-
-  assert.equal(getAiChartPaymentSession(), null)
-})
-
-test('getAiChartPaymentSession returns null for an invalid schema', () => {
-  installMockSessionStorage()
-  sessionStorage.setItem(
-    AI_CHART_PAYMENT_SESSION_KEY,
-    JSON.stringify({
-      reportId,
-      amountTwd: 100,
-      source: 'wrong_source',
-      createdAt: new Date().toISOString(),
-    }),
-  )
-
-  assert.equal(getAiChartPaymentSession(), null)
-})
-
-test('getAiChartPaymentSession returns a valid saved session', () => {
-  installMockSessionStorage()
+test('getAiChartPaymentSession returns a defensive copy of a valid session', () => {
   const saved = saveAiChartPaymentSession({
     reportId,
     merchantOrderNo,
@@ -187,6 +115,8 @@ test('getAiChartPaymentSession returns a valid saved session', () => {
 
   assert.deepEqual(getAiChartPaymentSession(), saved)
   assert.equal(isAiChartPaymentSession(saved), true)
+  saved.reportId = '00000000-0000-4000-8000-000000000000'
+  assert.equal(getAiChartPaymentSession()?.reportId, reportId)
 })
 
 test('isAiChartPaymentSession rejects unsafe or malformed sessions', () => {
@@ -210,19 +140,11 @@ test('isAiChartPaymentSession rejects unsafe or malformed sessions', () => {
   )
 })
 
-test('clearAiChartPaymentSession only removes the AI chart payment session key', () => {
-  installMockSessionStorage()
-  sessionStorage.setItem('waterbottle-chart-current-session', 'keep')
-  sessionStorage.setItem('unrelated_session_storage_key', 'keep')
-  sessionStorage.setItem('waterbottle_mock_payments', 'keep')
-  sessionStorage.setItem('waterbottle_mock_records', 'keep')
-
+test('clearAiChartPaymentSession clears the in-memory payment handoff only', () => {
   saveAiChartPaymentSession({ reportId })
   clearAiChartPaymentSession()
-
-  assert.equal(sessionStorage.getItem(AI_CHART_PAYMENT_SESSION_KEY), null)
-  assert.equal(sessionStorage.getItem('waterbottle-chart-current-session'), 'keep')
-  assert.equal(sessionStorage.getItem('unrelated_session_storage_key'), 'keep')
-  assert.equal(sessionStorage.getItem('waterbottle_mock_payments'), 'keep')
-  assert.equal(sessionStorage.getItem('waterbottle_mock_records'), 'keep')
+  assert.equal(getAiChartPaymentSession(), null)
 })
+
+const source = readFileSync(join(process.cwd(), 'src/lib/ai-chart/paymentSession.ts'), 'utf8')
+assert.doesNotMatch(source, /localStorage|sessionStorage/)

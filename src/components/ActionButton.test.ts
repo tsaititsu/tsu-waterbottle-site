@@ -9,7 +9,10 @@ const mockData = readFileSync(join(root, 'src/lib/mockData.ts'), 'utf8')
 
 // Login remains the only gate on the homepage action. The component no longer
 // imports or invokes the legacy local mock-payment flow.
-assert.equal(actionButton.includes("import { getMockUser } from '@/lib/mockAuth'"), true)
+assert.match(actionButton, /import \{ getMockUser, subscribeAuthChange \} from '@\/lib\/mockAuth'/)
+assert.match(actionButton, /createAsyncIdentityGuard/)
+assert.match(actionButton, /subscribeAuthChange/)
+assert.match(actionButton, /identityGuard\.isCurrent\(requestToken, currentIdentity\(\)\)/)
 assert.equal(actionButton.includes('<LoginModal'), true)
 assert.equal(actionButton.includes('createMockPayment'), false)
 assert.equal(actionButton.includes('PaymentConfirmModal'), false)

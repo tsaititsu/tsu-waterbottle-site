@@ -36,15 +36,22 @@ assert.equal(bookingsPage.includes('<CancelBookingModal'), true)
 assert.equal(bookingsPage.includes('onClick={() => openCancellationModal(booking)}'), true)
 assert.equal(bookingsPage.includes('data-testid="open-cancel-booking"'), true)
 
-// 原取消業務流程與 API 路徑維持不變，前端只傳既有必要欄位。
+// 先由後端確認取消狀態，前端不能宣告付款或外部副作用結果。
 assert.equal(bookingsPage.includes("'/api/calendar/cancel-event'"), true)
 assert.equal(bookingsPage.includes("'/api/email/send-booking-cancellation'"), true)
 assert.equal(bookingsPage.includes("'/api/bookings/update'"), true)
-assert.equal(bookingsPage.includes('{ bookingId: booking.id, cancellationReason: reason }'), true)
-assert.equal(bookingsPage.includes("status: 'cancelled'"), true)
+assert.equal(bookingsPage.includes('cancellationReason: reason'), true)
+assert.equal(bookingsPage.includes("status: 'cancelled'"), false)
+assert.equal(bookingsPage.includes('eventId: booking.googleCalendarEventId'), false)
+assert.equal(bookingsPage.includes('cancellationEmailSentToCustomer: emailsSent'), true)
 assert.equal(bookingsPage.includes("booking.status === 'cancelled' ?"), true)
-assert.equal(bookingUpdateRoute.includes('updateSupabaseBooking'), true)
+assert.equal(bookingUpdateRoute.includes('getSupabaseBookingForRequester'), true)
+assert.equal(bookingUpdateRoute.includes('cancelSupabaseBooking'), true)
 assert.equal(cancellationEmailRoute.includes("kind: 'cancellation'"), true)
+assert.ok(
+  bookingsPage.indexOf("'/api/bookings/update'") < bookingsPage.indexOf("'/api/calendar/cancel-event'"),
+  '必須先取消 booking，才能執行 Calendar 與 Email 副作用',
+)
 
 // API 成功才關閉並更新列表；API 失敗保留 Modal 與輸入內容。
 assert.equal(bookingsPage.includes('closeCancellationModal()'), true)

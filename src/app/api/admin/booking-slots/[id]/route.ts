@@ -40,18 +40,14 @@ export async function PATCH(
 
     if (error) {
       console.error('Failed to update consultation availability slot', {
-        id,
         code: error.code,
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
       })
       return NextResponse.json({ ok: false, error: '更新預約時段失敗。' }, { status: 500 })
     }
 
     return NextResponse.json({ ok: true, slot: data })
-  } catch (error) {
-    console.error('Unexpected booking slot update error', error)
+  } catch {
+    console.error('Unexpected booking slot update error')
     return NextResponse.json({ ok: false, error: '更新預約時段失敗。' }, { status: 500 })
   }
 }

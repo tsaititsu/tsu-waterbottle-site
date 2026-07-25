@@ -4,6 +4,17 @@ import { join } from 'node:path'
 
 const root = process.cwd()
 const bookingFormSource = readFileSync(join(root, 'src/components/BookingForm.tsx'), 'utf8')
+assert.match(bookingFormSource, /createAsyncIdentityGuard/)
+assert.match(bookingFormSource, /subscribeAuthChange/)
+assert.match(
+  bookingFormSource,
+  /bookingGuard\.isCurrent\(requestToken, currentIdentity\(\)\)/,
+)
+assert.ok(
+  bookingFormSource.lastIndexOf('if (!isCurrentRequest()) return false') <
+    bookingFormSource.indexOf('submitNewebPayForm(data.action, data.fields)'),
+  'booking payment form must not submit after auth or form identity changes',
+)
 const bookingPageSource = readFileSync(join(root, 'src/app/booking/page.tsx'), 'utf8')
 const floatingLineSource = readFileSync(join(root, 'src/components/FloatingLineButton.tsx'), 'utf8')
 const globalCssSource = readFileSync(join(root, 'src/app/globals.css'), 'utf8')

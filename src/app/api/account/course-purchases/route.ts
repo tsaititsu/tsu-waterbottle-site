@@ -22,7 +22,8 @@ export async function GET(request: Request) {
     .in('course_id', courseIds)
 
   if (error) {
-    return NextResponse.json({ ok: false, message: error.message }, { status: 500 })
+    console.error('Failed to list course purchases', { code: error.code })
+    return NextResponse.json({ ok: false, message: '讀取課程購買紀錄失敗，請稍後再試。' }, { status: 500 })
   }
 
   const courseIdsPurchased = (data ?? [])

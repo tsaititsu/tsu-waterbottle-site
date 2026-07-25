@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { handleBookingReadRequest, type BookingReadHandlerDeps } from './handler'
-import type { BookingRecord } from '../../../../lib/mockBooking'
+import type { BookingRecord } from '../../../../lib/bookings/types'
 
 const booking = { id: 'booking-1', userId: 'user-1', paymentStatus: 'pending' } as BookingRecord
 

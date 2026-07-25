@@ -2,7 +2,7 @@ import { handleBookingEmailRequest } from '@/lib/email/bookingEmailRequestHandle
 import { sendBookingConfirmationEmails } from '@/lib/email/sendBookingEmails'
 import { hasSupabaseAdminConfig } from '@/lib/supabase/admin'
 import { getUserWithEmailFromRequest } from '@/lib/supabase/auth'
-import { getSupabaseBooking, updateSupabaseBooking } from '@/lib/supabase/bookings'
+import { getSupabaseBookingForRequester, updateSupabaseBooking } from '@/lib/supabase/bookings'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,7 +12,7 @@ export async function POST(req: Request) {
   return handleBookingEmailRequest(req, {
     kind: 'confirmation',
     getRequesterFromRequest: getUserWithEmailFromRequest,
-    getBookingById: getSupabaseBooking,
+    getBookingById: getSupabaseBookingForRequester,
     requireTrustedPaidBooking: true,
     sendEmails: sendBookingConfirmationEmails,
     markEmailsSent: async (bookingId) => {

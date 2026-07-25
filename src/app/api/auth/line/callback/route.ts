@@ -84,10 +84,9 @@ export async function GET(request: NextRequest) {
     clearTransientCookies(response)
 
     return response
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'LINE 登入失敗'
+  } catch {
     const response = NextResponse.redirect(
-      new URL(`/auth/callback?error=${encodeURIComponent(message)}`, request.nextUrl.origin),
+      new URL('/auth/callback?error=line_login_failed', request.nextUrl.origin),
     )
     clearTransientCookies(response)
 

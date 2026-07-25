@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireAdminUser, type RequireAdminUserResult } from '../../../../lib/auth/admin'
 import {
   ADMIN_BOOKING_LIMIT,
+  ADMIN_BOOKING_MAX_LIMIT,
   listAdminBookings,
   type AdminBookingListItem,
   type AdminBookingsClient,
@@ -14,7 +15,10 @@ const NO_STORE_HEADERS = {
 
 export type AdminBookingsHandlerDeps = {
   requireAdmin: (request: Request) => Promise<RequireAdminUserResult>
-  listBookings: (supabase: AdminBookingsClient) => Promise<AdminBookingListItem[]>
+  listBookings: (
+    supabase: AdminBookingsClient,
+    pagination: { limit: number; offset: number },
+  ) => Promise<{ bookings: AdminBookingListItem[]; total: number }>
 }
 
 const defaultDeps: AdminBookingsHandlerDeps = {
@@ -37,15 +41,35 @@ export async function handleAdminBookingsRequest(
     const auth = await deps.requireAdmin(request)
     if ('error' in auth) return addNoStoreHeaders(auth.error)
 
-    const bookings = await deps.listBookings(auth.supabase)
+    const params = new URL(request.url).searchParams
+    const rawLimit = params.get('limit')
+    const rawOffset = params.get('offset')
+    const limit = rawLimit === null ? ADMIN_BOOKING_LIMIT : Number(rawLimit)
+    const offset = rawOffset === null ? 0 : Number(rawOffset)
+    if (
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > ADMIN_BOOKING_MAX_LIMIT ||
+      !Number.isSafeInteger(offset) ||
+      offset < 0
+    ) {
+      return NextResponse.json(
+        { ok: false, error: '分頁參數不合法。' },
+        { status: 400, headers: NO_STORE_HEADERS },
+      )
+    }
+
+    const result = await deps.listBookings(auth.supabase, { limit, offset })
 
     return NextResponse.json(
       {
         ok: true,
-        bookings,
+        bookings: result.bookings,
         meta: {
-          count: bookings.length,
-          limit: ADMIN_BOOKING_LIMIT,
+          count: result.bookings.length,
+          total: result.total,
+          limit,
+          offset,
         },
       },
       { headers: NO_STORE_HEADERS },

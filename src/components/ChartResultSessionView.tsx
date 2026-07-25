@@ -2,17 +2,23 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ActionButton } from './ActionButton'
 import { LoginModal } from './LoginModal'
+import { createAsyncIdentityGuard } from '@/lib/auth/asyncIdentityGuard'
+import {
+  getAiChartDraftNotes,
+  getAiChartDraftSession,
+  setAiChartDraftNotes,
+  setAiChartDraftSession,
+  type AiChartDraftSession,
+} from '@/lib/ai-chart/chartDraftMemory'
 import { saveAiChartPaymentSession } from '@/lib/ai-chart/paymentSession'
-import { getAuthAccessToken } from '@/lib/mockAuth'
+import { getAuthAccessToken, getMockUser, subscribeAuthChange } from '@/lib/mockAuth'
 import { buildNewebPayClientFormFields } from '@/lib/newebpay/clientForm'
 import { createZiweiGptPayload, type ChartInput, type ZiweiGptPayload } from '@/features/ziwei-chart/package'
 import { OriginalZiweiChartView } from '@/features/ziwei-chart/components/OriginalZiweiChartView'
 
-const CHART_SESSION_STORAGE_KEY = 'waterbottle-chart-current-session'
-const CHART_NOTES_STORAGE_KEY = 'waterbottle-chart-notes'
 const TIME_OPTION_COUNT = 13
 
 const selectedPlan = {
@@ -22,13 +28,6 @@ const selectedPlan = {
 const AI_CHART_REPORT_TITLE = 'AI 命盤分析'
 const AI_CHART_REPORT_PRODUCT_NAME = 'AI 命盤分析'
 const isAiChartNewebPayCheckoutEnabled = process.env.NEXT_PUBLIC_ENABLE_AI_CHART_NEWEBPAY === 'true'
-
-type ChartSession = {
-  input: ChartInput
-  chartId: string
-  selectedCategory: string
-  birthOrder?: string
-}
 
 type CreateAiChartReportResponse =
   | {
@@ -65,26 +64,6 @@ function adjustSolarDate(solarDate: string, offsetDays: number) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
-function parseChartSession(raw: string | null): ChartSession | null {
-  if (!raw) return null
-
-  try {
-    const parsed = JSON.parse(raw) as Partial<ChartSession>
-    if (!parsed.input || typeof parsed.input.solarDate !== 'string') return null
-    if (typeof parsed.input.timeIndex !== 'number') return null
-    if (parsed.input.gender !== 'male' && parsed.input.gender !== 'female') return null
-
-    return {
-      input: parsed.input,
-      chartId: parsed.chartId || chartId(parsed.input),
-      selectedCategory: parsed.selectedCategory || '自己',
-      birthOrder: parsed.birthOrder || ''
-    }
-  } catch {
-    return null
-  }
-}
-
 function submitNewebPayForm(input: {
   action: string
   fields: Array<{ name: string; value: string }>
@@ -108,20 +87,37 @@ function submitNewebPayForm(input: {
 
 export function ChartResultSessionView() {
   const router = useRouter()
-  const [session, setSession] = useState<ChartSession | null>(null)
+  const [session, setSession] = useState<AiChartDraftSession | null>(null)
   const [chartInput, setChartInput] = useState<ChartInput | null>(null)
   const [chartPayload, setChartPayload] = useState<ZiweiGptPayload | null>(null)
   const [notesByChartId, setNotesByChartId] = useState<Record<string, string>>({})
-  const [hasLoadedChartNotes, setHasLoadedChartNotes] = useState(false)
   const [hasAcceptedPaidNotice, setHasAcceptedPaidNotice] = useState(false)
   const [formError, setFormError] = useState('')
   const [paymentSetupMessage, setPaymentSetupMessage] = useState('')
   const [isCreatingPendingReport, setIsCreatingPendingReport] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
   const [loadError, setLoadError] = useState('')
+  const checkoutInFlightRef = useRef(false)
+  const checkoutResourceKey = useMemo(
+    () =>
+      JSON.stringify({
+        accepted: hasAcceptedPaidNotice,
+        input: chartInput,
+      }),
+    [chartInput, hasAcceptedPaidNotice],
+  )
+  const checkoutResourceKeyRef = useRef(checkoutResourceKey)
+  const [checkoutGuard] = useState(() => createAsyncIdentityGuard())
 
   useEffect(() => {
-    const nextSession = parseChartSession(window.sessionStorage.getItem(CHART_SESSION_STORAGE_KEY))
+    if (checkoutResourceKeyRef.current !== checkoutResourceKey) {
+      checkoutResourceKeyRef.current = checkoutResourceKey
+      checkoutGuard.invalidate()
+    }
+  }, [checkoutGuard, checkoutResourceKey])
+
+  useEffect(() => {
+    const nextSession = getAiChartDraftSession()
     if (!nextSession) {
       setLoadError('尚未產生命盤，請先回到新增命盤頁。')
       return
@@ -138,34 +134,38 @@ export function ChartResultSessionView() {
   }, [])
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(CHART_NOTES_STORAGE_KEY)
-      if (raw) setNotesByChartId(JSON.parse(raw) as Record<string, string>)
-    } catch {
-      window.localStorage.removeItem(CHART_NOTES_STORAGE_KEY)
-    } finally {
-      setHasLoadedChartNotes(true)
-    }
+    setNotesByChartId(getAiChartDraftNotes())
   }, [])
 
   useEffect(() => {
-    if (!hasLoadedChartNotes) return
-    window.localStorage.setItem(CHART_NOTES_STORAGE_KEY, JSON.stringify(notesByChartId))
-  }, [hasLoadedChartNotes, notesByChartId])
+    setAiChartDraftNotes(notesByChartId)
+  }, [notesByChartId])
+
+  useEffect(() => {
+    const unsubscribeAuth = subscribeAuthChange(() => {
+      checkoutGuard.invalidate()
+      setPaymentSetupMessage('')
+    })
+    return () => {
+      unsubscribeAuth()
+      checkoutGuard.invalidate()
+    }
+  }, [checkoutGuard])
 
   const persistSession = (nextInput: ChartInput) => {
-    const nextSession: ChartSession = {
+    const nextSession: AiChartDraftSession = {
       input: nextInput,
       chartId: chartId(nextInput),
       selectedCategory: session?.selectedCategory || '自己',
       birthOrder: session?.birthOrder || ''
     }
-    window.sessionStorage.setItem(CHART_SESSION_STORAGE_KEY, JSON.stringify(nextSession))
+    setAiChartDraftSession(nextSession)
     setSession(nextSession)
   }
 
   const shiftChartTime = (direction: -1 | 1) => {
     if (!chartInput) return
+    checkoutGuard.invalidate()
 
     const baseTimeIndex = chartInput.timeIndex
     const nextTimeIndex = (baseTimeIndex + direction + TIME_OPTION_COUNT) % TIME_OPTION_COUNT
@@ -231,6 +231,9 @@ export function ChartResultSessionView() {
   }
 
   const createPendingReportForCheckout = async () => {
+    if (checkoutInFlightRef.current) {
+      return
+    }
     if (!validatePaidInterpretationReadiness()) {
       return
     }
@@ -238,19 +241,34 @@ export function ChartResultSessionView() {
       return
     }
 
-    const accessToken = await getAuthAccessToken()
-    if (!accessToken) {
+    checkoutInFlightRef.current = true
+    const currentIdentity = () => ({
+      resourceKey: checkoutResourceKeyRef.current,
+      subjectId: getMockUser()?.id ?? null,
+    })
+    const requestToken = checkoutGuard.begin(currentIdentity())
+    if (!requestToken) {
+      checkoutInFlightRef.current = false
       setLoginOpen(true)
       return
     }
-
+    const requestChartInput = { ...chartInput }
+    const isCurrentRequest = () =>
+      checkoutGuard.isCurrent(requestToken, currentIdentity())
     setIsCreatingPendingReport(true)
     setFormError('')
     setPaymentSetupMessage('')
 
-    let reportId = ''
-
     try {
+      const accessToken = await getAuthAccessToken()
+      if (!isCurrentRequest()) {
+        return
+      }
+      if (!accessToken) {
+        setLoginOpen(true)
+        return
+      }
+
       const reportResponse = await fetch('/api/ai-chart/reports/create', {
         method: 'POST',
         headers: {
@@ -262,17 +280,20 @@ export function ChartResultSessionView() {
           productName: AI_CHART_REPORT_PRODUCT_NAME,
           amountTwd: selectedPlan.amount,
           birthInput: {
-            solarDate: chartInput.solarDate,
-            timeIndex: chartInput.timeIndex,
-            gender: chartInput.gender,
-            ...(chartInput.name ? { name: chartInput.name } : {}),
-            ...(typeof chartInput.fixLeap === 'boolean'
-              ? { fixLeap: chartInput.fixLeap }
+            solarDate: requestChartInput.solarDate,
+            timeIndex: requestChartInput.timeIndex,
+            gender: requestChartInput.gender,
+            ...(requestChartInput.name ? { name: requestChartInput.name } : {}),
+            ...(typeof requestChartInput.fixLeap === 'boolean'
+              ? { fixLeap: requestChartInput.fixLeap }
               : {})
           }
         })
       })
       const reportData = (await reportResponse.json().catch(() => null)) as CreateAiChartReportResponse | null
+      if (!isCurrentRequest()) {
+        return
+      }
 
       if (
         !reportResponse.ok ||
@@ -283,15 +304,7 @@ export function ChartResultSessionView() {
         throw new Error(reportData && !reportData.ok ? reportData.error : 'ai_chart_report_create_failed')
       }
 
-      reportId = reportData.reportId
-    } catch {
-      setFormError('付款資料建立失敗，請稍後再試。')
-      setPaymentSetupMessage('')
-      setIsCreatingPendingReport(false)
-      return
-    }
-
-    try {
+      const reportId = reportData.reportId
       const paymentResponse = await fetch('/api/payments/newebpay/create', {
         method: 'POST',
         headers: {
@@ -306,6 +319,9 @@ export function ChartResultSessionView() {
         })
       })
       const paymentData = (await paymentResponse.json().catch(() => null)) as CreateAiChartNewebPayPaymentResponse | null
+      if (!isCurrentRequest()) {
+        return
+      }
 
       if (!paymentResponse.ok || !paymentData?.ok) {
         const error = paymentData && !paymentData.ok ? paymentData.error : 'ai_chart_payment_create_failed'
@@ -338,6 +354,7 @@ export function ChartResultSessionView() {
         return
       }
 
+      if (!isCurrentRequest()) return
       saveAiChartPaymentSession({
         reportId,
         merchantOrderNo: paymentData.merchantOrderNo,
@@ -346,14 +363,18 @@ export function ChartResultSessionView() {
       })
       setPaymentSetupMessage('正在前往線上付款。')
       setFormError('')
+      if (!isCurrentRequest()) return
       submitNewebPayForm({
         action: paymentData.action,
         fields: formFields.fields
       })
     } catch {
-      setFormError('線上付款資料建立失敗，請稍後再試。')
-      setPaymentSetupMessage('')
+      if (isCurrentRequest()) {
+        setFormError('付款資料建立失敗，請稍後再試。')
+        setPaymentSetupMessage('')
+      }
     } finally {
+      checkoutInFlightRef.current = false
       setIsCreatingPendingReport(false)
     }
   }
@@ -381,6 +402,7 @@ export function ChartResultSessionView() {
           <div>
             <h2 className="font-serifTC text-2xl font-semibold text-deepPurple">完整命盤</h2>
             <p className="mt-1 text-sm text-textMuted">命盤已產生，可以先確認命盤，再決定是否購買完整分析。</p>
+            <p className="mt-1 text-xs text-textMuted">私人命盤只保留在目前分頁記憶體；重新整理或切換帳號後需重新輸入。</p>
           </div>
           <div className="flex flex-col gap-2 text-sm font-semibold text-darkGold md:items-end">
             <p>陽曆 {chartPayload.chart.birthInfo.solarDate}</p>
@@ -415,6 +437,7 @@ export function ChartResultSessionView() {
                 checked={hasAcceptedPaidNotice}
                 className="mt-1 size-4 rounded border-borderSoft text-deepPurple focus:ring-deepPurple"
                 onChange={(event) => {
+                  checkoutGuard.invalidate()
                   setHasAcceptedPaidNotice(event.target.checked)
                   if (event.target.checked) setFormError('')
                   setPaymentSetupMessage('')
@@ -464,8 +487,8 @@ export function ChartResultSessionView() {
           </div>
         </details>
 
-        {formError && <p className="text-sm font-semibold text-deepPurple">{formError}</p>}
-        {paymentSetupMessage && <p className="text-sm font-semibold text-darkGold">{paymentSetupMessage}</p>}
+        {formError && <p aria-live="polite" className="text-sm font-semibold text-deepPurple">{formError}</p>}
+        {paymentSetupMessage && <p aria-live="polite" className="text-sm font-semibold text-darkGold">{paymentSetupMessage}</p>}
 
         {isAiChartNewebPayCheckoutEnabled ? (
           <button

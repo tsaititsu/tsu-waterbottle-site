@@ -65,30 +65,57 @@ export function DivinationResultPageClient() {
   const [isInterpreting, setIsInterpreting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const resumeStartedRef = useRef('')
+  const requestGenerationRef = useRef(0)
+  const resumeGenerationRef = useRef(0)
+  const activeReadingIdRef = useRef('')
+  const activeUserIdRef = useRef<string | null>(null)
 
-  async function loadReading(options: { quiet?: boolean } = {}) {
+  async function loadReading(
+    expectedUser: UserProfile | null,
+    expectedReadingId: string,
+    options: { quiet?: boolean } = {},
+  ) {
+    requestGenerationRef.current += 1
+    const requestGeneration = requestGenerationRef.current
+    const isCurrentRequest = () =>
+      requestGenerationRef.current === requestGeneration &&
+      activeReadingIdRef.current === expectedReadingId &&
+      activeUserIdRef.current === expectedUser?.id &&
+      getMockUser()?.id === expectedUser?.id
+
     if (!options.quiet) {
       setIsLoading(true)
       setErrorMessage('')
     }
 
+    if (!expectedUser || !expectedReadingId) {
+      if (isCurrentRequest()) {
+        setReading(null)
+        if (!options.quiet) setIsLoading(false)
+      }
+      return
+    }
+
     try {
       const accessToken = await getAuthAccessToken()
+      if (!isCurrentRequest()) return
 
-      if (!accessToken || !readingId) {
+      if (!accessToken) {
         setReading(null)
         return
       }
 
-      const response = await fetch(`/api/account/divination-readings/${encodeURIComponent(readingId)}`, {
+      const response = await fetch(`/api/account/divination-readings/${encodeURIComponent(expectedReadingId)}`, {
         cache: 'no-store',
         headers: { Authorization: `Bearer ${accessToken}` },
       })
+      if (!isCurrentRequest()) return
       const data = (await response.json().catch(() => ({}))) as {
         ok?: boolean
         reading?: DivinationResultReading
         message?: string
       }
+      if (!isCurrentRequest()) return
 
       if (!response.ok || data.ok === false || !data.reading) {
         setReading(null)
@@ -98,21 +125,40 @@ export function DivinationResultPageClient() {
 
       setReading(data.reading)
     } catch {
-      setReading(null)
-      setErrorMessage('讀取占卜結果失敗，請稍後再試。')
+      if (isCurrentRequest()) {
+        setReading(null)
+        setErrorMessage('讀取占卜結果失敗，請稍後再試。')
+      }
     } finally {
-      if (!options.quiet) setIsLoading(false)
+      if (!options.quiet && isCurrentRequest()) setIsLoading(false)
     }
   }
 
-  async function resumeInterpretation() {
-    if (!readingId || resumeStartedRef.current === readingId) return
-    resumeStartedRef.current = readingId
+  async function resumeInterpretation(
+    expectedUser: UserProfile | null,
+    expectedReadingId: string,
+  ) {
+    if (
+      !expectedUser ||
+      !expectedReadingId ||
+      resumeStartedRef.current === expectedReadingId
+    ) return
+
+    resumeGenerationRef.current += 1
+    const resumeGeneration = resumeGenerationRef.current
+    const isCurrentResume = () =>
+      resumeGenerationRef.current === resumeGeneration &&
+      activeReadingIdRef.current === expectedReadingId &&
+      activeUserIdRef.current === expectedUser.id &&
+      getMockUser()?.id === expectedUser.id
+
+    resumeStartedRef.current = expectedReadingId
     setIsInterpreting(true)
     setErrorMessage('')
 
     try {
       const accessToken = await getAuthAccessToken()
+      if (!isCurrentResume()) return
       if (!accessToken) return
 
       const response = await fetch('/api/divination/interpret', {
@@ -122,11 +168,13 @@ export function DivinationResultPageClient() {
           Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
-          readingId,
+          readingId: expectedReadingId,
           resumeFromDb: true,
         }),
       })
+      if (!isCurrentResume()) return
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; message?: string; error?: string }
+      if (!isCurrentResume()) return
 
       if (!response.ok || data.ok === false) {
         if (data.error === 'DIVINATION_READING_INTERPRETING' || data.error === 'PAYMENT_PENDING') {
@@ -137,37 +185,51 @@ export function DivinationResultPageClient() {
         return
       }
 
-      await loadReading({ quiet: true })
+      await loadReading(expectedUser, expectedReadingId, { quiet: true })
     } catch {
-      setErrorMessage('付款已完成，但解讀暫時未完成，請聯繫客服。')
+      if (isCurrentResume()) {
+        setErrorMessage('付款已完成，但解讀暫時未完成，請聯繫客服。')
+      }
     } finally {
-      setIsInterpreting(false)
+      if (isCurrentResume()) setIsInterpreting(false)
     }
   }
 
   useEffect(() => {
     const sync = () => {
       const nextUser = getMockUser()
+      requestGenerationRef.current += 1
+      resumeGenerationRef.current += 1
+      activeReadingIdRef.current = readingId
+      activeUserIdRef.current = nextUser?.id ?? null
+      resumeStartedRef.current = ''
       setUser(nextUser)
       setLoginOpen(!nextUser)
-      void loadReading()
+      setReading(null)
+      setIsInterpreting(false)
+      void loadReading(nextUser, readingId)
     }
 
     sync()
     const unsubscribe = subscribeAuthChange(sync)
-    return unsubscribe
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      requestGenerationRef.current += 1
+      resumeGenerationRef.current += 1
+      activeReadingIdRef.current = ''
+      activeUserIdRef.current = null
+      unsubscribe()
+    }
   }, [readingId])
 
   useEffect(() => {
     if (!reading || reading.status === 'completed' || reading.status === 'failed') return
 
     if (reading.status === 'paid') {
-      void resumeInterpretation()
+      void resumeInterpretation(user, readingId)
     }
 
     const timer = window.setTimeout(() => {
-      void loadReading({ quiet: true })
+      void loadReading(user, readingId, { quiet: true })
     }, reading.status === 'pending_payment' ? 3000 : 2500)
 
     return () => window.clearTimeout(timer)

@@ -7,7 +7,7 @@ const WAITLIST_KEY = 'waterbottle_course_waitlist'
 export function joinCourseWaitlist() {
   const user = getMockUser()
   if (!user || typeof window === 'undefined') return false
-  window.localStorage.setItem(WAITLIST_KEY, JSON.stringify({ userId: user.id, joinedAt: new Date().toISOString() }))
+  window.localStorage.setItem(WAITLIST_KEY, 'joined')
   return true
 }
 

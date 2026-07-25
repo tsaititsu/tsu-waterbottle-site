@@ -144,16 +144,8 @@ function logSafePaymentFailure(input: {
   status: number
   databaseErrorCategory?: string
 }) {
-  console.error('NewebPay payment stage failed', {
-    stage: input.stage,
-    errorCode: input.errorCode,
-    provider: 'newebpay',
-    sourceType: input.sourceType,
-    testMode: input.testMode,
-    amount: input.amount,
-    status: input.status,
-    ...(input.databaseErrorCategory ? { databaseErrorCategory: input.databaseErrorCategory } : {}),
-  })
+  void input
+  console.error('NewebPay payment stage failed')
 }
 
 function paymentConfigErrorResponse() {
@@ -190,10 +182,7 @@ function pendingPaymentErrorResponse(input: {
     return NextResponse.json({ ok: false, error: errorCode }, { status })
   }
 
-  console.error('建立藍新 pending payment 失敗', {
-    itemKey: input.itemKey,
-    error: 'payment_insert_failed',
-  })
+  console.error('建立藍新 pending payment 失敗')
 
   return NextResponse.json({ ok: false, error: '建立付款紀錄失敗，請稍後再試。' }, { status: 500 })
 }
@@ -238,25 +227,21 @@ function divinationPaymentFormErrorResponse(input: { testMode: boolean; amount: 
 }
 
 function productOrderPendingPaymentErrorResponse(input: { orderId: string; merchantOrderNo: string; error: unknown }) {
-  console.error('建立商品訂單 pending payment 失敗', {
-    orderId: input.orderId,
-    merchantOrderNo: input.merchantOrderNo,
-    error: 'product_order_payment_create_failed',
-  })
+  void input
+  console.error('建立商品訂單 pending payment 失敗')
 
   return NextResponse.json({ ok: false, error: 'product_order_payment_create_failed' }, { status: 500 })
 }
 
 function bookingLookupErrorResponse(input: { bookingId: string; error: unknown }) {
-  console.error('藍新付款 booking 查詢失敗', {
-    bookingId: input.bookingId,
-    error: input.error instanceof Error ? input.error.message : 'unknown_error',
-  })
+  void input
+  console.error('藍新付款 booking 查詢失敗')
 
   return NextResponse.json({ ok: false, error: 'booking_lookup_failed' }, { status: 500 })
 }
 
 function divinationReadingLookupErrorResponse(input: { readingId: string; error: unknown }) {
+  void input
   logSafePaymentFailure({
     stage: 'payment_metadata',
     errorCode: 'divination_reading_lookup_failed',
@@ -270,19 +255,15 @@ function divinationReadingLookupErrorResponse(input: { readingId: string; error:
 }
 
 function aiChartReportLookupErrorResponse(input: { reportId: string; error: unknown }) {
-  console.error('藍新付款 AI 命盤 report 查詢失敗', {
-    reportId: input.reportId,
-    error: input.error instanceof Error ? input.error.message : 'unknown_error',
-  })
+  void input
+  console.error('藍新付款 AI 命盤 report 查詢失敗')
 
   return NextResponse.json({ ok: false, error: 'ai_chart_report_lookup_failed' }, { status: 500 })
 }
 
 function productOrderLookupErrorResponse(input: { orderId: string; error: unknown }) {
-  console.error('藍新付款 product order 查詢失敗', {
-    orderId: input.orderId,
-    error: input.error instanceof Error ? input.error.message : 'unknown_error',
-  })
+  void input
+  console.error('藍新付款 product order 查詢失敗')
 
   return NextResponse.json({ ok: false, error: 'product_order_lookup_failed' }, { status: 500 })
 }
@@ -324,6 +305,7 @@ function missingDivinationDrawSelectionResponse() {
 }
 
 function divinationDrawSelectionUpdateErrorResponse(input: { readingId: string; error: unknown }) {
+  void input
   logSafePaymentFailure({
     stage: 'payment_metadata',
     errorCode: 'divination_draw_selection_update_failed',
@@ -362,12 +344,8 @@ function aiChartPaymentLinkErrorResponse(input: {
   merchantOrderNo: string
   error: unknown
 }) {
-  console.error('藍新 AI 命盤 payment link 失敗', {
-    reportId: input.reportId,
-    paymentId: input.paymentId,
-    merchantOrderNo: input.merchantOrderNo,
-    error: input.error instanceof Error ? input.error.message : 'unknown_error',
-  })
+  void input
+  console.error('藍新 AI 命盤 payment link 失敗')
 
   return NextResponse.json({ ok: false, error: 'ai_chart_payment_link_failed' }, { status: 500 })
 }
@@ -378,12 +356,8 @@ function productOrderPaymentLinkErrorResponse(input: {
   merchantOrderNo: string
   error: unknown
 }) {
-  console.error('藍新商品訂單 payment link 失敗', {
-    orderId: input.orderId,
-    paymentId: input.paymentId,
-    merchantOrderNo: input.merchantOrderNo,
-    error: 'product_order_payment_link_failed',
-  })
+  void input
+  console.error('藍新商品訂單 payment link 失敗')
 
   return NextResponse.json({ ok: false, error: 'product_order_payment_link_failed' }, { status: 500 })
 }
@@ -421,12 +395,7 @@ function aiChartPaymentLinkResultResponse(input: {
 }) {
   const resolution = resolveNewebPayAiChartReportPendingPaymentLink(input.result)
 
-  console.warn('藍新 AI 命盤 payment link 未完成', {
-    reportId: input.reportId,
-    paymentId: input.paymentId,
-    merchantOrderNo: input.merchantOrderNo,
-    result: input.result,
-  })
+  console.warn('藍新 AI 命盤 payment link 未完成')
 
   return NextResponse.json(
     { ok: false, error: resolution.ok ? 'ai_chart_payment_link_failed' : resolution.error },

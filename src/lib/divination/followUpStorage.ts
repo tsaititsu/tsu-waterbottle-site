@@ -13,6 +13,9 @@ export const DIVINATION_FOLLOW_UP_MAX_PREVIOUS_READINGS = 3
 const displayThreadMaxReadings = 5
 
 const answerSummaryMaxLength = 300
+let activeThreadId = ""
+let currentDraft: DivinationFollowUpDraft | null = null
+const displayThreads = new Map<string, DivinationFollowUpDisplayThread>()
 
 function normalizeText(value: string) {
   return value.replace(/\s+/g, " ").trim()
@@ -37,12 +40,6 @@ function trimPreviousReadings(readings: DivinationPreviousReadingSummary[]) {
 
 function trimDisplayReadings(readings: DivinationFollowUpDisplayThread["readings"]) {
   return readings.slice(-displayThreadMaxReadings)
-}
-
-function readActiveThreadId() {
-  if (typeof window === "undefined") return ""
-
-  return window.sessionStorage.getItem(DIVINATION_FOLLOW_UP_ACTIVE_THREAD_ID_STORAGE_KEY) || ""
 }
 
 export function getDivinationFollowUpThreadStorageKey(threadId: string): string {
@@ -116,9 +113,7 @@ export function toDivinationFollowUpContext(
 }
 
 export function saveDivinationFollowUpDraft(draft: DivinationFollowUpDraft): void {
-  if (typeof window === "undefined") return
-
-  window.sessionStorage.setItem(DIVINATION_FOLLOW_UP_DRAFT_STORAGE_KEY, JSON.stringify(draft))
+  currentDraft = structuredClone(draft)
 }
 
 export function saveDivinationFollowUpDisplayReading(input: {
@@ -131,8 +126,6 @@ export function saveDivinationFollowUpDisplayReading(input: {
   answerSummary?: string
   existingFollowUpContext?: DivinationFollowUpContext
 }): void {
-  if (typeof window === "undefined") return
-
   const readingId = input.readingId?.trim()
   const question = input.question?.trim()
   const finalAnswer = input.finalAnswer?.trim()
@@ -140,7 +133,6 @@ export function saveDivinationFollowUpDisplayReading(input: {
   if (!readingId || !question || !finalAnswer) return
 
   const threadId = input.existingFollowUpContext?.threadId || `thread-${readingId}`
-  const storageKey = getDivinationFollowUpThreadStorageKey(threadId)
   const existingThread = loadDivinationFollowUpDisplayThread(threadId)
   const createdAt = new Date().toISOString()
   const reading = {
@@ -160,52 +152,39 @@ export function saveDivinationFollowUpDisplayReading(input: {
     updatedAt: createdAt,
   }
 
-  window.sessionStorage.setItem(storageKey, JSON.stringify(thread))
-  window.sessionStorage.setItem(DIVINATION_FOLLOW_UP_ACTIVE_THREAD_ID_STORAGE_KEY, threadId)
+  displayThreads.set(threadId, structuredClone(thread))
+  activeThreadId = threadId
 }
 
 export function loadDivinationFollowUpDraft(): DivinationFollowUpDraft | null {
-  if (typeof window === "undefined") return null
-
-  const rawDraft = window.sessionStorage.getItem(DIVINATION_FOLLOW_UP_DRAFT_STORAGE_KEY)
-  if (!rawDraft) return null
-
-  try {
-    return JSON.parse(rawDraft) as DivinationFollowUpDraft
-  } catch {
-    return null
-  }
+  return currentDraft ? structuredClone(currentDraft) : null
 }
 
 export function loadDivinationFollowUpDisplayThread(threadId?: string): DivinationFollowUpDisplayThread | null {
-  if (typeof window === "undefined") return null
-
-  const safeThreadId = threadId?.trim() || readActiveThreadId()
+  const safeThreadId = threadId?.trim() || activeThreadId
   if (!safeThreadId) return null
 
-  const rawThread = window.sessionStorage.getItem(getDivinationFollowUpThreadStorageKey(safeThreadId))
-  if (!rawThread) return null
-
-  try {
-    return JSON.parse(rawThread) as DivinationFollowUpDisplayThread
-  } catch {
-    return null
-  }
+  const thread = displayThreads.get(safeThreadId)
+  return thread ? structuredClone(thread) : null
 }
 
 export function clearDivinationFollowUpDraft(): void {
-  if (typeof window === "undefined") return
-
-  window.sessionStorage.removeItem(DIVINATION_FOLLOW_UP_DRAFT_STORAGE_KEY)
+  currentDraft = null
 }
 
 export function clearDivinationFollowUpDisplayThread(threadId?: string): void {
-  if (typeof window === "undefined") return
-
-  const safeThreadId = threadId?.trim() || readActiveThreadId()
+  const safeThreadId = threadId?.trim()
   if (safeThreadId) {
-    window.sessionStorage.removeItem(getDivinationFollowUpThreadStorageKey(safeThreadId))
+    displayThreads.delete(safeThreadId)
+  } else {
+    displayThreads.clear()
   }
 
-  window.sessionStorage.removeItem(DIVINATION_FOLLOW_UP_ACTIVE_THREAD_ID_STORAGE_KEY)
+  activeThreadId = ""
+}
+
+export function clearDivinationFollowUpMemory(): void {
+  activeThreadId = ""
+  currentDraft = null
+  displayThreads.clear()
 }

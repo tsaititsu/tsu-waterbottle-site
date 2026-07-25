@@ -25,8 +25,6 @@ const typeLabel: Record<string, string> = {
   other: '其他'
 }
 
-const postOfficeShippingStorageKey = 'waterbottle-post-office-shipping-info'
-
 type CartPaymentMethod = CartNewebPayPaymentMode
 
 const cartPaymentMethodOptions: Array<{
@@ -156,20 +154,6 @@ export default function CartPage() {
     return shippingInfo
   }
 
-  const savePostOfficeShippingInfo = (shippingInfo: ReturnType<typeof getTrimmedShippingInfo>) => {
-    try {
-      window.localStorage.setItem(
-        postOfficeShippingStorageKey,
-        JSON.stringify({
-          shipping_method: 'post_office',
-          shipping_info: shippingInfo,
-        }),
-      )
-    } catch {
-      // If local storage is unavailable, keep the current checkout path unchanged.
-    }
-  }
-
   const handleNewebPayCheckoutClick = async (paymentMode: CartNewebPayPaymentMode = 'credit') => {
     if (isNewebPayCheckingOut) return
 
@@ -179,7 +163,6 @@ export default function CartPage() {
     const productItems = items.filter((item) => item.type === 'spiritual_product')
     setIsNewebPayCheckingOut(true)
     setCheckoutError('')
-    savePostOfficeShippingInfo(shippingInfo)
 
     const result = await startNewebPayCartCheckout({
       cartItems: productItems,

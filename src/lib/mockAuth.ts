@@ -6,6 +6,7 @@ import {
   buildSameOriginAuthCallbackUrl,
   sanitizeAuthReturnPath,
 } from './auth/returnTo'
+import { clearSensitiveBrowserMemory } from './security/sensitiveBrowserMemory'
 import { getSupabaseBrowserClient, hasSupabaseBrowserConfig } from './supabase/client'
 
 export type { UserProfile } from './auth/types'
@@ -21,6 +22,17 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 let cachedUser: UserProfile | null = null
 let initialized = false
 const syncedProfileUserIds = new Set<string>()
+
+function updateCachedUser(nextUser: UserProfile | null) {
+  const previousUserId = cachedUser?.id ?? null
+  const nextUserId = nextUser?.id ?? null
+
+  if (previousUserId !== nextUserId) {
+    clearSensitiveBrowserMemory()
+  }
+
+  cachedUser = nextUser
+}
 
 function notifyAuthChange() {
   if (typeof window === 'undefined') return
@@ -97,15 +109,10 @@ function profileFromSupabaseUser(user: User): UserProfile {
 
 function getLegacyMockUser(): UserProfile | null {
   if (typeof window === 'undefined') return null
-  const raw = window.localStorage.getItem(LEGACY_USER_KEY)
-  if (!raw) return null
-
-  try {
-    return JSON.parse(raw) as UserProfile
-  } catch {
+  if (window.localStorage.getItem(LEGACY_USER_KEY)) {
     window.localStorage.removeItem(LEGACY_USER_KEY)
-    return null
   }
+  return null
 }
 
 function setLinePkceCookie(value: string) {
@@ -219,7 +226,7 @@ export async function refreshAuthUser() {
       const { data } = await supabase.auth.getUser()
 
       if (data.user) {
-        cachedUser = profileFromSupabaseUser(data.user)
+        updateCachedUser(profileFromSupabaseUser(data.user))
         void syncProfileToServer()
         notifyAuthChange()
         return cachedUser
@@ -229,7 +236,7 @@ export async function refreshAuthUser() {
     }
   }
 
-  cachedUser = await fetchLineSessionUser()
+  updateCachedUser(await fetchLineSessionUser())
   if (!cachedUser) {
     syncedProfileUserIds.clear()
   }
@@ -254,7 +261,7 @@ function ensureAuthListener() {
     const supabase = getSupabaseBrowserClient()
     const { data } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
       if (session?.user) {
-        cachedUser = profileFromSupabaseUser(session.user)
+        updateCachedUser(profileFromSupabaseUser(session.user))
         void syncProfileToServer()
         notifyAuthChange()
         return
@@ -302,19 +309,20 @@ export async function loginWithProvider(provider: 'line' | 'google', returnTo?: 
 export function logoutMockUser() {
   if (typeof window === 'undefined') return
   window.localStorage.removeItem(LEGACY_USER_KEY)
-  cachedUser = null
+  clearSensitiveBrowserMemory()
+  updateCachedUser(null)
   syncedProfileUserIds.clear()
   notifyAuthChange()
 
   void fetch('/api/auth/line/logout', { method: 'POST' }).finally(() => {
-    cachedUser = null
+    updateCachedUser(null)
     syncedProfileUserIds.clear()
     notifyAuthChange()
   })
 
   if (hasSupabaseBrowserConfig()) {
     void getSupabaseBrowserClient().auth.signOut().finally(() => {
-      cachedUser = null
+      updateCachedUser(null)
       syncedProfileUserIds.clear()
       notifyAuthChange()
     })

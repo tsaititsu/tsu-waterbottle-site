@@ -12,13 +12,13 @@ const followUpStorage = (await import(
 )) as FollowUpStorageModule
 
 const {
-  DIVINATION_FOLLOW_UP_ACTIVE_THREAD_ID_STORAGE_KEY,
-  DIVINATION_FOLLOW_UP_DRAFT_STORAGE_KEY,
   clearDivinationFollowUpDisplayThread,
   clearDivinationFollowUpDraft,
   getDivinationFollowUpThreadStorageKey,
   loadDivinationFollowUpDisplayThread,
   loadDivinationFollowUpDraft,
+  saveDivinationFollowUpDisplayReading,
+  saveDivinationFollowUpDraft,
 } = followUpStorage
 
 const {
@@ -152,59 +152,6 @@ function occurrenceCount(source: string, pattern: RegExp) {
   return source.match(pattern)?.length ?? 0
 }
 
-class FakeStorage {
-  private data = new Map<string, string>()
-
-  get length() {
-    return this.data.size
-  }
-
-  clear() {
-    this.data.clear()
-  }
-
-  getItem(key: string) {
-    return this.data.get(key) ?? null
-  }
-
-  key(index: number) {
-    return [...this.data.keys()][index] ?? null
-  }
-
-  removeItem(key: string) {
-    this.data.delete(key)
-  }
-
-  setItem(key: string, value: string) {
-    this.data.set(key, value)
-  }
-}
-
-async function withFakeSessionStorage(
-  run: (storage: FakeStorage) => Promise<void> | void,
-) {
-  const originalWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window')
-  const storage = new FakeStorage()
-
-  Object.defineProperty(globalThis, 'window', {
-    configurable: true,
-    writable: true,
-    value: { sessionStorage: storage },
-  })
-
-  try {
-    await run(storage)
-  } finally {
-    if (originalWindowDescriptor) {
-      Object.defineProperty(globalThis, 'window', originalWindowDescriptor)
-    } else {
-      Reflect.deleteProperty(globalThis, 'window')
-    }
-  }
-}
-
-const canonicalDraftStorageKey = 'divination_follow_up_draft'
-const canonicalActiveThreadIdStorageKey = 'divination_follow_up_active_thread_id'
 const canonicalThreadStoragePrefix = 'divination_follow_up_thread:'
 const threadId = 'codex-thread-fixture'
 const canonicalSyntheticThreadStorageKey = `${canonicalThreadStoragePrefix}${threadId}`
@@ -212,7 +159,6 @@ const readingId = 'codex-reading-fixture'
 const question = 'synthetic-question'
 const finalAnswer = 'synthetic-answer'
 const createdAt = '1970-01-01T00:00:00.000Z'
-const unrelatedSyntheticKey = 'codex-unrelated-session-fixture'
 
 const syntheticDraft = {
   threadId,
@@ -227,19 +173,6 @@ const syntheticDraft = {
     },
   ],
   createdAt,
-}
-
-const syntheticDisplayThread = {
-  threadId,
-  readings: [
-    {
-      readingId,
-      question,
-      finalAnswer,
-      createdAt,
-    },
-  ],
-  updatedAt: createdAt,
 }
 
 test('public pages render stable client shells without reading search params on the server', () => {
@@ -408,7 +341,7 @@ test('reset effect clears every reading and gates follow-up cleanup behind a non
   )
   assert.match(
     previewSource,
-    /<DivinationQuestionForm\s+key=\{resetKey \|\| ['"]initial['"]\}\s+onQuestionSubmit=\{handleQuestionSubmit\}/,
+    /<DivinationQuestionForm\s+key=\{resetKey \|\| ['"]initial['"]\}\s+disabled=\{isCreatingReading\}\s+onQuestionSubmit=\{handleQuestionSubmit\}/,
   )
 })
 
@@ -471,6 +404,32 @@ test('follow-up context panel keeps one unconditional shell before the question 
   )
 })
 
+test('reading creation takes a synchronous lock and disables every question submission control', () => {
+  const previewSource = readSource(
+    'src/components/divination/DivinationLocalPreview.tsx',
+  )
+  const formSource = readSource(
+    'src/components/divination/DivinationQuestionForm.tsx',
+  )
+
+  assert.match(previewSource, /const createReadingInFlightRef = useRef\(false\)/)
+  assert.match(
+    previewSource,
+    /if \(createReadingInFlightRef\.current\) \{\s*return\s*\}/,
+  )
+  assert.ok(
+    previewSource.indexOf('createReadingInFlightRef.current = true') <
+      previewSource.indexOf('const requestResetVersion = resetVersionRef.current'),
+    'reading creation must take a synchronous lock before any awaited work',
+  )
+  assert.match(
+    previewSource,
+    /<DivinationQuestionForm[\s\S]*disabled=\{isCreatingReading\}[\s\S]*onQuestionSubmit=\{handleQuestionSubmit\}/,
+  )
+  assert.match(formSource, /disabled\?: boolean/)
+  assert.equal(occurrenceCount(formSource, /disabled=\{disabled\}/g), 3)
+})
+
 test('context panel uses fixed grid rows and clamps dynamic follow-up text', () => {
   const panel = parseSource(
     'src/components/divination/DivinationQuestionContextPanel.tsx',
@@ -515,79 +474,59 @@ test('context panel uses fixed grid rows and clamps dynamic follow-up text', () 
   assert.match(panelSource, /完成一次占卜後，可從解答頁延續追問/)
 })
 
-test('follow-up storage exports preserve canonical browser storage keys', () => {
-  assert.equal(DIVINATION_FOLLOW_UP_DRAFT_STORAGE_KEY, canonicalDraftStorageKey)
-  assert.equal(
-    DIVINATION_FOLLOW_UP_ACTIVE_THREAD_ID_STORAGE_KEY,
-    canonicalActiveThreadIdStorageKey,
-  )
+test('follow-up memory contract retains stable thread identity without browser storage', () => {
   assert.equal(
     getDivinationFollowUpThreadStorageKey(threadId),
     canonicalSyntheticThreadStorageKey,
   )
+  const source = readSource('src/lib/divination/followUpStorage.ts')
+  assert.doesNotMatch(source, /localStorage|sessionStorage/)
 })
 
-test('follow-up draft loader reads the complete synthetic draft contract', { concurrency: false }, async () => {
-  await withFakeSessionStorage((storage) => {
-    storage.setItem(canonicalDraftStorageKey, JSON.stringify(syntheticDraft))
+test('follow-up draft loader reads a defensive in-memory draft contract', () => {
+  clearDivinationFollowUpDraft()
+  saveDivinationFollowUpDraft(syntheticDraft)
+  const loaded = loadDivinationFollowUpDraft()
 
-    const loaded = loadDivinationFollowUpDraft()
-
-    assert.equal(loaded?.threadId, threadId)
-    assert.equal(loaded?.parentReadingId, readingId)
-    assert.deepEqual(loaded?.previousReadings, syntheticDraft.previousReadings)
-    assert.equal(loaded?.createdAt, createdAt)
-  })
+  assert.equal(loaded?.threadId, threadId)
+  assert.equal(loaded?.parentReadingId, readingId)
+  assert.deepEqual(loaded?.previousReadings, syntheticDraft.previousReadings)
+  assert.equal(loaded?.createdAt, createdAt)
+  loaded!.previousReadings[0]!.question = 'external mutation'
+  assert.equal(loadDivinationFollowUpDraft()?.previousReadings[0]?.question, question)
 })
 
-test('display loader resolves the synthetic thread through the active thread ID', { concurrency: false }, async () => {
-  await withFakeSessionStorage((storage) => {
-    storage.setItem(canonicalActiveThreadIdStorageKey, threadId)
-    storage.setItem(canonicalSyntheticThreadStorageKey, JSON.stringify(syntheticDisplayThread))
-
-    const loaded = loadDivinationFollowUpDisplayThread()
-
-    assert.equal(loaded?.threadId, threadId)
-    assert.deepEqual(loaded?.readings, syntheticDisplayThread.readings)
-    assert.equal(loaded?.updatedAt, createdAt)
+test('display loader resolves the current in-memory thread', () => {
+  clearDivinationFollowUpDisplayThread()
+  saveDivinationFollowUpDisplayReading({
+    readingId,
+    question,
+    finalAnswer,
+    existingFollowUpContext: {
+      isFollowUp: true,
+      threadId,
+      parentReadingId: readingId,
+      previousReadings: syntheticDraft.previousReadings,
+    },
   })
+
+  const loaded = loadDivinationFollowUpDisplayThread()
+  assert.equal(loaded?.threadId, threadId)
+  assert.equal(loaded?.readings[0]?.readingId, readingId)
+  assert.equal(loaded?.readings[0]?.question, question)
+  assert.equal(loaded?.readings[0]?.finalAnswer, finalAnswer)
 })
 
-test('draft and display loaders fail closed on invalid synthetic JSON', { concurrency: false }, async () => {
-  await withFakeSessionStorage((storage) => {
-    storage.setItem(canonicalDraftStorageKey, '{not-json')
-    storage.setItem(canonicalActiveThreadIdStorageKey, threadId)
-    storage.setItem(canonicalSyntheticThreadStorageKey, '{not-json')
-
-    assert.equal(loadDivinationFollowUpDraft(), null)
-    assert.equal(loadDivinationFollowUpDisplayThread(), null)
-  })
+test('draft cleanup does not clear the current display thread', () => {
+  saveDivinationFollowUpDraft(syntheticDraft)
+  clearDivinationFollowUpDraft()
+  assert.equal(loadDivinationFollowUpDraft(), null)
+  assert.equal(loadDivinationFollowUpDisplayThread()?.threadId, threadId)
 })
 
-test('draft cleanup removes only the draft key', { concurrency: false }, async () => {
-  await withFakeSessionStorage((storage) => {
-    storage.setItem(canonicalDraftStorageKey, JSON.stringify(syntheticDraft))
-    storage.setItem(canonicalActiveThreadIdStorageKey, threadId)
-    storage.setItem(unrelatedSyntheticKey, 'keep')
-
-    clearDivinationFollowUpDraft()
-
-    assert.equal(storage.getItem(canonicalDraftStorageKey), null)
-    assert.equal(storage.getItem(canonicalActiveThreadIdStorageKey), threadId)
-    assert.equal(storage.getItem(unrelatedSyntheticKey), 'keep')
-  })
-})
-
-test('display cleanup removes the active thread pair and preserves unrelated synthetic storage', { concurrency: false }, async () => {
-  await withFakeSessionStorage((storage) => {
-    storage.setItem(canonicalActiveThreadIdStorageKey, threadId)
-    storage.setItem(canonicalSyntheticThreadStorageKey, JSON.stringify(syntheticDisplayThread))
-    storage.setItem(unrelatedSyntheticKey, 'keep')
-
-    clearDivinationFollowUpDisplayThread()
-
-    assert.equal(storage.getItem(canonicalActiveThreadIdStorageKey), null)
-    assert.equal(storage.getItem(canonicalSyntheticThreadStorageKey), null)
-    assert.equal(storage.getItem(unrelatedSyntheticKey), 'keep')
-  })
+test('display cleanup removes only the selected in-memory display thread', () => {
+  saveDivinationFollowUpDraft(syntheticDraft)
+  clearDivinationFollowUpDisplayThread()
+  assert.equal(loadDivinationFollowUpDisplayThread(), null)
+  assert.equal(loadDivinationFollowUpDraft()?.threadId, threadId)
 })
