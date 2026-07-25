@@ -4,24 +4,30 @@ on:
   pull_request:
     paths:
       - ".github/workflows/line-pay-db-contract-ci.yml"
+      - ".github/workflows/supabase-production-bank-transfer-baseline-capture.yml"
       - ".github/workflows/supabase-production-bank-transfer-forensic.yml"
       - ".github/workflows/supabase-production-line-pay-diagnostic.yml"
       - ".github/workflows/supabase-production-line-pay-migration.yml"
       - "package.json"
       - "package-lock.json"
       - "scripts/supabase/run-bank-transfer-production-forensic.mjs"
+      - "scripts/supabase/run-bank-transfer-production-baseline-capture.mjs"
       - "scripts/supabase/run-line-pay-production-exact-file.mjs"
       - "scripts/supabase/run-line-pay-production-diagnostic.mjs"
       - "scripts/supabase/validate-bank-transfer-production-forensic.mjs"
+      - "scripts/supabase/validate-bank-transfer-production-baseline-capture.mjs"
       - "scripts/supabase/validate-line-pay-production-diagnostic.mjs"
       - "scripts/supabase/validate-line-pay-production-deployment.mjs"
       - "src/lib/supabase/linePayDatabaseContracts.ts"
       - "src/lib/supabase/linePayDatabaseContracts.test.ts"
       - "supabase/bank_transfer_submissions_patch.sql"
+      - "supabase/bank_transfer_baseline_capture_runner.test.ts"
+      - "supabase/bank_transfer_baseline_capture_workflow.test.ts"
       - "supabase/bank_transfer_historical_forensic_runner.test.ts"
       - "supabase/bank_transfer_historical_forensic_workflow.test.ts"
       - "supabase/bank_transfer_submissions_readonly_fence.test.ts"
       - "supabase/deployment/bank_transfer_historical_forensic.sql"
+      - "supabase/deployment/bank_transfer_historical_baseline_capture.sql"
       - "supabase/deployment/line_pay_remediation_postflight.sql"
       - "supabase/deployment/line_pay_remediation_preflight.sql"
       - "supabase/deployment/line_pay_remediation_deploy.sql"
@@ -34,6 +40,7 @@ on:
       - "supabase/migrations/*_retire_bank_transfer_submissions_writes.sql"
       - "supabase/migrations/20260719033404_line_pay_remediation_contracts.sql"
       - "supabase/tests/run_bank_transfer_historical_forensic_contracts.mjs"
+      - "supabase/tests/run_bank_transfer_baseline_capture_contracts.mjs"
       - "supabase/tests/run_bank_transfer_submissions_readonly_fence.mjs"
       - "supabase/tests/run_line_pay_production_diagnostic_contracts.mjs"
       - "supabase/tests/run_line_pay_production_exact_file_contracts.mjs"
@@ -73,6 +80,8 @@ jobs:
       - name: Run static database contract tests
         run: |
           node --test supabase/bank_transfer_submissions_readonly_fence.test.ts
+          node --test supabase/bank_transfer_baseline_capture_workflow.test.ts
+          node --test supabase/bank_transfer_baseline_capture_runner.test.ts
           node --test supabase/bank_transfer_historical_forensic_workflow.test.ts
           node --test supabase/bank_transfer_historical_forensic_runner.test.ts
           node --test supabase/line_pay_remediation_contracts.test.ts
@@ -90,6 +99,9 @@ jobs:
 
       - name: Run bank transfer historical forensic contracts
         run: node supabase/tests/run_bank_transfer_historical_forensic_contracts.mjs
+
+      - name: Run bank transfer baseline capture contracts
+        run: node supabase/tests/run_bank_transfer_baseline_capture_contracts.mjs
 
       - name: Run bank transfer read-only fence contracts
         run: node supabase/tests/run_bank_transfer_submissions_readonly_fence.mjs
@@ -137,4 +149,10 @@ jobs:
           docker volume ls -q --filter label=task=bank-transfer-historical-forensic |
             xargs -r docker volume rm
           docker network ls -q --filter label=task=bank-transfer-historical-forensic |
+            xargs -r docker network rm
+          docker ps -aq --filter label=task=bank-transfer-baseline-capture |
+            xargs -r docker rm --force
+          docker volume ls -q --filter label=task=bank-transfer-baseline-capture |
+            xargs -r docker volume rm
+          docker network ls -q --filter label=task=bank-transfer-baseline-capture |
             xargs -r docker network rm
