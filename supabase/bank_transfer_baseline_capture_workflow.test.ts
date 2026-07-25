@@ -19,9 +19,28 @@ let validator: any
 before(async () => {
   validator = await import(pathToFileURL(validatorPath).href)
 })
-test('baseline capture workflow is manual-only, protected, and uploads one private one-day artifact', () => {
+test('used baseline capture workflow remains auditable but source validation is permanently fail-closed', () => {
   const workflow = readFileSync(workflowPath, 'utf8')
+  const validatorSource = readFileSync(validatorPath, 'utf8')
   assert.equal(validator.assertWorkflowSource(workflow), true)
+  assert.match(
+    validatorSource,
+    /const BASELINE_CAPTURE_CHANNEL_RETIRED = true/u,
+  )
+  assert.throws(
+    () =>
+      validator.validateWorkflowContext({
+        GITHUB_REPOSITORY: 'tsaititsu/tsu-waterbottle-site',
+        GITHUB_EVENT_NAME: 'workflow_dispatch',
+        GITHUB_REF: 'refs/heads/main',
+        GITHUB_SHA: 'a'.repeat(40),
+        AUTHORIZED_COMMIT: 'a'.repeat(40),
+        PROJECT_REF_INPUT: 'ndbqoznvobmpkgxkiezz',
+        BASELINE_CAPTURE_CONFIRMATION:
+          'CAPTURE_BANK_TRANSFER_BASELINE_READ_ONLY_ONCE',
+      }),
+    /BASELINE_CAPTURE_CHANNEL_RETIRED/,
+  )
   assert.match(
     workflow,
     /^name: Supabase Production Bank Transfer Baseline Capture$/mu,

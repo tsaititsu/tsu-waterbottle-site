@@ -843,225 +843,707 @@ fence_contract as (
   from fence_relation as relation
   cross join fence_acl as acl
 ),
-bank_transfer_fingerprint as (
+bank_transfer_expected_columns(
+  ordinal_position,
+  column_name,
+  formatted_type,
+  is_not_null,
+  default_expression,
+  generated_kind,
+  identity_kind
+) as (
+  values
+    (1, 'id', 'uuid', true, 'gen_random_uuid()', '', ''),
+    (2, 'user_id', 'uuid', false, null, '', ''),
+    (3, 'item_type', 'text', true, null, '', ''),
+    (4, 'item_id', 'text', false, null, '', ''),
+    (5, 'item_name', 'text', true, null, '', ''),
+    (6, 'amount_twd', 'integer', true, null, '', ''),
+    (7, 'payer_name', 'text', true, null, '', ''),
+    (8, 'payer_phone', 'text', true, null, '', ''),
+    (9, 'payer_email', 'text', false, null, '', ''),
+    (10, 'line_display_name', 'text', false, null, '', ''),
+    (11, 'bank_account_last5', 'text', true, null, '', ''),
+    (12, 'transfer_time', 'timestamp with time zone', false, null, '', ''),
+    (13, 'note', 'text', false, null, '', ''),
+    (14, 'status', 'text', true, '''pending_review''::text', '', ''),
+    (15, 'admin_note', 'text', false, null, '', ''),
+    (16, 'created_at', 'timestamp with time zone', false, 'now()', '', ''),
+    (17, 'confirmed_at', 'timestamp with time zone', false, null, '', '')
+),
+bank_transfer_actual_columns as (
   select
-    pg_catalog.count(*)::integer as rows,
-    pg_catalog.count(*) filter (where status = 'pending_review')::integer as pending_review,
+    attribute.attnum::integer as ordinal_position,
+    attribute.attname::text as column_name,
+    pg_catalog.format_type(
+      attribute.atttypid,
+      attribute.atttypmod
+    )::text as formatted_type,
+    attribute.attnotnull as is_not_null,
+    pg_catalog.pg_get_expr(
+      default_row.adbin,
+      default_row.adrelid,
+      false
+    )::text as default_expression,
+    attribute.attgenerated::text as generated_kind,
+    attribute.attidentity::text as identity_kind
+  from fence_relation as relation
+  join pg_catalog.pg_attribute as attribute
+    on attribute.attrelid = relation.oid
+   and attribute.attnum > 0
+   and not attribute.attisdropped
+  left join pg_catalog.pg_attrdef as default_row
+    on default_row.adrelid = attribute.attrelid
+   and default_row.adnum = attribute.attnum
+),
+bank_transfer_schema_contract as (
+  select
+    (
+      select pg_catalog.jsonb_agg(
+        pg_catalog.jsonb_build_array(
+          ordinal_position,
+          column_name,
+          formatted_type,
+          is_not_null,
+          default_expression,
+          generated_kind,
+          identity_kind
+        )
+        order by ordinal_position
+      )
+      from bank_transfer_expected_columns
+    ) = (
+      select pg_catalog.jsonb_agg(
+        pg_catalog.jsonb_build_array(
+          ordinal_position,
+          column_name,
+          formatted_type,
+          is_not_null,
+          default_expression,
+          generated_kind,
+          identity_kind
+        )
+        order by ordinal_position
+      )
+      from bank_transfer_actual_columns
+    )
+    and not exists (
+      select 1
+      from fence_relation as relation
+      join pg_catalog.pg_attribute as attribute
+        on attribute.attrelid = relation.oid
+      where attribute.attnum > 0
+        and attribute.attisdropped
+    ) as exact,
     pg_catalog.encode(
-      pg_catalog.sha256(pg_catalog.convert_to(
-        coalesce(pg_catalog.string_agg(id::text, E'\n' order by id), ''),
-        'UTF8'
-      )),
+      pg_catalog.sha256(
+        pg_catalog.convert_to(
+          coalesce(
+            (
+              select pg_catalog.string_agg(
+                pg_catalog.jsonb_build_array(
+                  ordinal_position,
+                  column_name,
+                  formatted_type,
+                  is_not_null,
+                  default_expression,
+                  generated_kind,
+                  identity_kind
+                )::text,
+                E'\n'
+                order by ordinal_position
+              )
+              from bank_transfer_actual_columns
+            ),
+            ''
+          ),
+          'UTF8'
+        )
+      ),
       'hex'
-    ) as pk_digest,
-    pg_catalog.encode(
-      pg_catalog.sha256(pg_catalog.convert_to(
-        coalesce(pg_catalog.string_agg(to_jsonb(row_value)::text, E'\n' order by id), ''),
-        'UTF8'
-      )),
-      'hex'
-    ) as content_digest
+    ) as signature
+),
+bank_transfer_canonical_rows as (
+  select
+    row_value.id,
+    row_value.status,
+    pg_catalog.row_number() over (order by row_value.id)::integer as ordinal,
+    pg_catalog.jsonb_build_object(
+      'id', row_value.id,
+      'user_id', row_value.user_id,
+      'item_type', row_value.item_type,
+      'item_id', row_value.item_id,
+      'item_name', row_value.item_name,
+      'amount_twd', row_value.amount_twd
+    ) as identity_and_amount,
+    pg_catalog.jsonb_build_object(
+      'id', row_value.id,
+      'payer_name', row_value.payer_name,
+      'payer_phone', row_value.payer_phone,
+      'payer_email', row_value.payer_email,
+      'line_display_name', row_value.line_display_name
+    ) as payer_contact,
+    pg_catalog.jsonb_build_object(
+      'id', row_value.id,
+      'bank_account_last5', row_value.bank_account_last5,
+      'transfer_time', row_value.transfer_time,
+      'note', row_value.note
+    ) as transfer_details,
+    pg_catalog.jsonb_build_object(
+      'id', row_value.id,
+      'status', row_value.status,
+      'admin_note', row_value.admin_note,
+      'created_at', row_value.created_at,
+      'confirmed_at', row_value.confirmed_at
+    ) as review_and_confirmation,
+    pg_catalog.jsonb_build_object(
+      'id', row_value.id,
+      'user_id', row_value.user_id,
+      'item_type', row_value.item_type,
+      'item_id', row_value.item_id,
+      'item_name', row_value.item_name,
+      'amount_twd', row_value.amount_twd,
+      'payer_name', row_value.payer_name,
+      'payer_phone', row_value.payer_phone,
+      'payer_email', row_value.payer_email,
+      'line_display_name', row_value.line_display_name,
+      'bank_account_last5', row_value.bank_account_last5,
+      'transfer_time', row_value.transfer_time,
+      'note', row_value.note,
+      'status', row_value.status,
+      'admin_note', row_value.admin_note,
+      'created_at', row_value.created_at,
+      'confirmed_at', row_value.confirmed_at
+    ) as full_canonical_row
   from public.bank_transfer_submissions as row_value
 ),
-\if :{?line_pay_baseline_manifest}
-payments_fingerprint as (
+bank_transfer_row_digests as (
   select
-    pg_catalog.count(*)::integer as rows,
+    id,
+    ordinal,
     pg_catalog.encode(
-      pg_catalog.sha256(pg_catalog.convert_to(
-        coalesce(pg_catalog.string_agg(manifest.id, E'\n' order by manifest.id), ''),
-        'UTF8'
-      )),
+      pg_catalog.sha256(
+        pg_catalog.convert_to(identity_and_amount::text, 'UTF8')
+      ),
+      'hex'
+    ) as identity_and_amount,
+    pg_catalog.encode(
+      pg_catalog.sha256(
+        pg_catalog.convert_to(payer_contact::text, 'UTF8')
+      ),
+      'hex'
+    ) as payer_contact,
+    pg_catalog.encode(
+      pg_catalog.sha256(
+        pg_catalog.convert_to(transfer_details::text, 'UTF8')
+      ),
+      'hex'
+    ) as transfer_details,
+    pg_catalog.encode(
+      pg_catalog.sha256(
+        pg_catalog.convert_to(review_and_confirmation::text, 'UTF8')
+      ),
+      'hex'
+    ) as review_and_confirmation,
+    pg_catalog.encode(
+      pg_catalog.sha256(
+        pg_catalog.convert_to(full_canonical_row::text, 'UTF8')
+      ),
+      'hex'
+    ) as full_canonical_row
+  from bank_transfer_canonical_rows
+),
+bank_transfer_aggregate_digests as (
+  select
+    pg_catalog.count(*)::integer as row_count,
+    pg_catalog.count(*) filter (
+      where row_value.status = 'pending_review'
+    )::integer as pending_review_count,
+    pg_catalog.encode(
+      pg_catalog.sha256(
+        pg_catalog.convert_to(
+          coalesce(
+            pg_catalog.string_agg(
+              row_value.id::text,
+              E'\n'
+              order by row_value.id
+            ),
+            ''
+          ),
+          'UTF8'
+        )
+      ),
       'hex'
     ) as pk_digest,
-    case when pg_catalog.bool_and(
-      row_value.id is not null
-      and pg_catalog.encode(
-        pg_catalog.sha256(pg_catalog.convert_to(
-          (
-            to_jsonb(row_value) - array[
-              'updated_at',
-              'product_order_id',
-              'environment',
-              'checkout_attempt_id',
-              'request_state',
-              'request_idempotency_key',
-              'request_body_sha256',
-              'line_pay_transaction_id',
-              'reconciliation_required',
-              'state_version'
-            ]
-          )::text,
-          'UTF8'
-        )),
+    pg_catalog.jsonb_build_object(
+      'identity_and_amount',
+      pg_catalog.encode(
+        pg_catalog.sha256(
+          pg_catalog.convert_to(
+            coalesce(
+              pg_catalog.string_agg(
+                row_value.identity_and_amount::text,
+                E'\n'
+                order by row_value.id
+              ),
+              ''
+            ),
+            'UTF8'
+          )
+        ),
         'hex'
-      ) = manifest.row_hash
-    ) then pg_catalog.encode(
-      pg_catalog.sha256(pg_catalog.convert_to(
-        coalesce(pg_catalog.string_agg(
-          (
-            to_jsonb(row_value) - array[
-              'updated_at',
-              'product_order_id',
-              'environment',
-              'checkout_attempt_id',
-              'request_state',
-              'request_idempotency_key',
-              'request_body_sha256',
-              'line_pay_transaction_id',
-              'reconciliation_required',
-              'state_version'
-            ]
-          )::text,
-          E'\n' order by manifest.id
-        ), ''),
-        'UTF8'
-      )),
+      ),
+      'payer_contact',
+      pg_catalog.encode(
+        pg_catalog.sha256(
+          pg_catalog.convert_to(
+            coalesce(
+              pg_catalog.string_agg(
+                row_value.payer_contact::text,
+                E'\n'
+                order by row_value.id
+              ),
+              ''
+            ),
+            'UTF8'
+          )
+        ),
+        'hex'
+      ),
+      'transfer_details',
+      pg_catalog.encode(
+        pg_catalog.sha256(
+          pg_catalog.convert_to(
+            coalesce(
+              pg_catalog.string_agg(
+                row_value.transfer_details::text,
+                E'\n'
+                order by row_value.id
+              ),
+              ''
+            ),
+            'UTF8'
+          )
+        ),
+        'hex'
+      ),
+      'review_and_confirmation',
+      pg_catalog.encode(
+        pg_catalog.sha256(
+          pg_catalog.convert_to(
+            coalesce(
+              pg_catalog.string_agg(
+                row_value.review_and_confirmation::text,
+                E'\n'
+                order by row_value.id
+              ),
+              ''
+            ),
+            'UTF8'
+          )
+        ),
+        'hex'
+      ),
+      'full_canonical_row',
+      pg_catalog.encode(
+        pg_catalog.sha256(
+          pg_catalog.convert_to(
+            coalesce(
+              pg_catalog.string_agg(
+                row_value.full_canonical_row::text,
+                E'\n'
+                order by row_value.id
+              ),
+              ''
+            ),
+            'UTF8'
+          )
+        ),
+        'hex'
+      )
+    ) as group_digests
+  from bank_transfer_canonical_rows as row_value
+),
+bank_transfer_contract as (
+  select pg_catalog.jsonb_build_object(
+    'schema_signature_match',
+    coalesce(
+      schema_contract.exact
+      and pg_catalog.encode(
+        pg_catalog.sha256(
+          pg_catalog.convert_to(schema_contract.signature, 'UTF8')
+        ),
+        'hex'
+      ) = '45d35856ba4ee300e196c562eb8e0e9b37dde94d3bb9d148248163827e005a04',
+      false
+    ),
+    'row_count_match', aggregate.row_count = 3,
+    'pending_review_count_match', aggregate.pending_review_count = 3,
+    'pk_digest_match',
+    pg_catalog.encode(
+      pg_catalog.sha256(
+        pg_catalog.convert_to(aggregate.pk_digest, 'UTF8')
+      ),
       'hex'
-    ) else 'drift' end as content_digest
+    ) = '4346bb9d65f1fe16ae98a26821e857bf49b158e12ac4e47d251380e6bc518199',
+    'group_matches',
+    pg_catalog.jsonb_build_object(
+      'identity_and_amount',
+      pg_catalog.encode(
+        pg_catalog.sha256(
+          pg_catalog.convert_to(
+            aggregate.group_digests ->> 'identity_and_amount',
+            'UTF8'
+          )
+        ),
+        'hex'
+      ) = '61ed62d26b2ffd626b1d494602b10700f6d79cf000ec7045261fbee44cff2c2c',
+      'payer_contact',
+      pg_catalog.encode(
+        pg_catalog.sha256(
+          pg_catalog.convert_to(
+            aggregate.group_digests ->> 'payer_contact',
+            'UTF8'
+          )
+        ),
+        'hex'
+      ) = '5eed83932fd5acd6a6c8fd1a7c8552e8d6c0f4bf67186b096ad702f1fff54c78',
+      'transfer_details',
+      pg_catalog.encode(
+        pg_catalog.sha256(
+          pg_catalog.convert_to(
+            aggregate.group_digests ->> 'transfer_details',
+            'UTF8'
+          )
+        ),
+        'hex'
+      ) = '624fe68a4f252e1128bbdf83e37050e4fbebc3b32828347fd10e5503cc93eb1b',
+      'review_and_confirmation',
+      pg_catalog.encode(
+        pg_catalog.sha256(
+          pg_catalog.convert_to(
+            aggregate.group_digests ->> 'review_and_confirmation',
+            'UTF8'
+          )
+        ),
+        'hex'
+      ) = '0e04c05d7edca9319b6fee5837e186916eded596e9d31a51cfd9d68251524271',
+      'full_canonical_row',
+      pg_catalog.encode(
+        pg_catalog.sha256(
+          pg_catalog.convert_to(
+            aggregate.group_digests ->> 'full_canonical_row',
+            'UTF8'
+          )
+        ),
+        'hex'
+      ) = 'd8ad6430e739d8a3d6d9b8f8d81680b2602313fa2f6b7662753331dda5fc93be'
+    ),
+    'ordinal_matches',
+    pg_catalog.jsonb_build_object(
+      'ordinal_1',
+      pg_catalog.jsonb_build_object(
+        'identity_group_match', coalesce((
+          select pg_catalog.encode(
+            pg_catalog.sha256(pg_catalog.convert_to(identity_and_amount, 'UTF8')),
+            'hex'
+          ) = '8054981959cf9095b36e19da0eea06e34d0b8f8f10379dc9313604e240a7db04'
+          from bank_transfer_row_digests where ordinal = 1
+        ), false),
+        'contact_group_match', coalesce((
+          select pg_catalog.encode(
+            pg_catalog.sha256(pg_catalog.convert_to(payer_contact, 'UTF8')),
+            'hex'
+          ) = 'f8172854e648abb71491098bb787edfd1b842f52b55c7631b91d8dcb3b14ed94'
+          from bank_transfer_row_digests where ordinal = 1
+        ), false),
+        'transfer_group_match', coalesce((
+          select pg_catalog.encode(
+            pg_catalog.sha256(pg_catalog.convert_to(transfer_details, 'UTF8')),
+            'hex'
+          ) = 'bb6eea7c32aa16e55702e7eb058a7df3cebbbf631433d0c842b1aae135d1f79f'
+          from bank_transfer_row_digests where ordinal = 1
+        ), false),
+        'review_group_match', coalesce((
+          select pg_catalog.encode(
+            pg_catalog.sha256(pg_catalog.convert_to(review_and_confirmation, 'UTF8')),
+            'hex'
+          ) = 'af75de6e16537e03fe5b9f1d905120e8cb84d7282de023357e0875b7e116d203'
+          from bank_transfer_row_digests where ordinal = 1
+        ), false),
+        'full_row_match', coalesce((
+          select pg_catalog.encode(
+            pg_catalog.sha256(pg_catalog.convert_to(full_canonical_row, 'UTF8')),
+            'hex'
+          ) = '77df43c18d57e3bb83ad9e285e14ca6429b50f177a353004170cf9863e849bb6'
+          from bank_transfer_row_digests where ordinal = 1
+        ), false)
+      ),
+      'ordinal_2',
+      pg_catalog.jsonb_build_object(
+        'identity_group_match', coalesce((
+          select pg_catalog.encode(
+            pg_catalog.sha256(pg_catalog.convert_to(identity_and_amount, 'UTF8')),
+            'hex'
+          ) = '41c0c3b20913fc951ad85057631d462e43f8e6ca335a0eb62c52685aa067d144'
+          from bank_transfer_row_digests where ordinal = 2
+        ), false),
+        'contact_group_match', coalesce((
+          select pg_catalog.encode(
+            pg_catalog.sha256(pg_catalog.convert_to(payer_contact, 'UTF8')),
+            'hex'
+          ) = '6a751378fd21bc0574cfa1b412ce1cdd8682505eaf07dacfe0cd0a67893f85b3'
+          from bank_transfer_row_digests where ordinal = 2
+        ), false),
+        'transfer_group_match', coalesce((
+          select pg_catalog.encode(
+            pg_catalog.sha256(pg_catalog.convert_to(transfer_details, 'UTF8')),
+            'hex'
+          ) = '7e5639668922d5c1ef7e3d0be137bd98a2ccd63b27746984b79f5ee6bde1f0c7'
+          from bank_transfer_row_digests where ordinal = 2
+        ), false),
+        'review_group_match', coalesce((
+          select pg_catalog.encode(
+            pg_catalog.sha256(pg_catalog.convert_to(review_and_confirmation, 'UTF8')),
+            'hex'
+          ) = '1db2ac98556bf945c15586491b5d5f844acf3b767fef307101a401877cbc7677'
+          from bank_transfer_row_digests where ordinal = 2
+        ), false),
+        'full_row_match', coalesce((
+          select pg_catalog.encode(
+            pg_catalog.sha256(pg_catalog.convert_to(full_canonical_row, 'UTF8')),
+            'hex'
+          ) = 'ad26153aa542a4310306d00da5c30fc3f3aff75fc71ce4e5385eae804059f514'
+          from bank_transfer_row_digests where ordinal = 2
+        ), false)
+      ),
+      'ordinal_3',
+      pg_catalog.jsonb_build_object(
+        'identity_group_match', coalesce((
+          select pg_catalog.encode(
+            pg_catalog.sha256(pg_catalog.convert_to(identity_and_amount, 'UTF8')),
+            'hex'
+          ) = 'df58063e371c4dc75807b1426f407119a3cd71241d972ee68177b1e8d754a4ab'
+          from bank_transfer_row_digests where ordinal = 3
+        ), false),
+        'contact_group_match', coalesce((
+          select pg_catalog.encode(
+            pg_catalog.sha256(pg_catalog.convert_to(payer_contact, 'UTF8')),
+            'hex'
+          ) = 'a1d83ac319167825ab16544ff9a27124639371156607727eabc80a6b8e13f29e'
+          from bank_transfer_row_digests where ordinal = 3
+        ), false),
+        'transfer_group_match', coalesce((
+          select pg_catalog.encode(
+            pg_catalog.sha256(pg_catalog.convert_to(transfer_details, 'UTF8')),
+            'hex'
+          ) = 'f1c8ca740c542cb6b51c330f8125aef55c89289f434058c9516d7558404975b6'
+          from bank_transfer_row_digests where ordinal = 3
+        ), false),
+        'review_group_match', coalesce((
+          select pg_catalog.encode(
+            pg_catalog.sha256(pg_catalog.convert_to(review_and_confirmation, 'UTF8')),
+            'hex'
+          ) = '73396a621108b90cf62be896452e3f4a44191f97febd055e10fd28af3a50b1bf'
+          from bank_transfer_row_digests where ordinal = 3
+        ), false),
+        'full_row_match', coalesce((
+          select pg_catalog.encode(
+            pg_catalog.sha256(pg_catalog.convert_to(full_canonical_row, 'UTF8')),
+            'hex'
+          ) = '782b67bbfb65e1819a24002a0ce4ecd7ab50396e1cf62fe4e8dc8913bb666772'
+          from bank_transfer_row_digests where ordinal = 3
+        ), false)
+      )
+    )
+  ) as value
+  from bank_transfer_schema_contract as schema_contract
+  cross join bank_transfer_aggregate_digests as aggregate
+),
+\if :{?line_pay_baseline_manifest}
+payments_baseline_manifest as (
+  select id, row_hash
   from pg_catalog.jsonb_each_text(
     :'baseline_payments_manifest'::jsonb
   ) as manifest(id, row_hash)
-  left join public.payments as row_value on row_value.id::text = manifest.id
 ),
-product_orders_fingerprint as (
+payments_current_manifest as (
   select
-    pg_catalog.count(*)::integer as rows,
+    row_value.id::text as id,
     pg_catalog.encode(
-      pg_catalog.sha256(pg_catalog.convert_to(
-        coalesce(pg_catalog.string_agg(manifest.id, E'\n' order by manifest.id), ''),
-        'UTF8'
-      )),
-      'hex'
-    ) as pk_digest,
-    case when pg_catalog.bool_and(
-      row_value.id is not null
-      and pg_catalog.encode(
-        pg_catalog.sha256(pg_catalog.convert_to(
-          (
-            to_jsonb(row_value) - array[
-              'environment',
-              'fulfillment_mode',
-              'sandbox_test',
-              'currency',
-              'checkout_attempt_id',
-              'payment_request_state',
-              'reconciliation_required',
-              'state_version'
-            ]
+      pg_catalog.sha256(
+        pg_catalog.convert_to(
+          pg_catalog.jsonb_build_object(
+            'id', row_value.id,
+            'user_id', row_value.user_id,
+            'booking_id', row_value.booking_id,
+            'provider', row_value.provider,
+            'provider_payment_id', row_value.provider_payment_id,
+            'item_type', row_value.item_type,
+            'item_name', row_value.item_name,
+            'amount_twd', row_value.amount_twd,
+            'currency', row_value.currency,
+            'status', row_value.status,
+            'paid_at', row_value.paid_at,
+            'refunded_at', row_value.refunded_at,
+            'raw_payload', row_value.raw_payload,
+            'created_at', row_value.created_at,
+            'item_id', row_value.item_id,
+            'merchant_order_no', row_value.merchant_order_no,
+            'provider_trade_no', row_value.provider_trade_no,
+            'notify_received_at', row_value.notify_received_at,
+            'failure_reason', row_value.failure_reason
           )::text,
           'UTF8'
-        )),
-        'hex'
-      ) = manifest.row_hash
-    ) then pg_catalog.encode(
-      pg_catalog.sha256(pg_catalog.convert_to(
-        coalesce(pg_catalog.string_agg(
-          (
-            to_jsonb(row_value) - array[
-              'environment',
-              'fulfillment_mode',
-              'sandbox_test',
-              'currency',
-              'checkout_attempt_id',
-              'payment_request_state',
-              'reconciliation_required',
-              'state_version'
-            ]
-          )::text,
-          E'\n' order by manifest.id
-        ), ''),
-        'UTF8'
-      )),
+        )
+      ),
       'hex'
-    ) else 'drift' end as content_digest
+    ) as row_hash
+  from public.payments as row_value
+),
+payments_manifest_contract as (
+  select pg_catalog.jsonb_build_object(
+    'manifest_complete',
+    pg_catalog.jsonb_typeof(:'baseline_payments_manifest'::jsonb) = 'object'
+      and (
+        select pg_catalog.count(*)::integer
+        from pg_catalog.jsonb_object_keys(
+          :'baseline_payments_manifest'::jsonb
+        )
+      ) = :'baseline_payments_row_count'::integer
+      and not exists (
+        select 1
+        from payments_baseline_manifest
+        where row_hash !~ '^[0-9a-f]{64}$'
+      ),
+    'no_missing_rows',
+    not exists (
+      select 1
+      from payments_baseline_manifest as baseline
+      left join payments_current_manifest as current using (id)
+      where current.id is null
+    ),
+    'no_unexpected_rows',
+    (select pg_catalog.count(*) from payments_current_manifest)
+      = :'baseline_payments_row_count'::integer
+      and not exists (
+        select 1
+        from payments_current_manifest as current
+        left join payments_baseline_manifest as baseline using (id)
+        where baseline.id is null
+      ),
+    'business_fields_unchanged',
+    not exists (
+      select 1
+      from payments_baseline_manifest as baseline
+      left join payments_current_manifest as current using (id)
+      where current.id is null or current.row_hash <> baseline.row_hash
+    )
+  ) as value
+),
+product_orders_baseline_manifest as (
+  select id, row_hash
   from pg_catalog.jsonb_each_text(
     :'baseline_product_orders_manifest'::jsonb
   ) as manifest(id, row_hash)
-  left join public.product_orders as row_value
-    on row_value.id::text = manifest.id
+),
+product_orders_current_manifest as (
+  select
+    row_value.id::text as id,
+    pg_catalog.encode(
+      pg_catalog.sha256(
+        pg_catalog.convert_to(
+          pg_catalog.jsonb_build_object(
+            'id', row_value.id,
+            'order_no', row_value.order_no,
+            'user_id', row_value.user_id,
+            'customer_name', row_value.customer_name,
+            'customer_email', row_value.customer_email,
+            'customer_phone', row_value.customer_phone,
+            'total_amount_twd', row_value.total_amount_twd,
+            'payment_method', row_value.payment_method,
+            'payment_status', row_value.payment_status,
+            'order_status', row_value.order_status,
+            'shipping_status', row_value.shipping_status,
+            'payment_id', row_value.payment_id,
+            'bank_transfer_submission_id',
+              row_value.bank_transfer_submission_id,
+            'note', row_value.note,
+            'created_at', row_value.created_at,
+            'updated_at', row_value.updated_at
+          )::text,
+          'UTF8'
+        )
+      ),
+      'hex'
+    ) as row_hash
+  from public.product_orders as row_value
+),
+product_orders_manifest_contract as (
+  select pg_catalog.jsonb_build_object(
+    'manifest_complete',
+    pg_catalog.jsonb_typeof(
+      :'baseline_product_orders_manifest'::jsonb
+    ) = 'object'
+      and (
+        select pg_catalog.count(*)::integer
+        from pg_catalog.jsonb_object_keys(
+          :'baseline_product_orders_manifest'::jsonb
+        )
+      ) = :'baseline_product_orders_row_count'::integer
+      and not exists (
+        select 1
+        from product_orders_baseline_manifest
+        where row_hash !~ '^[0-9a-f]{64}$'
+      ),
+    'no_missing_rows',
+    not exists (
+      select 1
+      from product_orders_baseline_manifest as baseline
+      left join product_orders_current_manifest as current using (id)
+      where current.id is null
+    ),
+    'no_unexpected_rows',
+    (select pg_catalog.count(*) from product_orders_current_manifest)
+      = :'baseline_product_orders_row_count'::integer
+      and not exists (
+        select 1
+        from product_orders_current_manifest as current
+        left join product_orders_baseline_manifest as baseline using (id)
+        where baseline.id is null
+      ),
+    'business_fields_unchanged',
+    not exists (
+      select 1
+      from product_orders_baseline_manifest as baseline
+      left join product_orders_current_manifest as current using (id)
+      where current.id is null or current.row_hash <> baseline.row_hash
+    )
+  ) as value
 ),
 \else
-payments_fingerprint as (
-  select
-    pg_catalog.count(*)::integer as rows,
-    pg_catalog.encode(
-      pg_catalog.sha256(pg_catalog.convert_to(
-        coalesce(pg_catalog.string_agg(id::text, E'\n' order by id), ''),
-        'UTF8'
-      )),
-      'hex'
-    ) as pk_digest,
-    pg_catalog.encode(
-      pg_catalog.sha256(pg_catalog.convert_to(
-        coalesce(
-          pg_catalog.string_agg(
-            (
-              to_jsonb(row_value) - array[
-                'updated_at',
-                'product_order_id',
-                'environment',
-                'checkout_attempt_id',
-                'request_state',
-                'request_idempotency_key',
-                'request_body_sha256',
-                'line_pay_transaction_id',
-                'reconciliation_required',
-                'state_version'
-              ]
-            )::text,
-            E'\n' order by id
-          ),
-          ''
-        ),
-        'UTF8'
-      )),
-      'hex'
-    ) as content_digest
-  from public.payments as row_value
+payments_manifest_contract as (
+  select '{
+    "manifest_complete":false,
+    "no_missing_rows":false,
+    "no_unexpected_rows":false,
+    "business_fields_unchanged":false
+  }'::jsonb as value
 ),
-product_orders_fingerprint as (
-  select
-    pg_catalog.count(*)::integer as rows,
-    pg_catalog.encode(
-      pg_catalog.sha256(pg_catalog.convert_to(
-        coalesce(pg_catalog.string_agg(id::text, E'\n' order by id), ''),
-        'UTF8'
-      )),
-      'hex'
-    ) as pk_digest,
-    pg_catalog.encode(
-      pg_catalog.sha256(pg_catalog.convert_to(
-        coalesce(
-          pg_catalog.string_agg(
-            (
-              to_jsonb(row_value) - array[
-                'environment',
-                'fulfillment_mode',
-                'sandbox_test',
-                'currency',
-                'checkout_attempt_id',
-                'payment_request_state',
-                'reconciliation_required',
-                'state_version'
-              ]
-            )::text,
-            E'\n' order by id
-          ),
-          ''
-        ),
-        'UTF8'
-      )),
-      'hex'
-    ) as content_digest
-  from public.product_orders as row_value
+product_orders_manifest_contract as (
+  select '{
+    "manifest_complete":false,
+    "no_missing_rows":false,
+    "no_unexpected_rows":false,
+    "business_fields_unchanged":false
+  }'::jsonb as value
 ),
 \endif
 historical_contract as (
   select pg_catalog.jsonb_build_object(
-    'bank_transfer', (select to_jsonb(row_value) from bank_transfer_fingerprint as row_value),
-    'payments', (select to_jsonb(row_value) from payments_fingerprint as row_value),
-    'product_orders', (select to_jsonb(row_value) from product_orders_fingerprint as row_value)
+    'bank_transfer', (select value from bank_transfer_contract),
+    'payments', (select value from payments_manifest_contract),
+    'product_orders', (select value from product_orders_manifest_contract)
   ) as value
 ),
 migration_history_contract as (
@@ -1135,20 +1617,52 @@ classified as (
        }'::jsonb
        and historical = '{
          "bank_transfer":{
-           "rows":3,
-           "pending_review":3,
-           "pk_digest":"e6a67042ff04db27bea56f76d9d983e6762ba4122e67fe54c30d740e458f5fec",
-           "content_digest":"e87a8425def35ac99bb054b4b2e0fee3efe985d5b3376ab6011d30e730c3bc40"
+           "schema_signature_match":true,
+           "row_count_match":true,
+           "pending_review_count_match":true,
+           "pk_digest_match":true,
+           "group_matches":{
+             "identity_and_amount":true,
+             "payer_contact":true,
+             "transfer_details":true,
+             "review_and_confirmation":true,
+             "full_canonical_row":true
+           },
+           "ordinal_matches":{
+             "ordinal_1":{
+               "identity_group_match":true,
+               "contact_group_match":true,
+               "transfer_group_match":true,
+               "review_group_match":true,
+               "full_row_match":true
+             },
+             "ordinal_2":{
+               "identity_group_match":true,
+               "contact_group_match":true,
+               "transfer_group_match":true,
+               "review_group_match":true,
+               "full_row_match":true
+             },
+             "ordinal_3":{
+               "identity_group_match":true,
+               "contact_group_match":true,
+               "transfer_group_match":true,
+               "review_group_match":true,
+               "full_row_match":true
+             }
+           }
          },
          "payments":{
-           "rows":18,
-           "pk_digest":"bc3bd47469b3d4c199be57d54c18195f9869d9b1c94527fee445d8cf83f2fa79",
-           "content_digest":"da6b440446bde8d5816f06a610baba34140a21dbd9d58e9c8ffbc0867395d1ab"
+           "manifest_complete":true,
+           "no_missing_rows":true,
+           "no_unexpected_rows":true,
+           "business_fields_unchanged":true
          },
          "product_orders":{
-           "rows":5,
-           "pk_digest":"5b2aa41738c901750a2bb752ce23f7e18743631e941476e84a86336e874b55cd",
-           "content_digest":"eb133b3808572d8ae76829ba87edc33ae04725609cd1d82e3e1a2db0d502f853"
+           "manifest_complete":true,
+           "no_missing_rows":true,
+           "no_unexpected_rows":true,
+           "business_fields_unchanged":true
          }
        }'::jsonb
        and migration_history = '{"line_pay_version_present":false}'::jsonb
