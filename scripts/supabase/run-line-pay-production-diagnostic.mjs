@@ -385,18 +385,33 @@ export function buildPgpassLine(connection) {
     .join(':')
 }
 
-export function buildPsqlArgs() {
+export function buildPsqlArgs(diagnosticFile = DIAGNOSTIC_FILE) {
+  if (
+    typeof diagnosticFile !== 'string' ||
+    !/^supabase\/deployment\/[a-z0-9_]+[.]sql$/u.test(diagnosticFile)
+  ) {
+    fail('DIAGNOSTIC_CONTAINER_START_FAILED')
+  }
   return [
     '--no-psqlrc',
     '--set=ON_ERROR_STOP=1',
     '--quiet',
     '--no-align',
     '--tuples-only',
-    `--file=${DIAGNOSTIC_CONTAINER_FILE}`,
+    `--file=${join(CONTAINER_REPOSITORY_ROOT, diagnosticFile)}`,
   ]
 }
 
-export function buildChildEnvironment(connection) {
+export function buildChildEnvironment(
+  connection,
+  applicationName = 'line-pay-production-read-only-diagnostic',
+) {
+  if (
+    typeof applicationName !== 'string' ||
+    !/^[a-z0-9-]{1,63}$/u.test(applicationName)
+  ) {
+    fail('DIAGNOSTIC_CONTAINER_START_FAILED')
+  }
   const environment = {
     LANG: 'C.UTF-8',
     LC_ALL: 'C.UTF-8',
@@ -406,7 +421,7 @@ export function buildChildEnvironment(connection) {
     PGUSER: connection.username,
     PGPASSFILE: CONTAINER_PGPASS_FILE,
     PGSSLMODE: connection.sslmode,
-    PGAPPNAME: 'line-pay-production-read-only-diagnostic',
+    PGAPPNAME: applicationName,
     PGCONNECT_TIMEOUT: CONNECT_TIMEOUT_SECONDS,
     PGOPTIONS: FIXED_PGOPTIONS,
   }
@@ -416,12 +431,19 @@ export function buildChildEnvironment(connection) {
   return environment
 }
 
-export function buildDockerRunArgs(connection, pgpassFile) {
+export function buildDockerRunArgs(
+  connection,
+  pgpassFile,
+  {
+    diagnosticFile = DIAGNOSTIC_FILE,
+    applicationName = 'line-pay-production-read-only-diagnostic',
+  } = {},
+) {
   validatePostgresImage(POSTGRES_IMAGE)
   if (typeof pgpassFile !== 'string' || !isAbsolute(pgpassFile)) {
     fail('DIAGNOSTIC_CONTAINER_START_FAILED')
   }
-  const childEnvironment = buildChildEnvironment(connection)
+  const childEnvironment = buildChildEnvironment(connection, applicationName)
   const user = `${process.getuid?.() ?? 1001}:${process.getgid?.() ?? 1001}`
   return [
     'run',
@@ -443,7 +465,7 @@ export function buildDockerRunArgs(connection, pgpassFile) {
     ]),
     POSTGRES_IMAGE,
     'psql',
-    ...buildPsqlArgs(),
+    ...buildPsqlArgs(diagnosticFile),
   ]
 }
 
@@ -543,8 +565,14 @@ export async function createCredentialFile(
   runnerTemp,
   connection,
   filesystem = fs,
+  credentialPrefix = 'line-pay-diagnostic-',
 ) {
-  if (typeof runnerTemp !== 'string' || !isAbsolute(runnerTemp)) {
+  if (
+    typeof runnerTemp !== 'string' ||
+    !isAbsolute(runnerTemp) ||
+    typeof credentialPrefix !== 'string' ||
+    !/^[a-z0-9-]{1,48}$/u.test(credentialPrefix)
+  ) {
     fail('DIAGNOSTIC_TEMP_CREDENTIAL_CREATE_FAILED')
   }
   try {
@@ -559,7 +587,7 @@ export async function createCredentialFile(
   let pgpassFile
   try {
     directory = await filesystem.mkdtemp(
-      join(runnerTemp, 'line-pay-diagnostic-'),
+      join(runnerTemp, credentialPrefix),
     )
     pgpassFile = join(directory, 'pgpass')
     await filesystem.writeFile(
@@ -639,10 +667,15 @@ export async function runDiagnostic({
   filesystem = fs,
   processObject = process,
   spawnImplementation = spawn,
+  diagnosticFile = DIAGNOSTIC_FILE,
+  applicationName = 'line-pay-production-read-only-diagnostic',
+  credentialPrefix = 'line-pay-diagnostic-',
+  validateDiagnosticFile = readAndValidateDiagnosticFile,
+  parseDiagnosticOutput = parseAndValidateDiagnosticOutput,
 } = {}) {
   validateNodeVersion()
   validateProductionChannel(environment)
-  readAndValidateDiagnosticFile(repositoryRoot)
+  validateDiagnosticFile(repositoryRoot)
   const connection = parseDatabaseUrl(
     environment.SUPABASE_PRODUCTION_DB_URL,
     environment.SUPABASE_PROJECT_ID,
@@ -717,6 +750,7 @@ export async function runDiagnostic({
       environment.RUNNER_TEMP,
       connection,
       filesystem,
+      credentialPrefix,
     )
     execution.state = DIAGNOSTIC_STATES.CREDENTIAL_CREATED
     ensureNotInterrupted()
@@ -748,6 +782,10 @@ export async function runDiagnostic({
     const dockerRunArgs = buildDockerRunArgs(
       connection,
       credentials.pgpassFile,
+      {
+        diagnosticFile,
+        applicationName,
+      },
     )
     databaseSessionExecutions += 1
     if (databaseSessionExecutions !== DATABASE_SESSION_LIMIT) {
@@ -826,7 +864,7 @@ export async function runDiagnostic({
     execution.state = DIAGNOSTIC_STATES.PSQL_COMPLETED
     execution.databaseConnection = DATABASE_CONNECTION_STATES.CONFIRMED
     execution.sqlCompleted = true
-    sanitizedResult = parseAndValidateDiagnosticOutput(result.stdout)
+    sanitizedResult = parseDiagnosticOutput(result.stdout)
     execution.state = DIAGNOSTIC_STATES.OUTPUT_VALIDATED
     execution.outputValidated = true
   } catch (error) {
