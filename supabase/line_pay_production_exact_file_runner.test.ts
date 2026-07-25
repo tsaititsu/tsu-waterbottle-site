@@ -59,6 +59,64 @@ test('validator fixes the complete Production deployment identity', async () => 
   )
 })
 
+test('validator exposes only frozen Bank Transfer match booleans and active manifest evidence', async () => {
+  const validator = await import(pathToFileURL(validatorPath).href)
+  const preflight = validator.buildExpectedAuditFixture('preflight')
+  const postflight = validator.buildExpectedAuditFixture('postflight')
+
+  assert.deepEqual(Object.keys(preflight.historical), ['bank_transfer'])
+  assert.deepEqual(preflight.historical.bank_transfer, {
+    schema_signature_match: true,
+    row_count_match: true,
+    pending_review_count_match: true,
+    pk_digest_match: true,
+    group_matches: {
+      identity_and_amount: true,
+      payer_contact: true,
+      transfer_details: true,
+      review_and_confirmation: true,
+      full_canonical_row: true,
+    },
+    ordinal_matches: {
+      ordinal_1: {
+        identity_group_match: true,
+        contact_group_match: true,
+        transfer_group_match: true,
+        review_group_match: true,
+        full_row_match: true,
+      },
+      ordinal_2: {
+        identity_group_match: true,
+        contact_group_match: true,
+        transfer_group_match: true,
+        review_group_match: true,
+        full_row_match: true,
+      },
+      ordinal_3: {
+        identity_group_match: true,
+        contact_group_match: true,
+        transfer_group_match: true,
+        review_group_match: true,
+        full_row_match: true,
+      },
+    },
+  })
+  for (const relation of ['payments', 'product_orders']) {
+    assert.deepEqual(postflight.historical[relation], {
+      manifest_complete: true,
+      no_missing_rows: true,
+      no_unexpected_rows: true,
+      business_fields_unchanged: true,
+    })
+  }
+
+  const serialized = JSON.stringify({ preflight, postflight })
+  assert.doesNotMatch(
+    serialized,
+    /"(?:pk_digest|content_digest)":|"rows":(?:18|5)/,
+  )
+})
+
 test('validator rejects identity mutations and unsupported PostgreSQL clients', async () => {
   const validator = await import(pathToFileURL(validatorPath).href)
 
@@ -263,6 +321,37 @@ test('preflight and postflight SQL are fixed read-only single-statement queries'
     const sql = readFileSync(join(root, relativePath), 'utf8')
     assert.equal(validator.assertReadOnlyAuditSql(sql), true)
   }
+  const preflight = readFileSync(join(root, validator.PREFLIGHT_FILE), 'utf8')
+  const postflight = readFileSync(join(root, validator.POSTFLIGHT_FILE), 'utf8')
+  assert.doesNotMatch(
+    preflight,
+    /payments_fingerprint|product_orders_fingerprint|to_jsonb\(row_value\)::text/,
+  )
+  assert.doesNotMatch(
+    postflight,
+    /payments_fingerprint|product_orders_fingerprint|to_jsonb\(row_value\)::text|"(?:rows|pk_digest|content_digest)":(?:18|5|")/,
+  )
+  for (const column of [
+    "'id', row_value.id",
+    "'user_id', row_value.user_id",
+    "'payer_name', row_value.payer_name",
+    "'bank_account_last5', row_value.bank_account_last5",
+    "'confirmed_at', row_value.confirmed_at",
+  ]) {
+    assert.ok(preflight.includes(column), column)
+    assert.ok(postflight.includes(column), column)
+  }
+  for (const safeBoolean of [
+    'schema_signature_match',
+    'row_count_match',
+    'pending_review_count_match',
+    'pk_digest_match',
+    'group_matches',
+    'ordinal_matches',
+  ]) {
+    assert.ok(preflight.includes(`'${safeBoolean}'`), safeBoolean)
+    assert.ok(postflight.includes(`'${safeBoolean}'`), safeBoolean)
+  }
   for (const sql of [
     'insert into public.x values (1);',
     'with x as (select 1) update public.x set y = 1;',
@@ -278,13 +367,76 @@ test('deploy orchestration mutations cannot remove guard, manifest, timeout, or 
   const validator = await import(pathToFileURL(validatorPath).href)
   const deploy = readFileSync(join(root, validator.DEPLOY_FILE), 'utf8')
   assert.equal(validator.assertDeployOrchestrationSql(deploy), true)
+  const manifestFields = [
+    "'id', row_value.id",
+    "'user_id', row_value.user_id",
+    "'booking_id', row_value.booking_id",
+    "'provider', row_value.provider",
+    "'provider_payment_id', row_value.provider_payment_id",
+    "'item_type', row_value.item_type",
+    "'item_name', row_value.item_name",
+    "'amount_twd', row_value.amount_twd",
+    "'currency', row_value.currency",
+    "'status', row_value.status",
+    "'paid_at', row_value.paid_at",
+    "'refunded_at', row_value.refunded_at",
+    "'raw_payload', row_value.raw_payload",
+    "'created_at', row_value.created_at",
+    "'item_id', row_value.item_id",
+    "'merchant_order_no', row_value.merchant_order_no",
+    "'provider_trade_no', row_value.provider_trade_no",
+    "'notify_received_at', row_value.notify_received_at",
+    "'failure_reason', row_value.failure_reason",
+    "'order_no', row_value.order_no",
+    "'customer_name', row_value.customer_name",
+    "'customer_email', row_value.customer_email",
+    "'customer_phone', row_value.customer_phone",
+    "'total_amount_twd', row_value.total_amount_twd",
+    "'payment_method', row_value.payment_method",
+    "'payment_status', row_value.payment_status",
+    "'order_status', row_value.order_status",
+    "'shipping_status', row_value.shipping_status",
+    "'payment_id', row_value.payment_id",
+    "'bank_transfer_submission_id',",
+    'row_value.bank_transfer_submission_id',
+    "'note', row_value.note",
+    "'updated_at', row_value.updated_at",
+  ]
+  for (const token of [
+    'baseline_payments_manifest',
+    'baseline_product_orders_manifest',
+    'baseline_payments_row_count',
+    'baseline_product_orders_row_count',
+    ...manifestFields,
+  ]) {
+    assert.ok(deploy.includes(token), token)
+  }
+  const postflight = readFileSync(
+    join(root, validator.POSTFLIGHT_FILE),
+    'utf8',
+  )
+  for (const token of manifestFields) {
+    assert.ok(postflight.includes(token), token)
+  }
   for (const mutated of [
     deploy.replace(
       'lock table public.product_orders, public.payments in access exclusive mode;\n',
       '',
     ),
+    deploy.replace(
+      'lock table public.product_orders, public.payments in access exclusive mode;\n\n\\set line_pay_baseline_manifest 1',
+      '\\set line_pay_baseline_manifest 1',
+    ),
+    deploy.replace(
+      '\\set line_pay_baseline_manifest 1\n\\ir line_pay_remediation_postflight.sql\n\\unset line_pay_baseline_manifest\n\ncommit;',
+      'commit;\n\\set line_pay_baseline_manifest 1\n\\ir line_pay_remediation_postflight.sql\n\\unset line_pay_baseline_manifest',
+    ),
     deploy.replace('\\if :line_pay_locked_guard_ready\n', ''),
     deploy.replace('baseline_payments_manifest', 'removed_manifest'),
+    deploy.replace(
+      "'failure_reason', row_value.failure_reason",
+      "'failure_reason', null",
+    ),
     deploy.replace("set local statement_timeout = '120s';\n", ''),
     deploy.replace(
       '\\ir ../migrations/20260719033404_line_pay_remediation_contracts.sql',
@@ -377,7 +529,7 @@ test('audit parser requires one JSON row and fixed safe statuses', async () => {
     /DATABASE_OUTPUT_INVALID/,
   )
   const drift = structuredClone(preflight)
-  drift.historical.payments.rows = 19
+  drift.historical.bank_transfer.group_matches.payer_contact = false
   assert.throws(
     () =>
       validator.parseAndValidateAuditOutput(

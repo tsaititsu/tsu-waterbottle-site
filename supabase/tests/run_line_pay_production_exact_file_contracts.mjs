@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -35,6 +35,10 @@ const postflightPath = join(
 const deployPath = join(
   root,
   'supabase/deployment/line_pay_remediation_deploy.sql',
+)
+const baselineCapturePath = join(
+  root,
+  'supabase/deployment/bank_transfer_historical_baseline_capture.sql',
 )
 const baselineFiles = [
   'supabase/schema.sql',
@@ -197,6 +201,59 @@ function startBlockingLock(database, tableName) {
   })
 }
 
+function startContainerPsqlFile(database, containerPath) {
+  const child = spawn(
+    'docker',
+    [
+      'exec',
+      '-i',
+      containerName,
+      'psql',
+      '-X',
+      '--set=ON_ERROR_STOP=1',
+      '--quiet',
+      '--no-align',
+      '--tuples-only',
+      '-U',
+      'postgres',
+      '-d',
+      database,
+      `--file=${containerPath}`,
+    ],
+    { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] },
+  )
+  let stdout = ''
+  let stderr = ''
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk.toString('utf8')
+  })
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk.toString('utf8')
+  })
+  return {
+    child,
+    completion: new Promise((resolvePromise, rejectPromise) => {
+      child.once('error', rejectPromise)
+      child.once('close', (code) =>
+        resolvePromise({ code, stdout: stdout.trim(), stderr: stderr.trim() }),
+      )
+    }),
+  }
+}
+
+async function waitForCommittedMigration(database) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const result = psql(
+      database,
+      "select to_regclass('public.line_pay_checkout_attempts') is not null;",
+      'post-migration gap probe',
+    )
+    if (result === 't') return
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100))
+  }
+  throw new Error('POST_MIGRATION_GAP_NOT_REACHED')
+}
+
 function prepareBaseline(database) {
   psqlFile(database, 'supabase/tests/line_pay_local_postgres_bootstrap.sql')
   for (const file of baselineFiles) psqlFile(database, file)
@@ -296,56 +353,238 @@ function readFingerprints(database, afterMigration) {
   return JSON.parse(output)
 }
 
-const productionFingerprints = {
-  bank_transfer: {
-    rows: 3,
-    pending_review: 3,
-    pk_digest:
-      'e6a67042ff04db27bea56f76d9d983e6762ba4122e67fe54c30d740e458f5fec',
-    content_digest:
-      'e87a8425def35ac99bb054b4b2e0fee3efe985d5b3376ab6011d30e730c3bc40',
-  },
-  payments: {
-    rows: 18,
-    pk_digest:
-      'bc3bd47469b3d4c199be57d54c18195f9869d9b1c94527fee445d8cf83f2fa79',
-    content_digest:
-      'da6b440446bde8d5816f06a610baba34140a21dbd9d58e9c8ffbc0867395d1ab',
-  },
-  product_orders: {
-    rows: 5,
-    pk_digest:
-      '5b2aa41738c901750a2bb752ce23f7e18743631e941476e84a86336e874b55cd',
-    content_digest:
-      'eb133b3808572d8ae76829ba87edc33ae04725609cd1d82e3e1a2db0d502f853',
-  },
+function readActiveTableManifests(database) {
+  const output = psql(
+    database,
+    `
+      with
+      payments_manifest as (
+        select coalesce(
+          jsonb_object_agg(
+            row_value.id::text,
+            encode(
+              sha256(convert_to(
+                jsonb_build_object(
+                  'id', row_value.id,
+                  'user_id', row_value.user_id,
+                  'booking_id', row_value.booking_id,
+                  'provider', row_value.provider,
+                  'provider_payment_id', row_value.provider_payment_id,
+                  'item_type', row_value.item_type,
+                  'item_name', row_value.item_name,
+                  'amount_twd', row_value.amount_twd,
+                  'currency', row_value.currency,
+                  'status', row_value.status,
+                  'paid_at', row_value.paid_at,
+                  'refunded_at', row_value.refunded_at,
+                  'raw_payload', row_value.raw_payload,
+                  'created_at', row_value.created_at,
+                  'item_id', row_value.item_id,
+                  'merchant_order_no', row_value.merchant_order_no,
+                  'provider_trade_no', row_value.provider_trade_no,
+                  'notify_received_at', row_value.notify_received_at,
+                  'failure_reason', row_value.failure_reason
+                )::text,
+                'UTF8'
+              )),
+              'hex'
+            )
+            order by row_value.id
+          ),
+          '{}'::jsonb
+        ) as value
+        from public.payments as row_value
+      ),
+      product_orders_manifest as (
+        select coalesce(
+          jsonb_object_agg(
+            row_value.id::text,
+            encode(
+              sha256(convert_to(
+                jsonb_build_object(
+                  'id', row_value.id,
+                  'order_no', row_value.order_no,
+                  'user_id', row_value.user_id,
+                  'customer_name', row_value.customer_name,
+                  'customer_email', row_value.customer_email,
+                  'customer_phone', row_value.customer_phone,
+                  'total_amount_twd', row_value.total_amount_twd,
+                  'payment_method', row_value.payment_method,
+                  'payment_status', row_value.payment_status,
+                  'order_status', row_value.order_status,
+                  'shipping_status', row_value.shipping_status,
+                  'payment_id', row_value.payment_id,
+                  'bank_transfer_submission_id',
+                    row_value.bank_transfer_submission_id,
+                  'note', row_value.note,
+                  'created_at', row_value.created_at,
+                  'updated_at', row_value.updated_at
+                )::text,
+                'UTF8'
+              )),
+              'hex'
+            )
+            order by row_value.id
+          ),
+          '{}'::jsonb
+        ) as value
+        from public.product_orders as row_value
+      )
+      select jsonb_build_object(
+        'payments_manifest', (select value from payments_manifest),
+        'payments_row_count', (select count(*) from public.payments),
+        'product_orders_manifest', (select value from product_orders_manifest),
+        'product_orders_row_count', (select count(*) from public.product_orders)
+      );
+    `,
+    'active table manifest capture',
+  )
+  return JSON.parse(output)
 }
 
-function useFixtureContract(source, fixture, database) {
+function withActiveTableManifest(source, manifest) {
+  return [
+    `\\set baseline_payments_manifest '${JSON.stringify(
+      manifest.payments_manifest,
+    )}'`,
+    `\\set baseline_payments_row_count ${manifest.payments_row_count}`,
+    `\\set baseline_product_orders_manifest '${JSON.stringify(
+      manifest.product_orders_manifest,
+    )}'`,
+    `\\set baseline_product_orders_row_count ${manifest.product_orders_row_count}`,
+    '\\set line_pay_baseline_manifest 1',
+    source,
+  ].join('\n')
+}
+
+const productionBankTransferVerifiers = Object.freeze({
+  schema_signature:
+    '45d35856ba4ee300e196c562eb8e0e9b37dde94d3bb9d148248163827e005a04',
+  pk_digest:
+    '4346bb9d65f1fe16ae98a26821e857bf49b158e12ac4e47d251380e6bc518199',
+  group_digests: Object.freeze({
+    identity_and_amount:
+      '61ed62d26b2ffd626b1d494602b10700f6d79cf000ec7045261fbee44cff2c2c',
+    payer_contact:
+      '5eed83932fd5acd6a6c8fd1a7c8552e8d6c0f4bf67186b096ad702f1fff54c78',
+    transfer_details:
+      '624fe68a4f252e1128bbdf83e37050e4fbebc3b32828347fd10e5503cc93eb1b',
+    review_and_confirmation:
+      '0e04c05d7edca9319b6fee5837e186916eded596e9d31a51cfd9d68251524271',
+    full_canonical_row:
+      'd8ad6430e739d8a3d6d9b8f8d81680b2602313fa2f6b7662753331dda5fc93be',
+  }),
+  ordinal_digests: Object.freeze({
+    ordinal_1: Object.freeze({
+      identity_and_amount:
+        '8054981959cf9095b36e19da0eea06e34d0b8f8f10379dc9313604e240a7db04',
+      payer_contact:
+        'f8172854e648abb71491098bb787edfd1b842f52b55c7631b91d8dcb3b14ed94',
+      transfer_details:
+        'bb6eea7c32aa16e55702e7eb058a7df3cebbbf631433d0c842b1aae135d1f79f',
+      review_and_confirmation:
+        'af75de6e16537e03fe5b9f1d905120e8cb84d7282de023357e0875b7e116d203',
+      full_canonical_row:
+        '77df43c18d57e3bb83ad9e285e14ca6429b50f177a353004170cf9863e849bb6',
+    }),
+    ordinal_2: Object.freeze({
+      identity_and_amount:
+        '41c0c3b20913fc951ad85057631d462e43f8e6ca335a0eb62c52685aa067d144',
+      payer_contact:
+        '6a751378fd21bc0574cfa1b412ce1cdd8682505eaf07dacfe0cd0a67893f85b3',
+      transfer_details:
+        '7e5639668922d5c1ef7e3d0be137bd98a2ccd63b27746984b79f5ee6bde1f0c7',
+      review_and_confirmation:
+        '1db2ac98556bf945c15586491b5d5f844acf3b767fef307101a401877cbc7677',
+      full_canonical_row:
+        'ad26153aa542a4310306d00da5c30fc3f3aff75fc71ce4e5385eae804059f514',
+    }),
+    ordinal_3: Object.freeze({
+      identity_and_amount:
+        'df58063e371c4dc75807b1426f407119a3cd71241d972ee68177b1e8d754a4ab',
+      payer_contact:
+        'a1d83ac319167825ab16544ff9a27124639371156607727eabc80a6b8e13f29e',
+      transfer_details:
+        'f1c8ca740c542cb6b51c330f8125aef55c89289f434058c9516d7558404975b6',
+      review_and_confirmation:
+        '73396a621108b90cf62be896452e3f4a44191f97febd055e10fd28af3a50b1bf',
+      full_canonical_row:
+        '782b67bbfb65e1819a24002a0ce4ecd7ab50396e1cf62fe4e8dc8913bb666772',
+    }),
+  }),
+})
+
+function sha256(value) {
+  return createHash('sha256').update(value, 'utf8').digest('hex')
+}
+
+function readBankTransferFixture(database) {
+  const source = readFileSync(baselineCapturePath, 'utf8').replace(
+    "pg_catalog.current_database() = 'postgres'",
+    `pg_catalog.current_database() = '${database}'`,
+  )
+  const result = JSON.parse(
+    psql(database, source, 'bank transfer fixture capture', false, true),
+  )
+  if (
+    result.row_count !== 3 ||
+    result.pending_review_count !== 3 ||
+    typeof result.schema_signature !== 'string' ||
+    typeof result.pk_digest !== 'string'
+  ) {
+    throw new Error('BANK_TRANSFER_FIXTURE_CAPTURE_INVALID')
+  }
+  return result
+}
+
+function verifierPaths(contract, prefix = []) {
+  if (typeof contract === 'string') return [prefix]
+  return Object.keys(contract).flatMap((key) =>
+    verifierPaths(contract[key], [...prefix, key]),
+  )
+}
+
+function valueAtPath(contract, path) {
+  return path.reduce((value, key) => value[key], contract)
+}
+
+function useFixtureContract(source, _fixture, database) {
+  const artifact = readBankTransferFixture(database)
+  const fixtureVerifiers = {
+    schema_signature: sha256(artifact.schema_signature),
+    pk_digest: sha256(artifact.pk_digest),
+    group_digests: Object.fromEntries(
+      Object.entries(artifact.group_digests).map(([key, value]) => [
+        key,
+        sha256(value),
+      ]),
+    ),
+    ordinal_digests: Object.fromEntries(
+      Object.entries(artifact.ordinal_digests).map(([ordinal, value]) => [
+        ordinal,
+        Object.fromEntries(
+          Object.entries(value).map(([key, digest]) => [
+            key,
+            sha256(digest),
+          ]),
+        ),
+      ]),
+    ),
+  }
   let output = source.replace(
     '{"name":"postgres","major":17,"recovery":false}',
     `{"name":"${database}","major":17,"recovery":false}`,
   )
-  for (const table of Object.keys(productionFingerprints)) {
-    for (const key of Object.keys(productionFingerprints[table])) {
-      output = output.replaceAll(
-        `"${key}":${
-          typeof productionFingerprints[table][key] === 'number'
-            ? productionFingerprints[table][key]
-            : `"${productionFingerprints[table][key]}"`
-        }`,
-        `"${key}":${
-          typeof fixture[table][key] === 'number'
-            ? fixture[table][key]
-            : `"${fixture[table][key]}"`
-        }`,
-      )
-    }
+  for (const path of verifierPaths(productionBankTransferVerifiers)) {
+    output = output.replaceAll(
+      valueAtPath(productionBankTransferVerifiers, path),
+      valueAtPath(fixtureVerifiers, path),
+    )
   }
   return output
 }
 
-function assertAuditStatus(output, expected, expectedHistorical) {
+function assertAuditStatus(output, expected) {
   const rows = output.split(/\r?\n/u).filter(Boolean)
   if (rows.length !== 1) throw new Error('AUDIT_OUTPUT_ROW_COUNT_INVALID')
   const result = JSON.parse(rows[0])
@@ -356,7 +595,6 @@ function assertAuditStatus(output, expected, expectedHistorical) {
         line_pay: result.line_pay,
         fence: result.fence,
         historical: result.historical,
-        expectedHistorical,
         locks: result.locks,
         migration_history: result.migration_history,
       })}`,
@@ -494,25 +732,7 @@ function runDeployOrchestrationScenario() {
   )
   writeContainerFile(
     '/workspace/supabase/deployment/line_pay_remediation_deploy.sql',
-    readFileSync(deployPath, 'utf8').replace(
-      '\\set line_pay_baseline_manifest 1',
-      `
-insert into public.product_orders (
-  id, order_no, user_id, total_amount_twd, payment_method,
-  payment_status, order_status, shipping_status, payment_id
-) values (
-  '30000000-0000-4000-8000-000000000099',
-  'POST-COMMIT-SYNTHETIC-ORDER',
-  null,
-  100,
-  'newebpay',
-  'pending',
-  'pending_payment',
-  'not_shipped',
-  null
-);
-\\set line_pay_baseline_manifest 1`,
-    ),
+    readFileSync(deployPath, 'utf8'),
   )
   runDocker([
     'cp',
@@ -542,9 +762,8 @@ insert into public.product_orders (
   )
 }
 
-function runBaselineMutationScenario() {
-  const database = 'exact_file_baseline_mutation'
-  psql('postgres', `create database ${database};`, 'create baseline mutation db')
+function runManifestDriftScenario(database, label, mutationSql) {
+  psql('postgres', `create database ${database};`, `create ${label} db`)
   prepareBaseline(database)
   const baseline = readFingerprints(database, false)
   writeContainerFile(
@@ -559,10 +778,7 @@ function runBaselineMutationScenario() {
     '/workspace/supabase/deployment/line_pay_remediation_deploy.sql',
     readFileSync(deployPath, 'utf8').replace(
       '\\set line_pay_baseline_manifest 1',
-      `
-update public.payments
-set item_name = 'post-commit synthetic drift'
-where id = '20000000-0000-4000-8000-000000000001';
+      `${mutationSql}
 \\set line_pay_baseline_manifest 1`,
     ),
   )
@@ -570,7 +786,7 @@ where id = '20000000-0000-4000-8000-000000000001';
     psqlContainerFile(
       database,
       '/workspace/supabase/deployment/line_pay_remediation_deploy.sql',
-      'baseline mutation orchestration',
+      `${label} orchestration`,
     ),
     'POSTFLIGHT_CONTRACT_FAILED',
   )
@@ -581,7 +797,114 @@ where id = '20000000-0000-4000-8000-000000000001';
       drop role line_pay_payment_executor;
       drop role line_pay_payment_function_owner;
     `,
-    'baseline mutation cleanup',
+    `${label} cleanup`,
+  )
+}
+
+function runManifestDriftScenarios() {
+  runManifestDriftScenario(
+    'exact_file_manifest_business_drift',
+    'business-field mutation',
+    `
+update public.payments
+set item_name = 'post-commit synthetic drift'
+where id = '20000000-0000-4000-8000-000000000001';`,
+  )
+  runManifestDriftScenario(
+    'exact_file_manifest_unexpected_row',
+    'unexpected-row mutation',
+    `
+insert into public.product_orders (
+  id, order_no, user_id, total_amount_twd, payment_method,
+  payment_status, order_status, shipping_status, payment_id
+) values (
+  '30000000-0000-4000-8000-000000000099',
+  'POST-COMMIT-SYNTHETIC-ORDER',
+  null,
+  100,
+  'newebpay',
+  'pending',
+  'pending_payment',
+  'not_shipped',
+  null
+);`,
+  )
+  runManifestDriftScenario(
+    'exact_file_manifest_missing_row',
+    'missing-row mutation',
+    `
+delete from public.product_orders
+where id = '30000000-0000-4000-8000-000000000004';`,
+  )
+}
+
+async function runPostMigrationGapDriftScenario() {
+  const database = 'exact_file_manifest_concurrent_gap_drift'
+  psql('postgres', `create database ${database};`, 'create concurrent gap db')
+  prepareBaseline(database)
+  const baseline = readFingerprints(database, false)
+  writeContainerFile(
+    '/workspace/supabase/deployment/line_pay_remediation_preflight.sql',
+    useFixtureContract(readFileSync(preflightPath, 'utf8'), baseline, database),
+  )
+  writeContainerFile(
+    '/workspace/supabase/deployment/line_pay_remediation_postflight.sql',
+    useFixtureContract(readFileSync(postflightPath, 'utf8'), baseline, database),
+  )
+  writeContainerFile(
+    '/workspace/supabase/deployment/line_pay_remediation_deploy.sql',
+    readFileSync(deployPath, 'utf8').replace(
+      '\\ir ../migrations/20260719033404_line_pay_remediation_contracts.sql',
+      `\\ir ../migrations/20260719033404_line_pay_remediation_contracts.sql
+select pg_sleep(5);`,
+    ),
+  )
+  const deployment = startContainerPsqlFile(
+    database,
+    '/workspace/supabase/deployment/line_pay_remediation_deploy.sql',
+  )
+  await waitForCommittedMigration(database)
+  psql(
+    database,
+    `
+      update public.payments
+      set item_name = 'concurrent post-commit synthetic drift'
+      where id = '20000000-0000-4000-8000-000000000001';
+    `,
+    'concurrent post-migration business-field mutation',
+  )
+  const result = await deployment.completion
+  if (result.code !== 0) throw new Error('POST_MIGRATION_GAP_DEPLOY_FAILED')
+  assertAuditFailureStatus(
+    result.stdout,
+    'POSTFLIGHT_CONTRACT_FAILED',
+  )
+  if (
+    psql(
+      database,
+      "select to_regclass('public.line_pay_checkout_attempts') is not null;",
+      'committed Migration evidence',
+    ) !== 't' ||
+    psql(
+      database,
+      `
+        select item_name = 'concurrent post-commit synthetic drift'
+        from public.payments
+        where id = '20000000-0000-4000-8000-000000000001';
+      `,
+      'committed concurrent drift evidence',
+    ) !== 't'
+  ) {
+    throw new Error('POST_MIGRATION_GAP_FIXTURE_INVALID')
+  }
+  psql(
+    'postgres',
+    `
+      drop database ${database} with (force);
+      drop role line_pay_payment_executor;
+      drop role line_pay_payment_function_owner;
+    `,
+    'concurrent gap cleanup',
   )
 }
 
@@ -736,7 +1059,8 @@ async function main() {
   await runLockedTimeoutScenario('payments')
   await runLockedTimeoutScenario('product_orders')
   runDeployOrchestrationScenario()
-  runBaselineMutationScenario()
+  runManifestDriftScenarios()
+  await runPostMigrationGapDriftScenario()
 
   psql('postgres', 'create database exact_file_success;', 'create success db')
   psql('postgres', 'create database exact_file_rollback;', 'create rollback db')
@@ -762,6 +1086,7 @@ async function main() {
 
   prepareBaseline('exact_file_success')
   const before = readFingerprints('exact_file_success', false)
+  const activeTableManifest = readActiveTableManifests('exact_file_success')
   const preflight = useFixtureContract(
     readFileSync(preflightPath, 'utf8'),
     before,
@@ -814,7 +1139,7 @@ async function main() {
       label: 'historical data drift',
       status: 'PRODUCTION_DATA_DRIFT',
       apply:
-        "update public.payments set item_name = 'synthetic drift' where id = '20000000-0000-4000-8000-000000000001';",
+        "update public.bank_transfer_submissions set item_name = 'synthetic drift' where id = '21000000-0000-4000-8000-000000000001';",
     },
   ]
   for (const mutation of preflightMutations) {
@@ -862,10 +1187,13 @@ async function main() {
     ),
     'ALREADY_APPLIED',
   )
-  const postflight = useFixtureContract(
-    readFileSync(postflightPath, 'utf8'),
-    after,
-    'exact_file_success',
+  const postflight = withActiveTableManifest(
+    useFixtureContract(
+      readFileSync(postflightPath, 'utf8'),
+      after,
+      'exact_file_success',
+    ),
+    activeTableManifest,
   )
   const postflightOutput = psql(
     'exact_file_success',
@@ -993,7 +1321,7 @@ async function main() {
   process.stdout.write(
     'line_pay_production_exact_file_contracts: PASS ' +
       '(PostgreSQL 17, preflight, exact Migration, postflight, ' +
-      'server_timeouts=2/2, post_commit_insert=PASS, baseline_mutation=CAUGHT, ' +
+      'server_timeouts=2/2, active_manifest=PASS, manifest_drifts=4/4 caught, ' +
       `catalog mutations, rollback, cleanup, locked_deploy_ms=${measuredLockedDeployMs})\n`,
   )
 }

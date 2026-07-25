@@ -40,6 +40,7 @@ export const EXPECTED_FENCE_SHA256 =
 export const MAX_BASELINE_CAPTURE_BYTES = 16 * 1024
 
 export const SAFE_FAILURE_CODES = Object.freeze([
+  'BASELINE_CAPTURE_CHANNEL_RETIRED',
   'SOURCE_CONTEXT_INVALID',
   'INVALID_NODE_VERSION',
   'POSTGRES_IMAGE_MISMATCH',
@@ -60,6 +61,7 @@ export const SAFE_FAILURE_CODES = Object.freeze([
   'TEMP_CREDENTIAL_CLEANUP_FAILED',
 ])
 
+const BASELINE_CAPTURE_CHANNEL_RETIRED = true
 const SAFE_FAILURE_CODE_SET = new Set(SAFE_FAILURE_CODES)
 const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/u
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u
@@ -189,6 +191,9 @@ export function validatePostgresImage(value) {
 }
 
 export function validateWorkflowContext(environment = process.env) {
+  if (BASELINE_CAPTURE_CHANNEL_RETIRED) {
+    fail('BASELINE_CAPTURE_CHANNEL_RETIRED')
+  }
   validateNodeVersion()
   if (
     environment.GITHUB_REPOSITORY !== EXPECTED_REPOSITORY ||
