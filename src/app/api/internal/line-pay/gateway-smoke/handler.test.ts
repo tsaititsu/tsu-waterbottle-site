@@ -166,6 +166,20 @@ test('smoke errors return a stable redacted response without stack or secrets', 
   assert.deepEqual(JSON.parse(body), { ok: false, error: 'gateway_smoke_failed' })
 })
 
+test('unknown transport error codes cannot escape through the diagnostic allowlist prototype', async () => {
+  const response = await handleLinePayGatewaySmoke({
+    request: request(),
+    env: enabledEnv,
+    authorize: async () => true,
+    runSmoke: async () => {
+      throw new LinePayTransportError('__proto__')
+    },
+  })
+
+  assert.equal(response.status, 502)
+  assert.deepEqual(await json(response), { ok: false, error: 'gateway_smoke_failed' })
+})
+
 test('Gateway transport failures return only their fixed allowlisted diagnostic reason', async () => {
   for (const [code, reason] of [
     ['line_pay_gateway_unavailable', 'gateway_unavailable'],

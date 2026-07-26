@@ -39,8 +39,9 @@ const SAFE_SMOKE_FAILURE_REASONS: Readonly<Record<string, SafeSmokeFailureReason
 
 function getSafeSmokeFailureReason(error: unknown) {
   if (!(error instanceof LinePayTransportError)) return null
+  if (!Object.hasOwn(SAFE_SMOKE_FAILURE_REASONS, error.code)) return null
 
-  return SAFE_SMOKE_FAILURE_REASONS[error.code] ?? null
+  return SAFE_SMOKE_FAILURE_REASONS[error.code]
 }
 
 function notFoundResponse() {
