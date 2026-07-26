@@ -15,6 +15,8 @@ import {
   type LinePayTransportEnv,
   type LinePayTransportFetch,
   type LinePayTransportFetchInit,
+  type LinePayTransportOperation,
+  type LinePayTimeoutScheduler,
 } from './transport'
 
 const channelId = 'transport-test-channel'
@@ -88,6 +90,52 @@ function requestInput(fetchFn: LinePayTransportFetch, transportEnv: LinePayTrans
   }
 }
 
+function operationTransportInput(
+  operation: LinePayTransportOperation,
+  fetchFn: LinePayTransportFetch,
+  transportEnv: LinePayTransportEnv,
+  timeoutScheduler: LinePayTimeoutScheduler,
+) {
+  const target = {
+    request: {
+      method: 'POST' as const,
+      apiPath: '/v3/payments/request',
+      bodyText: JSON.stringify({ amount: 1500 }),
+    },
+    confirm: {
+      method: 'POST' as const,
+      apiPath: `/v3/payments/${transactionId}/confirm`,
+      bodyText: JSON.stringify({ amount: 1500, currency: 'TWD' }),
+      transactionId,
+    },
+    status: {
+      method: 'GET' as const,
+      apiPath: `/v3/payments/requests/${transactionId}/check`,
+      transactionId,
+    },
+    paymentDetails: {
+      method: 'GET' as const,
+      apiPath: '/v3/payments',
+      queryString: `transactionId=${transactionId}&orderId=${orderId}`,
+      transactionId,
+      orderId,
+    },
+  }[operation]
+
+  return {
+    operation,
+    environment: 'sandbox',
+    ...target,
+    linePayHeaders: { 'Content-Type': 'application/json' },
+    fetchFn,
+    transportEnv,
+    now: () => 1_800_000_000_000,
+    createNonce: () => `nonce-${operation}`,
+    createRequestId: () => `request-${operation}`,
+    timeoutScheduler,
+  }
+}
+
 function assertGatewayUrlRejectedInEveryRuntime(gatewayUrl: string, label = gatewayUrl) {
   for (const vercelEnv of ['preview', 'production', 'development']) {
     assert.throws(
@@ -114,6 +162,65 @@ test('direct mode preserves the original LINE Pay URL, method, body and headers'
   assert.equal(calls[0]?.init.method, 'POST')
   assert.equal(calls[0]?.init.headers['X-LINE-ChannelId'], channelId)
   assert.equal(typeof calls[0]?.init.body, 'string')
+})
+
+test('direct request uses an AbortSignal and a 15-second operation deadline', async () => {
+  const calls: Array<{ url: string; init: LinePayTransportFetchInit }> = []
+  const scheduledDelays: number[] = []
+  const timeoutScheduler = {
+    schedule(_callback: () => void, delayMs: number) {
+      scheduledDelays.push(delayMs)
+      return Symbol('direct-request-timeout')
+    },
+    clear() {},
+  }
+
+  await sendLinePayRequest({
+    operation: 'request',
+    environment: 'sandbox',
+    method: 'POST',
+    apiPath: '/v3/payments/request',
+    bodyText: JSON.stringify({ amount: 1500 }),
+    linePayHeaders: { 'Content-Type': 'application/json' },
+    fetchFn: async (url, init) => {
+      calls.push({ url, init })
+      return { status: 200, json: async () => responseForOperation('request') }
+    },
+    transportEnv: { LINE_PAY_TRANSPORT: 'direct' },
+    timeoutScheduler,
+  } as Parameters<typeof sendLinePayRequest>[0] & { timeoutScheduler: typeof timeoutScheduler })
+
+  assert.deepEqual(scheduledDelays, [15_000])
+  assert.equal(calls[0]?.init.signal instanceof AbortSignal, true)
+  assert.equal(calls[0]?.init.redirect, 'error')
+})
+
+test('direct transport applies the fixed operation deadline to every v3 operation', async () => {
+  const scheduledDelays: number[] = []
+  const timeoutScheduler: LinePayTimeoutScheduler = {
+    schedule(_callback, delayMs) {
+      scheduledDelays.push(delayMs)
+      return Symbol('direct-operation-timeout')
+    },
+    clear() {},
+  }
+
+  for (const operation of ['request', 'confirm', 'status', 'paymentDetails'] as const) {
+    const response = await sendLinePayRequest(
+      operationTransportInput(
+        operation,
+        async () => ({
+          status: 200,
+          json: async () => responseForOperation(operation),
+        }),
+        { LINE_PAY_TRANSPORT: 'direct' },
+        timeoutScheduler,
+      ),
+    )
+    await response.json()
+  }
+
+  assert.deepEqual(scheduledDelays, [15_000, 45_000, 25_000, 25_000])
 })
 
 test('Preview accepts only an explicitly configured gateway transport', () => {
@@ -157,6 +264,26 @@ test('Production direct and development missing transport preserve their existin
   )
   assert.deepEqual(getLinePayTransportConfig({ VERCEL_ENV: 'development' }, 'sandbox'), { mode: 'direct' })
   assert.deepEqual(getLinePayTransportConfig({}, 'sandbox'), { mode: 'direct' })
+})
+
+test('website configured timeout stays inside the range used by outer deadline guarantees', () => {
+  const maximum = getLinePayTransportConfig(
+    { ...gatewayEnv, LINE_PAY_GATEWAY_TIMEOUT_MS: '30000' },
+    'sandbox',
+  )
+  assert.equal(maximum.mode === 'gateway' ? maximum.timeoutMs : null, 30_000)
+
+  for (const invalidTimeout of ['99', '30001']) {
+    assert.throws(
+      () =>
+        getLinePayTransportConfig(
+          { ...gatewayEnv, LINE_PAY_GATEWAY_TIMEOUT_MS: invalidTimeout },
+          'sandbox',
+        ),
+      (error: unknown) =>
+        error instanceof LinePayTransportError && error.code === 'invalid_line_pay_gateway_timeout',
+    )
+  }
 })
 
 test('Gateway URL accepts canonical public HTTPS origins with explicit case and IDNA normalization', () => {
@@ -444,6 +571,25 @@ test('gateway canonical signature covers method, path, timestamp, nonce and exac
   assert.equal(call?.url, 'https://gateway.example.com/v1/line-pay/proxy')
 })
 
+test('website Gateway deadlines remain above every permitted Gateway upstream deadline', async () => {
+  const scheduledDelays: number[] = []
+  const timeoutScheduler: LinePayTimeoutScheduler = {
+    schedule(_callback, delayMs) {
+      scheduledDelays.push(delayMs)
+      return Symbol('gateway-operation-timeout')
+    },
+    clear() {},
+  }
+
+  for (const operation of ['request', 'confirm', 'status', 'paymentDetails'] as const) {
+    await sendLinePayRequest(
+      operationTransportInput(operation, createGatewayFetch(), gatewayEnv, timeoutScheduler),
+    )
+  }
+
+  assert.deepEqual(scheduledDelays, [35_000, 50_000, 35_000, 35_000])
+})
+
 test('request operation is forwarded through gateway and keeps transactionId as string', async () => {
   const calls: Array<{ url: string; init: LinePayTransportFetchInit }> = []
   const result = await requestLinePayPayment(requestInput(createGatewayFetch(calls)))
@@ -504,11 +650,129 @@ test('paymentDetails operation is forwarded through gateway with fixed lookup fi
 })
 
 test('gateway timeout aborts with a stable error', async () => {
-  const fetchFn: LinePayTransportFetch = async (_url, init) => ({
-    json: async () =>
-      new Promise((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(new Error('aborted')))),
+  let calls = 0
+  const urls: string[] = []
+  let triggerTimeout: (() => void) | undefined
+  const fetchFn: LinePayTransportFetch = async (url, init) => {
+    calls += 1
+    urls.push(url)
+    return new Promise((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+    })
+  }
+  const responsePromise = sendLinePayRequest(
+    operationTransportInput('request', fetchFn, gatewayEnv, {
+      schedule(callback) {
+        triggerTimeout = callback
+        return Symbol('controlled-gateway-timeout')
+      },
+      clear() {},
+    }),
+  )
+  assert.equal(calls, 1)
+  triggerTimeout?.()
+  await assert.rejects(
+    () => responsePromise,
+    (error: unknown) =>
+      error instanceof LinePayTransportError && error.code === 'line_pay_gateway_timeout',
+  )
+  assert.equal(calls, 1)
+  assert.deepEqual(urls, ['https://gateway.example.com/v1/line-pay/proxy'])
+})
+
+test('direct timeout is stable and never retries or falls back to another target', async () => {
+  let calls = 0
+  const urls: string[] = []
+  let triggerTimeout: (() => void) | undefined
+  const fetchFn: LinePayTransportFetch = async (url, init) => {
+    calls += 1
+    urls.push(url)
+    return new Promise((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+    })
+  }
+  const responsePromise = sendLinePayRequest(
+    operationTransportInput('request', fetchFn, { LINE_PAY_TRANSPORT: 'direct' }, {
+      schedule(callback) {
+        triggerTimeout = callback
+        return Symbol('controlled-direct-timeout')
+      },
+      clear() {},
+    }),
+  )
+  assert.equal(calls, 1)
+  triggerTimeout?.()
+  await assert.rejects(
+    () => responsePromise,
+    (error: unknown) =>
+      error instanceof LinePayTransportError && error.code === 'line_pay_upstream_timeout',
+  )
+  assert.equal(calls, 1)
+  assert.deepEqual(urls, ['https://sandbox-api-pay.line.me/v3/payments/request'])
+})
+
+test('direct timeout stays fail closed if the fetch adapter resolves after abort', async () => {
+  let triggerTimeout: (() => void) | undefined
+  let resolveFetch: ((response: Awaited<ReturnType<LinePayTransportFetch>>) => void) | undefined
+  const fetchFn: LinePayTransportFetch = async () =>
+    new Promise((resolve) => {
+      resolveFetch = resolve
+    })
+  const responsePromise = sendLinePayRequest(
+    operationTransportInput('request', fetchFn, { LINE_PAY_TRANSPORT: 'direct' }, {
+      schedule(callback) {
+        triggerTimeout = callback
+        return Symbol('late-direct-timeout')
+      },
+      clear() {},
+    }),
+  )
+
+  triggerTimeout?.()
+  resolveFetch?.({
+    status: 200,
+    json: async () => responseForOperation('request'),
   })
-  await assert.rejects(() => requestLinePayPayment(requestInput(fetchFn)), /line_pay_gateway_timeout/)
+
+  await assert.rejects(
+    () => responsePromise,
+    (error: unknown) =>
+      error instanceof LinePayTransportError && error.code === 'line_pay_upstream_timeout',
+  )
+})
+
+test('website Gateway timeout stays fail closed if the fetch adapter resolves after abort', async () => {
+  let triggerTimeout: (() => void) | undefined
+  let resolveFetch: ((response: Awaited<ReturnType<LinePayTransportFetch>>) => void) | undefined
+  const fetchFn: LinePayTransportFetch = async () =>
+    new Promise((resolve) => {
+      resolveFetch = resolve
+    })
+  const responsePromise = sendLinePayRequest(
+    operationTransportInput('request', fetchFn, gatewayEnv, {
+      schedule(callback) {
+        triggerTimeout = callback
+        return Symbol('late-gateway-timeout')
+      },
+      clear() {},
+    }),
+  )
+
+  triggerTimeout?.()
+  resolveFetch?.({
+    status: 200,
+    json: async () => ({
+      ok: true,
+      upstreamStatus: 200,
+      body: responseForOperation('request'),
+    }),
+  })
+
+  await assert.rejects(
+    () => responsePromise,
+    (error: unknown) =>
+      error instanceof LinePayTransportError && error.code === 'line_pay_gateway_timeout',
+  )
 })
 
 test('gateway non-JSON response becomes a stable controlled error', async () => {

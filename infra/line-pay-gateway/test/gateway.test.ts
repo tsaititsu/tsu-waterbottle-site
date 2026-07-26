@@ -127,6 +127,156 @@ test('valid HMAC is accepted and request operation reaches the fixed sandbox hos
   assert.equal(calls[0]?.url, 'https://sandbox-api-pay.line.me/v3/payments/request')
 })
 
+test('request operation keeps an upstream deadline above the official 10-second minimum', async () => {
+  const scheduledDelays: number[] = []
+  const timeoutScheduler = {
+    schedule(_callback: () => void, delayMs: number) {
+      scheduledDelays.push(delayMs)
+      return Symbol('request-timeout')
+    },
+    clear() {},
+  }
+  const handler = createGatewayHandler(config, {
+    fetchFn: successFetch(),
+    now: () => nowMs,
+    timeoutScheduler,
+  } as Parameters<typeof createGatewayHandler>[1] & { timeoutScheduler: typeof timeoutScheduler })
+
+  const response = await handler(
+    buildSignedRequest(requestPayload(), {
+      nonce: 'nonce-request-timeout-policy',
+      requestId: 'request-request-timeout-policy',
+    }),
+  )
+
+  assert.equal(response.statusCode, 200)
+  assert.deepEqual(scheduledDelays, [15_000])
+})
+
+test('confirm operation keeps an upstream deadline above the official 40-second minimum', async () => {
+  const scheduledDelays: number[] = []
+  const timeoutScheduler = {
+    schedule(_callback: () => void, delayMs: number) {
+      scheduledDelays.push(delayMs)
+      return Symbol('confirm-timeout')
+    },
+    clear() {},
+  }
+  const handler = createGatewayHandler(config, {
+    fetchFn: successFetch(),
+    now: () => nowMs,
+    timeoutScheduler,
+  })
+  const response = await handler(
+    buildSignedRequest(
+      {
+        ...requestPayload(),
+        operation: 'confirm',
+        transactionId: '2026072600000000001',
+      },
+      {
+        nonce: 'nonce-confirm-timeout-policy',
+        requestId: 'request-confirm-timeout-policy',
+      },
+    ),
+  )
+
+  assert.equal(response.statusCode, 200)
+  assert.deepEqual(scheduledDelays, [45_000])
+})
+
+test('status and paymentDetails keep fixed v3 targets and 25-second upstream deadlines', async () => {
+  const transactionId = '2026072600000000002'
+  const orderId = 'LP202607260001'
+  const calls: Array<{ url: string }> = []
+  const scheduledDelays: number[] = []
+  const handler = createGatewayHandler(config, {
+    fetchFn: successFetch(calls),
+    now: () => nowMs,
+    timeoutScheduler: {
+      schedule(_callback, delayMs) {
+        scheduledDelays.push(delayMs)
+        return Symbol('query-timeout')
+      },
+      clear() {},
+    },
+  })
+
+  const statusResponse = await handler(
+    buildSignedRequest(
+      {
+        operation: 'status',
+        environment: 'sandbox',
+        requestId: 'request-status-timeout-policy',
+        transactionId,
+        linePayHeaders,
+      },
+      {
+        nonce: 'nonce-status-timeout-policy',
+        requestId: 'request-status-timeout-policy',
+      },
+    ),
+  )
+  const detailsResponse = await handler(
+    buildSignedRequest(
+      {
+        operation: 'paymentDetails',
+        environment: 'sandbox',
+        requestId: 'request-details-timeout-policy',
+        transactionId,
+        orderId,
+        linePayHeaders,
+      },
+      {
+        nonce: 'nonce-details-timeout-policy',
+        requestId: 'request-details-timeout-policy',
+      },
+    ),
+  )
+
+  assert.equal(statusResponse.statusCode, 200)
+  assert.equal(detailsResponse.statusCode, 200)
+  assert.deepEqual(scheduledDelays, [25_000, 25_000])
+  assert.deepEqual(
+    calls.map((call) => call.url),
+    [
+      `https://sandbox-api-pay.line.me/v3/payments/requests/${transactionId}/check`,
+      `https://sandbox-api-pay.line.me/v3/payments?transactionId=${transactionId}&orderId=${orderId}`,
+    ],
+  )
+})
+
+test('configured Gateway timeout can raise but never lower an operation deadline', async () => {
+  const scheduledDelays: number[] = []
+  const handler = createGatewayHandler(
+    { ...config, upstreamTimeoutMs: 30_000 },
+    {
+      fetchFn: successFetch(),
+      now: () => nowMs,
+      timeoutScheduler: {
+        schedule(_callback, delayMs) {
+          scheduledDelays.push(delayMs)
+          return Symbol('configured-timeout')
+        },
+        clear() {},
+      },
+    },
+  )
+
+  assert.equal(
+    (
+      await handler(
+        buildSignedRequest(requestPayload(), {
+          nonce: 'nonce-configured-timeout',
+          requestId: 'request-configured-timeout',
+        }),
+      )
+    ).statusCode,
+    200,
+  )
+  assert.deepEqual(scheduledDelays, [30_000])
+})
+
 test('invalid HMAC returns 401 and never calls upstream', async () => {
   const calls: Array<{ url: string }> = []
   const handler = createGatewayHandler(config, { fetchFn: successFetch(calls), now: () => nowMs })
@@ -270,21 +420,70 @@ test('non-JSON Content-Type returns 415', async () => {
 
 test('upstream timeout returns a controlled 504 without retrying', async () => {
   let calls = 0
+  let triggerTimeout: (() => void) | undefined
   const fetchFn: GatewayUpstreamFetch = async (_url, init) => {
     calls += 1
-    return {
-      status: 200,
-      text: async () =>
-        new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(new Error('aborted')))),
-    }
+    return new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(new Error('aborted')))
+    })
   }
-  const handler = createGatewayHandler(config, { fetchFn, now: () => nowMs })
-  const response = await handler(
+  const handler = createGatewayHandler(config, {
+    fetchFn,
+    now: () => nowMs,
+    timeoutScheduler: {
+      schedule(callback) {
+        triggerTimeout = callback
+        return Symbol('controlled-timeout')
+      },
+      clear() {},
+    },
+  })
+  const responsePromise = handler(
     buildSignedRequest(requestPayload(), { nonce: 'nonce-id-0004', requestId: 'request-id-0004' }),
   )
+  assert.equal(calls, 1)
+  triggerTimeout?.()
+  const response = await responsePromise
   assert.equal(response.statusCode, 504)
   assert.equal(response.body.error, 'upstream_timeout')
   assert.equal(calls, 1)
+})
+
+test('upstream timeout stays fail closed if the fetch adapter resolves after abort', async () => {
+  let triggerTimeout: (() => void) | undefined
+  let resolveFetch: ((response: Awaited<ReturnType<GatewayUpstreamFetch>>) => void) | undefined
+  const fetchFn: GatewayUpstreamFetch = async () =>
+    new Promise((resolve) => {
+      resolveFetch = resolve
+    })
+  const handler = createGatewayHandler(config, {
+    fetchFn,
+    now: () => nowMs,
+    timeoutScheduler: {
+      schedule(callback) {
+        triggerTimeout = callback
+        return Symbol('late-upstream-timeout')
+      },
+      clear() {},
+    },
+  })
+  const responsePromise = handler(
+    buildSignedRequest(requestPayload(), {
+      nonce: 'nonce-late-upstream-timeout',
+      requestId: 'request-late-upstream-timeout',
+    }),
+  )
+
+  triggerTimeout?.()
+  resolveFetch?.({
+    status: 200,
+    text: async () => JSON.stringify({ returnCode: '0000' }),
+  })
+
+  assert.deepEqual(await responsePromise, {
+    statusCode: 504,
+    body: { ok: false, error: 'upstream_timeout' },
+  })
 })
 
 test('non-JSON upstream response becomes a controlled 502', async () => {
@@ -418,6 +617,26 @@ test('Gateway config rejects malformed Proxy Token and reuse of the Gateway HMAC
       }),
     /proxy_token_must_differ_from_gateway_secret/,
   )
+})
+
+test('Gateway configured timeout stays inside the range used by operation deadline guarantees', () => {
+  const baseEnv = {
+    LINE_PAY_GATEWAY_ENV: 'sandbox',
+    LINE_PAY_GATEWAY_KEY_ID: keyId,
+    LINE_PAY_GATEWAY_SECRET: secret,
+    LINE_PAY_GATEWAY_PROXY_TOKEN: proxyToken,
+  }
+
+  assert.equal(
+    loadGatewayConfig({ ...baseEnv, LINE_PAY_UPSTREAM_TIMEOUT_MS: '30000' }).upstreamTimeoutMs,
+    30_000,
+  )
+  for (const invalidTimeout of ['99', '30001']) {
+    assert.throws(
+      () => loadGatewayConfig({ ...baseEnv, LINE_PAY_UPSTREAM_TIMEOUT_MS: invalidTimeout }),
+      /invalid_line_pay_upstream_timeout_ms/,
+    )
+  }
 })
 
 test('valid Proxy Token does not depend on socket remoteAddress', async () => {

@@ -10,6 +10,32 @@ export type LinePayTransportMode = 'direct' | 'gateway'
 export type LinePayTransportOperation = 'request' | 'confirm' | 'status' | 'paymentDetails'
 export type LinePayTransportEnv = Record<string, string | undefined>
 
+// LINE Pay's documented read-timeout minimums plus a fixed five-second service margin.
+const LINE_PAY_DIRECT_TIMEOUT_MS: Readonly<Record<LinePayTransportOperation, number>> = Object.freeze({
+  request: 15_000,
+  confirm: 45_000,
+  status: 25_000,
+  paymentDetails: 25_000,
+})
+
+// The Gateway configured minimum is capped at 30 seconds; retain another five seconds for its response.
+const LINE_PAY_GATEWAY_OPERATION_TIMEOUT_MS: Readonly<Record<LinePayTransportOperation, number>> = Object.freeze({
+  request: 35_000,
+  confirm: 50_000,
+  status: 35_000,
+  paymentDetails: 35_000,
+})
+
+export type LinePayTimeoutScheduler = {
+  schedule: (callback: () => void, delayMs: number) => unknown
+  clear: (handle: unknown) => void
+}
+
+const systemTimeoutScheduler: LinePayTimeoutScheduler = {
+  schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+  clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+}
+
 export type LinePayTransportFetchInit = {
   method: LinePayHttpMethod
   headers: Record<string, string>
@@ -55,6 +81,7 @@ export type SendLinePayRequestInput = {
   now?: () => number
   createNonce?: () => string
   createRequestId?: () => string
+  timeoutScheduler?: LinePayTimeoutScheduler
 }
 
 type GatewaySuccessResponse = {
@@ -331,6 +358,55 @@ function buildDirectUrl(environment: LinePayEnvironment, input: SendLinePayReque
   return `${getLinePayBaseUrl(environment)}${input.apiPath}${query}`
 }
 
+function getGatewayOperationTimeoutMs(operation: LinePayTransportOperation, configuredMinimumMs: number) {
+  return Math.max(LINE_PAY_GATEWAY_OPERATION_TIMEOUT_MS[operation], configuredMinimumMs)
+}
+
+async function sendDirectLinePayRequest(
+  environment: LinePayEnvironment,
+  input: SendLinePayRequestInput,
+  fetchFn: LinePayTransportFetch,
+): Promise<LinePayTransportResponse> {
+  const timeoutScheduler = input.timeoutScheduler ?? systemTimeoutScheduler
+  const controller = new AbortController()
+  const timeout = timeoutScheduler.schedule(
+    () => controller.abort(),
+    LINE_PAY_DIRECT_TIMEOUT_MS[input.operation],
+  )
+  let response: LinePayTransportResponse
+
+  try {
+    response = await fetchFn(buildDirectUrl(environment, input), {
+      method: input.method,
+      headers: input.linePayHeaders,
+      ...(input.bodyText !== undefined ? { body: input.bodyText } : {}),
+      signal: controller.signal,
+      redirect: 'error',
+    })
+    if (controller.signal.aborted) throw transportError('line_pay_upstream_timeout')
+  } catch {
+    timeoutScheduler.clear(timeout)
+    if (controller.signal.aborted) throw transportError('line_pay_upstream_timeout')
+    throw transportError('line_pay_upstream_unavailable')
+  }
+
+  return {
+    status: response.status,
+    json: async () => {
+      try {
+        const payload = await response.json()
+        if (controller.signal.aborted) throw transportError('line_pay_upstream_timeout')
+        return payload
+      } catch (error) {
+        if (controller.signal.aborted) throw transportError('line_pay_upstream_timeout')
+        throw error
+      } finally {
+        timeoutScheduler.clear(timeout)
+      }
+    },
+  }
+}
+
 function normalizeGatewayError(payload: unknown) {
   if (isRecord(payload) && typeof payload.error === 'string' && payload.error.includes('timeout')) {
     return 'line_pay_gateway_upstream_timeout'
@@ -346,6 +422,8 @@ async function sendSignedGatewayBody(input: {
   fetchFn: LinePayTransportFetch
   now?: () => number
   createNonce?: () => string
+  timeoutMs?: number
+  timeoutScheduler?: LinePayTimeoutScheduler
 }): Promise<SignedGatewayResponse> {
   const nonce = (input.createNonce ?? randomUUID)()
   const timestamp = String(Math.floor((input.now ?? Date.now)() / 1_000))
@@ -357,7 +435,11 @@ async function sendSignedGatewayBody(input: {
     bodyText: input.bodyText,
   })
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), input.config.timeoutMs)
+  const timeoutScheduler = input.timeoutScheduler ?? systemTimeoutScheduler
+  const timeout = timeoutScheduler.schedule(
+    () => controller.abort(),
+    input.timeoutMs ?? input.config.timeoutMs,
+  )
   let response: LinePayTransportResponse
   let payload: unknown
 
@@ -377,6 +459,7 @@ async function sendSignedGatewayBody(input: {
         signal: controller.signal,
         redirect: 'error',
       })
+      if (controller.signal.aborted) throw transportError('line_pay_gateway_timeout')
     } catch {
       if (controller.signal.aborted) throw transportError('line_pay_gateway_timeout')
       throw transportError('line_pay_gateway_unavailable')
@@ -384,12 +467,13 @@ async function sendSignedGatewayBody(input: {
 
     try {
       payload = await response.json()
+      if (controller.signal.aborted) throw transportError('line_pay_gateway_timeout')
     } catch {
       if (controller.signal.aborted) throw transportError('line_pay_gateway_timeout')
       throw transportError('invalid_line_pay_gateway_response')
     }
   } finally {
-    clearTimeout(timeout)
+    timeoutScheduler.clear(timeout)
   }
 
   return { status: response.status, payload }
@@ -458,11 +542,7 @@ export async function sendLinePayRequest(input: SendLinePayRequestInput): Promis
   const config = getLinePayTransportConfig(input.transportEnv ?? process.env, environment)
 
   if (config.mode === 'direct') {
-    return input.fetchFn(buildDirectUrl(environment, input), {
-      method: input.method,
-      headers: input.linePayHeaders,
-      ...(input.bodyText !== undefined ? { body: input.bodyText } : {}),
-    })
+    return sendDirectLinePayRequest(environment, input, input.fetchFn)
   }
 
   const requestId = (input.createRequestId ?? randomUUID)()
@@ -482,6 +562,8 @@ export async function sendLinePayRequest(input: SendLinePayRequestInput): Promis
     fetchFn: input.fetchFn,
     now: input.now,
     createNonce: input.createNonce,
+    timeoutMs: getGatewayOperationTimeoutMs(input.operation, config.timeoutMs),
+    timeoutScheduler: input.timeoutScheduler,
   })
 
   if (!isRecord(payload) || payload.ok !== true || typeof payload.upstreamStatus !== 'number' || !('body' in payload)) {

@@ -3,6 +3,14 @@ import type { GatewayEnvironment } from './security.js'
 
 export type GatewayOperation = 'request' | 'confirm' | 'status' | 'paymentDetails'
 
+// LINE Pay's documented read-timeout minimums plus a fixed five-second service margin.
+const GATEWAY_OPERATION_UPSTREAM_TIMEOUT_MS: Readonly<Record<GatewayOperation, number>> = Object.freeze({
+  request: 15_000,
+  confirm: 45_000,
+  status: 25_000,
+  paymentDetails: 25_000,
+})
+
 export type GatewayProxyPayload = {
   operation: GatewayOperation
   environment: GatewayEnvironment
@@ -11,6 +19,13 @@ export type GatewayProxyPayload = {
   orderId?: string
   bodyText?: string
   linePayHeaders: Record<string, string>
+}
+
+export function getGatewayOperationUpstreamTimeoutMs(
+  operation: GatewayOperation,
+  configuredMinimumMs: number,
+) {
+  return Math.max(GATEWAY_OPERATION_UPSTREAM_TIMEOUT_MS[operation], configuredMinimumMs)
 }
 
 export type LinePayTarget = {
