@@ -1,6 +1,11 @@
 import { GatewayHttpError } from './errors.js'
 import { readProxyClientIp } from './client-address.js'
-import { buildLinePayTarget, parseGatewayPayload, type GatewayProxyPayload } from './operations.js'
+import {
+  buildLinePayTarget,
+  getGatewayOperationUpstreamTimeoutMs,
+  parseGatewayPayload,
+  type GatewayProxyPayload,
+} from './operations.js'
 import { authenticateProxyRequest } from './proxy-auth.js'
 import {
   authenticateGatewayRequest,
@@ -45,12 +50,23 @@ export type GatewayUpstreamFetch = (
   },
 ) => Promise<GatewayUpstreamResponse>
 
+export type GatewayTimeoutScheduler = {
+  schedule: (callback: () => void, delayMs: number) => unknown
+  clear: (handle: unknown) => void
+}
+
 export type GatewayDependencies = {
   fetchFn: GatewayUpstreamFetch
   now?: () => number
   replayCache?: ReplayCache
   rateLimiter?: FixedWindowRateLimiter
   logger?: (entry: GatewayLogEntry) => void
+  timeoutScheduler?: GatewayTimeoutScheduler
+}
+
+const systemTimeoutScheduler: GatewayTimeoutScheduler = {
+  schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+  clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 }
 
 function isJsonContentType(value: string | undefined) {
@@ -68,10 +84,14 @@ async function callLinePayUpstream(
   payload: GatewayProxyPayload,
   config: GatewayConfig,
   fetchFn: GatewayUpstreamFetch,
+  timeoutScheduler: GatewayTimeoutScheduler,
 ) {
   const target = buildLinePayTarget(payload, config.environment)
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), config.upstreamTimeoutMs)
+  const timeout = timeoutScheduler.schedule(
+    () => controller.abort(),
+    getGatewayOperationUpstreamTimeoutMs(payload.operation, config.upstreamTimeoutMs),
+  )
   let response: GatewayUpstreamResponse
   let responseText: string
 
@@ -84,6 +104,7 @@ async function callLinePayUpstream(
         signal: controller.signal,
         redirect: 'error',
       })
+      if (controller.signal.aborted) throw new GatewayHttpError(504, 'upstream_timeout')
     } catch {
       if (controller.signal.aborted) throw new GatewayHttpError(504, 'upstream_timeout')
       throw new GatewayHttpError(502, 'upstream_unavailable')
@@ -91,12 +112,13 @@ async function callLinePayUpstream(
 
     try {
       responseText = await response.text()
+      if (controller.signal.aborted) throw new GatewayHttpError(504, 'upstream_timeout')
     } catch {
       if (controller.signal.aborted) throw new GatewayHttpError(504, 'upstream_timeout')
       throw new GatewayHttpError(502, 'invalid_upstream_response')
     }
   } finally {
-    clearTimeout(timeout)
+    timeoutScheduler.clear(timeout)
   }
 
   let body: unknown
@@ -114,6 +136,7 @@ export function createGatewayHandler(config: GatewayConfig, dependencies: Gatewa
   const replayCache = dependencies.replayCache ?? new ReplayCache()
   const rateLimiter = dependencies.rateLimiter ?? new FixedWindowRateLimiter()
   const logger = dependencies.logger ?? ((entry: GatewayLogEntry) => console.info(JSON.stringify(entry)))
+  const timeoutScheduler = dependencies.timeoutScheduler ?? systemTimeoutScheduler
 
   return async function handleGatewayRequest(request: GatewayRequest): Promise<GatewayResponse> {
     const startedAt = now()
@@ -160,7 +183,7 @@ export function createGatewayHandler(config: GatewayConfig, dependencies: Gatewa
 
       payload = parseGatewayPayload(request.bodyText)
       if (payload.requestId !== auth.requestId) throw new GatewayHttpError(401, 'unauthorized')
-      response = await callLinePayUpstream(payload, config, dependencies.fetchFn)
+      response = await callLinePayUpstream(payload, config, dependencies.fetchFn, timeoutScheduler)
     } catch (error) {
       response = errorResponse(error)
     }

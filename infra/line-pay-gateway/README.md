@@ -48,16 +48,20 @@ LINE Pay Sandbox 或 Production API
 
 `upstreamStatus` 保留 LINE Pay HTTP status，`body` 保留 LINE Pay JSON。無效 JSON、timeout 或 Gateway 內部錯誤只回傳固定錯誤碼，不回傳上游 HTML 或內部例外內容。
 
-## Operation 白名單
+## Operation 白名單與 timeout 契約
 
-| operation | method | 固定 path | 必要欄位 |
-| --- | --- | --- | --- |
-| `request` | POST | `/v3/payments/request` | `bodyText` |
-| `confirm` | POST | `/v3/payments/{transactionId}/confirm` | `transactionId`, `bodyText` |
-| `status` | GET | `/v3/payments/requests/{transactionId}/check` | `transactionId` |
-| `paymentDetails` | GET | `/v3/payments?transactionId=...&orderId=...` | 至少一個查詢鍵 |
+| operation | method | 固定 v3 path | 必要欄位 | LINE Pay 官方最低 read timeout | direct／Gateway upstream | 網站到 Gateway |
+| --- | --- | --- | --- | ---: | ---: | ---: |
+| `request` | POST | `/v3/payments/request` | `bodyText` | 10 秒 | 15 秒 | 35 秒 |
+| `confirm` | POST | `/v3/payments/{transactionId}/confirm` | `transactionId`, `bodyText` | 40 秒 | 45 秒 | 50 秒 |
+| `status` | GET | `/v3/payments/requests/{transactionId}/check` | `transactionId` | 20 秒 | 25 秒 | 35 秒 |
+| `paymentDetails` | GET | `/v3/payments?transactionId=...&orderId=...` | 至少一個查詢鍵 | 20 秒 | 25 秒 | 35 秒 |
 
 `refund` 與 `void` 不在白名單；目前網站沒有完整正式基礎，本階段只列為後續評估項目。Payload 若出現 `url` 等任何未定義欄位會被拒絕。
+
+P1 保留完整 Online API v3 operation set，不把部分路徑靜默換成 v4。官方目前把 v4 的主要差異定位在台灣 EPI 的 `paymentProvider` 與預先授權付款；本專案尚未使用這兩項能力。若商務需求確認要使用 v4，必須另以原子化工作包同步修改四個 path、HMAC 測試向量、Gateway target 與 response schema。官方版本與 timeout 研究記錄見 [`docs/line-pay-online-api-version-timeout-research.md`](../../docs/line-pay-online-api-version-timeout-research.md)。
+
+上表的 direct／Gateway upstream deadline 已包含 5 秒服務緩衝。`LINE_PAY_UPSTREAM_TIMEOUT_MS` 仍可把特定 operation 的 Gateway deadline拉長，但不能壓低表列值；其允許上限為 30 秒，因此各 operation 的最大 upstream deadline 分別是 30／45／30／30 秒。網站到 Gateway 的固定下限再多保留 5 秒，確保 Gateway 有時間解析上游回應並傳回受控結果。兩層 timeout 都只會中止本次 request，不會自動 retry，也不會從 Gateway fallback 到 direct。
 
 ## HMAC canonical string
 
@@ -96,7 +100,7 @@ Gateway：
 | `LINE_PAY_GATEWAY_KEY_ID` | 是 | 無 | 內部金鑰識別，不是秘密 |
 | `LINE_PAY_GATEWAY_SECRET` | 是 | 無 | Vercel 與 Gateway 的獨立共享秘密 |
 | `LINE_PAY_GATEWAY_PROXY_TOKEN` | 是 | 無 | Caddy 與 Gateway 的獨立 64 字元小寫 hex token，不得與 Gateway secret 共用 |
-| `LINE_PAY_UPSTREAM_TIMEOUT_MS` | 否 | `5000` | Gateway 到 LINE Pay timeout，100–30000 ms |
+| `LINE_PAY_UPSTREAM_TIMEOUT_MS` | 否 | `5000` | Gateway upstream timeout 的設定下限，100–30000 ms；實際值不得低於 operation 固定 deadline |
 | `GATEWAY_TIMESTAMP_TOLERANCE_SECONDS` | 否 | `60` | HMAC timestamp 容許誤差，1–300 秒 |
 | `GATEWAY_REPLAY_TTL_SECONDS` | 否 | `120` | nonce/requestId 單機 TTL，60–600 秒 |
 | `GATEWAY_RATE_LIMIT_WINDOW_MS` | 否 | `60000` | 單機來源 IP rate limit 視窗 |
@@ -110,7 +114,7 @@ Gateway：
 | `LINE_PAY_GATEWAY_URL` | 未經 percent encoding 的 canonical 公開 HTTPS Gateway origin；authority／hostname 內任何 `%` 都拒絕，且不得有 hostname 尾點、任何顯式 port（含 `:443`）、尾端 `/`、path、query、fragment 或帳密，也拒絕 IP 與 localhost |
 | `LINE_PAY_GATEWAY_KEY_ID` | 必須與 Gateway 相同 |
 | `LINE_PAY_GATEWAY_SECRET` | 必須與 Gateway 相同，不得與 LINE Pay Channel Secret 共用 |
-| `LINE_PAY_GATEWAY_TIMEOUT_MS` | 網站到 Gateway timeout，預設 5000 ms |
+| `LINE_PAY_GATEWAY_TIMEOUT_MS` | 網站到 Gateway timeout 的設定下限，預設 5000 ms；實際值不得低於 operation 固定 deadline |
 | `LINE_PAY_GATEWAY_SMOKE_ENABLED` | 僅 Preview 的 authenticated smoke 開關，預設停用；Production 不需要也不會自動啟用 |
 
 gateway 模式少任何必要設定都 fail closed，不會 fallback 到 direct。Gateway URL 在 Sandbox、Preview、Development 與 Production runtime 一律必須是 canonical 公開 HTTPS origin。Validator 會先檢查未經 URL parser normalization 的原始字串，再檢查解析後的 URL；authority／hostname 內任何 `%` 都會在 parser 前被拒絕，因此 percent decoding、顯式預設 port、literal／encoded dot-segment、backslash、控制字元與任何 path 都不能被 parser 折疊後接受。Scheme 與 hostname 大小寫可正規化；原始 Unicode 公開 hostname 仍依 IDNA 正規化為 Punycode，公開 Punycode hostname 也維持允許，Unicode 等價尾點仍會被拒絕。固定 hostname allowlist 尚未實作。所有範例值只是假值；不要提交真實秘密或把秘密寫入映像檔。
