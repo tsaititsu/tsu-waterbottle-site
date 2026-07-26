@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { parseAndValidateDiagnosticOutput } from '../../scripts/supabase/validate-line-pay-application-state-diagnostic.mjs'
 import { LINE_PAY_POSTGRES_IMAGE } from './line_pay_postgres_image.mjs'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
@@ -38,6 +39,10 @@ const preflightPath = join(
 const postflightPath = join(
   root,
   'supabase/deployment/line_pay_remediation_postflight.sql',
+)
+const applicationStateDiagnosticPath = join(
+  root,
+  'supabase/deployment/line_pay_application_state_diagnostic.sql',
 )
 const deployPath = join(
   root,
@@ -638,6 +643,17 @@ function useFixtureContract(source, _fixture, database) {
   return output
 }
 
+function useApplicationStateDatabase(source, database) {
+  const productionIdentity = "pg_catalog.current_database() = 'postgres'"
+  if (source.split(productionIdentity).length !== 2) {
+    throw new Error('APPLICATION_STATE_DATABASE_FIXTURE_INVALID')
+  }
+  return source.replace(
+    productionIdentity,
+    `pg_catalog.current_database() = '${database}'`,
+  )
+}
+
 function stripDeployAttestationMarkers(output) {
   const rows = output.split(/\r?\n/u).filter(Boolean)
   const markerSet = new Set(deployAttestationMarkers)
@@ -729,27 +745,48 @@ function assertNoLinePayObjects(database) {
 
 function runHostedNonSuperuserMigrationScenario() {
   const database = 'exact_file_hosted_executor'
-  const executor = 'line_pay_hosted_postgres_fixture'
+  const executor = 'postgres'
+  const clusterAdmin = 'line_pay_cluster_admin_fixture'
+  const originalPostgres = 'line_pay_original_postgres_fixture'
+  const unexpectedMember = 'line_pay_unexpected_executor_member'
 
   psql(
     'postgres',
+    `
+      create role ${clusterAdmin}
+        login inherit superuser createdb createrole replication bypassrls;
+    `,
+    'create hosted cluster admin role',
+  )
+  psqlAs(
+    'postgres',
+    clusterAdmin,
+    `alter role postgres rename to ${originalPostgres};`,
+    'reserve production executor role name',
+  )
+  psqlAs(
+    'postgres',
+    clusterAdmin,
     `
       create role ${executor}
         login inherit nosuperuser createdb createrole replication bypassrls;
     `,
     'create hosted executor role',
   )
-  psql(
+  psqlAs(
     'postgres',
+    clusterAdmin,
     `create database ${database} owner ${executor};`,
     'create hosted executor db',
   )
-  psqlFile(
+  psqlFileAs(
     database,
+    clusterAdmin,
     'supabase/tests/line_pay_local_postgres_bootstrap.sql',
   )
-  psql(
+  psqlAs(
     database,
+    clusterAdmin,
     `
       grant all on schema auth to ${executor};
       grant all on all tables in schema auth to ${executor};
@@ -788,6 +825,7 @@ function runHostedNonSuperuserMigrationScenario() {
   }
 
   const before = readFingerprints(database, false, executor)
+  const activeTableManifest = readActiveTableManifests(database)
   const hostedPreflight = useFixtureContract(
     readFileSync(preflightPath, 'utf8'),
     before,
@@ -826,6 +864,42 @@ rollback;`,
   const after = readFingerprints(database, true, executor)
   if (JSON.stringify(before) !== JSON.stringify(after)) {
     throw new Error('HOSTED_EXECUTOR_EXISTING_DATA_FINGERPRINT_CHANGED')
+  }
+
+  const hostedPostflight = withActiveTableManifest(
+    useFixtureContract(
+      readFileSync(postflightPath, 'utf8'),
+      after,
+      database,
+    ),
+    activeTableManifest,
+  )
+  assertAuditStatus(
+    psqlAs(
+      database,
+      executor,
+      hostedPostflight,
+      'hosted executor formal postflight',
+    ),
+    'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED',
+  )
+
+  const hostedApplicationStateDiagnostic = useApplicationStateDatabase(
+    readFileSync(applicationStateDiagnosticPath, 'utf8'),
+    database,
+  )
+  const hostedApplicationState = parseAndValidateDiagnosticOutput(
+    psqlAs(
+      database,
+      executor,
+      hostedApplicationStateDiagnostic,
+      'hosted executor formal application-state diagnostic',
+    ),
+  )
+  if (hostedApplicationState.application_state !== 'FULL_WITHOUT_HISTORY') {
+    throw new Error(
+      `HOSTED_APPLICATION_STATE_INVALID:${hostedApplicationState.application_state}`,
+    )
   }
 
   const contract = JSON.parse(
@@ -943,19 +1017,150 @@ rollback;`,
     )
   }
 
-  psql(
+  psqlAs(
+    database,
+    clusterAdmin,
+    `
+      grant line_pay_payment_function_owner to ${executor}
+        with admin true, inherit false, set true;
+    `,
+    'hosted unsafe SET membership mutation',
+  )
+  assertAuditFailureStatus(
+    psqlAs(
+      database,
+      executor,
+      hostedPostflight,
+      'hosted unsafe SET membership postflight',
+    ),
+    'POSTFLIGHT_CONTRACT_FAILED',
+  )
+  const unsafeSetApplicationState = parseAndValidateDiagnosticOutput(
+    psqlAs(
+      database,
+      executor,
+      hostedApplicationStateDiagnostic,
+      'hosted unsafe SET membership application-state diagnostic',
+    ),
+  )
+  if (unsafeSetApplicationState.application_state !== 'PARTIAL') {
+    throw new Error(
+      `HOSTED_UNSAFE_SET_APPLICATION_STATE_INVALID:${unsafeSetApplicationState.application_state}`,
+    )
+  }
+  psqlAs(
+    database,
+    clusterAdmin,
+    `
+      grant line_pay_payment_function_owner to ${executor}
+        with admin true, inherit false, set false;
+    `,
+    'restore hosted unsafe SET membership mutation',
+  )
+  assertAuditStatus(
+    psqlAs(
+      database,
+      executor,
+      hostedPostflight,
+      'restored hosted SET membership postflight',
+    ),
+    'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED',
+  )
+
+  psqlAs(
+    database,
+    clusterAdmin,
+    `create role ${unexpectedMember} nologin noinherit;`,
+    'create hosted unexpected member role',
+  )
+  psqlAs(
+    database,
+    executor,
+    `
+      grant line_pay_payment_executor to ${unexpectedMember}
+        with admin false, inherit false, set false;
+    `,
+    'hosted duplicate membership mutation',
+  )
+  assertAuditFailureStatus(
+    psqlAs(
+      database,
+      executor,
+      hostedPostflight,
+      'hosted duplicate membership postflight',
+    ),
+    'POSTFLIGHT_CONTRACT_FAILED',
+  )
+  const duplicateMembershipApplicationState =
+    parseAndValidateDiagnosticOutput(
+      psqlAs(
+        database,
+        executor,
+        hostedApplicationStateDiagnostic,
+        'hosted duplicate membership application-state diagnostic',
+      ),
+    )
+  if (duplicateMembershipApplicationState.application_state !== 'PARTIAL') {
+    throw new Error(
+      `HOSTED_DUPLICATE_MEMBERSHIP_APPLICATION_STATE_INVALID:${duplicateMembershipApplicationState.application_state}`,
+    )
+  }
+  psqlAs(
+    database,
+    executor,
+    `revoke line_pay_payment_executor from ${unexpectedMember};`,
+    'restore hosted duplicate membership mutation',
+  )
+  psqlAs(
+    database,
+    clusterAdmin,
+    `drop role ${unexpectedMember};`,
+    'drop hosted unexpected member role',
+  )
+  assertAuditStatus(
+    psqlAs(
+      database,
+      executor,
+      hostedPostflight,
+      'restored hosted duplicate membership postflight',
+    ),
+    'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED',
+  )
+  const restoredApplicationState = parseAndValidateDiagnosticOutput(
+    psqlAs(
+      database,
+      executor,
+      hostedApplicationStateDiagnostic,
+      'restored hosted application-state diagnostic',
+    ),
+  )
+  if (restoredApplicationState.application_state !== 'FULL_WITHOUT_HISTORY') {
+    throw new Error(
+      `HOSTED_RESTORED_APPLICATION_STATE_INVALID:${restoredApplicationState.application_state}`,
+    )
+  }
+
+  psqlAs(
     'postgres',
+    clusterAdmin,
     `drop database ${database};`,
     'drop hosted executor db',
   )
-  psql(
+  psqlAs(
     'postgres',
+    clusterAdmin,
     `
       drop role line_pay_payment_executor;
       drop role line_pay_payment_function_owner;
       drop role ${executor};
+      alter role ${originalPostgres} rename to postgres;
     `,
-    'drop hosted executor roles',
+    'restore original postgres role',
+  )
+  psql(
+    'postgres',
+    `drop role ${clusterAdmin};`,
+    'drop hosted cluster admin role',
   )
 }
 

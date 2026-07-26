@@ -22,6 +22,10 @@ const runnerPath = join(
   root,
   'scripts/supabase/run-line-pay-production-exact-file.mjs',
 )
+const postgresContractRunnerPath = join(
+  root,
+  'supabase/tests/run_line_pay_production_exact_file_contracts.mjs',
+)
 
 test('validator fixes the complete Production deployment identity', async () => {
   const validator = await import(pathToFileURL(validatorPath).href)
@@ -393,6 +397,39 @@ test('preflight and postflight SQL are fixed read-only single-statement queries'
   ]) {
     assert.throws(() => validator.assertReadOnlyAuditSql(sql), /UNSAFE_AUDIT_SQL/)
   }
+})
+
+test('hosted non-superuser scenario executes the formal safety contracts and mutations', () => {
+  const source = readFileSync(postgresContractRunnerPath, 'utf8')
+  const scenarioStart = source.indexOf(
+    'function runHostedNonSuperuserMigrationScenario()',
+  )
+  const scenarioEnd = source.indexOf(
+    '\nfunction readLinePayFunctionMetadata',
+    scenarioStart,
+  )
+  assert.ok(scenarioStart >= 0)
+  assert.ok(scenarioEnd > scenarioStart)
+  const scenario = source.slice(scenarioStart, scenarioEnd)
+
+  for (const requiredEvidence of [
+    'hosted executor formal postflight',
+    'hosted executor formal application-state diagnostic',
+    'hosted unsafe SET membership postflight',
+    'hosted unsafe SET membership application-state diagnostic',
+    'hosted duplicate membership postflight',
+    'hosted duplicate membership application-state diagnostic',
+  ]) {
+    assert.ok(scenario.includes(requiredEvidence), requiredEvidence)
+  }
+  assert.match(
+    scenario,
+    /parseAndValidateDiagnosticOutput\([\s\S]*?application_state[\s\S]*?FULL_WITHOUT_HISTORY/u,
+  )
+  assert.match(
+    scenario,
+    /assertAuditFailureStatus\([\s\S]*?'POSTFLIGHT_CONTRACT_FAILED'/u,
+  )
 })
 
 test('deploy orchestration mutations cannot remove transaction attestations, guard, manifest, timeout, or duplicate Migration', async () => {
