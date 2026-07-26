@@ -140,7 +140,7 @@ test('static mutations cannot weaken the read-only or inventory contract', () =>
   }
 })
 
-test('existing deploy boundary makes DEPLOY_PSQL_FAILED commit state unknown', () => {
+test('deploy boundary records observed evidence and keeps history policy consistent', () => {
   assert.deepEqual(
     deploySql.match(/^\\ir [^\r\n]+$/gmu),
     [
@@ -163,12 +163,54 @@ test('existing deploy boundary makes DEPLOY_PSQL_FAILED commit state unknown', (
     [deploySql, migrationSql, preflightSql, postflightSql].join('\n'),
     /\binsert\s+into\s+supabase_migrations[.]schema_migrations\b/iu,
   )
+  const orderedMarkers = [
+    'LINE_PAY_DEPLOY_MIGRATION_STARTED',
+    'LINE_PAY_DEPLOY_MIGRATION_COMMITTED',
+    'LINE_PAY_DEPLOY_POSTFLIGHT_STARTED',
+    'LINE_PAY_DEPLOY_POSTFLIGHT_STATE_EMITTED',
+    'LINE_PAY_DEPLOY_POSTFLIGHT_COMMITTED',
+  ]
+  let previousMarkerIndex = -1
+  for (const marker of orderedMarkers) {
+    const markerIndex = deploySql.indexOf(`\\echo ${marker}`)
+    assert.ok(markerIndex > previousMarkerIndex, marker)
+    previousMarkerIndex = markerIndex
+  }
+  for (const failureCode of [
+    'MIGRATION_COMMIT_STATE_UNKNOWN',
+    'MIGRATION_SQL_FAILED_BEFORE_COMMIT',
+    'MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_NOT_OBSERVED',
+    'MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_COMMIT_STATE_UNKNOWN',
+    'MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_SQL_FAILED_BEFORE_COMMIT',
+    'OUTPUT_VALIDATION_FAILED_AFTER_BOTH_COMMITS_OBSERVED',
+    'CREDENTIAL_CLEANUP_FAILED_AFTER_BOTH_COMMITS_OBSERVED',
+  ]) {
+    assert.match(exactFileRunner, new RegExp(`'${failureCode}'`, 'u'))
+  }
   assert.match(
     exactFileRunner,
-    /if \(result[.]code !== 0 \|\| result[.]signal\) fail\(phaseFailureCode\(phase\)\)/u,
+    /deployment_recording_policy: DEPLOYMENT_RECORDING_POLICY/u,
   )
-  assert.match(exactFileRunner, /'DEPLOY_PSQL_FAILED'/u)
-  assert.match(exactFileRunner, /'DEPLOY_CONTRACT_FAILED'/u)
+  assert.match(
+    exactFileRunner,
+    /status: validatedPostflight[.]status[\s\S]*line_pay_contract_status: validatedPostflight[.]status[\s\S]*runtime_enabled: validatedPostflight[.]runtime_enabled/u,
+  )
+  assert.match(
+    exactFileRunner,
+    /supabase_migration_history_table_present:\s*validatedPostflight[.]migration_history[.]line_pay_version_present[\s\S]*supabase_migration_history_version_present:\s*validatedPostflight[.]migration_history[.]line_pay_version_present/u,
+  )
+  assert.doesNotMatch(
+    exactFileRunner,
+    /ABSENT_EXPECTED|DEPLOY_SUCCESS_ATTESTATION|runtime_enabled:\s*false/u,
+  )
+  assert.match(
+    diagnosticSql,
+    /then 'FULL_WITH_HISTORY'[\s\S]*then 'FULL_WITHOUT_HISTORY'/u,
+  )
+  assert.doesNotMatch(
+    [workflow, diagnosticSql].join('\n'),
+    /run-line-pay-production-exact-file|line_pay_remediation_deploy|supabase\s+(?:db|migration)/iu,
+  )
 })
 
 test('LINE Pay DB CI owns the application-state contracts and cleanup', () => {

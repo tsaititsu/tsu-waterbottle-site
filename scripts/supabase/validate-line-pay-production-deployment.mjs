@@ -127,6 +127,14 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value))
 }
 
+function deepFreeze(value) {
+  if (value === null || typeof value !== 'object' || Object.isFrozen(value)) {
+    return value
+  }
+  for (const nested of Object.values(value)) deepFreeze(nested)
+  return Object.freeze(value)
+}
+
 function assertPlainObject(value, code = 'DATABASE_OUTPUT_INVALID') {
   if (
     value === null ||
@@ -442,6 +450,11 @@ export function assertDeployOrchestrationSql(sql) {
     '\\set line_pay_baseline_manifest 1',
     "'provider', row_value.provider",
     "'payment_status', row_value.payment_status",
+    '\\echo LINE_PAY_DEPLOY_MIGRATION_STARTED',
+    '\\echo LINE_PAY_DEPLOY_MIGRATION_COMMITTED',
+    '\\echo LINE_PAY_DEPLOY_POSTFLIGHT_STARTED',
+    '\\echo LINE_PAY_DEPLOY_POSTFLIGHT_STATE_EMITTED',
+    '\\echo LINE_PAY_DEPLOY_POSTFLIGHT_COMMITTED',
   ]
   for (const token of requiredOnce) {
     if (sql.split(token).length !== 2) fail('FIXED_FILE_INVALID')
@@ -459,6 +472,15 @@ export function assertDeployOrchestrationSql(sql) {
   const migrationIndex = sql.indexOf(
     '\\ir ../migrations/20260719033404_line_pay_remediation_contracts.sql',
   )
+  const migrationStartedIndex = sql.indexOf(
+    '\\echo LINE_PAY_DEPLOY_MIGRATION_STARTED',
+  )
+  const migrationCommittedIndex = sql.indexOf(
+    '\\echo LINE_PAY_DEPLOY_MIGRATION_COMMITTED',
+  )
+  const postflightStartedIndex = sql.indexOf(
+    '\\echo LINE_PAY_DEPLOY_POSTFLIGHT_STARTED',
+  )
   const secondTransactionIndex = sql.indexOf('begin;', migrationIndex)
   const secondLockIndex = sql.indexOf(
     'lock table public.product_orders, public.payments in access exclusive mode;',
@@ -467,13 +489,24 @@ export function assertDeployOrchestrationSql(sql) {
   const postflightIndex = sql.indexOf(
     '\\ir line_pay_remediation_postflight.sql',
   )
+  const postflightStateEmittedIndex = sql.indexOf(
+    '\\echo LINE_PAY_DEPLOY_POSTFLIGHT_STATE_EMITTED',
+  )
   const postflightCommitIndex = sql.indexOf('commit;', postflightIndex)
+  const postflightCommittedIndex = sql.indexOf(
+    '\\echo LINE_PAY_DEPLOY_POSTFLIGHT_COMMITTED',
+  )
   if (
-    migrationIndex < 0 ||
-    secondTransactionIndex <= migrationIndex ||
+    migrationStartedIndex < 0 ||
+    migrationIndex <= migrationStartedIndex ||
+    migrationCommittedIndex <= migrationIndex ||
+    postflightStartedIndex <= migrationCommittedIndex ||
+    secondTransactionIndex <= postflightStartedIndex ||
     secondLockIndex <= secondTransactionIndex ||
     postflightIndex <= secondLockIndex ||
-    postflightCommitIndex <= postflightIndex
+    postflightStateEmittedIndex <= postflightIndex ||
+    postflightCommitIndex <= postflightStateEmittedIndex ||
+    postflightCommittedIndex <= postflightCommitIndex
   ) {
     fail('FIXED_FILE_INVALID')
   }
@@ -611,6 +644,75 @@ export function assertSignalLifecycleSource(source) {
   return true
 }
 
+export function assertDeployAttestationSource(source) {
+  if (typeof source !== 'string') fail('FIXED_FILE_INVALID')
+  const requiredOnce = [
+    'export const DEPLOY_ATTESTATION_MARKERS = Object.freeze({',
+    'export const DEPLOYMENT_RECORDING_POLICY =',
+    'export function buildDeploySuccessAttestation(',
+    'validatedPostflight = parseAndValidateAuditOutput(',
+    'return buildDeploySuccessAttestation(evidence, validatedPostflight)',
+    'deployEvidence = inspectDeployOutput(result.stdout)',
+    "error.attestation = buildDeploymentFailureAttestation(",
+    'export function safeFailureOutput(error) {',
+    "typeof result === 'string' ? result : JSON.stringify(result)",
+  ]
+  for (const token of requiredOnce) {
+    if (source.split(token).length !== 2) fail('FIXED_FILE_INVALID')
+  }
+  for (const token of [
+    'validatedPostflight.status',
+    'line_pay_contract_status: validatedPostflight.status',
+    'validatedPostflight.runtime_enabled',
+    'supabase_migration_history_table_present:',
+    'validatedPostflight.migration_history.line_pay_version_present',
+    'migration_started_observed',
+    'migration_commit_observed',
+    'postflight_started_observed',
+    'postflight_state_observed',
+    'postflight_commit_observed',
+    'cleanup_failure_code',
+    'operationError = createDeploymentFailure(',
+  ]) {
+    if (!source.includes(token)) fail('FIXED_FILE_INVALID')
+  }
+  if (
+    source.split(
+      'validatedPostflight.migration_history.line_pay_version_present',
+    ).length !== 3
+  ) {
+    fail('FIXED_FILE_INVALID')
+  }
+  const inspectIndex = source.indexOf(
+    'deployEvidence = inspectDeployOutput(result.stdout)',
+  )
+  const validationIndex = source.indexOf(
+    'completedResult = validateDeployExecutionResult(',
+    inspectIndex,
+  )
+  const cleanupClassificationIndex = source.indexOf(
+    'operationError = createDeploymentFailure(',
+    validationIndex,
+  )
+  if (
+    !(
+      inspectIndex >= 0 &&
+      inspectIndex < validationIndex &&
+      validationIndex < cleanupClassificationIndex
+    ) ||
+    source.includes('DEPLOY_SUCCESS_ATTESTATION') ||
+    source.includes('DATABASE_CONTRACTS_READY_RUNTIME_DISABLED') ||
+    /runtime_enabled:\s*false/u.test(source) ||
+    /line_pay_version_present:\s*false/u.test(source) ||
+    /console[.](?:log|error)[(](?:result[.](?:stdout|stderr)|evidence[.]auditOutput)/u.test(
+      source,
+    )
+  ) {
+    fail('FIXED_FILE_INVALID')
+  }
+  return true
+}
+
 function databaseContract() {
   return {
     name: 'postgres',
@@ -729,14 +831,14 @@ export function buildExpectedAuditFixture(phase) {
   const common = {
     database: databaseContract(),
     fence: clone(FENCE_CONTRACT),
-    migration_history: {
-      line_pay_version_present: false,
-    },
   }
   if (phase === 'preflight') {
     return {
       status: 'READY_EXPECTED',
       ...common,
+      migration_history: {
+        line_pay_version_present: false,
+      },
       historical: {
         bank_transfer: clone(BANK_TRANSFER_HISTORICAL_CONTRACT),
       },
@@ -747,6 +849,9 @@ export function buildExpectedAuditFixture(phase) {
   return {
     status: 'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED',
     ...common,
+    migration_history: {
+      line_pay_version_present: false,
+    },
     historical: {
       bank_transfer: clone(BANK_TRANSFER_HISTORICAL_CONTRACT),
       payments: clone(ACTIVE_TABLE_MANIFEST_CONTRACT),
@@ -792,7 +897,7 @@ function validateAuditResult(result, phase) {
         : 'POSTFLIGHT_CONTRACT_FAILED',
     )
   }
-  return result.status
+  return deepFreeze(result)
 }
 
 export function parseSingleColumnJson(text) {
@@ -859,6 +964,7 @@ export function validateSource(
   assertReadOnlyAuditSql(postflight)
   assertDeployOrchestrationSql(deploy)
   assertSignalLifecycleSource(runner)
+  assertDeployAttestationSource(runner)
   validatePostgresImage(POSTGRES_IMAGE)
 
   const githubSha = environment.GITHUB_SHA

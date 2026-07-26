@@ -363,10 +363,19 @@ test('preflight and postflight SQL are fixed read-only single-statement queries'
   }
 })
 
-test('deploy orchestration mutations cannot remove guard, manifest, timeout, or duplicate Migration', async () => {
+test('deploy orchestration mutations cannot remove transaction attestations, guard, manifest, timeout, or duplicate Migration', async () => {
   const validator = await import(pathToFileURL(validatorPath).href)
   const deploy = readFileSync(join(root, validator.DEPLOY_FILE), 'utf8')
   assert.equal(validator.assertDeployOrchestrationSql(deploy), true)
+  for (const marker of [
+    'LINE_PAY_DEPLOY_MIGRATION_STARTED',
+    'LINE_PAY_DEPLOY_MIGRATION_COMMITTED',
+    'LINE_PAY_DEPLOY_POSTFLIGHT_STARTED',
+    'LINE_PAY_DEPLOY_POSTFLIGHT_STATE_EMITTED',
+    'LINE_PAY_DEPLOY_POSTFLIGHT_COMMITTED',
+  ]) {
+    assert.equal(deploy.split(marker).length, 2, marker)
+  }
   const manifestFields = [
     "'id', row_value.id",
     "'user_id', row_value.user_id",
@@ -428,8 +437,8 @@ test('deploy orchestration mutations cannot remove guard, manifest, timeout, or 
       '\\set line_pay_baseline_manifest 1',
     ),
     deploy.replace(
-      '\\set line_pay_baseline_manifest 1\n\\ir line_pay_remediation_postflight.sql\n\\unset line_pay_baseline_manifest\n\ncommit;',
-      'commit;\n\\set line_pay_baseline_manifest 1\n\\ir line_pay_remediation_postflight.sql\n\\unset line_pay_baseline_manifest',
+      '\\set line_pay_baseline_manifest 1\n\\ir line_pay_remediation_postflight.sql\n\\unset line_pay_baseline_manifest\n\\echo LINE_PAY_DEPLOY_POSTFLIGHT_STATE_EMITTED\n\ncommit;',
+      'commit;\n\\set line_pay_baseline_manifest 1\n\\ir line_pay_remediation_postflight.sql\n\\unset line_pay_baseline_manifest\n\\echo LINE_PAY_DEPLOY_POSTFLIGHT_STATE_EMITTED',
     ),
     deploy.replace('\\if :line_pay_locked_guard_ready\n', ''),
     deploy.replace('baseline_payments_manifest', 'removed_manifest'),
@@ -438,6 +447,15 @@ test('deploy orchestration mutations cannot remove guard, manifest, timeout, or 
       "'failure_reason', null",
     ),
     deploy.replace("set local statement_timeout = '120s';\n", ''),
+    deploy.replace('\\echo LINE_PAY_DEPLOY_MIGRATION_COMMITTED\n', ''),
+    deploy.replace(
+      '\\echo LINE_PAY_DEPLOY_POSTFLIGHT_STATE_EMITTED\n',
+      '',
+    ),
+    deploy.replace(
+      '\\echo LINE_PAY_DEPLOY_POSTFLIGHT_COMMITTED\n',
+      '',
+    ),
     deploy.replace(
       '\\ir ../migrations/20260719033404_line_pay_remediation_contracts.sql',
       '\\ir ../migrations/20260719033404_line_pay_remediation_contracts.sql\n\\ir ../migrations/20260719033404_line_pay_remediation_contracts.sql',
@@ -501,25 +519,63 @@ test('signal lifecycle source contract catches fail-open mutations', async () =>
   }
 })
 
+test('deploy attestation source contract catches boundary and raw-output mutations', async () => {
+  const validator = await import(pathToFileURL(validatorPath).href)
+  const source = readFileSync(runnerPath, 'utf8')
+  assert.equal(validator.assertDeployAttestationSource(source), true)
+
+  for (const mutated of [
+    source.replace(
+      'deployEvidence = inspectDeployOutput(result.stdout)',
+      'deployEvidence = { migration_commit_observed: true }',
+    ),
+    source.replace(
+      'validatedPostflight.status',
+      "'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED'",
+    ),
+    source.replace(
+      'validatedPostflight.runtime_enabled',
+      'false',
+    ),
+    source.replace(
+      'line_pay_contract_status: validatedPostflight.status',
+      "line_pay_contract_status: 'EXACT'",
+    ),
+    source.replace(
+      'validatedPostflight.migration_history.line_pay_version_present',
+      'false',
+    ),
+    source.replace(
+      "typeof result === 'string' ? result : JSON.stringify(result)",
+      'result.stdout',
+    ),
+  ]) {
+    assert.throws(
+      () => validator.assertDeployAttestationSource(mutated),
+      /FIXED_FILE_INVALID/,
+    )
+  }
+})
+
 test('audit parser requires one JSON row and fixed safe statuses', async () => {
   const validator = await import(pathToFileURL(validatorPath).href)
   const preflight = validator.buildExpectedAuditFixture('preflight')
   const postflight = validator.buildExpectedAuditFixture('postflight')
 
-  assert.equal(
-    validator.parseAndValidateAuditOutput(
-      `${JSON.stringify(preflight)}\n`,
-      'preflight',
-    ),
-    'READY_EXPECTED',
+  const validatedPreflight = validator.parseAndValidateAuditOutput(
+    `${JSON.stringify(preflight)}\n`,
+    'preflight',
   )
-  assert.equal(
-    validator.parseAndValidateAuditOutput(
-      `${JSON.stringify(postflight)}\n`,
-      'postflight',
-    ),
-    'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED',
+  const validatedPostflight = validator.parseAndValidateAuditOutput(
+    `${JSON.stringify(postflight)}\n`,
+    'postflight',
   )
+  assert.deepEqual(validatedPreflight, preflight)
+  assert.deepEqual(validatedPostflight, postflight)
+  assert.equal(Object.isFrozen(validatedPreflight), true)
+  assert.equal(Object.isFrozen(validatedPreflight.line_pay), true)
+  assert.equal(Object.isFrozen(validatedPostflight), true)
+  assert.equal(Object.isFrozen(validatedPostflight.migration_history), true)
   assert.throws(
     () =>
       validator.parseAndValidateAuditOutput(
@@ -578,6 +634,183 @@ test('audit parser requires one JSON row and fixed safe statuses', async () => {
         'postflight',
       ),
     /POSTFLIGHT_CONTRACT_FAILED/,
+  )
+  const extraPostflightField = structuredClone(postflight)
+  extraPostflightField.unexpected = true
+  assert.throws(
+    () =>
+      validator.parseAndValidateAuditOutput(
+        JSON.stringify(extraPostflightField),
+        'postflight',
+      ),
+    /DATABASE_OUTPUT_INVALID/,
+  )
+  const runtimeMutation = structuredClone(postflight)
+  runtimeMutation.runtime_enabled = true
+  assert.throws(
+    () =>
+      validator.parseAndValidateAuditOutput(
+        JSON.stringify(runtimeMutation),
+        'postflight',
+      ),
+    /POSTFLIGHT_CONTRACT_FAILED/,
+  )
+  const historyMutation = structuredClone(postflight)
+  historyMutation.migration_history.line_pay_version_present = true
+  assert.throws(
+    () =>
+      validator.parseAndValidateAuditOutput(
+        JSON.stringify(historyMutation),
+        'postflight',
+      ),
+    /POSTFLIGHT_CONTRACT_FAILED/,
+  )
+})
+
+test('deploy result matrix treats missing markers as unknown, never rollback proof', async () => {
+  const runner = await import(pathToFileURL(runnerPath).href)
+  const validator = await import(pathToFileURL(validatorPath).href)
+  const markers = runner.DEPLOY_ATTESTATION_MARKERS
+  const postflight = JSON.stringify(
+    validator.buildExpectedAuditFixture('postflight'),
+  )
+  const validate = (
+    stdout: string,
+    code: number | null,
+    signal: string | null = null,
+  ) =>
+    runner.validateDeployExecutionResult(
+      { code, signal, stderr: '', stdout },
+      runner.inspectDeployOutput(stdout),
+    )
+
+  assert.throws(
+    () => validate(`${markers.migrationStarted}\n`, null, 'SIGTERM'),
+    /MIGRATION_COMMIT_STATE_UNKNOWN/,
+  )
+  assert.throws(
+    () => validate(`${markers.migrationStarted}\n`, null, 'CAPTURE_LIMIT'),
+    /MIGRATION_COMMIT_STATE_UNKNOWN/,
+  )
+  assert.throws(
+    () => validate(`${markers.migrationStarted}\n`, 2),
+    /MIGRATION_COMMIT_STATE_UNKNOWN/,
+  )
+  assert.throws(
+    () => validate(`${markers.migrationStarted}\n`, 3),
+    /MIGRATION_SQL_FAILED_BEFORE_COMMIT/,
+  )
+  assert.throws(
+    () => validate('', 3),
+    /DEPLOY_FAILED_BEFORE_MIGRATION_START/,
+  )
+  assert.throws(
+    () => validate('', 2),
+    /MIGRATION_COMMIT_STATE_UNKNOWN/,
+  )
+  assert.throws(
+    () =>
+      validate(
+        `${markers.migrationStarted}\n${markers.migrationCommitted}\n`,
+        3,
+      ),
+    /MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_NOT_OBSERVED/,
+  )
+  assert.throws(
+    () =>
+      validate(
+        [
+          markers.migrationStarted,
+          markers.migrationCommitted,
+          markers.postflightStarted,
+          postflight,
+          markers.postflightStateEmitted,
+          '',
+        ].join('\n'),
+        0,
+      ),
+    /MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_COMMIT_STATE_UNKNOWN/,
+  )
+  assert.throws(
+    () =>
+      validate(
+        [
+          markers.migrationStarted,
+          markers.migrationCommitted,
+          markers.postflightStarted,
+          '',
+        ].join('\n'),
+        3,
+      ),
+    /MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_SQL_FAILED_BEFORE_COMMIT/,
+  )
+  assert.throws(
+    () =>
+      validate(
+        [
+          markers.migrationStarted,
+          markers.migrationCommitted,
+          markers.postflightStarted,
+          '',
+        ].join('\n'),
+        2,
+      ),
+    /MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_COMMIT_STATE_UNKNOWN/,
+  )
+  assert.throws(
+    () =>
+      validate(
+        [
+          markers.migrationStarted,
+          markers.migrationCommitted,
+          markers.postflightStarted,
+          '{}',
+          markers.postflightStateEmitted,
+          markers.postflightCommitted,
+          '',
+        ].join('\n'),
+        0,
+      ),
+    /OUTPUT_VALIDATION_FAILED_AFTER_BOTH_COMMITS_OBSERVED/,
+  )
+  const duplicateEvidence = runner.inspectDeployOutput(
+    [
+      markers.migrationStarted,
+      markers.migrationStarted,
+      markers.migrationCommitted,
+      markers.postflightStarted,
+      postflight,
+      markers.postflightStateEmitted,
+      markers.postflightCommitted,
+      '',
+    ].join('\n'),
+  )
+  assert.equal(duplicateEvidence.markerSequenceValid, false)
+  assert.equal(duplicateEvidence.migration_started_observed, true)
+  assert.equal(duplicateEvidence.migration_commit_observed, true)
+  assert.equal(duplicateEvidence.postflight_commit_observed, true)
+  assert.throws(
+    () =>
+      runner.validateDeployExecutionResult(
+        { code: 0, signal: null, stderr: '', stdout: '' },
+        duplicateEvidence,
+      ),
+    /DEPLOY_PROCESS_FAILED_AFTER_BOTH_COMMITS_OBSERVED/,
+  )
+  assert.throws(
+    () =>
+      validate(
+        [
+          markers.migrationStarted,
+          markers.postflightStarted,
+          postflight,
+          markers.postflightStateEmitted,
+          markers.postflightCommitted,
+          '',
+        ].join('\n'),
+        0,
+      ),
+    /MIGRATION_COMMIT_STATE_UNKNOWN/,
   )
 })
 
@@ -778,12 +1011,20 @@ test('credential cleanup failure exposes only the fixed safe code', async () => 
     child.stderr = new PassThrough()
     child.kill = () => true
     queueMicrotask(() => {
+      const markers = runner.DEPLOY_ATTESTATION_MARKERS
+      const successfulDeployOutput = [
+        markers.migrationStarted,
+        markers.migrationCommitted,
+        markers.postflightStarted,
+        JSON.stringify(validator.buildExpectedAuditFixture('postflight')),
+        markers.postflightStateEmitted,
+        markers.postflightCommitted,
+        '',
+      ].join('\n')
       child.stdout.end(
         args[0] === 'pull'
           ? 'fixed image ready\n'
-          : `${JSON.stringify(
-              validator.buildExpectedAuditFixture('postflight'),
-            )}\n`,
+          : successfulDeployOutput,
       )
       child.stderr.end()
       child.emit('close', 0, null)
@@ -809,8 +1050,24 @@ test('credential cleanup failure exposes only the fixed safe code', async () => 
         (caught: unknown) => caught,
       )
     assert.ok(error instanceof Error)
-    assert.equal(error.message, 'TEMP_CREDENTIAL_CLEANUP_FAILED')
-    assert.equal(runner.safeFailureCode(error), 'TEMP_CREDENTIAL_CLEANUP_FAILED')
+    assert.equal(
+      error.message,
+      'CREDENTIAL_CLEANUP_FAILED_AFTER_BOTH_COMMITS_OBSERVED',
+    )
+    assert.equal(
+      runner.safeFailureCode(error),
+      'CREDENTIAL_CLEANUP_FAILED_AFTER_BOTH_COMMITS_OBSERVED',
+    )
+    const deploymentError = error as Error & {
+      attestation: Record<string, unknown>
+    }
+    const serializedAttestation = runner.safeFailureOutput(error)
+    assert.deepEqual(
+      JSON.parse(serializedAttestation),
+      deploymentError.attestation,
+    )
+    assert.doesNotMatch(serializedAttestation, new RegExp(syntheticSecret))
+    assert.doesNotMatch(serializedAttestation, new RegExp(runnerTemp))
     assert.doesNotMatch(error.message, new RegExp(syntheticSecret))
     assert.doesNotMatch(error.message, new RegExp(runnerTemp))
   } finally {
@@ -876,7 +1133,7 @@ test('credential creation cleanup failure outranks a concurrent signal', async (
   }
 })
 
-test('runner executes one fixed phase and cleans credentials on success and failure', async () => {
+test('runner attests deploy commits and classifies failures by the last proven boundary', async () => {
   const runner = await import(pathToFileURL(runnerPath).href)
   const validator = await import(pathToFileURL(validatorPath).href)
   const testTempRoot = join(writableTestRoot, '.line-pay-production-test-tmp')
@@ -890,7 +1147,13 @@ test('runner executes one fixed phase and cleans credentials on success and fail
     SUPABASE_PROJECT_ID: 'ndbqoznvobmpkgxkiezz',
   }
 
-  const makeSpawn = (phaseExitCode: number) => {
+  const makeSpawn = ({
+    phaseExitCode,
+    phaseStdout,
+  }: {
+    phaseExitCode: number
+    phaseStdout: string
+  }) => {
     const calls: Array<{ args: string[]; options: Record<string, unknown> }> = []
     const fakeSpawn = (
       _binary: string,
@@ -913,11 +1176,7 @@ test('runner executes one fixed phase and cleans credentials on success and fail
           child.emit('close', 0, null)
           return
         }
-        child.stdout.end(
-          `${JSON.stringify(
-            validator.buildExpectedAuditFixture('postflight'),
-          )}\n`,
-        )
+        child.stdout.end(phaseStdout)
         child.stderr.end('synthetic failure detail\n')
         child.emit('close', phaseExitCode, null)
       })
@@ -926,14 +1185,56 @@ test('runner executes one fixed phase and cleans credentials on success and fail
     return { calls, fakeSpawn }
   }
 
+  const markers = runner.DEPLOY_ATTESTATION_MARKERS
+  const validPostflight = JSON.stringify(
+    validator.buildExpectedAuditFixture('postflight'),
+  )
+  const successfulOutput = [
+    markers.migrationStarted,
+    markers.migrationCommitted,
+    markers.postflightStarted,
+    validPostflight,
+    markers.postflightStateEmitted,
+    markers.postflightCommitted,
+    '',
+  ].join('\n')
+
   try {
-    const success = makeSpawn(0)
+    const success = makeSpawn({
+      phaseExitCode: 0,
+      phaseStdout: successfulOutput,
+    })
+    const successAttestation = await runner.runDatabasePhase('deploy', {
+      environment,
+      spawnImplementation: success.fakeSpawn,
+    })
+    assert.deepEqual(successAttestation, {
+      status: 'DEPLOYMENT_VALIDATED',
+      deployment_recording_policy: 'GITHUB_ATTESTED_EXACT_FILE',
+      transaction_boundary_attestation: {
+        migration_started_observed: true,
+        migration_commit_observed: true,
+        postflight_started_observed: true,
+        postflight_state_observed: true,
+        postflight_commit_observed: true,
+      },
+      database_postflight_attestation: {
+        status: 'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED',
+        line_pay_contract_status:
+          'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED',
+        runtime_enabled: false,
+        supabase_migration_history_table_present: false,
+        supabase_migration_history_version_present: false,
+      },
+    })
+    assert.equal(Object.isFrozen(successAttestation), true)
     assert.equal(
-      await runner.runDatabasePhase('deploy', {
-        environment,
-        spawnImplementation: success.fakeSpawn,
-      }),
-      'DEPLOYMENT_VALIDATED',
+      Object.isFrozen(successAttestation.transaction_boundary_attestation),
+      true,
+    )
+    assert.equal(
+      Object.isFrozen(successAttestation.database_postflight_attestation),
+      true,
     )
     assert.equal(success.calls.length, 2)
     assert.equal(
@@ -947,18 +1248,188 @@ test('runner executes one fixed phase and cleans credentials on success and fail
       [],
     )
 
-    const failure = makeSpawn(9)
+    const migrationFailure = makeSpawn({
+      phaseExitCode: 3,
+      phaseStdout: `${markers.migrationStarted}\n`,
+    })
     await assert.rejects(
       runner.runDatabasePhase('deploy', {
         environment,
-        spawnImplementation: failure.fakeSpawn,
+        spawnImplementation: migrationFailure.fakeSpawn,
       }),
-      /DEPLOY_PSQL_FAILED/,
+      /MIGRATION_SQL_FAILED_BEFORE_COMMIT/,
     )
-    assert.equal(failure.calls.length, 2)
+
+    const postflightFailure = makeSpawn({
+      phaseExitCode: 3,
+      phaseStdout: [
+        markers.migrationStarted,
+        markers.migrationCommitted,
+        markers.postflightStarted,
+        '',
+      ].join('\n'),
+    })
+    await assert.rejects(
+      runner.runDatabasePhase('deploy', {
+        environment,
+        spawnImplementation: postflightFailure.fakeSpawn,
+      }),
+      /MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_SQL_FAILED_BEFORE_COMMIT/,
+    )
+
+    const outputValidationFailure = makeSpawn({
+      phaseExitCode: 0,
+      phaseStdout: [
+        markers.migrationStarted,
+        markers.migrationCommitted,
+        markers.postflightStarted,
+        '{}',
+        markers.postflightStateEmitted,
+        markers.postflightCommitted,
+        '',
+      ].join('\n'),
+    })
+    await assert.rejects(
+      runner.runDatabasePhase('deploy', {
+        environment,
+        spawnImplementation: outputValidationFailure.fakeSpawn,
+      }),
+      /OUTPUT_VALIDATION_FAILED_AFTER_BOTH_COMMITS_OBSERVED/,
+    )
+
+    const missingCommitAttestation = makeSpawn({
+      phaseExitCode: 0,
+      phaseStdout: [
+        markers.migrationStarted,
+        markers.migrationCommitted,
+        markers.postflightStarted,
+        validPostflight,
+        markers.postflightStateEmitted,
+        '',
+      ].join('\n'),
+    })
+    await assert.rejects(
+      runner.runDatabasePhase('deploy', {
+        environment,
+        spawnImplementation: missingCommitAttestation.fakeSpawn,
+      }),
+      /MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_COMMIT_STATE_UNKNOWN/,
+    )
+
+    const reorderedAttestation = makeSpawn({
+      phaseExitCode: 0,
+      phaseStdout: [
+        markers.migrationStarted,
+        markers.postflightStarted,
+        markers.migrationCommitted,
+        validPostflight,
+        markers.postflightStateEmitted,
+        markers.postflightCommitted,
+        '',
+      ].join('\n'),
+    })
+    await assert.rejects(
+      runner.runDatabasePhase('deploy', {
+        environment,
+        spawnImplementation: reorderedAttestation.fakeSpawn,
+      }),
+      /DEPLOY_PROCESS_FAILED_AFTER_BOTH_COMMITS_OBSERVED/,
+    )
+
+    const realFilesystem = await import('node:fs/promises')
+    const cleanupFailure = makeSpawn({
+      phaseExitCode: 0,
+      phaseStdout: successfulOutput,
+    })
+    await assert.rejects(
+      runner.runDatabasePhase('deploy', {
+        environment,
+        filesystem: {
+          ...realFilesystem,
+          unlink: async () => {
+            throw new Error('synthetic cleanup failure')
+          },
+        },
+        spawnImplementation: cleanupFailure.fakeSpawn,
+      }),
+      /CREDENTIAL_CLEANUP_FAILED_AFTER_BOTH_COMMITS_OBSERVED/,
+    )
+
+    const compoundRunnerTemp = await mkdtemp(
+      join(testTempRoot, 'line-pay-compound-temp-'),
+    )
+    const compoundFailure = makeSpawn({
+      phaseExitCode: 3,
+      phaseStdout: [
+        markers.migrationStarted,
+        markers.migrationCommitted,
+        markers.postflightStarted,
+        '',
+      ].join('\n'),
+    })
+    const compoundError = await runner
+      .runDatabasePhase('deploy', {
+        environment: {
+          ...environment,
+          RUNNER_TEMP: compoundRunnerTemp,
+        },
+        filesystem: {
+          ...realFilesystem,
+          unlink: async () => {
+            throw new Error('synthetic cleanup failure')
+          },
+        },
+        spawnImplementation: compoundFailure.fakeSpawn,
+      })
+      .then(
+        () => null,
+        (caught: unknown) => caught,
+    )
+    assert.ok(compoundError instanceof Error)
+    const compoundDeploymentError = compoundError as Error & {
+      attestation: Record<string, unknown>
+    }
+    assert.equal(
+      compoundError.message,
+      'MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_SQL_FAILED_BEFORE_COMMIT',
+    )
+    assert.deepEqual(compoundDeploymentError.attestation, {
+      status: 'DEPLOYMENT_FAILED',
+      primary_failure_code:
+        'MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_SQL_FAILED_BEFORE_COMMIT',
+      migration_started_observed: true,
+      migration_commit_observed: true,
+      postflight_started_observed: true,
+      postflight_state_observed: false,
+      postflight_commit_observed: false,
+      cleanup_failure_code: 'TEMP_CREDENTIAL_CLEANUP_FAILED',
+    })
     assert.deepEqual(
-      await (await import('node:fs/promises')).readdir(runnerTemp),
-      [],
+      JSON.parse(runner.safeFailureOutput(compoundError)),
+      compoundDeploymentError.attestation,
+    )
+    const untrustedError = new Error('synthetic unsafe failure') as Error & {
+      attestation?: Record<string, string>
+    }
+    untrustedError.attestation = { unsafe: 'synthetic secret-like detail' }
+    assert.equal(
+      runner.safeFailureOutput(untrustedError),
+      'DATABASE_OUTPUT_INVALID',
+    )
+
+    for (const code of [
+      'MIGRATION_SQL_FAILED_BEFORE_COMMIT',
+      'MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_SQL_FAILED_BEFORE_COMMIT',
+      'OUTPUT_VALIDATION_FAILED_AFTER_BOTH_COMMITS_OBSERVED',
+      'CREDENTIAL_CLEANUP_FAILED_AFTER_BOTH_COMMITS_OBSERVED',
+      'MIGRATION_COMMIT_STATE_UNKNOWN',
+    ]) {
+      assert.equal(runner.safeFailureCode(new Error(code)), code)
+    }
+
+    assert.equal(
+      (await (await import('node:fs/promises')).readdir(runnerTemp)).length,
+      1,
     )
   } finally {
     await rm(runnerTemp, { recursive: true })
@@ -1165,11 +1636,22 @@ async function runSignalLifecycleScenario(
       queueMicrotask(emitSignal)
     } else {
       queueMicrotask(() => {
-        child.stdout.end(
-          `${JSON.stringify(
-            validator.buildExpectedAuditFixture('postflight'),
-          )}\n`,
+        const postflight = JSON.stringify(
+          validator.buildExpectedAuditFixture('postflight'),
         )
+        const output =
+          stage === 'cleanup-running'
+            ? [
+                runner.DEPLOY_ATTESTATION_MARKERS.migrationStarted,
+                runner.DEPLOY_ATTESTATION_MARKERS.migrationCommitted,
+                runner.DEPLOY_ATTESTATION_MARKERS.postflightStarted,
+                postflight,
+                runner.DEPLOY_ATTESTATION_MARKERS.postflightStateEmitted,
+                runner.DEPLOY_ATTESTATION_MARKERS.postflightCommitted,
+                '',
+              ].join('\n')
+            : `${postflight}\n`
+        child.stdout.end(output)
         child.stderr.end()
         closed = true
         child.emit('close', 0, null)
@@ -1179,6 +1661,12 @@ async function runSignalLifecycleScenario(
   }
 
   try {
+    const expectedFailure =
+      stage === 'container-running'
+        ? /MIGRATION_COMMIT_STATE_UNKNOWN/
+        : stage === 'cleanup-running'
+          ? /DEPLOY_PROCESS_FAILED_AFTER_BOTH_COMMITS_OBSERVED/
+          : /PROCESS_INTERRUPTED/
     await assert.rejects(
       runner.runDatabasePhase('deploy', {
         environment: {
@@ -1192,7 +1680,7 @@ async function runSignalLifecycleScenario(
         processObject,
         spawnImplementation: fakeSpawn,
       }),
-      /PROCESS_INTERRUPTED/,
+      expectedFailure,
     )
     assert.equal(processObject.exitCode, 1)
     assert.equal(credentialCleanupCount, 1)
