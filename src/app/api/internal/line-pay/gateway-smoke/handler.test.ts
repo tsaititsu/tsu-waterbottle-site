@@ -166,50 +166,18 @@ test('smoke errors return a stable redacted response without stack or secrets', 
   assert.deepEqual(JSON.parse(body), { ok: false, error: 'gateway_smoke_failed' })
 })
 
-test('Gateway network failures return only the fixed unavailable diagnostic reason', async () => {
-  const response = await handleLinePayGatewaySmoke({
-    request: request(),
-    env: enabledEnv,
-    authorize: async () => true,
-    runSmoke: async () => {
-      throw new LinePayTransportError('line_pay_gateway_unavailable')
-    },
-  })
-
-  assert.equal(response.status, 502)
-  assert.deepEqual(await json(response), {
-    ok: false,
-    error: 'gateway_smoke_failed',
-    reason: 'gateway_unavailable',
-  })
-})
-
-test('Gateway timeouts return only the fixed timeout diagnostic reason', async () => {
-  const response = await handleLinePayGatewaySmoke({
-    request: request(),
-    env: enabledEnv,
-    authorize: async () => true,
-    runSmoke: async () => {
-      throw new LinePayTransportError('line_pay_gateway_timeout')
-    },
-  })
-
-  assert.equal(response.status, 502)
-  assert.deepEqual(await json(response), {
-    ok: false,
-    error: 'gateway_smoke_failed',
-    reason: 'gateway_timeout',
-  })
-})
-
-test('Gateway configuration failures return one fixed diagnostic reason without naming the invalid value', async () => {
-  for (const code of [
-    'missing_line_pay_gateway_config',
-    'invalid_line_pay_gateway_url',
-    'invalid_line_pay_gateway_timeout',
-    'line_pay_preview_requires_gateway',
-    'invalid_line_pay_transport',
-  ]) {
+test('Gateway transport failures return only their fixed allowlisted diagnostic reason', async () => {
+  for (const [code, reason] of [
+    ['line_pay_gateway_unavailable', 'gateway_unavailable'],
+    ['line_pay_gateway_timeout', 'gateway_timeout'],
+    ['invalid_line_pay_gateway_response', 'gateway_response_invalid'],
+    ['line_pay_gateway_smoke_failed', 'gateway_response_unexpected'],
+    ['missing_line_pay_gateway_config', 'gateway_config_invalid'],
+    ['invalid_line_pay_gateway_url', 'gateway_config_invalid'],
+    ['invalid_line_pay_gateway_timeout', 'gateway_config_invalid'],
+    ['line_pay_preview_requires_gateway', 'gateway_config_invalid'],
+    ['invalid_line_pay_transport', 'gateway_config_invalid'],
+  ] as const) {
     const response = await handleLinePayGatewaySmoke({
       request: request(),
       env: enabledEnv,
@@ -223,45 +191,9 @@ test('Gateway configuration failures return one fixed diagnostic reason without 
     assert.deepEqual(await json(response), {
       ok: false,
       error: 'gateway_smoke_failed',
-      reason: 'gateway_config_invalid',
+      reason,
     })
   }
-})
-
-test('invalid Gateway response bodies return only the fixed response diagnostic reason', async () => {
-  const response = await handleLinePayGatewaySmoke({
-    request: request(),
-    env: enabledEnv,
-    authorize: async () => true,
-    runSmoke: async () => {
-      throw new LinePayTransportError('invalid_line_pay_gateway_response')
-    },
-  })
-
-  assert.equal(response.status, 502)
-  assert.deepEqual(await json(response), {
-    ok: false,
-    error: 'gateway_smoke_failed',
-    reason: 'gateway_response_invalid',
-  })
-})
-
-test('unexpected authenticated probe responses return only the fixed unexpected diagnostic reason', async () => {
-  const response = await handleLinePayGatewaySmoke({
-    request: request(),
-    env: enabledEnv,
-    authorize: async () => true,
-    runSmoke: async () => {
-      throw new LinePayTransportError('line_pay_gateway_smoke_failed')
-    },
-  })
-
-  assert.equal(response.status, 502)
-  assert.deepEqual(await json(response), {
-    ok: false,
-    error: 'gateway_smoke_failed',
-    reason: 'gateway_response_unexpected',
-  })
 })
 
 test('route uses existing admin authorization, exports only POST and website source never references the Proxy Token env', () => {

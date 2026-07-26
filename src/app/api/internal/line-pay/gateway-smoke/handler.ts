@@ -18,24 +18,29 @@ type RunGatewaySmoke = (input: {
   fetchFn: LinePayTransportFetch
 }) => Promise<LinePayGatewaySmokeResult>
 
+type SafeSmokeFailureReason =
+  | 'gateway_config_invalid'
+  | 'gateway_response_invalid'
+  | 'gateway_response_unexpected'
+  | 'gateway_timeout'
+  | 'gateway_unavailable'
+
+const SAFE_SMOKE_FAILURE_REASONS: Readonly<Record<string, SafeSmokeFailureReason>> = Object.freeze({
+  invalid_line_pay_gateway_response: 'gateway_response_invalid',
+  invalid_line_pay_gateway_timeout: 'gateway_config_invalid',
+  invalid_line_pay_gateway_url: 'gateway_config_invalid',
+  invalid_line_pay_transport: 'gateway_config_invalid',
+  line_pay_gateway_smoke_failed: 'gateway_response_unexpected',
+  line_pay_gateway_timeout: 'gateway_timeout',
+  line_pay_gateway_unavailable: 'gateway_unavailable',
+  line_pay_preview_requires_gateway: 'gateway_config_invalid',
+  missing_line_pay_gateway_config: 'gateway_config_invalid',
+})
+
 function getSafeSmokeFailureReason(error: unknown) {
   if (!(error instanceof LinePayTransportError)) return null
 
-  if (error.code === 'line_pay_gateway_unavailable') return 'gateway_unavailable'
-  if (error.code === 'line_pay_gateway_timeout') return 'gateway_timeout'
-  if (error.code === 'invalid_line_pay_gateway_response') return 'gateway_response_invalid'
-  if (error.code === 'line_pay_gateway_smoke_failed') return 'gateway_response_unexpected'
-  if (
-    error.code === 'missing_line_pay_gateway_config' ||
-    error.code === 'invalid_line_pay_gateway_url' ||
-    error.code === 'invalid_line_pay_gateway_timeout' ||
-    error.code === 'line_pay_preview_requires_gateway' ||
-    error.code === 'invalid_line_pay_transport'
-  ) {
-    return 'gateway_config_invalid'
-  }
-
-  return null
+  return SAFE_SMOKE_FAILURE_REASONS[error.code] ?? null
 }
 
 function notFoundResponse() {
