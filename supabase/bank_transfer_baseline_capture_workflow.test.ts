@@ -13,6 +13,8 @@ const workflowPath =
   '.github/workflows/supabase-production-bank-transfer-baseline-capture.yml'
 const capturePath =
   'supabase/deployment/bank_transfer_historical_baseline_capture.sql'
+const contractRunnerPath =
+  'supabase/tests/run_bank_transfer_baseline_capture_contracts.mjs'
 
 let validator: any
 
@@ -119,6 +121,23 @@ test('capture SQL is an exact explicit 17-column read-only canonicalization', ()
     validator.stripSqlForStaticAnalysis(sql),
     /\b(?:insert|update|delete|merge|truncate|create|alter|drop|grant|revoke|comment|copy|call|do|execute)\b/iu,
   )
+})
+
+test('baseline capture PostgreSQL contract runner waits for the final server process', () => {
+  const contractRunner = readFileSync(contractRunnerPath, 'utf8')
+  const finalServerGate = contractRunner.search(
+    /\['exec', containerName, 'cat', '\/proc\/1\/comm'\]/u,
+  )
+  const finalServerIdentity = contractRunner.search(
+    /pidOneResult[.]stdout[.]trim\(\) === 'postgres'/u,
+  )
+  const readinessProbe = contractRunner.search(
+    /\[\s*'exec',\s*containerName,\s*'pg_isready',\s*'-U',\s*'postgres',\s*'-d',\s*'postgres',?\s*\]/u,
+  )
+
+  assert.ok(finalServerGate >= 0)
+  assert.ok(finalServerIdentity > finalServerGate)
+  assert.ok(readinessProbe > finalServerIdentity)
 })
 
 test('capture artifact schema contains only anonymous digests and approved counts', () => {

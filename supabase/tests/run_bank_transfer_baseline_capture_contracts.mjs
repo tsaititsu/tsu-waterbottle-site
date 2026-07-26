@@ -202,6 +202,37 @@ function restore() {
   prepareFixture()
 }
 
+function waitForPostgres() {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const pidOneResult = spawnSync(
+      'docker',
+      ['exec', containerName, 'cat', '/proc/1/comm'],
+      { cwd: root, encoding: 'utf8' },
+    )
+    if (
+      pidOneResult.status === 0 &&
+      pidOneResult.stdout.trim() === 'postgres'
+    ) {
+      const readyResult = spawnSync(
+        'docker',
+        [
+          'exec',
+          containerName,
+          'pg_isready',
+          '-U',
+          'postgres',
+          '-d',
+          'postgres',
+        ],
+        { cwd: root, stdio: 'ignore' },
+      )
+      if (readyResult.status === 0) return
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500)
+  }
+  assert.fail('POSTGRES_FINAL_SERVER_NOT_READY')
+}
+
 let failure
 try {
   docker(['network', 'create', '--label', `task=${taskLabel}`, networkName])
@@ -224,20 +255,7 @@ try {
     LINE_PAY_POSTGRES_IMAGE,
   ])
 
-  let ready = false
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    const result = spawnSync(
-      'docker',
-      ['exec', containerName, 'pg_isready', '-U', 'postgres', '-d', 'postgres'],
-      { encoding: 'utf8' },
-    )
-    if (result.status === 0) {
-      ready = true
-      break
-    }
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500)
-  }
-  assert.equal(ready, true, 'PostgreSQL 17 did not become ready')
+  waitForPostgres()
   assert.match(psql('show server_version;', 'postgres version'), /^17[.]/u)
 
   prepareFixture()

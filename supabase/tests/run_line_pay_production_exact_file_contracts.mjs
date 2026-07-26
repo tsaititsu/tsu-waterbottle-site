@@ -159,7 +159,7 @@ function psqlFile(database, relativePath, label = relativePath) {
   psqlFileAs(database, 'postgres', relativePath, label)
 }
 
-function psqlContainerFile(database, containerPath, label) {
+function psqlContainerFileAs(database, user, containerPath, label) {
   const result = spawnSync(
     'docker',
     [
@@ -173,7 +173,7 @@ function psqlContainerFile(database, containerPath, label) {
       '--no-align',
       '--tuples-only',
       '-U',
-      'postgres',
+      user,
       '-d',
       database,
       `--file=${containerPath}`,
@@ -184,6 +184,15 @@ function psqlContainerFile(database, containerPath, label) {
     throw new Error(`${label}:FAILED\n${result.stderr || result.stdout}`)
   }
   return result.stdout.trim()
+}
+
+function psqlContainerFile(database, containerPath, label) {
+  return psqlContainerFileAs(
+    database,
+    'postgres',
+    containerPath,
+    label,
+  )
 }
 
 function writeContainerFile(containerPath, contents) {
@@ -831,6 +840,14 @@ function runHostedNonSuperuserMigrationScenario() {
     before,
     database,
   )
+  const hostedPostflight = withActiveTableManifest(
+    useFixtureContract(
+      readFileSync(postflightPath, 'utf8'),
+      before,
+      database,
+    ),
+    activeTableManifest,
+  )
   assertAuditStatus(
     psqlAs(
       database,
@@ -855,34 +872,43 @@ rollback;`,
     ),
     'SCHEMA_DRIFT',
   )
-  psqlAs(
+
+  writeContainerFile(
+    '/workspace/supabase/deployment/line_pay_remediation_preflight.sql',
+    hostedPreflight,
+  )
+  writeContainerFile(
+    '/workspace/supabase/deployment/line_pay_remediation_postflight.sql',
+    useFixtureContract(
+      readFileSync(postflightPath, 'utf8'),
+      before,
+      database,
+    ),
+  )
+  writeContainerFile(
+    '/workspace/supabase/deployment/line_pay_remediation_deploy.sql',
+    readFileSync(deployPath, 'utf8'),
+  )
+  const hostedDeployOutput = psqlContainerFileAs(
     database,
     executor,
-    readFileSync(migrationPath, 'utf8'),
-    'hosted non-superuser exact LINE Pay Migration',
+    '/workspace/supabase/deployment/line_pay_remediation_deploy.sql',
+    'hosted non-superuser deploy orchestration',
   )
+  for (const marker of deployAttestationMarkers) {
+    if (hostedDeployOutput.split(marker).length !== 2) {
+      throw new Error(`HOSTED_DEPLOY_ATTESTATION_MISSING:${marker}`)
+    }
+  }
+  assertAuditStatus(
+    hostedDeployOutput,
+    'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED',
+  )
+
   const after = readFingerprints(database, true, executor)
   if (JSON.stringify(before) !== JSON.stringify(after)) {
     throw new Error('HOSTED_EXECUTOR_EXISTING_DATA_FINGERPRINT_CHANGED')
   }
-
-  const hostedPostflight = withActiveTableManifest(
-    useFixtureContract(
-      readFileSync(postflightPath, 'utf8'),
-      after,
-      database,
-    ),
-    activeTableManifest,
-  )
-  assertAuditStatus(
-    psqlAs(
-      database,
-      executor,
-      hostedPostflight,
-      'hosted executor formal postflight',
-    ),
-    'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED',
-  )
 
   const hostedApplicationStateDiagnostic = useApplicationStateDatabase(
     readFileSync(applicationStateDiagnosticPath, 'utf8'),
@@ -1488,6 +1514,37 @@ function cleanup() {
   })
 }
 
+async function waitForPostgres() {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const pidOneResult = spawnSync(
+      'docker',
+      ['exec', containerName, 'cat', '/proc/1/comm'],
+      { cwd: root, encoding: 'utf8' },
+    )
+    if (
+      pidOneResult.status === 0 &&
+      pidOneResult.stdout.trim() === 'postgres'
+    ) {
+      const readyResult = spawnSync(
+        'docker',
+        [
+          'exec',
+          containerName,
+          'pg_isready',
+          '-U',
+          'postgres',
+          '-d',
+          'postgres',
+        ],
+        { cwd: root, stdio: 'ignore' },
+      )
+      if (readyResult.status === 0) return
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250))
+  }
+  throw new Error('POSTGRES_FINAL_SERVER_NOT_READY')
+}
+
 async function main() {
   const localImage = spawnSync('docker', ['image', 'inspect', image], {
     cwd: root,
@@ -1517,34 +1574,7 @@ async function main() {
     `type=volume,source=${volumeName},target=/var/lib/postgresql/data`,
     image,
   ])
-  let consecutiveReadyChecks = 0
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    const ready = spawnSync(
-      'docker',
-      [
-        'exec',
-        containerName,
-        'psql',
-        '-X',
-        '--set=ON_ERROR_STOP=1',
-        '--no-align',
-        '--tuples-only',
-        '-U',
-        'postgres',
-        '-d',
-        'postgres',
-        '--command=select 1;',
-      ],
-      { cwd: root, encoding: 'utf8' },
-    )
-    consecutiveReadyChecks =
-      ready.status === 0 && ready.stdout.trim() === '1'
-        ? consecutiveReadyChecks + 1
-        : 0
-    if (consecutiveReadyChecks >= 2) break
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250))
-    if (attempt === 59) throw new Error('POSTGRES_READINESS_TIMEOUT')
-  }
+  await waitForPostgres()
   const version = runDocker([
     'exec',
     containerName,
@@ -1838,7 +1868,8 @@ async function main() {
 
   process.stdout.write(
     'line_pay_production_exact_file_contracts: PASS ' +
-      '(PostgreSQL 17, preflight, exact Migration, postflight, ' +
+      '(PostgreSQL 17, final_server_readiness=PASS, ' +
+      'hosted_non_superuser_deploy=PASS, preflight, exact Migration, postflight, ' +
       'server_timeouts=2/2, active_manifest=PASS, manifest_drifts=4/4 caught, ' +
       `catalog mutations, rollback, cleanup, locked_deploy_ms=${measuredLockedDeployMs})\n`,
   )

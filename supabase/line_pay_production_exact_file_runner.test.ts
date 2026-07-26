@@ -413,7 +413,7 @@ test('hosted non-superuser scenario executes the formal safety contracts and mut
   const scenario = source.slice(scenarioStart, scenarioEnd)
 
   for (const requiredEvidence of [
-    'hosted executor formal postflight',
+    'hosted non-superuser deploy orchestration',
     'hosted executor formal application-state diagnostic',
     'hosted unsafe SET membership postflight',
     'hosted unsafe SET membership application-state diagnostic',
@@ -424,12 +424,38 @@ test('hosted non-superuser scenario executes the formal safety contracts and mut
   }
   assert.match(
     scenario,
+    /psqlContainerFileAs\(\s*database,\s*executor,\s*'\/workspace\/supabase\/deployment\/line_pay_remediation_deploy[.]sql'/u,
+  )
+  assert.doesNotMatch(
+    scenario,
+    /psqlAs\(\s*database,\s*executor,\s*readFileSync\(migrationPath/u,
+  )
+  assert.match(
+    scenario,
     /parseAndValidateDiagnosticOutput\([\s\S]*?application_state[\s\S]*?FULL_WITHOUT_HISTORY/u,
   )
   assert.match(
     scenario,
     /assertAuditFailureStatus\([\s\S]*?'POSTFLIGHT_CONTRACT_FAILED'/u,
   )
+})
+
+test('exact-file PostgreSQL runner waits for the final server before probing readiness', () => {
+  const source = readFileSync(postgresContractRunnerPath, 'utf8')
+  const finalServerGate = source.search(
+    /\['exec', containerName, 'cat', '\/proc\/1\/comm'\]/u,
+  )
+  const finalServerIdentity = source.search(
+    /pidOneResult[.]stdout[.]trim\(\) === 'postgres'/u,
+  )
+  const readinessProbe = source.search(
+    /\[\s*'exec',\s*containerName,\s*'pg_isready',\s*'-U',\s*'postgres',\s*'-d',\s*'postgres',?\s*\]/u,
+  )
+
+  assert.ok(finalServerGate >= 0)
+  assert.ok(finalServerIdentity > finalServerGate)
+  assert.ok(readinessProbe > finalServerIdentity)
+  assert.doesNotMatch(source, /consecutiveReadyChecks/u)
 })
 
 test('deploy orchestration mutations cannot remove transaction attestations, guard, manifest, timeout, or duplicate Migration', async () => {
