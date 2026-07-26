@@ -15,9 +15,12 @@ const workflowPath =
 const ciPath = '.github/workflows/line-pay-db-contract-ci.yml'
 const forensicPath =
   'supabase/deployment/bank_transfer_historical_forensic.sql'
+const contractRunnerPath =
+  'supabase/tests/run_bank_transfer_historical_forensic_contracts.mjs'
 
 const workflow = readFileSync(workflowPath, 'utf8')
 const forensicSql = readFileSync(forensicPath, 'utf8')
+const contractRunner = readFileSync(contractRunnerPath, 'utf8')
 const ci = readFileSync(ciPath, 'utf8')
 let validator: any
 
@@ -135,4 +138,23 @@ test('LINE Pay DB CI includes all forensic contracts and cleanup', () => {
     assert.match(ci, new RegExp(command.replaceAll('.', '[.]'), 'u'))
   }
   assert.match(ci, /task=bank-transfer-historical-forensic/u)
+})
+
+test('forensic PostgreSQL contract runner waits for the final server process', () => {
+  assert.match(
+    contractRunner,
+    /\['exec', containerName, 'cat', '\/proc\/1\/comm'\]/u,
+  )
+  assert.match(
+    contractRunner,
+    /pidOneResult[.]stdout[.]trim\(\) === 'postgres'/u,
+  )
+  const finalServerGate = contractRunner.search(
+    /pidOneResult[.]stdout[.]trim\(\) === 'postgres'/u,
+  )
+  const readinessProbe = contractRunner.search(
+    /\[\s*'exec',\s*containerName,\s*'pg_isready',\s*'-U',\s*'postgres',\s*'-d',\s*'postgres',?\s*\]/u,
+  )
+  assert.ok(finalServerGate >= 0)
+  assert.ok(readinessProbe > finalServerGate)
 })
