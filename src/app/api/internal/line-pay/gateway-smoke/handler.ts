@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import {
+  LinePayTransportError,
   probeLinePayGatewayAuthentication,
   type LinePayGatewaySmokeResult,
   type LinePayTransportEnv,
@@ -16,6 +17,26 @@ type RunGatewaySmoke = (input: {
   transportEnv: LinePayTransportEnv
   fetchFn: LinePayTransportFetch
 }) => Promise<LinePayGatewaySmokeResult>
+
+function getSafeSmokeFailureReason(error: unknown) {
+  if (!(error instanceof LinePayTransportError)) return null
+
+  if (error.code === 'line_pay_gateway_unavailable') return 'gateway_unavailable'
+  if (error.code === 'line_pay_gateway_timeout') return 'gateway_timeout'
+  if (error.code === 'invalid_line_pay_gateway_response') return 'gateway_response_invalid'
+  if (error.code === 'line_pay_gateway_smoke_failed') return 'gateway_response_unexpected'
+  if (
+    error.code === 'missing_line_pay_gateway_config' ||
+    error.code === 'invalid_line_pay_gateway_url' ||
+    error.code === 'invalid_line_pay_gateway_timeout' ||
+    error.code === 'line_pay_preview_requires_gateway' ||
+    error.code === 'invalid_line_pay_transport'
+  ) {
+    return 'gateway_config_invalid'
+  }
+
+  return null
+}
 
 function notFoundResponse() {
   return NextResponse.json(
@@ -56,9 +77,14 @@ export async function handleLinePayGatewaySmoke(input: {
     })
 
     return NextResponse.json(result, { headers: { 'Cache-Control': 'no-store' } })
-  } catch {
+  } catch (error) {
+    const reason = getSafeSmokeFailureReason(error)
     return NextResponse.json(
-      { ok: false, error: 'gateway_smoke_failed' },
+      {
+        ok: false,
+        error: 'gateway_smoke_failed',
+        ...(reason ? { reason } : {}),
+      },
       { status: 502, headers: { 'Cache-Control': 'no-store' } },
     )
   }
