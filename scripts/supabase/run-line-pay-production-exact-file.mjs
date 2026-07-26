@@ -65,22 +65,12 @@ const DEPLOY_ATTESTATION_MARKER_ORDER = Object.freeze([
   DEPLOY_ATTESTATION_MARKERS.postflightStateEmitted,
   DEPLOY_ATTESTATION_MARKERS.postflightCommitted,
 ])
+const DEPLOYMENT_FAILURE_ATTESTATION = Symbol(
+  'deploymentFailureAttestation',
+)
 
-export const DEPLOY_SUCCESS_ATTESTATION = Object.freeze({
-  status: 'DEPLOYMENT_VALIDATED',
-  transaction_completion_attestation: Object.freeze({
-    migration_committed: true,
-    postflight_committed: true,
-  }),
-  migration_history_attestation: Object.freeze({
-    version_present: false,
-    state: 'ABSENT_EXPECTED',
-  }),
-  postflight_state_attestation: Object.freeze({
-    status: 'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED',
-    runtime_enabled: false,
-  }),
-})
+export const DEPLOYMENT_RECORDING_POLICY =
+  'GITHUB_ATTESTED_EXACT_FILE'
 
 export const CONNECTION_MODES = Object.freeze({
   direct: 'direct',
@@ -96,13 +86,17 @@ const SAFE_FAILURE_CODES = new Set([
   'INVALID_NODE_VERSION',
   'POSTGRES_IMAGE_MISMATCH',
   'DEPLOY_PSQL_FAILED',
-  'DEPLOY_COMMIT_STATE_UNKNOWN',
+  'DEPLOY_FAILED_BEFORE_MIGRATION_START',
+  'DEPLOY_PROCESS_FAILED_AFTER_BOTH_COMMITS_OBSERVED',
   'DOCKER_IMAGE_PULL_FAILED',
-  'CREDENTIAL_CLEANUP_FAILED_AFTER_COMMIT',
-  'MIGRATION_SQL_FAILED',
-  'OUTPUT_VALIDATION_FAILED_AFTER_COMMIT',
+  'CREDENTIAL_CLEANUP_FAILED_AFTER_BOTH_COMMITS_OBSERVED',
+  'MIGRATION_COMMIT_STATE_UNKNOWN',
+  'MIGRATION_SQL_FAILED_BEFORE_COMMIT',
+  'MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_NOT_OBSERVED',
+  'MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_COMMIT_STATE_UNKNOWN',
+  'MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_SQL_FAILED_BEFORE_COMMIT',
+  'OUTPUT_VALIDATION_FAILED_AFTER_BOTH_COMMITS_OBSERVED',
   'PARTIAL_APPLICATION',
-  'POSTFLIGHT_FAILED_BEFORE_COMMIT',
   'POSTFLIGHT_CONTRACT_FAILED',
   'PREFLIGHT_CONTRACT_FAILED',
   'PREFLIGHT_PSQL_FAILED',
@@ -121,6 +115,75 @@ const SAFE_FAILURE_CODES = new Set([
 
 function fail(code) {
   throw new Error(code)
+}
+
+function freezeAttestation(value) {
+  for (const nested of Object.values(value)) {
+    if (nested && typeof nested === 'object') freezeAttestation(nested)
+  }
+  return Object.freeze(value)
+}
+
+function emptyDeployEvidence() {
+  return Object.freeze({
+    markerSequenceValid: true,
+    migration_started_observed: false,
+    migration_commit_observed: false,
+    postflight_started_observed: false,
+    postflight_state_observed: false,
+    postflight_commit_observed: false,
+    auditOutput: '',
+  })
+}
+
+export function buildDeploymentFailureAttestation(
+  primaryFailureCode,
+  evidence = emptyDeployEvidence(),
+  cleanupFailureCode,
+) {
+  if (!SAFE_FAILURE_CODES.has(primaryFailureCode)) {
+    primaryFailureCode = 'DATABASE_OUTPUT_INVALID'
+  }
+  if (
+    cleanupFailureCode !== undefined &&
+    cleanupFailureCode !== 'TEMP_CREDENTIAL_CLEANUP_FAILED'
+  ) {
+    cleanupFailureCode = 'TEMP_CREDENTIAL_CLEANUP_FAILED'
+  }
+  const attestation = {
+    status: 'DEPLOYMENT_FAILED',
+    primary_failure_code: primaryFailureCode,
+    migration_started_observed:
+      evidence.migration_started_observed === true,
+    migration_commit_observed:
+      evidence.migration_commit_observed === true,
+    postflight_started_observed:
+      evidence.postflight_started_observed === true,
+    postflight_state_observed:
+      evidence.postflight_state_observed === true,
+    postflight_commit_observed:
+      evidence.postflight_commit_observed === true,
+  }
+  if (cleanupFailureCode) {
+    attestation.cleanup_failure_code = cleanupFailureCode
+  }
+  return freezeAttestation(attestation)
+}
+
+function createDeploymentFailure(
+  primaryFailure,
+  evidence,
+  cleanupFailureCode,
+) {
+  const primaryFailureCode = safeFailureCode(primaryFailure)
+  const error = new Error(primaryFailureCode)
+  error.attestation = buildDeploymentFailureAttestation(
+    primaryFailureCode,
+    evidence,
+    cleanupFailureCode,
+  )
+  error[DEPLOYMENT_FAILURE_ATTESTATION] = error.attestation
+  return error
 }
 
 function decodeComponent(value) {
@@ -542,7 +605,7 @@ function phaseFailureCode(phase) {
 }
 
 export function inspectDeployOutput(text) {
-  if (typeof text !== 'string') fail('DEPLOY_COMMIT_STATE_UNKNOWN')
+  if (typeof text !== 'string') return emptyDeployEvidence()
   const lines = text
     .split(/\r?\n/u)
     .map((line) => line.trim())
@@ -555,33 +618,83 @@ export function inspectDeployOutput(text) {
       observedMarkers.filter((value) => value === marker).length,
     ]),
   )
-  const markerPrefixValid =
+  const markerSequenceValid =
     observedMarkers.length <= DEPLOY_ATTESTATION_MARKER_ORDER.length &&
     observedMarkers.every(
       (marker, index) => marker === DEPLOY_ATTESTATION_MARKER_ORDER[index],
     ) &&
     [...markerCounts.values()].every((count) => count <= 1)
-  const hasMarker = (marker) => markerCounts.get(marker) === 1
+  const hasObservedMarker = (marker) => markerCounts.get(marker) >= 1
   const auditLines = lines.filter((line) => !markerSet.has(line))
   return Object.freeze({
-    markerPrefixValid,
-    migrationStarted: hasMarker(
+    markerSequenceValid,
+    migration_started_observed: hasObservedMarker(
       DEPLOY_ATTESTATION_MARKERS.migrationStarted,
     ),
-    migrationCommitted: hasMarker(
+    migration_commit_observed: hasObservedMarker(
       DEPLOY_ATTESTATION_MARKERS.migrationCommitted,
     ),
-    postflightStarted: hasMarker(
+    postflight_started_observed: hasObservedMarker(
       DEPLOY_ATTESTATION_MARKERS.postflightStarted,
     ),
-    postflightStateEmitted: hasMarker(
+    postflight_state_observed: hasObservedMarker(
       DEPLOY_ATTESTATION_MARKERS.postflightStateEmitted,
     ),
-    postflightCommitted: hasMarker(
+    postflight_commit_observed: hasObservedMarker(
       DEPLOY_ATTESTATION_MARKERS.postflightCommitted,
     ),
     auditOutput: auditLines.join('\n'),
   })
+}
+
+export function buildDeploySuccessAttestation(
+  evidence,
+  validatedPostflight,
+) {
+  return freezeAttestation({
+    status: 'DEPLOYMENT_VALIDATED',
+    deployment_recording_policy: DEPLOYMENT_RECORDING_POLICY,
+    transaction_boundary_attestation: {
+      migration_started_observed:
+        evidence.migration_started_observed,
+      migration_commit_observed:
+        evidence.migration_commit_observed,
+      postflight_started_observed:
+        evidence.postflight_started_observed,
+      postflight_state_observed:
+        evidence.postflight_state_observed,
+      postflight_commit_observed:
+        evidence.postflight_commit_observed,
+    },
+    database_postflight_attestation: {
+      status: validatedPostflight.status,
+      line_pay_contract_status: validatedPostflight.status,
+      runtime_enabled: validatedPostflight.runtime_enabled,
+      supabase_migration_history_table_present:
+        validatedPostflight.migration_history.line_pay_version_present,
+      supabase_migration_history_version_present:
+        validatedPostflight.migration_history.line_pay_version_present,
+    },
+  })
+}
+
+function isProvenPsqlSqlFailureBeforeCommit(result) {
+  return result.code === 3 && result.signal === null
+}
+
+function interruptedDeployFailureCode(evidence) {
+  if (
+    evidence.migration_commit_observed &&
+    evidence.postflight_commit_observed
+  ) {
+    return 'DEPLOY_PROCESS_FAILED_AFTER_BOTH_COMMITS_OBSERVED'
+  }
+  if (evidence.migration_commit_observed) {
+    return evidence.postflight_started_observed
+      ? 'MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_COMMIT_STATE_UNKNOWN'
+      : 'MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_NOT_OBSERVED'
+  }
+  return 'MIGRATION_COMMIT_STATE_UNKNOWN'
 }
 
 export function validateDeployExecutionResult(result, evidence) {
@@ -589,37 +702,61 @@ export function validateDeployExecutionResult(result, evidence) {
     !result ||
     typeof result !== 'object' ||
     !evidence ||
-    typeof evidence !== 'object' ||
-    !evidence.markerPrefixValid
+    typeof evidence !== 'object'
   ) {
-    fail('DEPLOY_COMMIT_STATE_UNKNOWN')
-  }
-  if (result.signal) fail('DEPLOY_COMMIT_STATE_UNKNOWN')
-  if (result.code !== 0) {
-    if (evidence.postflightCommitted) {
-      fail('OUTPUT_VALIDATION_FAILED_AFTER_COMMIT')
-    }
-    if (evidence.migrationCommitted) {
-      fail('POSTFLIGHT_FAILED_BEFORE_COMMIT')
-    }
-    if (evidence.migrationStarted) fail('MIGRATION_SQL_FAILED')
-    fail('DEPLOY_PSQL_FAILED')
+    fail('MIGRATION_COMMIT_STATE_UNKNOWN')
   }
   if (
-    !evidence.migrationStarted ||
-    !evidence.migrationCommitted ||
-    !evidence.postflightStarted ||
-    !evidence.postflightStateEmitted ||
-    !evidence.postflightCommitted
+    evidence.migration_commit_observed &&
+    evidence.postflight_commit_observed
   ) {
-    fail('DEPLOY_COMMIT_STATE_UNKNOWN')
+    if (
+      !evidence.markerSequenceValid ||
+      result.code !== 0 ||
+      result.signal ||
+      !evidence.migration_started_observed ||
+      !evidence.postflight_started_observed ||
+      !evidence.postflight_state_observed
+    ) {
+      fail('DEPLOY_PROCESS_FAILED_AFTER_BOTH_COMMITS_OBSERVED')
+    }
+    let validatedPostflight
+    try {
+      validatedPostflight = parseAndValidateAuditOutput(
+        evidence.auditOutput,
+        'postflight',
+      )
+    } catch {
+      fail('OUTPUT_VALIDATION_FAILED_AFTER_BOTH_COMMITS_OBSERVED')
+    }
+    return buildDeploySuccessAttestation(evidence, validatedPostflight)
   }
-  try {
-    parseAndValidateAuditOutput(evidence.auditOutput, 'postflight')
-  } catch {
-    fail('OUTPUT_VALIDATION_FAILED_AFTER_COMMIT')
+  if (evidence.migration_commit_observed) {
+    if (!evidence.postflight_started_observed) {
+      fail('MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_NOT_OBSERVED')
+    }
+    if (isProvenPsqlSqlFailureBeforeCommit(result)) {
+      fail(
+        'MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_SQL_FAILED_BEFORE_COMMIT',
+      )
+    }
+    fail(
+      'MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_COMMIT_STATE_UNKNOWN',
+    )
   }
-  return DEPLOY_SUCCESS_ATTESTATION
+  if (evidence.migration_started_observed) {
+    if (isProvenPsqlSqlFailureBeforeCommit(result)) {
+      fail('MIGRATION_SQL_FAILED_BEFORE_COMMIT')
+    }
+    fail('MIGRATION_COMMIT_STATE_UNKNOWN')
+  }
+  if (
+    isProvenPsqlSqlFailureBeforeCommit(result) &&
+    evidence.markerSequenceValid
+  ) {
+    fail('DEPLOY_FAILED_BEFORE_MIGRATION_START')
+  }
+  fail('MIGRATION_COMMIT_STATE_UNKNOWN')
 }
 
 export async function runDatabasePhase(
@@ -655,7 +792,7 @@ export async function runDatabasePhase(
   let cleanupStarted = false
   let cleanupCompleted = false
   let cleanupPromise = null
-  let migrationTransactionCommitted = false
+  let deployEvidence = emptyDeployEvidence()
   let completedResult = SUCCESS_MESSAGES[phase]
   const ensureNotInterrupted = () => {
     if (interrupted) fail('PROCESS_INTERRUPTED')
@@ -746,12 +883,16 @@ export async function runDatabasePhase(
     } catch {
       fail(phaseFailureCode(phase))
     }
-    ensureNotInterrupted()
     if (phase === 'deploy') {
-      const evidence = inspectDeployOutput(result.stdout)
-      migrationTransactionCommitted = evidence.migrationCommitted
-      completedResult = validateDeployExecutionResult(result, evidence)
+      deployEvidence = inspectDeployOutput(result.stdout)
+      completedResult = validateDeployExecutionResult(
+        interrupted && !result.signal
+          ? { ...result, signal: 'RUNNER_INTERRUPTED' }
+          : result,
+        deployEvidence,
+      )
     } else {
+      ensureNotInterrupted()
       if (result.code !== 0 || result.signal) fail(phaseFailureCode(phase))
       try {
         parseAndValidateAuditOutput(result.stdout, 'preflight')
@@ -770,10 +911,11 @@ export async function runDatabasePhase(
       error instanceof Error &&
       error.message === 'TEMP_CREDENTIAL_CLEANUP_FAILED'
         ? error
-        : interrupted
+        : interrupted && phase !== 'deploy'
           ? new Error('PROCESS_INTERRUPTED')
           : error
   } finally {
+    let cleanupError = null
     try {
       await terminateActiveChild()
     } catch {
@@ -781,16 +923,13 @@ export async function runDatabasePhase(
     }
     try {
       await cleanupCredentialsOnce()
-    } catch (cleanupError) {
-      operationError = new Error(
-        migrationTransactionCommitted
-          ? 'CREDENTIAL_CLEANUP_FAILED_AFTER_COMMIT'
-          : 'TEMP_CREDENTIAL_CLEANUP_FAILED',
-      )
+    } catch {
+      cleanupError = new Error('TEMP_CREDENTIAL_CLEANUP_FAILED')
     } finally {
       removeSignalHandlers()
       if (
         interrupted &&
+        phase !== 'deploy' &&
         !(
           operationError instanceof Error &&
           operationError.message === 'TEMP_CREDENTIAL_CLEANUP_FAILED'
@@ -799,8 +938,43 @@ export async function runDatabasePhase(
         operationError = new Error('PROCESS_INTERRUPTED')
       }
     }
+    if (interrupted && phase === 'deploy' && !operationError) {
+      operationError = new Error(
+        interruptedDeployFailureCode(deployEvidence),
+      )
+    }
+    if (cleanupError) {
+      if (phase === 'deploy') {
+        if (operationError) {
+          operationError = createDeploymentFailure(
+            operationError,
+            deployEvidence,
+            'TEMP_CREDENTIAL_CLEANUP_FAILED',
+          )
+        } else {
+          const cleanupPrimary =
+            deployEvidence.migration_commit_observed &&
+            deployEvidence.postflight_commit_observed
+              ? new Error(
+                  'CREDENTIAL_CLEANUP_FAILED_AFTER_BOTH_COMMITS_OBSERVED',
+                )
+              : cleanupError
+          operationError = createDeploymentFailure(
+            cleanupPrimary,
+            deployEvidence,
+          )
+        }
+      } else {
+        operationError = cleanupError
+      }
+    }
   }
-  if (operationError) throw operationError
+  if (operationError) {
+    if (phase === 'deploy' && !operationError.attestation) {
+      throw createDeploymentFailure(operationError, deployEvidence)
+    }
+    throw operationError
+  }
   return completedResult
 }
 
@@ -808,6 +982,17 @@ export function safeFailureCode(error) {
   return error instanceof Error && SAFE_FAILURE_CODES.has(error.message)
     ? error.message
     : 'DATABASE_OUTPUT_INVALID'
+}
+
+export function safeFailureOutput(error) {
+  if (
+    error instanceof Error &&
+    error[DEPLOYMENT_FAILURE_ATTESTATION] &&
+    error[DEPLOYMENT_FAILURE_ATTESTATION] === error.attestation
+  ) {
+    return JSON.stringify(error.attestation)
+  }
+  return safeFailureCode(error)
 }
 
 async function main() {
@@ -824,7 +1009,7 @@ const invokedPath = process.argv[1]
   : ''
 if (invokedPath === import.meta.url) {
   main().catch((error) => {
-    console.error(safeFailureCode(error))
+    console.error(safeFailureOutput(error))
     process.exitCode = 1
   })
 }

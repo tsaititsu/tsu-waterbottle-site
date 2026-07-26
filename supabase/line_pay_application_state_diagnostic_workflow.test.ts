@@ -140,7 +140,7 @@ test('static mutations cannot weaken the read-only or inventory contract', () =>
   }
 })
 
-test('deploy boundary now attests both commits and classifies the exact failure stage', () => {
+test('deploy boundary records observed evidence and keeps history policy consistent', () => {
   assert.deepEqual(
     deploySql.match(/^\\ir [^\r\n]+$/gmu),
     [
@@ -177,21 +177,39 @@ test('deploy boundary now attests both commits and classifies the exact failure 
     previousMarkerIndex = markerIndex
   }
   for (const failureCode of [
-    'MIGRATION_SQL_FAILED',
-    'POSTFLIGHT_FAILED_BEFORE_COMMIT',
-    'OUTPUT_VALIDATION_FAILED_AFTER_COMMIT',
-    'CREDENTIAL_CLEANUP_FAILED_AFTER_COMMIT',
-    'DEPLOY_COMMIT_STATE_UNKNOWN',
+    'MIGRATION_COMMIT_STATE_UNKNOWN',
+    'MIGRATION_SQL_FAILED_BEFORE_COMMIT',
+    'MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_NOT_OBSERVED',
+    'MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_COMMIT_STATE_UNKNOWN',
+    'MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_SQL_FAILED_BEFORE_COMMIT',
+    'OUTPUT_VALIDATION_FAILED_AFTER_BOTH_COMMITS_OBSERVED',
+    'CREDENTIAL_CLEANUP_FAILED_AFTER_BOTH_COMMITS_OBSERVED',
   ]) {
     assert.match(exactFileRunner, new RegExp(`'${failureCode}'`, 'u'))
   }
   assert.match(
     exactFileRunner,
-    /migration_history_attestation:[\s\S]*version_present: false[\s\S]*state: 'ABSENT_EXPECTED'/u,
+    /deployment_recording_policy: DEPLOYMENT_RECORDING_POLICY/u,
   )
   assert.match(
     exactFileRunner,
-    /postflight_state_attestation:[\s\S]*status: 'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED'[\s\S]*runtime_enabled: false/u,
+    /status: validatedPostflight[.]status[\s\S]*line_pay_contract_status: validatedPostflight[.]status[\s\S]*runtime_enabled: validatedPostflight[.]runtime_enabled/u,
+  )
+  assert.match(
+    exactFileRunner,
+    /supabase_migration_history_table_present:\s*validatedPostflight[.]migration_history[.]line_pay_version_present[\s\S]*supabase_migration_history_version_present:\s*validatedPostflight[.]migration_history[.]line_pay_version_present/u,
+  )
+  assert.doesNotMatch(
+    exactFileRunner,
+    /ABSENT_EXPECTED|DEPLOY_SUCCESS_ATTESTATION|runtime_enabled:\s*false/u,
+  )
+  assert.match(
+    diagnosticSql,
+    /then 'FULL_WITH_HISTORY'[\s\S]*then 'FULL_WITHOUT_HISTORY'/u,
+  )
+  assert.doesNotMatch(
+    [workflow, diagnosticSql].join('\n'),
+    /run-line-pay-production-exact-file|line_pay_remediation_deploy|supabase\s+(?:db|migration)/iu,
   )
 })
 

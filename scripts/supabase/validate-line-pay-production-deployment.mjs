@@ -127,6 +127,14 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value))
 }
 
+function deepFreeze(value) {
+  if (value === null || typeof value !== 'object' || Object.isFrozen(value)) {
+    return value
+  }
+  for (const nested of Object.values(value)) deepFreeze(nested)
+  return Object.freeze(value)
+}
+
 function assertPlainObject(value, code = 'DATABASE_OUTPUT_INVALID') {
   if (
     value === null ||
@@ -640,38 +648,62 @@ export function assertDeployAttestationSource(source) {
   if (typeof source !== 'string') fail('FIXED_FILE_INVALID')
   const requiredOnce = [
     'export const DEPLOY_ATTESTATION_MARKERS = Object.freeze({',
-    'export const DEPLOY_SUCCESS_ATTESTATION = Object.freeze({',
-    'const evidence = inspectDeployOutput(result.stdout)',
-    'migrationTransactionCommitted = evidence.migrationCommitted',
-    'completedResult = validateDeployExecutionResult(result, evidence)',
-    "? 'CREDENTIAL_CLEANUP_FAILED_AFTER_COMMIT'",
+    'export const DEPLOYMENT_RECORDING_POLICY =',
+    'export function buildDeploySuccessAttestation(',
+    'validatedPostflight = parseAndValidateAuditOutput(',
+    'return buildDeploySuccessAttestation(evidence, validatedPostflight)',
+    'deployEvidence = inspectDeployOutput(result.stdout)',
+    "error.attestation = buildDeploymentFailureAttestation(",
+    'export function safeFailureOutput(error) {',
     "typeof result === 'string' ? result : JSON.stringify(result)",
   ]
   for (const token of requiredOnce) {
     if (source.split(token).length !== 2) fail('FIXED_FILE_INVALID')
   }
+  for (const token of [
+    'validatedPostflight.status',
+    'line_pay_contract_status: validatedPostflight.status',
+    'validatedPostflight.runtime_enabled',
+    'supabase_migration_history_table_present:',
+    'validatedPostflight.migration_history.line_pay_version_present',
+    'migration_started_observed',
+    'migration_commit_observed',
+    'postflight_started_observed',
+    'postflight_state_observed',
+    'postflight_commit_observed',
+    'cleanup_failure_code',
+    'operationError = createDeploymentFailure(',
+  ]) {
+    if (!source.includes(token)) fail('FIXED_FILE_INVALID')
+  }
+  if (
+    source.split(
+      'validatedPostflight.migration_history.line_pay_version_present',
+    ).length !== 3
+  ) {
+    fail('FIXED_FILE_INVALID')
+  }
   const inspectIndex = source.indexOf(
-    'const evidence = inspectDeployOutput(result.stdout)',
-  )
-  const commitEvidenceIndex = source.indexOf(
-    'migrationTransactionCommitted = evidence.migrationCommitted',
-    inspectIndex,
+    'deployEvidence = inspectDeployOutput(result.stdout)',
   )
   const validationIndex = source.indexOf(
-    'completedResult = validateDeployExecutionResult(result, evidence)',
-    commitEvidenceIndex,
+    'completedResult = validateDeployExecutionResult(',
+    inspectIndex,
   )
   const cleanupClassificationIndex = source.indexOf(
-    "? 'CREDENTIAL_CLEANUP_FAILED_AFTER_COMMIT'",
+    'operationError = createDeploymentFailure(',
     validationIndex,
   )
   if (
     !(
       inspectIndex >= 0 &&
-      inspectIndex < commitEvidenceIndex &&
-      commitEvidenceIndex < validationIndex &&
+      inspectIndex < validationIndex &&
       validationIndex < cleanupClassificationIndex
     ) ||
+    source.includes('DEPLOY_SUCCESS_ATTESTATION') ||
+    source.includes('DATABASE_CONTRACTS_READY_RUNTIME_DISABLED') ||
+    /runtime_enabled:\s*false/u.test(source) ||
+    /line_pay_version_present:\s*false/u.test(source) ||
     /console[.](?:log|error)[(](?:result[.](?:stdout|stderr)|evidence[.]auditOutput)/u.test(
       source,
     )
@@ -799,14 +831,14 @@ export function buildExpectedAuditFixture(phase) {
   const common = {
     database: databaseContract(),
     fence: clone(FENCE_CONTRACT),
-    migration_history: {
-      line_pay_version_present: false,
-    },
   }
   if (phase === 'preflight') {
     return {
       status: 'READY_EXPECTED',
       ...common,
+      migration_history: {
+        line_pay_version_present: false,
+      },
       historical: {
         bank_transfer: clone(BANK_TRANSFER_HISTORICAL_CONTRACT),
       },
@@ -817,6 +849,9 @@ export function buildExpectedAuditFixture(phase) {
   return {
     status: 'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED',
     ...common,
+    migration_history: {
+      line_pay_version_present: false,
+    },
     historical: {
       bank_transfer: clone(BANK_TRANSFER_HISTORICAL_CONTRACT),
       payments: clone(ACTIVE_TABLE_MANIFEST_CONTRACT),
@@ -862,7 +897,7 @@ function validateAuditResult(result, phase) {
         : 'POSTFLIGHT_CONTRACT_FAILED',
     )
   }
-  return result.status
+  return deepFreeze(result)
 }
 
 export function parseSingleColumnJson(text) {
