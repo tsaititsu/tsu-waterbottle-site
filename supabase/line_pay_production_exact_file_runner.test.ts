@@ -22,6 +22,10 @@ const runnerPath = join(
   root,
   'scripts/supabase/run-line-pay-production-exact-file.mjs',
 )
+const postgresContractRunnerPath = join(
+  root,
+  'supabase/tests/run_line_pay_production_exact_file_contracts.mjs',
+)
 
 test('validator fixes the complete Production deployment identity', async () => {
   const validator = await import(pathToFileURL(validatorPath).href)
@@ -51,7 +55,7 @@ test('validator fixes the complete Production deployment identity', async () => 
   )
   assert.equal(
     createHash('sha256').update(migration).digest('hex'),
-    '370984c499d93f602b3dccf876becd030085e88ccd9a17106fee8b0009d84046',
+    '8da1fb429aecb1c35b12a245b63907135dbe7c467ef0a5f069afd431d21e94b8',
   )
   assert.equal(
     createHash('sha256').update(fence).digest('hex'),
@@ -64,6 +68,12 @@ test('validator exposes only frozen Bank Transfer match booleans and active mani
   const preflight = validator.buildExpectedAuditFixture('preflight')
   const postflight = validator.buildExpectedAuditFixture('postflight')
 
+  assert.deepEqual(preflight.executor, {
+    ownership_transfer_ready: true,
+  })
+  assert.deepEqual(postflight.executor, {
+    ownership_transfer_ready: true,
+  })
   assert.deepEqual(Object.keys(preflight.historical), ['bank_transfer'])
   assert.deepEqual(preflight.historical.bank_transfer, {
     schema_signature_match: true,
@@ -113,8 +123,27 @@ test('validator exposes only frozen Bank Transfer match booleans and active mani
   const serialized = JSON.stringify({ preflight, postflight })
   assert.doesNotMatch(
     serialized,
-    /"(?:pk_digest|content_digest)":|"rows":(?:18|5)/,
+    /"(?:pk_digest|content_digest)":|"rows":(?:18|5)|rolname|rolcreaterole|rolsuper/,
   )
+})
+
+test('validator fails closed when the executor cannot perform ownership transfers', async () => {
+  const validator = await import(pathToFileURL(validatorPath).href)
+
+  for (const phase of ['preflight', 'postflight']) {
+    const fixture = validator.buildExpectedAuditFixture(phase)
+    fixture.executor.ownership_transfer_ready = false
+    assert.throws(
+      () =>
+        validator.parseAndValidateAuditOutput(
+          `${JSON.stringify(fixture)}\n`,
+          phase,
+        ),
+      phase === 'preflight'
+        ? /SCHEMA_DRIFT/
+        : /POSTFLIGHT_CONTRACT_FAILED/,
+    )
+  }
 })
 
 test('validator rejects identity mutations and unsupported PostgreSQL clients', async () => {
@@ -139,7 +168,7 @@ test('validator rejects identity mutations and unsupported PostgreSQL clients', 
   )
   assert.equal(
     validator.validateMigrationHash(
-      '370984c499d93f602b3dccf876becd030085e88ccd9a17106fee8b0009d84046',
+      '8da1fb429aecb1c35b12a245b63907135dbe7c467ef0a5f069afd431d21e94b8',
     ),
     true,
   )
@@ -212,7 +241,7 @@ test('source context and Environment channel gates fail closed', async () => {
     AUTHORIZED_COMMIT: sha,
     PROJECT_REF_INPUT: 'ndbqoznvobmpkgxkiezz',
     MIGRATION_SHA256_INPUT:
-      '370984c499d93f602b3dccf876becd030085e88ccd9a17106fee8b0009d84046',
+      '8da1fb429aecb1c35b12a245b63907135dbe7c467ef0a5f069afd431d21e94b8',
     DEPLOY_CONFIRMATION: 'DEPLOY_LINE_PAY_REMEDIATION_EXACT_FILE_ONCE',
   }
   assert.equal(validator.validateWorkflowContext(valid), true)
@@ -342,6 +371,7 @@ test('preflight and postflight SQL are fixed read-only single-statement queries'
     assert.ok(postflight.includes(column), column)
   }
   for (const safeBoolean of [
+    'ownership_transfer_ready',
     'schema_signature_match',
     'row_count_match',
     'pending_review_count_match',
@@ -352,6 +382,12 @@ test('preflight and postflight SQL are fixed read-only single-statement queries'
     assert.ok(preflight.includes(`'${safeBoolean}'`), safeBoolean)
     assert.ok(postflight.includes(`'${safeBoolean}'`), safeBoolean)
   }
+  for (const sql of [preflight, postflight]) {
+    assert.match(sql, /current_setting\('createrole_self_grant'\) = ''/)
+    assert.match(sql, /role[.]rolsuper/)
+    assert.match(sql, /role[.]rolcreaterole/)
+    assert.doesNotMatch(sql, /jsonb_build_object\([\s\S]{0,400}'(?:rolname|rolsuper|rolcreaterole)'/)
+  }
   for (const sql of [
     'insert into public.x values (1);',
     'with x as (select 1) update public.x set y = 1;',
@@ -361,6 +397,65 @@ test('preflight and postflight SQL are fixed read-only single-statement queries'
   ]) {
     assert.throws(() => validator.assertReadOnlyAuditSql(sql), /UNSAFE_AUDIT_SQL/)
   }
+})
+
+test('hosted non-superuser scenario executes the formal safety contracts and mutations', () => {
+  const source = readFileSync(postgresContractRunnerPath, 'utf8')
+  const scenarioStart = source.indexOf(
+    'function runHostedNonSuperuserMigrationScenario()',
+  )
+  const scenarioEnd = source.indexOf(
+    '\nfunction readLinePayFunctionMetadata',
+    scenarioStart,
+  )
+  assert.ok(scenarioStart >= 0)
+  assert.ok(scenarioEnd > scenarioStart)
+  const scenario = source.slice(scenarioStart, scenarioEnd)
+
+  for (const requiredEvidence of [
+    'hosted non-superuser deploy orchestration',
+    'hosted executor formal application-state diagnostic',
+    'hosted unsafe SET membership postflight',
+    'hosted unsafe SET membership application-state diagnostic',
+    'hosted duplicate membership postflight',
+    'hosted duplicate membership application-state diagnostic',
+  ]) {
+    assert.ok(scenario.includes(requiredEvidence), requiredEvidence)
+  }
+  assert.match(
+    scenario,
+    /psqlContainerFileAs\(\s*database,\s*executor,\s*'\/workspace\/supabase\/deployment\/line_pay_remediation_deploy[.]sql'/u,
+  )
+  assert.doesNotMatch(
+    scenario,
+    /psqlAs\(\s*database,\s*executor,\s*readFileSync\(migrationPath/u,
+  )
+  assert.match(
+    scenario,
+    /parseAndValidateDiagnosticOutput\([\s\S]*?application_state[\s\S]*?FULL_WITHOUT_HISTORY/u,
+  )
+  assert.match(
+    scenario,
+    /assertAuditFailureStatus\([\s\S]*?'POSTFLIGHT_CONTRACT_FAILED'/u,
+  )
+})
+
+test('exact-file PostgreSQL runner waits for the final server before probing readiness', () => {
+  const source = readFileSync(postgresContractRunnerPath, 'utf8')
+  const finalServerGate = source.search(
+    /\['exec', containerName, 'cat', '\/proc\/1\/comm'\]/u,
+  )
+  const finalServerIdentity = source.search(
+    /pidOneResult[.]stdout[.]trim\(\) === 'postgres'/u,
+  )
+  const readinessProbe = source.search(
+    /\[\s*'exec',\s*containerName,\s*'pg_isready',\s*'-U',\s*'postgres',\s*'-d',\s*'postgres',?\s*\]/u,
+  )
+
+  assert.ok(finalServerGate >= 0)
+  assert.ok(finalServerIdentity > finalServerGate)
+  assert.ok(readinessProbe > finalServerIdentity)
+  assert.doesNotMatch(source, /consecutiveReadyChecks/u)
 })
 
 test('deploy orchestration mutations cannot remove transaction attestations, guard, manifest, timeout, or duplicate Migration', async () => {

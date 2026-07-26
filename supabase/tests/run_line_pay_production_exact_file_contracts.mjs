@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { parseAndValidateDiagnosticOutput } from '../../scripts/supabase/validate-line-pay-application-state-diagnostic.mjs'
 import { LINE_PAY_POSTGRES_IMAGE } from './line_pay_postgres_image.mjs'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
@@ -38,6 +39,10 @@ const preflightPath = join(
 const postflightPath = join(
   root,
   'supabase/deployment/line_pay_remediation_postflight.sql',
+)
+const applicationStateDiagnosticPath = join(
+  root,
+  'supabase/deployment/line_pay_application_state_diagnostic.sql',
 )
 const deployPath = join(
   root,
@@ -76,8 +81,9 @@ function runDocker(args, options = {}) {
   return result.stdout.trim()
 }
 
-function psql(
+function psqlAs(
   database,
+  user,
   sql,
   label,
   expectFailure = false,
@@ -96,7 +102,7 @@ function psql(
       '--no-align',
       '--tuples-only',
       '-U',
-      'postgres',
+      user,
       '-d',
       database,
     ],
@@ -118,11 +124,42 @@ function psql(
   return result.stdout.trim()
 }
 
-function psqlFile(database, relativePath, label = relativePath) {
-  psql(database, readFileSync(join(root, relativePath), 'utf8'), label)
+function psql(
+  database,
+  sql,
+  label,
+  expectFailure = false,
+  quiet = false,
+) {
+  return psqlAs(
+    database,
+    'postgres',
+    sql,
+    label,
+    expectFailure,
+    quiet,
+  )
 }
 
-function psqlContainerFile(database, containerPath, label) {
+function psqlFileAs(
+  database,
+  user,
+  relativePath,
+  label = relativePath,
+) {
+  psqlAs(
+    database,
+    user,
+    readFileSync(join(root, relativePath), 'utf8'),
+    label,
+  )
+}
+
+function psqlFile(database, relativePath, label = relativePath) {
+  psqlFileAs(database, 'postgres', relativePath, label)
+}
+
+function psqlContainerFileAs(database, user, containerPath, label) {
   const result = spawnSync(
     'docker',
     [
@@ -136,7 +173,7 @@ function psqlContainerFile(database, containerPath, label) {
       '--no-align',
       '--tuples-only',
       '-U',
-      'postgres',
+      user,
       '-d',
       database,
       `--file=${containerPath}`,
@@ -147,6 +184,15 @@ function psqlContainerFile(database, containerPath, label) {
     throw new Error(`${label}:FAILED\n${result.stderr || result.stdout}`)
   }
   return result.stdout.trim()
+}
+
+function psqlContainerFile(database, containerPath, label) {
+  return psqlContainerFileAs(
+    database,
+    'postgres',
+    containerPath,
+    label,
+  )
 }
 
 function writeContainerFile(containerPath, contents) {
@@ -261,53 +307,67 @@ async function waitForCommittedMigration(database) {
   throw new Error('POST_MIGRATION_GAP_NOT_REACHED')
 }
 
-function prepareBaseline(database) {
-  psqlFile(database, 'supabase/tests/line_pay_local_postgres_bootstrap.sql')
-  for (const file of baselineFiles) psqlFile(database, file)
-  psql(
-    database,
-    `
-      insert into auth.users (id) values
-        ('10000000-0000-4000-8000-000000000011'),
-        ('10000000-0000-4000-8000-000000000012')
-      on conflict (id) do nothing;
+const syntheticBankTransferFixtures = `
+  insert into auth.users (id) values
+    ('10000000-0000-4000-8000-000000000011'),
+    ('10000000-0000-4000-8000-000000000012')
+  on conflict (id) do nothing;
 
-      insert into public.bank_transfer_submissions (
-        id, user_id, item_type, item_id, item_name, amount_twd,
-        payer_name, payer_phone, payer_email, bank_account_last5,
-        transfer_time, note, status, created_at
-      ) values
-        (
-          '21000000-0000-4000-8000-000000000001',
-          '10000000-0000-4000-8000-000000000011',
-          'synthetic', 'fixture-1', 'Synthetic fixture 1', 100,
-          'Synthetic User', '0000000000', 'one@example.invalid', '00001',
-          '2026-07-01 00:00:00+00', 'synthetic', 'pending_review',
-          '2026-07-01 00:00:00+00'
-        ),
-        (
-          '21000000-0000-4000-8000-000000000002',
-          '10000000-0000-4000-8000-000000000011',
-          'synthetic', 'fixture-2', 'Synthetic fixture 2', 200,
-          'Synthetic User', '0000000000', 'two@example.invalid', '00002',
-          '2026-07-02 00:00:00+00', 'synthetic', 'pending_review',
-          '2026-07-02 00:00:00+00'
-        ),
-        (
-          '21000000-0000-4000-8000-000000000003',
-          '10000000-0000-4000-8000-000000000012',
-          'synthetic', 'fixture-3', 'Synthetic fixture 3', 300,
-          'Synthetic User', '0000000000', 'three@example.invalid', '00003',
-          '2026-07-03 00:00:00+00', 'synthetic', 'pending_review',
-          '2026-07-03 00:00:00+00'
-        );
-    `,
+  insert into public.bank_transfer_submissions (
+    id, user_id, item_type, item_id, item_name, amount_twd,
+    payer_name, payer_phone, payer_email, bank_account_last5,
+    transfer_time, note, status, created_at
+  ) values
+    (
+      '21000000-0000-4000-8000-000000000001',
+      '10000000-0000-4000-8000-000000000011',
+      'synthetic', 'fixture-1', 'Synthetic fixture 1', 100,
+      'Synthetic User', '0000000000', 'one@example.invalid', '00001',
+      '2026-07-01 00:00:00+00', 'synthetic', 'pending_review',
+      '2026-07-01 00:00:00+00'
+    ),
+    (
+      '21000000-0000-4000-8000-000000000002',
+      '10000000-0000-4000-8000-000000000011',
+      'synthetic', 'fixture-2', 'Synthetic fixture 2', 200,
+      'Synthetic User', '0000000000', 'two@example.invalid', '00002',
+      '2026-07-02 00:00:00+00', 'synthetic', 'pending_review',
+      '2026-07-02 00:00:00+00'
+    ),
+    (
+      '21000000-0000-4000-8000-000000000003',
+      '10000000-0000-4000-8000-000000000012',
+      'synthetic', 'fixture-3', 'Synthetic fixture 3', 300,
+      'Synthetic User', '0000000000', 'three@example.invalid', '00003',
+      '2026-07-03 00:00:00+00', 'synthetic', 'pending_review',
+      '2026-07-03 00:00:00+00'
+    );
+`
+
+function prepareBaselineForUser(database, user) {
+  for (const file of baselineFiles) {
+    psqlFileAs(database, user, file)
+  }
+  psqlAs(
+    database,
+    user,
+    syntheticBankTransferFixtures,
     'synthetic bank transfer fixtures',
   )
-  psql(database, readFileSync(fencePath, 'utf8'), 'read-only fence')
+  psqlAs(
+    database,
+    user,
+    readFileSync(fencePath, 'utf8'),
+    'read-only fence',
+  )
 }
 
-function readFingerprints(database, afterMigration) {
+function prepareBaseline(database) {
+  psqlFile(database, 'supabase/tests/line_pay_local_postgres_bootstrap.sql')
+  prepareBaselineForUser(database, 'postgres')
+}
+
+function readFingerprints(database, afterMigration, user = 'postgres') {
   const paymentExpression = afterMigration
     ? `(to_jsonb(row_value) - array[
         'updated_at',
@@ -323,8 +383,9 @@ function readFingerprints(database, afterMigration) {
         'reconciliation_required','state_version'
       ])`
     : 'to_jsonb(row_value)'
-  const output = psql(
+  const output = psqlAs(
     database,
+    user,
     `
       with
       bank_transfer as (
@@ -591,6 +652,17 @@ function useFixtureContract(source, _fixture, database) {
   return output
 }
 
+function useApplicationStateDatabase(source, database) {
+  const productionIdentity = "pg_catalog.current_database() = 'postgres'"
+  if (source.split(productionIdentity).length !== 2) {
+    throw new Error('APPLICATION_STATE_DATABASE_FIXTURE_INVALID')
+  }
+  return source.replace(
+    productionIdentity,
+    `pg_catalog.current_database() = '${database}'`,
+  )
+}
+
 function stripDeployAttestationMarkers(output) {
   const rows = output.split(/\r?\n/u).filter(Boolean)
   const markerSet = new Set(deployAttestationMarkers)
@@ -678,6 +750,444 @@ function assertNoLinePayObjects(database) {
       `MIGRATION_ROLLBACK_INCOMPLETE:relations=${result.relations}:roles=${result.roles}`,
     )
   }
+}
+
+function runHostedNonSuperuserMigrationScenario() {
+  const database = 'exact_file_hosted_executor'
+  const executor = 'postgres'
+  const clusterAdmin = 'line_pay_cluster_admin_fixture'
+  const originalPostgres = 'line_pay_original_postgres_fixture'
+  const unexpectedMember = 'line_pay_unexpected_executor_member'
+
+  psql(
+    'postgres',
+    `
+      create role ${clusterAdmin}
+        login inherit superuser createdb createrole replication bypassrls;
+    `,
+    'create hosted cluster admin role',
+  )
+  psqlAs(
+    'postgres',
+    clusterAdmin,
+    `alter role postgres rename to ${originalPostgres};`,
+    'reserve production executor role name',
+  )
+  psqlAs(
+    'postgres',
+    clusterAdmin,
+    `
+      create role ${executor}
+        login inherit nosuperuser createdb createrole replication bypassrls;
+    `,
+    'create hosted executor role',
+  )
+  psqlAs(
+    'postgres',
+    clusterAdmin,
+    `create database ${database} owner ${executor};`,
+    'create hosted executor db',
+  )
+  psqlFileAs(
+    database,
+    clusterAdmin,
+    'supabase/tests/line_pay_local_postgres_bootstrap.sql',
+  )
+  psqlAs(
+    database,
+    clusterAdmin,
+    `
+      grant all on schema auth to ${executor};
+      grant all on all tables in schema auth to ${executor};
+      grant all on all sequences in schema auth to ${executor};
+      grant all on all routines in schema auth to ${executor};
+      grant anon, authenticated, service_role
+        to ${executor} with admin option;
+    `,
+    'grant hosted executor baseline capabilities',
+  )
+  prepareBaselineForUser(database, executor)
+
+  const executorState = psqlAs(
+    database,
+    executor,
+    `
+      select jsonb_build_object(
+        'superuser', role.rolsuper,
+        'createdb', role.rolcreatedb,
+        'createrole', role.rolcreaterole,
+        'replication', role.rolreplication,
+        'bypassrls', role.rolbypassrls,
+        'createrole_self_grant',
+          pg_catalog.current_setting('createrole_self_grant')
+      )
+      from pg_catalog.pg_roles as role
+      where role.rolname = current_user;
+    `,
+    'hosted executor role state',
+  )
+  if (
+    executorState !==
+    '{"createdb": true, "bypassrls": true, "superuser": false, "createrole": true, "replication": true, "createrole_self_grant": ""}'
+  ) {
+    throw new Error(`HOSTED_EXECUTOR_ROLE_STATE_INVALID:${executorState}`)
+  }
+
+  const before = readFingerprints(database, false, executor)
+  const activeTableManifest = readActiveTableManifests(database)
+  const hostedPreflight = useFixtureContract(
+    readFileSync(preflightPath, 'utf8'),
+    before,
+    database,
+  )
+  const hostedPostflight = withActiveTableManifest(
+    useFixtureContract(
+      readFileSync(postflightPath, 'utf8'),
+      before,
+      database,
+    ),
+    activeTableManifest,
+  )
+  assertAuditStatus(
+    psqlAs(
+      database,
+      executor,
+      hostedPreflight,
+      'hosted executor preflight',
+    ),
+    'READY_EXPECTED',
+    before,
+  )
+  assertAuditFailureStatus(
+    psqlAs(
+      database,
+      executor,
+      `begin;
+set local createrole_self_grant = 'inherit';
+${hostedPreflight}
+rollback;`,
+      'hosted incapable executor preflight',
+      false,
+      true,
+    ),
+    'SCHEMA_DRIFT',
+  )
+
+  writeContainerFile(
+    '/workspace/supabase/deployment/line_pay_remediation_preflight.sql',
+    hostedPreflight,
+  )
+  writeContainerFile(
+    '/workspace/supabase/deployment/line_pay_remediation_postflight.sql',
+    useFixtureContract(
+      readFileSync(postflightPath, 'utf8'),
+      before,
+      database,
+    ),
+  )
+  writeContainerFile(
+    '/workspace/supabase/deployment/line_pay_remediation_deploy.sql',
+    readFileSync(deployPath, 'utf8'),
+  )
+  const hostedDeployOutput = psqlContainerFileAs(
+    database,
+    executor,
+    '/workspace/supabase/deployment/line_pay_remediation_deploy.sql',
+    'hosted non-superuser deploy orchestration',
+  )
+  for (const marker of deployAttestationMarkers) {
+    if (hostedDeployOutput.split(marker).length !== 2) {
+      throw new Error(`HOSTED_DEPLOY_ATTESTATION_MISSING:${marker}`)
+    }
+  }
+  assertAuditStatus(
+    hostedDeployOutput,
+    'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED',
+  )
+
+  const after = readFingerprints(database, true, executor)
+  if (JSON.stringify(before) !== JSON.stringify(after)) {
+    throw new Error('HOSTED_EXECUTOR_EXISTING_DATA_FINGERPRINT_CHANGED')
+  }
+
+  const hostedApplicationStateDiagnostic = useApplicationStateDatabase(
+    readFileSync(applicationStateDiagnosticPath, 'utf8'),
+    database,
+  )
+  const hostedApplicationState = parseAndValidateDiagnosticOutput(
+    psqlAs(
+      database,
+      executor,
+      hostedApplicationStateDiagnostic,
+      'hosted executor formal application-state diagnostic',
+    ),
+  )
+  if (hostedApplicationState.application_state !== 'FULL_WITHOUT_HISTORY') {
+    throw new Error(
+      `HOSTED_APPLICATION_STATE_INVALID:${hostedApplicationState.application_state}`,
+    )
+  }
+
+  const contract = JSON.parse(
+    psqlAs(
+      database,
+      executor,
+      `
+        select jsonb_build_object(
+          'relations', (
+            select pg_catalog.count(*)
+            from pg_catalog.pg_class as relation
+            join pg_catalog.pg_namespace as namespace
+              on namespace.oid = relation.relnamespace
+            where relation.relkind in ('r', 'p')
+              and (namespace.nspname, relation.relname) in (
+                ('public', 'app_environment_attestation'),
+                ('public', 'line_pay_checkout_attempts'),
+                ('public', 'line_pay_request_outbox'),
+                ('public', 'line_pay_callback_capabilities'),
+                ('public', 'line_pay_callback_events'),
+                ('public', 'line_pay_payment_audit_events'),
+                ('line_pay_private', 'line_pay_completion_proofs')
+              )
+          ),
+          'admin_only_executor_memberships', (
+            select pg_catalog.count(*)
+            from pg_catalog.pg_auth_members as membership
+            join pg_catalog.pg_roles as granted_role
+              on granted_role.oid = membership.roleid
+            join pg_catalog.pg_roles as member_role
+              on member_role.oid = membership.member
+            join pg_catalog.pg_roles as grantor_role
+              on grantor_role.oid = membership.grantor
+            where granted_role.rolname in (
+                'line_pay_payment_executor',
+                'line_pay_payment_function_owner'
+              )
+              and member_role.rolname = current_user
+              and grantor_role.rolsuper
+              and membership.admin_option
+              and not membership.inherit_option
+              and not membership.set_option
+          ),
+          'unsafe_dedicated_role_memberships', (
+            select pg_catalog.count(*)
+            from pg_catalog.pg_auth_members as membership
+            join pg_catalog.pg_roles as granted_role
+              on granted_role.oid = membership.roleid
+            join pg_catalog.pg_roles as member_role
+              on member_role.oid = membership.member
+            join pg_catalog.pg_roles as grantor_role
+              on grantor_role.oid = membership.grantor
+            where (
+              granted_role.rolname in (
+                'line_pay_payment_executor',
+                'line_pay_payment_function_owner'
+              )
+              or member_role.rolname in (
+                'line_pay_payment_executor',
+                'line_pay_payment_function_owner'
+              )
+            )
+            and not (
+              granted_role.rolname in (
+                'line_pay_payment_executor',
+                'line_pay_payment_function_owner'
+              )
+              and member_role.rolname = current_user
+              and grantor_role.rolsuper
+              and membership.admin_option
+              and not membership.inherit_option
+              and not membership.set_option
+            )
+          ),
+          'private_schema_owner', (
+            select owner.rolname
+            from pg_catalog.pg_namespace as namespace
+            join pg_catalog.pg_roles as owner
+              on owner.oid = namespace.nspowner
+            where namespace.nspname = 'line_pay_private'
+          ),
+          'completion_proof_owner', (
+            select owner.rolname
+            from pg_catalog.pg_class as relation
+            join pg_catalog.pg_namespace as namespace
+              on namespace.oid = relation.relnamespace
+            join pg_catalog.pg_roles as owner
+              on owner.oid = relation.relowner
+            where namespace.nspname = 'line_pay_private'
+              and relation.relname = 'line_pay_completion_proofs'
+          ),
+          'runtime_attestations', (
+            select pg_catalog.count(*)
+            from public.app_environment_attestation
+          )
+        );
+      `,
+      'hosted executor post-migration contract',
+    ),
+  )
+  if (
+    contract.relations !== 7 ||
+    contract.admin_only_executor_memberships !== 2 ||
+    contract.unsafe_dedicated_role_memberships !== 0 ||
+    contract.private_schema_owner !==
+      'line_pay_payment_function_owner' ||
+    contract.completion_proof_owner !==
+      'line_pay_payment_function_owner' ||
+    contract.runtime_attestations !== 0
+  ) {
+    throw new Error(
+      `HOSTED_EXECUTOR_POST_MIGRATION_CONTRACT_FAILED:${JSON.stringify(
+        contract,
+      )}`,
+    )
+  }
+
+  psqlAs(
+    database,
+    clusterAdmin,
+    `
+      grant line_pay_payment_function_owner to ${executor}
+        with admin true, inherit false, set true;
+    `,
+    'hosted unsafe SET membership mutation',
+  )
+  assertAuditFailureStatus(
+    psqlAs(
+      database,
+      executor,
+      hostedPostflight,
+      'hosted unsafe SET membership postflight',
+    ),
+    'POSTFLIGHT_CONTRACT_FAILED',
+  )
+  const unsafeSetApplicationState = parseAndValidateDiagnosticOutput(
+    psqlAs(
+      database,
+      executor,
+      hostedApplicationStateDiagnostic,
+      'hosted unsafe SET membership application-state diagnostic',
+    ),
+  )
+  if (unsafeSetApplicationState.application_state !== 'PARTIAL') {
+    throw new Error(
+      `HOSTED_UNSAFE_SET_APPLICATION_STATE_INVALID:${unsafeSetApplicationState.application_state}`,
+    )
+  }
+  psqlAs(
+    database,
+    clusterAdmin,
+    `
+      grant line_pay_payment_function_owner to ${executor}
+        with admin true, inherit false, set false;
+    `,
+    'restore hosted unsafe SET membership mutation',
+  )
+  assertAuditStatus(
+    psqlAs(
+      database,
+      executor,
+      hostedPostflight,
+      'restored hosted SET membership postflight',
+    ),
+    'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED',
+  )
+
+  psqlAs(
+    database,
+    clusterAdmin,
+    `create role ${unexpectedMember} nologin noinherit;`,
+    'create hosted unexpected member role',
+  )
+  psqlAs(
+    database,
+    executor,
+    `
+      grant line_pay_payment_executor to ${unexpectedMember}
+        with admin false, inherit false, set false;
+    `,
+    'hosted duplicate membership mutation',
+  )
+  assertAuditFailureStatus(
+    psqlAs(
+      database,
+      executor,
+      hostedPostflight,
+      'hosted duplicate membership postflight',
+    ),
+    'POSTFLIGHT_CONTRACT_FAILED',
+  )
+  const duplicateMembershipApplicationState =
+    parseAndValidateDiagnosticOutput(
+      psqlAs(
+        database,
+        executor,
+        hostedApplicationStateDiagnostic,
+        'hosted duplicate membership application-state diagnostic',
+      ),
+    )
+  if (duplicateMembershipApplicationState.application_state !== 'PARTIAL') {
+    throw new Error(
+      `HOSTED_DUPLICATE_MEMBERSHIP_APPLICATION_STATE_INVALID:${duplicateMembershipApplicationState.application_state}`,
+    )
+  }
+  psqlAs(
+    database,
+    executor,
+    `revoke line_pay_payment_executor from ${unexpectedMember};`,
+    'restore hosted duplicate membership mutation',
+  )
+  psqlAs(
+    database,
+    clusterAdmin,
+    `drop role ${unexpectedMember};`,
+    'drop hosted unexpected member role',
+  )
+  assertAuditStatus(
+    psqlAs(
+      database,
+      executor,
+      hostedPostflight,
+      'restored hosted duplicate membership postflight',
+    ),
+    'DATABASE_CONTRACTS_READY_RUNTIME_DISABLED',
+  )
+  const restoredApplicationState = parseAndValidateDiagnosticOutput(
+    psqlAs(
+      database,
+      executor,
+      hostedApplicationStateDiagnostic,
+      'restored hosted application-state diagnostic',
+    ),
+  )
+  if (restoredApplicationState.application_state !== 'FULL_WITHOUT_HISTORY') {
+    throw new Error(
+      `HOSTED_RESTORED_APPLICATION_STATE_INVALID:${restoredApplicationState.application_state}`,
+    )
+  }
+
+  psqlAs(
+    'postgres',
+    clusterAdmin,
+    `drop database ${database};`,
+    'drop hosted executor db',
+  )
+  psqlAs(
+    'postgres',
+    clusterAdmin,
+    `
+      drop role line_pay_payment_executor;
+      drop role line_pay_payment_function_owner;
+      drop role ${executor};
+      alter role ${originalPostgres} rename to postgres;
+    `,
+    'restore original postgres role',
+  )
+  psql(
+    'postgres',
+    `drop role ${clusterAdmin};`,
+    'drop hosted cluster admin role',
+  )
 }
 
 function readLinePayFunctionMetadata(database) {
@@ -1004,6 +1514,37 @@ function cleanup() {
   })
 }
 
+async function waitForPostgres() {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const pidOneResult = spawnSync(
+      'docker',
+      ['exec', containerName, 'cat', '/proc/1/comm'],
+      { cwd: root, encoding: 'utf8' },
+    )
+    if (
+      pidOneResult.status === 0 &&
+      pidOneResult.stdout.trim() === 'postgres'
+    ) {
+      const readyResult = spawnSync(
+        'docker',
+        [
+          'exec',
+          containerName,
+          'pg_isready',
+          '-U',
+          'postgres',
+          '-d',
+          'postgres',
+        ],
+        { cwd: root, stdio: 'ignore' },
+      )
+      if (readyResult.status === 0) return
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250))
+  }
+  throw new Error('POSTGRES_FINAL_SERVER_NOT_READY')
+}
+
 async function main() {
   const localImage = spawnSync('docker', ['image', 'inspect', image], {
     cwd: root,
@@ -1033,34 +1574,7 @@ async function main() {
     `type=volume,source=${volumeName},target=/var/lib/postgresql/data`,
     image,
   ])
-  let consecutiveReadyChecks = 0
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    const ready = spawnSync(
-      'docker',
-      [
-        'exec',
-        containerName,
-        'psql',
-        '-X',
-        '--set=ON_ERROR_STOP=1',
-        '--no-align',
-        '--tuples-only',
-        '-U',
-        'postgres',
-        '-d',
-        'postgres',
-        '--command=select 1;',
-      ],
-      { cwd: root, encoding: 'utf8' },
-    )
-    consecutiveReadyChecks =
-      ready.status === 0 && ready.stdout.trim() === '1'
-        ? consecutiveReadyChecks + 1
-        : 0
-    if (consecutiveReadyChecks >= 2) break
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250))
-    if (attempt === 59) throw new Error('POSTGRES_READINESS_TIMEOUT')
-  }
+  await waitForPostgres()
   const version = runDocker([
     'exec',
     containerName,
@@ -1083,6 +1597,7 @@ async function main() {
     migrationPath,
     `${containerName}:/workspace/supabase/migrations/20260719033404_line_pay_remediation_contracts.sql`,
   ])
+  runHostedNonSuperuserMigrationScenario()
   await runLockedTimeoutScenario('payments')
   await runLockedTimeoutScenario('product_orders')
   runDeployOrchestrationScenario()
@@ -1296,6 +1811,12 @@ async function main() {
       restore: 'alter role line_pay_payment_executor noinherit;',
     },
     {
+      label: 'role membership exact count',
+      apply:
+        'grant line_pay_payment_executor to current_user with admin true, inherit false, set false;',
+      restore: 'revoke line_pay_payment_executor from current_user;',
+    },
+    {
       label: 'relation ACL',
       apply:
         'grant select on table public.line_pay_checkout_attempts to public;',
@@ -1347,7 +1868,8 @@ async function main() {
 
   process.stdout.write(
     'line_pay_production_exact_file_contracts: PASS ' +
-      '(PostgreSQL 17, preflight, exact Migration, postflight, ' +
+      '(PostgreSQL 17, final_server_readiness=PASS, ' +
+      'hosted_non_superuser_deploy=PASS, preflight, exact Migration, postflight, ' +
       'server_timeouts=2/2, active_manifest=PASS, manifest_drifts=4/4 caught, ' +
       `catalog mutations, rollback, cleanup, locked_deploy_ms=${measuredLockedDeployMs})\n`,
   )

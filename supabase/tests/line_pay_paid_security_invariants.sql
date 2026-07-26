@@ -346,16 +346,67 @@ begin
       on granted_role.oid = membership.roleid
     join pg_catalog.pg_roles as member_role
       on member_role.oid = membership.member
+    join pg_catalog.pg_roles as grantor_role
+      on grantor_role.oid = membership.grantor
+    where (
+      granted_role.rolname in (
+        'line_pay_payment_executor',
+        'line_pay_payment_function_owner'
+      )
+      or member_role.rolname in (
+        'line_pay_payment_executor',
+        'line_pay_payment_function_owner'
+      )
+    )
+    and not (
+      granted_role.rolname in (
+        'line_pay_payment_executor',
+        'line_pay_payment_function_owner'
+      )
+      and member_role.rolname = current_user
+      and grantor_role.rolsuper
+      and membership.admin_option
+      and not membership.inherit_option
+      and not membership.set_option
+    )
+  ) then
+    raise exception 'dedicated_payment_roles_have_unsafe_memberships';
+  end if;
+
+  if exists (
+    select 1
+    from pg_catalog.pg_auth_members as membership
+    join pg_catalog.pg_roles as granted_role
+      on granted_role.oid = membership.roleid
     where granted_role.rolname in (
       'line_pay_payment_executor',
       'line_pay_payment_function_owner'
     )
-       or member_role.rolname in (
-         'line_pay_payment_executor',
-         'line_pay_payment_function_owner'
-       )
+    group by granted_role.rolname
+    having pg_catalog.count(*) > 1
   ) then
-    raise exception 'dedicated_payment_roles_have_memberships';
+    raise exception 'dedicated_payment_roles_have_duplicate_memberships';
+  end if;
+
+  if not coalesce((
+    select case
+      when role.rolsuper then membership_inventory.membership_count = 0
+      else membership_inventory.membership_count = 2
+    end
+    from pg_catalog.pg_roles as role
+    cross join lateral (
+      select pg_catalog.count(*)::integer as membership_count
+      from pg_catalog.pg_auth_members as membership
+      join pg_catalog.pg_roles as granted_role
+        on granted_role.oid = membership.roleid
+      where granted_role.rolname in (
+        'line_pay_payment_executor',
+        'line_pay_payment_function_owner'
+      )
+    ) as membership_inventory
+    where role.rolname = current_user
+  ), false) then
+    raise exception 'dedicated_payment_role_membership_count_is_not_exact';
   end if;
 
   if pg_catalog.has_table_privilege(

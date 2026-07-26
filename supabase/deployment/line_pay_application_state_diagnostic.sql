@@ -577,9 +577,45 @@ role_integrity as (
         on granted_role.oid = membership.roleid
       join pg_catalog.pg_roles as member_role
         on member_role.oid = membership.member
-      where granted_role.rolname in (select role_name from expected_roles)
-         or member_role.rolname in (select role_name from expected_roles)
+      join pg_catalog.pg_roles as grantor_role
+        on grantor_role.oid = membership.grantor
+      where (
+        granted_role.rolname in (select role_name from expected_roles)
+        or member_role.rolname in (select role_name from expected_roles)
+      )
+      and not (
+        granted_role.rolname in (select role_name from expected_roles)
+        and member_role.rolname = current_user
+        and grantor_role.rolsuper
+        and membership.admin_option
+        and not membership.inherit_option
+        and not membership.set_option
+      )
     )
+    and not exists (
+      select 1
+      from pg_catalog.pg_auth_members as membership
+      join pg_catalog.pg_roles as granted_role
+        on granted_role.oid = membership.roleid
+      where granted_role.rolname in (select role_name from expected_roles)
+      group by granted_role.rolname
+      having pg_catalog.count(*) > 1
+    )
+    and coalesce((
+      select case
+        when executor_role.rolsuper then membership_inventory.membership_count = 0
+        else membership_inventory.membership_count = 2
+      end
+      from pg_catalog.pg_roles as executor_role
+      cross join lateral (
+        select pg_catalog.count(*)::integer as membership_count
+        from pg_catalog.pg_auth_members as membership
+        join pg_catalog.pg_roles as granted_role
+          on granted_role.oid = membership.roleid
+        where granted_role.rolname in (select role_name from expected_roles)
+      ) as membership_inventory
+      where executor_role.rolname = current_user
+    ), false)
     and not exists (
       select 1
       from pg_catalog.pg_default_acl as default_acl

@@ -532,6 +532,37 @@ function cleanup() {
   })
 }
 
+function waitForPostgres() {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const pidOneResult = spawnSync(
+      'docker',
+      ['exec', containerName, 'cat', '/proc/1/comm'],
+      { cwd: root, encoding: 'utf8' },
+    )
+    if (
+      pidOneResult.status === 0 &&
+      pidOneResult.stdout.trim() === 'postgres'
+    ) {
+      const readyResult = spawnSync(
+        'docker',
+        [
+          'exec',
+          containerName,
+          'pg_isready',
+          '-U',
+          'postgres',
+          '-d',
+          'postgres',
+        ],
+        { cwd: root, stdio: 'ignore' },
+      )
+      if (readyResult.status === 0) return
+    }
+    spawnSync('sleep', ['1'])
+  }
+  assert.fail('POSTGRES_FINAL_SERVER_NOT_READY')
+}
+
 try {
   assert.match(image, /^postgres@sha256:[0-9a-f]{64}$/u)
   runDocker(['pull', image])
@@ -570,20 +601,7 @@ try {
     'track_commit_timestamp=on',
   ])
 
-  let ready = false
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    const result = spawnSync(
-      'docker',
-      ['exec', containerName, 'pg_isready', '-U', 'postgres', '-d', 'postgres'],
-      { cwd: root, stdio: 'ignore' },
-    )
-    if (result.status === 0) {
-      ready = true
-      break
-    }
-    spawnSync('sleep', ['1'])
-  }
-  assert.equal(ready, true)
+  waitForPostgres()
 
   prepareBaseline()
   const source = buildFixtureForensic()
