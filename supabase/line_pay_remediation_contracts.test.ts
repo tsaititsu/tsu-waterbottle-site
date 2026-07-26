@@ -181,6 +181,24 @@ for (const functionName of functionNames) {
 
 assert.match(migration, /create\s+role\s+line_pay_payment_executor\s+[^;]*nologin[^;]*nobypassrls/i)
 assert.match(migration, /create\s+role\s+line_pay_payment_function_owner\s+[^;]*nologin[^;]*nobypassrls/i)
+assert.match(
+  migration,
+  /current_setting\s*\(\s*'createrole_self_grant'\s*\)\s*<>\s*''/i,
+)
+assert.match(
+  migration,
+  /grant\s+line_pay_payment_function_owner\s+to\s+current_user\s+with\s+inherit\s+true,\s*set\s+true/i,
+)
+assert.match(
+  migration,
+  /revoke\s+line_pay_payment_function_owner\s+from\s+current_user/i,
+)
+assert.match(migration, /membership\.admin_option/i)
+assert.match(migration, /not\s+membership\.inherit_option/i)
+assert.match(migration, /not\s+membership\.set_option/i)
+assert.match(migration, /grantor_role\.rolsuper/i)
+assert.match(migration, /when\s+role\.rolsuper\s+then\s+membership_inventory\.membership_count\s+<>\s+0/i)
+assert.match(migration, /else\s+membership_inventory\.membership_count\s+<>\s+2/i)
 assert.match(migration, /create\s+schema\s+line_pay_private\s+authorization\s+line_pay_payment_function_owner/i)
 assert.match(migration, /create\s+table\s+line_pay_private\.line_pay_completion_proofs\b/i)
 assert.match(migration, /line_pay_completion_proof_is_immutable/i)

@@ -4370,6 +4370,15 @@ $$;
 
 do $$
 begin
+  if not (
+    select role.rolsuper
+    from pg_catalog.pg_roles as role
+    where role.rolname = current_user
+  ) and pg_catalog.current_setting('createrole_self_grant') <> '' then
+    raise exception using errcode = '42501',
+      message = 'line_pay_createrole_self_grant_must_be_empty';
+  end if;
+
   if not exists (
     select 1 from pg_catalog.pg_roles where rolname = 'line_pay_payment_executor'
   ) then
@@ -4385,6 +4394,15 @@ begin
   end if;
 end
 $$;
+
+-- Hosted Supabase exposes a CREATEROLE postgres role without SUPERUSER.
+-- PostgreSQL 17 gives that creator ADMIN, but not SET/INHERIT, on a role it
+-- creates when createrole_self_grant is empty. Ownership transfer requires
+-- SET, while the DDL and ACL statements below also need the owner's inherited
+-- object privileges. Keep that capability transaction-local and revoke the
+-- complete membership before any final role postcondition can pass.
+grant line_pay_payment_function_owner to current_user
+  with inherit true, set true;
 
 create schema line_pay_private authorization line_pay_payment_function_owner;
 
@@ -4766,6 +4784,12 @@ grant execute on function public.mark_product_order_line_pay_reconciliation(
   text, uuid, uuid, uuid, text, text
 ) to service_role;
 
+-- Remove the temporary current-user grant. On PostgreSQL 17, a non-superuser
+-- CREATEROLE executor still retains one bootstrap-superuser-granted ADMIN-only
+-- membership for each role it created. That catalog fact grants neither SET
+-- nor inherited Runtime privileges and is checked exactly below.
+revoke line_pay_payment_function_owner from current_user;
+
 -- Exact postcondition: one reviewed signature per sensitive name, fixed owner,
 -- fixed SECURITY DEFINER boundary, empty search_path, and no unexpected caller.
 do $$
@@ -4918,9 +4942,56 @@ begin
     from pg_catalog.pg_auth_members as membership
     join pg_catalog.pg_roles as granted_role on granted_role.oid = membership.roleid
     join pg_catalog.pg_roles as member_role on member_role.oid = membership.member
-    where granted_role.rolname in ('line_pay_payment_executor', 'line_pay_payment_function_owner')
-       or member_role.rolname in ('line_pay_payment_executor', 'line_pay_payment_function_owner')
-  ) then
+    join pg_catalog.pg_roles as grantor_role on grantor_role.oid = membership.grantor
+    where (
+      granted_role.rolname in (
+        'line_pay_payment_executor',
+        'line_pay_payment_function_owner'
+      )
+      or member_role.rolname in (
+        'line_pay_payment_executor',
+        'line_pay_payment_function_owner'
+      )
+    )
+    and not (
+      granted_role.rolname in (
+        'line_pay_payment_executor',
+        'line_pay_payment_function_owner'
+      )
+      and member_role.rolname = current_user
+      and grantor_role.rolsuper
+      and membership.admin_option
+      and not membership.inherit_option
+      and not membership.set_option
+    )
+  ) or exists (
+    select 1
+    from pg_catalog.pg_auth_members as membership
+    join pg_catalog.pg_roles as granted_role on granted_role.oid = membership.roleid
+    where granted_role.rolname in (
+      'line_pay_payment_executor',
+      'line_pay_payment_function_owner'
+    )
+    group by granted_role.rolname
+    having pg_catalog.count(*) > 1
+  ) or coalesce((
+    select case
+      when role.rolsuper then membership_inventory.membership_count <> 0
+      else membership_inventory.membership_count <> 2
+    end
+    from pg_catalog.pg_roles as role
+    cross join lateral (
+      select pg_catalog.count(*)::integer as membership_count
+      from pg_catalog.pg_auth_members as membership
+      join pg_catalog.pg_roles as granted_role
+        on granted_role.oid = membership.roleid
+      where granted_role.rolname in (
+        'line_pay_payment_executor',
+        'line_pay_payment_function_owner'
+      )
+    ) as membership_inventory
+    where role.rolname = current_user
+  ), true) then
     raise exception using errcode = '42501',
       message = 'line_pay_dedicated_role_membership_postcondition_failed';
   end if;

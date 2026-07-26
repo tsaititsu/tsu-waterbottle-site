@@ -5,6 +5,18 @@ database_contract as (
     pg_catalog.current_setting('server_version_num')::integer / 10000 as major,
     pg_catalog.pg_is_in_recovery() as recovery
 ),
+executor_contract as (
+  select pg_catalog.jsonb_build_object(
+    'ownership_transfer_ready',
+    role.rolsuper
+      or (
+        role.rolcreaterole
+        and pg_catalog.current_setting('createrole_self_grant') = ''
+      )
+  ) as value
+  from pg_catalog.pg_roles as role
+  where role.rolname = current_user
+),
 expected_relations(schema_name, relation_name) as (
   values
     ('public', 'app_environment_attestation'),
@@ -840,6 +852,7 @@ migration_history_contract as (
 assembled as (
   select
     to_jsonb(database_contract) as database,
+    (select value from executor_contract) as executor,
     to_jsonb(line_pay_inventory) as line_pay,
     (select value from fence_contract) as fence,
     (select value from historical_contract) as historical,
@@ -854,6 +867,8 @@ classified as (
   select
     case
       when database <> '{"name":"postgres","major":17,"recovery":false}'::jsonb
+        then 'SCHEMA_DRIFT'
+      when executor <> '{"ownership_transfer_ready":true}'::jsonb
         then 'SCHEMA_DRIFT'
       when (migration_history ->> 'line_pay_version_present')::boolean
         then 'SCHEMA_DRIFT'
@@ -954,6 +969,7 @@ from classified
 select pg_catalog.jsonb_build_object(
   'status', status,
   'database', database,
+  'executor', executor,
   'line_pay', line_pay,
   'fence', fence,
   'historical', historical,

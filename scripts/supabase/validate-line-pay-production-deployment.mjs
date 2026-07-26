@@ -31,7 +31,7 @@ export const WORKFLOW_FILE =
 export const RETIRED_WORKFLOW_FILE =
   '.github/workflows/supabase-emergency-profiles-acl.yml'
 export const EXPECTED_MIGRATION_SHA256 =
-  '370984c499d93f602b3dccf876becd030085e88ccd9a17106fee8b0009d84046'
+  '8da1fb429aecb1c35b12a245b63907135dbe7c467ef0a5f069afd431d21e94b8'
 export const EXPECTED_FENCE_SHA256 =
   '2f43979b1f4ff88243296f0a389c146b879652715d40d23bdb7ce1d6785407d7'
 export const EXPECTED_PSQL_MAJOR = 17
@@ -830,6 +830,9 @@ export function buildExpectedAuditFixture(phase) {
   }
   const common = {
     database: databaseContract(),
+    executor: {
+      ownership_transfer_ready: true,
+    },
     fence: clone(FENCE_CONTRACT),
   }
   if (phase === 'preflight') {

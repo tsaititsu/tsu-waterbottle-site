@@ -51,7 +51,7 @@ test('validator fixes the complete Production deployment identity', async () => 
   )
   assert.equal(
     createHash('sha256').update(migration).digest('hex'),
-    '370984c499d93f602b3dccf876becd030085e88ccd9a17106fee8b0009d84046',
+    '8da1fb429aecb1c35b12a245b63907135dbe7c467ef0a5f069afd431d21e94b8',
   )
   assert.equal(
     createHash('sha256').update(fence).digest('hex'),
@@ -64,6 +64,12 @@ test('validator exposes only frozen Bank Transfer match booleans and active mani
   const preflight = validator.buildExpectedAuditFixture('preflight')
   const postflight = validator.buildExpectedAuditFixture('postflight')
 
+  assert.deepEqual(preflight.executor, {
+    ownership_transfer_ready: true,
+  })
+  assert.deepEqual(postflight.executor, {
+    ownership_transfer_ready: true,
+  })
   assert.deepEqual(Object.keys(preflight.historical), ['bank_transfer'])
   assert.deepEqual(preflight.historical.bank_transfer, {
     schema_signature_match: true,
@@ -113,8 +119,27 @@ test('validator exposes only frozen Bank Transfer match booleans and active mani
   const serialized = JSON.stringify({ preflight, postflight })
   assert.doesNotMatch(
     serialized,
-    /"(?:pk_digest|content_digest)":|"rows":(?:18|5)/,
+    /"(?:pk_digest|content_digest)":|"rows":(?:18|5)|rolname|rolcreaterole|rolsuper/,
   )
+})
+
+test('validator fails closed when the executor cannot perform ownership transfers', async () => {
+  const validator = await import(pathToFileURL(validatorPath).href)
+
+  for (const phase of ['preflight', 'postflight']) {
+    const fixture = validator.buildExpectedAuditFixture(phase)
+    fixture.executor.ownership_transfer_ready = false
+    assert.throws(
+      () =>
+        validator.parseAndValidateAuditOutput(
+          `${JSON.stringify(fixture)}\n`,
+          phase,
+        ),
+      phase === 'preflight'
+        ? /SCHEMA_DRIFT/
+        : /POSTFLIGHT_CONTRACT_FAILED/,
+    )
+  }
 })
 
 test('validator rejects identity mutations and unsupported PostgreSQL clients', async () => {
@@ -139,7 +164,7 @@ test('validator rejects identity mutations and unsupported PostgreSQL clients', 
   )
   assert.equal(
     validator.validateMigrationHash(
-      '370984c499d93f602b3dccf876becd030085e88ccd9a17106fee8b0009d84046',
+      '8da1fb429aecb1c35b12a245b63907135dbe7c467ef0a5f069afd431d21e94b8',
     ),
     true,
   )
@@ -212,7 +237,7 @@ test('source context and Environment channel gates fail closed', async () => {
     AUTHORIZED_COMMIT: sha,
     PROJECT_REF_INPUT: 'ndbqoznvobmpkgxkiezz',
     MIGRATION_SHA256_INPUT:
-      '370984c499d93f602b3dccf876becd030085e88ccd9a17106fee8b0009d84046',
+      '8da1fb429aecb1c35b12a245b63907135dbe7c467ef0a5f069afd431d21e94b8',
     DEPLOY_CONFIRMATION: 'DEPLOY_LINE_PAY_REMEDIATION_EXACT_FILE_ONCE',
   }
   assert.equal(validator.validateWorkflowContext(valid), true)
@@ -342,6 +367,7 @@ test('preflight and postflight SQL are fixed read-only single-statement queries'
     assert.ok(postflight.includes(column), column)
   }
   for (const safeBoolean of [
+    'ownership_transfer_ready',
     'schema_signature_match',
     'row_count_match',
     'pending_review_count_match',
@@ -351,6 +377,12 @@ test('preflight and postflight SQL are fixed read-only single-statement queries'
   ]) {
     assert.ok(preflight.includes(`'${safeBoolean}'`), safeBoolean)
     assert.ok(postflight.includes(`'${safeBoolean}'`), safeBoolean)
+  }
+  for (const sql of [preflight, postflight]) {
+    assert.match(sql, /current_setting\('createrole_self_grant'\) = ''/)
+    assert.match(sql, /role[.]rolsuper/)
+    assert.match(sql, /role[.]rolcreaterole/)
+    assert.doesNotMatch(sql, /jsonb_build_object\([\s\S]{0,400}'(?:rolname|rolsuper|rolcreaterole)'/)
   }
   for (const sql of [
     'insert into public.x values (1);',
