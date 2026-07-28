@@ -274,8 +274,13 @@ test('shared runner defaults remain unchanged for the existing diagnostic', () =
 
 test('disposable PostgreSQL runner waits for stable SQL readiness', () => {
   const source = readFileSync(disposableRunnerPath, 'utf8')
+  const finalProcessGate = source.search(/\/proc\/1\/comm/u)
+  const sqlProbe = source.search(/['"]select 1['"]/u)
+
   assert.match(source, /let consecutiveReadyChecks = 0/u)
   assert.match(source, /['"]select 1['"]/u)
   assert.match(source, /consecutiveReadyChecks >= 2/u)
+  assert.ok(finalProcessGate >= 0)
+  assert.ok(sqlProbe > finalProcessGate)
   assert.doesNotMatch(source, /if \(result[.]status === 0\) return/u)
 })

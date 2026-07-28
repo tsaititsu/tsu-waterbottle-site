@@ -12,7 +12,9 @@ on public.line_pay_payment_audit_events(checkout_attempt_id)
 where event_type = 'checkout_initialized';
 
 -- Policy intent:
--- READ: no new read policy; existing owner-scoped audit visibility is unchanged.
+-- AUDIT READ: no new read policy; owner-scoped audit visibility is unchanged.
+-- AGGREGATE READ: the dedicated function-owner may inspect only LINE Pay
+-- product-order items and shipping rows to bind complete initialization.
 -- INSERT: only the dedicated function-owner role may add checkout_initialized.
 -- UPDATE: no policy or table privilege is added.
 -- DELETE: no policy or table privilege is added.
@@ -21,6 +23,37 @@ on public.line_pay_payment_audit_events
 for insert
 to line_pay_payment_function_owner
 with check (event_type = 'checkout_initialized');
+
+grant select on table
+  public.product_order_items,
+  public.product_shipping_info
+to line_pay_payment_function_owner;
+
+create policy line_pay_payment_function_owner_initialization_items_select
+on public.product_order_items
+for select
+to line_pay_payment_function_owner
+using (
+  exists (
+    select 1
+    from public.product_orders as product_order
+    where product_order.id = product_order_items.order_id
+      and product_order.payment_method = 'line_pay'
+  )
+);
+
+create policy line_pay_payment_function_owner_initialization_shipping_select
+on public.product_shipping_info
+for select
+to line_pay_payment_function_owner
+using (
+  exists (
+    select 1
+    from public.product_orders as product_order
+    where product_order.id = product_shipping_info.order_id
+      and product_order.payment_method = 'line_pay'
+  )
+);
 
 create or replace function line_pay_private.record_line_pay_checkout_initialized_audit(
   p_payment_id uuid,
@@ -55,19 +88,147 @@ begin
          and payment.environment = p_environment
          and payment.request_state = 'initialized'
          and payment.status = 'pending'
+         and payment.currency = 'TWD'
+         and payment.amount_twd = product_order.total_amount_twd
+         and payment.amount_twd = attempt.amount_twd
          and payment.user_id = product_order.user_id
          and product_order.user_id = attempt.user_id
          and product_order.payment_method = 'line_pay'
          and product_order.environment = p_environment
+         and product_order.currency = 'TWD'
          and product_order.payment_id is not distinct from payment.id
          and product_order.checkout_attempt_id is not distinct from attempt.id
          and product_order.payment_request_state = 'initialized'
          and product_order.payment_status = 'pending'
          and attempt.provider = 'line_pay'
          and attempt.environment = p_environment
+         and attempt.currency = 'TWD'
          and attempt.payment_id = payment.id
          and attempt.product_order_id = product_order.id
          and attempt.request_state = 'queued'
+         and (
+           select pg_catalog.count(*)
+           from public.product_order_items as item
+           where item.order_id = product_order.id
+         ) between 1 and 100
+         and (
+           select coalesce(
+             pg_catalog.sum(item.subtotal_twd::bigint),
+             0
+           )
+           from public.product_order_items as item
+           where item.order_id = product_order.id
+         ) = payment.amount_twd::bigint
+         and not exists (
+           select 1
+           from public.product_order_items as item
+           where item.order_id = product_order.id
+             and (
+               item.subtotal_twd::bigint
+                 <> item.unit_price_twd::bigint * item.quantity::bigint
+               or pg_catalog.jsonb_typeof(item.product_snapshot) <> 'object'
+               or not (
+                 item.product_snapshot ?& array[
+                   'slug',
+                   'name',
+                   'category',
+                   'priceTwd'
+                 ]::text[]
+               )
+               or exists (
+                 select 1
+                 from pg_catalog.jsonb_object_keys(
+                   item.product_snapshot
+                 ) as supplied(key)
+                 where supplied.key not in (
+                   'slug',
+                   'name',
+                   'category',
+                   'priceTwd'
+                 )
+               )
+               or pg_catalog.jsonb_typeof(
+                 item.product_snapshot -> 'slug'
+               ) <> 'string'
+               or pg_catalog.jsonb_typeof(
+                 item.product_snapshot -> 'name'
+               ) <> 'string'
+               or pg_catalog.jsonb_typeof(
+                 item.product_snapshot -> 'category'
+               ) <> 'string'
+               or item.product_snapshot ->> 'slug'
+                 is distinct from item.product_slug
+               or item.product_snapshot ->> 'name'
+                 is distinct from item.product_name
+               or coalesce(item.product_snapshot ->> 'category', '')
+                 not in ('符咒商品', '聚寶盆')
+               or pg_catalog.jsonb_typeof(
+                 item.product_snapshot -> 'priceTwd'
+               ) <> 'number'
+               or item.product_snapshot ->> 'priceTwd' !~ '^[0-9]+$'
+               or pg_catalog.length(
+                 item.product_snapshot ->> 'priceTwd'
+               ) > 10
+               or (
+                 item.product_snapshot ->> 'priceTwd'
+               )::bigint <> item.unit_price_twd::bigint
+             )
+         )
+         and (
+           select pg_catalog.count(*)
+           from public.product_shipping_info as shipping
+           where shipping.order_id = product_order.id
+             and shipping.shipping_method in (
+               'manual',
+               'convenience_store_c2c',
+               'convenience_store_b2c',
+               'home_delivery'
+             )
+             and (
+               p_environment = 'sandbox'
+               or (
+                 nullif(
+                   pg_catalog.btrim(coalesce(shipping.recipient_name, '')),
+                   ''
+                 ) is not null
+                 and nullif(
+                   pg_catalog.btrim(coalesce(shipping.recipient_phone, '')),
+                   ''
+                 ) is not null
+                 and (
+                   (
+                     shipping.shipping_method in ('manual', 'home_delivery')
+                     and nullif(
+                       pg_catalog.btrim(coalesce(shipping.address, '')),
+                       ''
+                     ) is not null
+                   )
+                   or (
+                     shipping.shipping_method in (
+                       'convenience_store_c2c',
+                       'convenience_store_b2c'
+                     )
+                     and nullif(
+                       pg_catalog.btrim(coalesce(shipping.store_type, '')),
+                       ''
+                     ) is not null
+                     and nullif(
+                       pg_catalog.btrim(coalesce(shipping.store_id, '')),
+                       ''
+                     ) is not null
+                     and nullif(
+                       pg_catalog.btrim(coalesce(shipping.store_name, '')),
+                       ''
+                     ) is not null
+                     and nullif(
+                       pg_catalog.btrim(coalesce(shipping.store_address, '')),
+                       ''
+                     ) is not null
+                   )
+                 )
+               )
+             )
+         ) = 1
          and (
            select pg_catalog.count(*)
            from public.line_pay_request_outbox as request_outbox
@@ -138,6 +299,12 @@ alter function line_pay_private.record_line_pay_checkout_initialized_audit(
   uuid,
   text
 ) owner to line_pay_payment_function_owner;
+comment on function line_pay_private.record_line_pay_checkout_initialized_audit(
+  uuid,
+  uuid,
+  uuid,
+  text
+) is 'line_pay_definition_md5:93202b38912b59f67084524354c99c5f';
 
 revoke all on function line_pay_private.record_line_pay_checkout_initialized_audit(
   uuid,
@@ -963,6 +1130,9 @@ begin
 end;
 $$;
 
+comment on function public.initialize_product_order_line_pay_checkout(jsonb)
+is 'line_pay_definition_md5:bd574bd743ce0b523e487d303efb0318';
+
 revoke all on function public.initialize_product_order_line_pay_checkout(jsonb)
 from public, anon, authenticated;
 grant execute on function public.initialize_product_order_line_pay_checkout(jsonb)
@@ -1010,8 +1180,18 @@ begin
     where procedure.oid = v_function_oid
       and (
         procedure.prosecdef
+        or procedure.proowner <> (
+          select role.oid
+          from pg_catalog.pg_roles as role
+          where role.rolname = current_user
+        )
+        or procedure.provolatile <> 'v'
         or procedure.proconfig is null
         or not ('search_path=""' = any (procedure.proconfig))
+        or pg_catalog.obj_description(procedure.oid, 'pg_proc')
+          <> 'line_pay_definition_md5:bd574bd743ce0b523e487d303efb0318'
+        or pg_catalog.md5(pg_catalog.pg_get_functiondef(procedure.oid))
+          <> 'bd574bd743ce0b523e487d303efb0318'
       )
   )
   or exists (
@@ -1028,6 +1208,10 @@ begin
         or procedure.provolatile <> 'v'
         or procedure.proconfig is null
         or not ('search_path=""' = any (procedure.proconfig))
+        or pg_catalog.obj_description(procedure.oid, 'pg_proc')
+          <> 'line_pay_definition_md5:93202b38912b59f67084524354c99c5f'
+        or pg_catalog.md5(pg_catalog.pg_get_functiondef(procedure.oid))
+          <> '93202b38912b59f67084524354c99c5f'
       )
   )
   or not pg_catalog.has_function_privilege(
@@ -1105,6 +1289,78 @@ begin
       and pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid)
         = '(event_type = ''checkout_initialized''::text)'
   ) <> 1
+  or (
+    select pg_catalog.count(*)
+    from pg_catalog.pg_policy as policy
+    join pg_catalog.pg_class as relation
+      on relation.oid = policy.polrelid
+    join pg_catalog.pg_namespace as namespace
+      on namespace.oid = relation.relnamespace
+    where namespace.nspname = 'public'
+      and relation.relname = 'product_order_items'
+      and policy.polname =
+        'line_pay_payment_function_owner_initialization_items_select'
+      and policy.polcmd = 'r'
+      and policy.polpermissive
+      and policy.polroles = array[
+        (
+          select role.oid
+          from pg_catalog.pg_roles as role
+          where role.rolname = 'line_pay_payment_function_owner'
+        )
+      ]::oid[]
+      and policy.polwithcheck is null
+      and pg_catalog.pg_get_expr(policy.polqual, policy.polrelid) =
+        '(EXISTS ( SELECT 1
+   FROM product_orders product_order
+  WHERE ((product_order.id = product_order_items.order_id) AND (product_order.payment_method = ''line_pay''::text))))'
+  ) <> 1
+  or (
+    select pg_catalog.count(*)
+    from pg_catalog.pg_policy as policy
+    join pg_catalog.pg_class as relation
+      on relation.oid = policy.polrelid
+    join pg_catalog.pg_namespace as namespace
+      on namespace.oid = relation.relnamespace
+    where namespace.nspname = 'public'
+      and relation.relname = 'product_shipping_info'
+      and policy.polname =
+        'line_pay_payment_function_owner_initialization_shipping_select'
+      and policy.polcmd = 'r'
+      and policy.polpermissive
+      and policy.polroles = array[
+        (
+          select role.oid
+          from pg_catalog.pg_roles as role
+          where role.rolname = 'line_pay_payment_function_owner'
+        )
+      ]::oid[]
+      and policy.polwithcheck is null
+      and pg_catalog.pg_get_expr(policy.polqual, policy.polrelid) =
+        '(EXISTS ( SELECT 1
+   FROM product_orders product_order
+  WHERE ((product_order.id = product_shipping_info.order_id) AND (product_order.payment_method = ''line_pay''::text))))'
+  ) <> 1
+  or not pg_catalog.has_table_privilege(
+    'line_pay_payment_function_owner',
+    'public.product_order_items',
+    'select'
+  )
+  or not pg_catalog.has_table_privilege(
+    'line_pay_payment_function_owner',
+    'public.product_shipping_info',
+    'select'
+  )
+  or pg_catalog.has_table_privilege(
+    'line_pay_payment_function_owner',
+    'public.product_order_items',
+    'insert,update,delete,truncate,references,trigger'
+  )
+  or pg_catalog.has_table_privilege(
+    'line_pay_payment_function_owner',
+    'public.product_shipping_info',
+    'insert,update,delete,truncate,references,trigger'
+  )
   or pg_catalog.has_table_privilege(
     'service_role',
     'public.line_pay_payment_audit_events',

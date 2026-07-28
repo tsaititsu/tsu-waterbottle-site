@@ -127,6 +127,20 @@ function psqlFile(relativePath) {
 function waitForPostgres() {
   let consecutiveReadyChecks = 0
   for (let attempt = 0; attempt < 120; attempt += 1) {
+    const finalProcess = spawnSync(
+      'docker',
+      ['exec', containerName, 'cat', '/proc/1/comm'],
+      { cwd: root, encoding: 'utf8' },
+    )
+    if (
+      finalProcess.status !== 0
+      || finalProcess.stdout.trim() !== 'postgres'
+    ) {
+      consecutiveReadyChecks = 0
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250)
+      continue
+    }
+
     const result = spawnSync(
       'docker',
       [

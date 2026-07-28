@@ -6,15 +6,26 @@
 ## 影響範圍
 
 Migration 只新增一個 service-role-only initializer、一個 private audit helper、
-一條 INSERT Policy 與一個 partial unique index。它不建立或改寫既有資料表，
-也不改變既有訂單、付款或銀行轉帳資料。
+一條 audit INSERT Policy、兩條聚合驗證用 SELECT Policy、一個 partial unique
+index，以及 dedicated function-owner 對品項／收件資料的 SELECT 權限。它不
+建立或改寫既有資料表，也不改變既有訂單、付款或銀行轉帳資料。
 
 Policy 意圖如下：
 
-- 讀取：不新增讀取 Policy，沿用既有 owner-scoped audit 可見性。
+- Audit 讀取：不新增讀取 Policy，沿用既有 owner-scoped audit 可見性。
+- Aggregate 驗證讀取：只讓 dedicated function-owner 讀取 LINE Pay 訂單的
+  品項與收件資料。
 - 新增：只有 dedicated function-owner role 可新增 `checkout_initialized`。
 - 更新：不新增 Policy 或 table privilege。
 - 刪除：不新增 Policy 或 table privilege。
+
+兩條額外 SELECT Policy 只供 private audit helper 驗證完整 aggregate：
+
+- 品項至少一筆，subtotal 合計、snapshot、訂單／付款／attempt 金額與幣別一致。
+- 收件資料精確一筆；Production 仍須符合對應配送方式的必要欄位。
+
+這些 Policy 不授權 `anon`、`authenticated` 或 `service_role` 直接新增、
+修改或刪除 audit 資料。
 
 ## Backup／PITR 與 restore point
 
@@ -49,7 +60,9 @@ Policy 意圖如下：
 
 - `LINE Pay Runtime disabled`。
 - `checkout_initialized` audit event 精確為 0。
-- initializer、private helper、Policy 與 index 均為預期完整狀態。
+- initializer、private helper、三條 Policy、SELECT ACL 與 index 均通過
+  owner、security mode、definition digest、ACL 與 canonical expression
+  的 exact catalog 驗證。
 - Backup／PITR 與可用 restore point 已核對。
 
 Recovery 只移除本 Migration 新增的 function、Policy 與 index；不處理資料，

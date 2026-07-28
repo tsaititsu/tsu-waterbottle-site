@@ -177,6 +177,20 @@ function prepareDatabase(database) {
 function waitForPostgres(container) {
   let readyChecks = 0
   for (let attempt = 0; attempt < 120; attempt += 1) {
+    const finalProcess = spawnSync(
+      'docker',
+      ['exec', container, 'cat', '/proc/1/comm'],
+      { encoding: 'utf8' },
+    )
+    if (
+      finalProcess.status !== 0
+      || finalProcess.stdout.trim() !== 'postgres'
+    ) {
+      readyChecks = 0
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250)
+      continue
+    }
+
     const result = spawnSync(
       'docker',
       [
@@ -361,6 +375,90 @@ function testReviewedRecovery(database) {
   }
 }
 
+function testReviewedRecoveryRejectsDefinitionDrift(database) {
+  psqlFile(database, 'supabase/tests/line_pay_local_postgres_bootstrap.sql')
+  for (const file of baselineFiles) psqlFile(database, file)
+  psqlFile(database, baseMigration)
+  psqlFile(database, initializationMigration)
+  psql(
+    database,
+    `
+      alter function public.initialize_product_order_line_pay_checkout(jsonb)
+      stable;
+    `,
+    'reviewed recovery definition drift fixture',
+  )
+
+  const recoveryOutput = psqlAsInContainer(
+    containerName,
+    database,
+    'postgres',
+    readFileSync(initializationRecovery, 'utf8'),
+    'reviewed recovery after definition drift',
+    true,
+  )
+  if (
+    !recoveryOutput.includes(
+      'line_pay_initialization_recovery_state_mismatch',
+    )
+  ) {
+    throw new Error(
+      'reviewed recovery did not reject definition drift with the exact marker',
+    )
+  }
+
+  const preservedState = JSON.parse(
+    psql(
+      database,
+      `
+        copy (
+          select pg_catalog.jsonb_build_object(
+            'initializer_preserved',
+              pg_catalog.to_regprocedure(
+                'public.initialize_product_order_line_pay_checkout(jsonb)'
+              ) is not null,
+            'audit_helper_preserved',
+              pg_catalog.to_regprocedure(
+                'line_pay_private.record_line_pay_checkout_initialized_audit(uuid,uuid,uuid,text)'
+              ) is not null,
+            'index_preserved',
+              pg_catalog.to_regclass(
+                'public.line_pay_payment_audit_events_checkout_initialized_once_idx'
+              ) is not null,
+            'audit_policy_preserved',
+              exists (
+                select 1
+                from pg_catalog.pg_policy as policy
+                where policy.polname =
+                  'line_pay_payment_function_owner_checkout_initialized_audit_insert'
+              ),
+            'items_policy_preserved',
+              exists (
+                select 1
+                from pg_catalog.pg_policy as policy
+                where policy.polname =
+                  'line_pay_payment_function_owner_initialization_items_select'
+              ),
+            'shipping_policy_preserved',
+              exists (
+                select 1
+                from pg_catalog.pg_policy as policy
+                where policy.polname =
+                  'line_pay_payment_function_owner_initialization_shipping_select'
+              )
+          )
+        ) to stdout;
+      `,
+      'definition drift recovery preservation',
+    ),
+  )
+  if (Object.values(preservedState).some((value) => value !== true)) {
+    throw new Error(
+      `definition drift recovery changed state: ${JSON.stringify(preservedState)}`,
+    )
+  }
+}
+
 function testReviewedRecoveryRequiresFailForward(database) {
   const recoveryOutput = psqlAsInContainer(
     containerName,
@@ -443,98 +541,23 @@ function testPayloadLimitMutationSensitivity(database) {
   if (mutatedMigration === migration) {
     throw new Error('payload size mutation did not remove the reviewed guard')
   }
-  psql(
+  const migrationFailure = psqlAsInContainer(
+    containerName,
     database,
+    'postgres',
     mutatedMigration,
     'payload size guard mutation migration',
+    true,
   )
-
-  psql(
-    database,
-    `
-      insert into auth.users (id)
-      values ('41000000-0000-4000-8000-000000000088');
-
-      set role service_role;
-
-      do $$
-      declare
-        v_payload jsonb;
-        v_result record;
-      begin
-        select pg_catalog.jsonb_build_object(
-          'user_id', '41000000-0000-4000-8000-000000000088',
-          'environment', 'sandbox',
-          'order_no', 'PO-SANDBOX-SIZE-MUTATION-1',
-          'merchant_order_no', 'LP_SANDBOX_SIZE_MUTATION_1',
-          'customer_name', null,
-          'customer_email', null,
-          'customer_phone', null,
-          'note', null,
-          'items', (
-            select pg_catalog.jsonb_agg(
-              pg_catalog.jsonb_build_object(
-                'product_slug',
-                  'oversized-'
-                  || pg_catalog.lpad(item_index::text, 3, '0')
-                  || pg_catalog.repeat('s', 180),
-                'product_name', pg_catalog.repeat('N', 500),
-                'unit_price_twd', 1,
-                'quantity', 1,
-                'product_snapshot', pg_catalog.jsonb_build_object(
-                  'slug',
-                    'oversized-'
-                    || pg_catalog.lpad(item_index::text, 3, '0')
-                    || pg_catalog.repeat('s', 180),
-                  'name', pg_catalog.repeat('N', 500),
-                  'category', '符咒商品',
-                  'priceTwd', 1
-                )
-              )
-            )
-            from pg_catalog.generate_series(1, 100) as item_index
-          ),
-          'shipping_info', pg_catalog.jsonb_build_object(
-            'recipient_name', null,
-            'recipient_phone', null,
-            'recipient_email', null,
-            'shipping_method', 'manual',
-            'postal_code', null,
-            'address', null,
-            'store_type', null,
-            'store_id', null,
-            'store_name', null,
-            'store_address', null,
-            'store_phone', null
-          ),
-          'idempotency_key', 'sandbox-size-mutation-0001',
-          'request_body_sha256', pg_catalog.repeat('1', 64),
-          'confirm_token_hash', pg_catalog.repeat('2', 64),
-          'cancel_token_hash', pg_catalog.repeat('3', 64),
-          'capability_expires_at',
-            pg_catalog.to_char(
-              pg_catalog.clock_timestamp() + interval '30 minutes',
-              'YYYY-MM-DD"T"HH24:MI:SS.USOF'
-            )
-        )
-        into strict v_payload;
-
-        if pg_catalog.octet_length(v_payload::text) <= 65536 then
-          raise exception 'payload_size_mutation_fixture_too_small';
-        end if;
-
-        select *
-        into strict v_result
-        from public.initialize_product_order_line_pay_checkout(v_payload);
-
-        if v_result.result_code <> 'initialized' then
-          raise exception 'payload_size_mutation_did_not_reach_initializer';
-        end if;
-      end;
-      $$;
-    `,
-    'payload size guard mutation sensitivity',
-  )
+  if (
+    !migrationFailure.includes(
+      'line_pay_initialization_rpc_security_postcondition_failed',
+    )
+  ) {
+    throw new Error(
+      'payload size guard mutation bypassed definition attestation',
+    )
+  }
 }
 
 function testHostedNonSuperuserUpgrade() {
@@ -950,6 +973,11 @@ async function main() {
     'create database line_pay_initialization_reviewed_recovery;',
     'create reviewed recovery database',
   )
+  psql(
+    'postgres',
+    'create database line_pay_initialization_recovery_drift;',
+    'create recovery drift database',
+  )
 
   prepareDatabase('line_pay_initialization_contract')
   psqlFile(
@@ -976,6 +1004,9 @@ async function main() {
     'line_pay_initialization_payload_mutation',
   )
   testReviewedRecovery('line_pay_initialization_reviewed_recovery')
+  testReviewedRecoveryRejectsDefinitionDrift(
+    'line_pay_initialization_recovery_drift',
+  )
   testHostedNonSuperuserUpgrade()
 
   process.stdout.write(

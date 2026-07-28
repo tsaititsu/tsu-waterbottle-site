@@ -25,6 +25,13 @@ const workflow = readFileSync(
   new URL('../.github/workflows/line-pay-db-contract-ci.yml', import.meta.url),
   'utf8',
 )
+const postgresRunner = readFileSync(
+  new URL(
+    './tests/run_line_pay_checkout_aggregate_initialization.mjs',
+    import.meta.url,
+  ),
+  'utf8',
+)
 
 test('adds one JSON-only atomic LINE Pay checkout initializer', () => {
   assert.match(
@@ -257,6 +264,14 @@ test('LINE Pay DB CI runs both static and PostgreSQL 17 initialization contracts
   assert.match(workflow, /task=line-pay-initialize-aggregate-v1/)
 })
 
+test('initializer PostgreSQL runner waits for the final container process', () => {
+  const finalProcessGate = postgresRunner.search(/\/proc\/1\/comm/u)
+  const sqlProbe = postgresRunner.search(/['"]select 1['"]/u)
+
+  assert.ok(finalProcessGate >= 0)
+  assert.ok(sqlProbe > finalProcessGate)
+})
+
 test('provides a reviewed fail-closed recovery artifact without wiring Production execution', () => {
   assert.equal(existsSync(recoveryPath), true)
   assert.match(recovery, /^\s*\\set\s+ON_ERROR_STOP\s+on/im)
@@ -281,8 +296,24 @@ test('provides a reviewed fail-closed recovery artifact without wiring Productio
     /drop\s+index\s+public\.line_pay_payment_audit_events_checkout_initialized_once_idx/i,
   )
   assert.doesNotMatch(recovery, /\bcascade\b/i)
-  assert.doesNotMatch(recovery, /\b(?:delete|truncate|update)\b/i)
+  assert.doesNotMatch(
+    recovery,
+    /^\s*(?:delete|truncate|update)\s+/im,
+  )
   assert.doesNotMatch(workflow, /run:.*line_pay_checkout_aggregate_initialization_recovery/is)
+  assert.match(recovery, /pg_catalog\.pg_get_functiondef/i)
+  assert.match(recovery, /pg_catalog\.obj_description/i)
+  assert.match(recovery, /pg_catalog\.aclexplode/i)
+  assert.match(recovery, /pg_catalog\.pg_get_indexdef/i)
+  assert.match(recovery, /pg_catalog\.pg_get_expr/i)
+  assert.match(recovery, /index_catalog\.indnkeyatts\s*=\s*1/i)
+  assert.match(recovery, /index_catalog\.indnatts\s*=\s*1/i)
+  assert.match(recovery, /index_catalog\.indexprs\s+is\s+null/i)
+  assert.match(recovery, /access_method\.amname\s*=\s*'btree'/i)
+  assert.match(recovery, /index_catalog\.indisready/i)
+  assert.match(recovery, /policy\.polcmd\s*=\s*'a'/i)
+  assert.match(recovery, /policy\.polwithcheck/i)
+  assert.match(recovery, /line_pay_initialization_recovery_state_mismatch/i)
 })
 
 test('documents impact, backup, deployment order, compatibility, and fail-forward boundary', () => {

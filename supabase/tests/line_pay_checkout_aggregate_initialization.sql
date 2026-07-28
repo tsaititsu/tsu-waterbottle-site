@@ -400,6 +400,129 @@ $$;
 
 rollback;
 
+begin;
+
+delete from public.product_order_items
+where order_id = (
+  select product_order_id
+  from line_pay_initialization_first_result
+);
+
+set local role service_role;
+
+do $$
+begin
+  perform line_pay_private.record_line_pay_checkout_initialized_audit(
+    (select payment_id from line_pay_initialization_first_result),
+    (select product_order_id from line_pay_initialization_first_result),
+    (select attempt_id from line_pay_initialization_first_result),
+    'sandbox'
+  );
+  raise exception 'line_pay_initialization_missing_items_audit_was_accepted';
+exception
+  when check_violation then
+    if sqlerrm <> 'line_pay_initialization_audit_binding_invalid' then
+      raise;
+    end if;
+end;
+$$;
+
+rollback;
+
+begin;
+
+delete from public.product_shipping_info
+where order_id = (
+  select product_order_id
+  from line_pay_initialization_first_result
+);
+
+set local role service_role;
+
+do $$
+begin
+  perform line_pay_private.record_line_pay_checkout_initialized_audit(
+    (select payment_id from line_pay_initialization_first_result),
+    (select product_order_id from line_pay_initialization_first_result),
+    (select attempt_id from line_pay_initialization_first_result),
+    'sandbox'
+  );
+  raise exception 'line_pay_initialization_missing_shipping_audit_was_accepted';
+exception
+  when check_violation then
+    if sqlerrm <> 'line_pay_initialization_audit_binding_invalid' then
+      raise;
+    end if;
+end;
+$$;
+
+rollback;
+
+begin;
+
+update public.product_order_items
+set product_snapshot = pg_catalog.jsonb_set(
+  product_snapshot,
+  '{slug}',
+  'null'::jsonb,
+  false
+)
+where order_id = (
+  select product_order_id
+  from line_pay_initialization_first_result
+);
+
+set local role service_role;
+
+do $$
+begin
+  perform line_pay_private.record_line_pay_checkout_initialized_audit(
+    (select payment_id from line_pay_initialization_first_result),
+    (select product_order_id from line_pay_initialization_first_result),
+    (select attempt_id from line_pay_initialization_first_result),
+    'sandbox'
+  );
+  raise exception 'line_pay_initialization_null_snapshot_audit_was_accepted';
+exception
+  when check_violation then
+    if sqlerrm <> 'line_pay_initialization_audit_binding_invalid' then
+      raise;
+    end if;
+end;
+$$;
+
+rollback;
+
+begin;
+
+update public.line_pay_checkout_attempts
+set amount_twd = amount_twd + 1
+where id = (
+  select attempt_id
+  from line_pay_initialization_first_result
+);
+
+set local role service_role;
+
+do $$
+begin
+  perform line_pay_private.record_line_pay_checkout_initialized_audit(
+    (select payment_id from line_pay_initialization_first_result),
+    (select product_order_id from line_pay_initialization_first_result),
+    (select attempt_id from line_pay_initialization_first_result),
+    'sandbox'
+  );
+  raise exception 'line_pay_initialization_amount_mismatch_audit_was_accepted';
+exception
+  when check_violation then
+    if sqlerrm <> 'line_pay_initialization_audit_binding_invalid' then
+      raise;
+    end if;
+end;
+$$;
+
+rollback;
+
 set role service_role;
 
 do $$
