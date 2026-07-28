@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 const migrationPath = new URL(
@@ -7,6 +7,20 @@ const migrationPath = new URL(
   import.meta.url,
 )
 const migration = readFileSync(migrationPath, 'utf8')
+const recoveryPath = new URL(
+  './deployment/line_pay_checkout_aggregate_initialization_recovery.sql',
+  import.meta.url,
+)
+const recovery = existsSync(recoveryPath)
+  ? readFileSync(recoveryPath, 'utf8')
+  : ''
+const deploymentRunbookPath = new URL(
+  '../docs/line-pay-checkout-aggregate-initialization-deployment.md',
+  import.meta.url,
+)
+const deploymentRunbook = existsSync(deploymentRunbookPath)
+  ? readFileSync(deploymentRunbookPath, 'utf8')
+  : ''
 const workflow = readFileSync(
   new URL('../.github/workflows/line-pay-db-contract-ci.yml', import.meta.url),
   'utf8',
@@ -106,6 +120,12 @@ test('initializer is exact-shape, fail-closed, and secret-minimizing', () => {
     migration,
     /channel[_ ]?secret|authorization|gateway[_ ]?secret|private[_ ]?key/i,
   )
+  assert.match(migration, /customer_email[\s\S]*?\^\[\^\[:space:\]@\]\+@/i)
+  assert.match(migration, /customer_phone[\s\S]*?\^\[0-9\+\(\)\. \-\]\+\$/i)
+  assert.match(migration, /recipient_email[\s\S]*?\^\[\^\[:space:\]@\]\+@/i)
+  assert.match(migration, /recipient_phone[\s\S]*?\^\[0-9\+\(\)\. \-\]\+\$/i)
+  assert.match(migration, /postal_code[\s\S]*?\^\[A-Za-z0-9\]/i)
+  assert.match(migration, /store_phone[\s\S]*?\^\[0-9\+\(\)\. \-\]\+\$/i)
 })
 
 test('initializer replay validates reciprocal aggregate bindings before success', () => {
@@ -189,6 +209,10 @@ test('initializer writes one bounded audit event through a least-privilege helpe
     /has_table_privilege\([\s\S]*?'service_role'[\s\S]*?'public\.line_pay_payment_audit_events'/i,
   )
   assert.match(migration, /v_audit_function_oid/i)
+  assert.match(
+    migration,
+    /policy\s+intent[\s\S]*?read[\s\S]*?insert[\s\S]*?update[\s\S]*?delete/i,
+  )
 })
 
 test('initializer execute ACL is service-role only with an exact catalog postcondition', () => {
@@ -210,7 +234,9 @@ test('LINE Pay DB CI runs both static and PostgreSQL 17 initialization contracts
     'src/lib/supabase/linePayCheckoutInitialization.test.ts',
     'supabase/line_pay_checkout_aggregate_initialization.test.ts',
     'supabase/migrations/20260728053215_line_pay_checkout_aggregate_initialization.sql',
+    'supabase/deployment/line_pay_checkout_aggregate_initialization_recovery.sql',
     'supabase/tests/run_line_pay_checkout_aggregate_initialization.mjs',
+    'docs/line-pay-checkout-aggregate-initialization-deployment.md',
   ]) {
     assert.match(workflow, new RegExp(path.replaceAll('.', '\\.')))
   }
@@ -229,4 +255,50 @@ test('LINE Pay DB CI runs both static and PostgreSQL 17 initialization contracts
   )
   assert.match(workflow, /supabase\/tests\/line_pay_\*\.sql/)
   assert.match(workflow, /task=line-pay-initialize-aggregate-v1/)
+})
+
+test('provides a reviewed fail-closed recovery artifact without wiring Production execution', () => {
+  assert.equal(existsSync(recoveryPath), true)
+  assert.match(recovery, /^\s*\\set\s+ON_ERROR_STOP\s+on/im)
+  assert.match(recovery, /\bbegin\s*;/i)
+  assert.match(recovery, /\bcommit\s*;/i)
+  assert.match(recovery, /event_type\s*=\s*'checkout_initialized'/i)
+  assert.match(recovery, /line_pay_initialization_recovery_requires_fail_forward/i)
+  assert.match(
+    recovery,
+    /drop\s+function\s+public\.initialize_product_order_line_pay_checkout\s*\(\s*jsonb\s*\)/i,
+  )
+  assert.match(
+    recovery,
+    /drop\s+function\s+line_pay_private\.record_line_pay_checkout_initialized_audit/i,
+  )
+  assert.match(
+    recovery,
+    /drop\s+policy\s+line_pay_payment_function_owner_checkout_initialized_audit_insert/i,
+  )
+  assert.match(
+    recovery,
+    /drop\s+index\s+public\.line_pay_payment_audit_events_checkout_initialized_once_idx/i,
+  )
+  assert.doesNotMatch(recovery, /\bcascade\b/i)
+  assert.doesNotMatch(recovery, /\b(?:delete|truncate|update)\b/i)
+  assert.doesNotMatch(workflow, /run:.*line_pay_checkout_aggregate_initialization_recovery/is)
+})
+
+test('documents impact, backup, deployment order, compatibility, and fail-forward boundary', () => {
+  assert.equal(existsSync(deploymentRunbookPath), true)
+  for (const phrase of [
+    '影響範圍',
+    'Backup／PITR',
+    'restore point',
+    '上線順序',
+    '舊程式相容性',
+    'LINE Pay Runtime disabled',
+    'fail-forward',
+    'line_pay_checkout_aggregate_initialization_recovery.sql',
+  ]) {
+    assert.match(deploymentRunbook, new RegExp(phrase, 'i'))
+  }
+  assert.match(deploymentRunbook, /不得自動執行/i)
+  assert.match(deploymentRunbook, /checkout_initialized[\s\S]*?0/i)
 })

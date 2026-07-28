@@ -38,6 +38,8 @@ on:
       - "supabase/deployment/line_pay_remediation_deploy.sql"
       - "supabase/deployment/line_pay_remediation_diagnostic.sql"
       - "supabase/deployment/line_pay_application_state_diagnostic.sql"
+      - "supabase/deployment/line_pay_checkout_aggregate_initialization_recovery.sql"
+      - "docs/line-pay-checkout-aggregate-initialization-deployment.md"
       - "supabase/line_pay_remediation_contracts.test.ts"
       - "supabase/line_pay_checkout_aggregate_initialization.test.ts"
       - "supabase/line_pay_production_diagnostic_runner.test.ts"

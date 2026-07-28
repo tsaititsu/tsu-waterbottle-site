@@ -96,6 +96,27 @@ function createRpcClient(responses: RpcResponse[]) {
   return { calls, client }
 }
 
+function createRejectingRpcClient(rejection: Error) {
+  let calls = 0
+  const client: LinePayCheckoutInitializationRpcClient = {
+    rpc() {
+      return {
+        single: async () => {
+          calls += 1
+          throw rejection
+        },
+      }
+    },
+  }
+
+  return {
+    client,
+    get calls() {
+      return calls
+    },
+  }
+}
+
 const input: InitializeProductOrderLinePayCheckoutInput = {
   orderNo: 'PO-SANDBOX-ATOMIC-1',
   merchantOrderNo: 'LP_SANDBOX_ATOMIC_1',
@@ -365,6 +386,63 @@ test('rejects unsafe or malformed input before calling RPC', async () => {
   }
 })
 
+test('rejects malformed contact fields before calling RPC', async () => {
+  const invalidInputs: InitializeProductOrderLinePayCheckoutInput[] = [
+    {
+      ...input,
+      customerEmail: 'not-an-email',
+    },
+    {
+      ...input,
+      customerPhone: 'call-me-maybe',
+    },
+    {
+      ...input,
+      shippingInfo: {
+        ...input.shippingInfo,
+        recipientEmail: 'missing-domain@example',
+      },
+    },
+    {
+      ...input,
+      shippingInfo: {
+        ...input.shippingInfo,
+        recipientPhone: 'private-phone-value',
+      },
+    },
+    {
+      ...input,
+      shippingInfo: {
+        ...input.shippingInfo,
+        postalCode: '100<script>',
+      },
+    },
+    {
+      ...input,
+      shippingInfo: {
+        ...input.shippingInfo,
+        storePhone: 'store-phone-value',
+      },
+    },
+  ]
+
+  for (const invalidInput of invalidInputs) {
+    const rpc = createRpcClient([])
+    await assert.rejects(
+      () => initializeProductOrderLinePayCheckout(
+        invalidInput,
+        trustedContext,
+        rpc.client,
+      ),
+      (error: unknown) =>
+        error instanceof LinePayCheckoutInitializationError
+        && error.code === 'invalid_input'
+        && error.message === 'line_pay_checkout_initialization_error',
+    )
+    assert.equal(rpc.calls.length, 0)
+  }
+})
+
 test('rejects incomplete production shipping before calling RPC', async () => {
   const rpc = createRpcClient([])
 
@@ -435,14 +513,13 @@ test('rejects every omitted production shipping field for every method', async (
 
     for (const field of shippingCase.requiredFields) {
       const rpc = createRpcClient([])
+      const incompleteShipping = { ...completeShipping }
+      delete (incompleteShipping as Record<string, unknown>)[field]
       await assert.rejects(
         () => initializeProductOrderLinePayCheckout(
           {
             ...input,
-            shippingInfo: {
-              ...completeShipping,
-              [field]: null,
-            },
+            shippingInfo: incompleteShipping,
           },
           {
             ...trustedContext,
@@ -566,6 +643,27 @@ test('maps database failures to a stable non-sensitive error', async () => {
       && error.message === 'line_pay_checkout_initialization_error'
       && !JSON.stringify(error).includes('raw database payload'),
   )
+})
+
+test('maps an RPC promise rejection to a stable non-sensitive error', async () => {
+  const rpc = createRejectingRpcClient(
+    new Error('raw network failure with private connection details'),
+  )
+
+  await assert.rejects(
+    () => initializeProductOrderLinePayCheckout(
+      input,
+      trustedContext,
+      rpc.client,
+    ),
+    (error: unknown) =>
+      error instanceof LinePayCheckoutInitializationError
+      && error.code === 'rpc_failed'
+      && error.message === 'line_pay_checkout_initialization_error'
+      && !JSON.stringify(error).includes('raw network failure')
+      && !JSON.stringify(error).includes('private connection details'),
+  )
+  assert.equal(rpc.calls, 1)
 })
 
 test('fails closed on extra fields or inconsistent RPC results', async () => {

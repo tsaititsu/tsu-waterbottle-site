@@ -23,6 +23,10 @@ const initializationMigration = join(
   root,
   'supabase/migrations/20260728053215_line_pay_checkout_aggregate_initialization.sql',
 )
+const initializationRecovery = join(
+  root,
+  'supabase/deployment/line_pay_checkout_aggregate_initialization_recovery.sql',
+)
 const baselineFiles = [
   'supabase/schema.sql',
   'supabase/bank_transfer_submissions_patch.sql',
@@ -296,6 +300,132 @@ commit;
   if (Object.values(rollbackState).some((value) => value !== true)) {
     throw new Error(
       `late migration rollback left residual state: ${JSON.stringify(rollbackState)}`,
+    )
+  }
+}
+
+function testReviewedRecovery(database) {
+  psqlFile(database, 'supabase/tests/line_pay_local_postgres_bootstrap.sql')
+  for (const file of baselineFiles) psqlFile(database, file)
+  psqlFile(database, baseMigration)
+  psqlFile(database, initializationMigration)
+  psqlFile(database, initializationRecovery)
+
+  const recoveryState = JSON.parse(
+    psql(
+      database,
+      `
+        copy (
+          select pg_catalog.jsonb_build_object(
+            'initializer_absent',
+              pg_catalog.to_regprocedure(
+                'public.initialize_product_order_line_pay_checkout(jsonb)'
+              ) is null,
+            'audit_helper_absent',
+              pg_catalog.to_regprocedure(
+                'line_pay_private.record_line_pay_checkout_initialized_audit(uuid,uuid,uuid,text)'
+              ) is null,
+            'index_absent',
+              pg_catalog.to_regclass(
+                'public.line_pay_payment_audit_events_checkout_initialized_once_idx'
+              ) is null,
+            'policy_absent',
+              not exists (
+                select 1
+                from pg_catalog.pg_policy as policy
+                join pg_catalog.pg_class as relation
+                  on relation.oid = policy.polrelid
+                join pg_catalog.pg_namespace as namespace
+                  on namespace.oid = relation.relnamespace
+                where namespace.nspname = 'public'
+                  and relation.relname = 'line_pay_payment_audit_events'
+                  and policy.polname =
+                    'line_pay_payment_function_owner_checkout_initialized_audit_insert'
+              ),
+            'audit_rows_absent',
+              not exists (
+                select 1
+                from public.line_pay_payment_audit_events as audit
+                where audit.event_type = 'checkout_initialized'
+              )
+          )
+        ) to stdout;
+      `,
+      'reviewed recovery postcondition',
+    ),
+  )
+  if (Object.values(recoveryState).some((value) => value !== true)) {
+    throw new Error(
+      `reviewed recovery left unexpected state: ${JSON.stringify(recoveryState)}`,
+    )
+  }
+}
+
+function testReviewedRecoveryRequiresFailForward(database) {
+  const recoveryOutput = psqlAsInContainer(
+    containerName,
+    database,
+    'postgres',
+    readFileSync(initializationRecovery, 'utf8'),
+    'reviewed recovery after initializer use',
+    true,
+  )
+  if (
+    !recoveryOutput.includes(
+      'line_pay_initialization_recovery_requires_fail_forward',
+    )
+  ) {
+    throw new Error(
+      'reviewed recovery did not fail closed with the exact fail-forward marker',
+    )
+  }
+
+  const preservedState = JSON.parse(
+    psql(
+      database,
+      `
+        copy (
+          select pg_catalog.jsonb_build_object(
+            'initializer_preserved',
+              pg_catalog.to_regprocedure(
+                'public.initialize_product_order_line_pay_checkout(jsonb)'
+              ) is not null,
+            'audit_helper_preserved',
+              pg_catalog.to_regprocedure(
+                'line_pay_private.record_line_pay_checkout_initialized_audit(uuid,uuid,uuid,text)'
+              ) is not null,
+            'index_preserved',
+              pg_catalog.to_regclass(
+                'public.line_pay_payment_audit_events_checkout_initialized_once_idx'
+              ) is not null,
+            'policy_preserved',
+              exists (
+                select 1
+                from pg_catalog.pg_policy as policy
+                join pg_catalog.pg_class as relation
+                  on relation.oid = policy.polrelid
+                join pg_catalog.pg_namespace as namespace
+                  on namespace.oid = relation.relnamespace
+                where namespace.nspname = 'public'
+                  and relation.relname = 'line_pay_payment_audit_events'
+                  and policy.polname =
+                    'line_pay_payment_function_owner_checkout_initialized_audit_insert'
+              ),
+            'audit_evidence_preserved',
+              exists (
+                select 1
+                from public.line_pay_payment_audit_events as audit
+                where audit.event_type = 'checkout_initialized'
+              )
+          )
+        ) to stdout;
+      `,
+      'fail-forward recovery preservation',
+    ),
+  )
+  if (Object.values(preservedState).some((value) => value !== true)) {
+    throw new Error(
+      `fail-forward recovery changed state: ${JSON.stringify(preservedState)}`,
     )
   }
 }
@@ -815,11 +945,19 @@ async function main() {
     'create database line_pay_initialization_payload_mutation;',
     'create payload mutation database',
   )
+  psql(
+    'postgres',
+    'create database line_pay_initialization_reviewed_recovery;',
+    'create reviewed recovery database',
+  )
 
   prepareDatabase('line_pay_initialization_contract')
   psqlFile(
     'line_pay_initialization_contract',
     'supabase/tests/line_pay_checkout_aggregate_initialization.sql',
+  )
+  testReviewedRecoveryRequiresFailForward(
+    'line_pay_initialization_contract',
   )
   for (const role of ['public_probe', 'anon', 'authenticated']) {
     psqlExpectDenied(
@@ -837,10 +975,11 @@ async function main() {
   testPayloadLimitMutationSensitivity(
     'line_pay_initialization_payload_mutation',
   )
+  testReviewedRecovery('line_pay_initialization_reviewed_recovery')
   testHostedNonSuperuserUpgrade()
 
   process.stdout.write(
-    'line_pay_checkout_aggregate_initialization: PASS (PostgreSQL 17, atomic migration, hosted non-superuser upgrade, atomic aggregate, replay, concurrency, rollback, ACL, payload-size mutation caught)\n',
+    'line_pay_checkout_aggregate_initialization: PASS (PostgreSQL 17, atomic migration, hosted non-superuser upgrade, atomic aggregate, replay, concurrency, rollback, reviewed recovery, fail-forward guard, ACL, payload-size mutation caught)\n',
   )
 }
 

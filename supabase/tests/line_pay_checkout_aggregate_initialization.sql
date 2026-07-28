@@ -635,6 +635,77 @@ end;
 $$;
 
 do $$
+begin
+  perform *
+  from public.initialize_product_order_line_pay_checkout(
+    (
+      select pg_catalog.jsonb_set(
+        payload,
+        '{shipping_info}',
+        (payload -> 'shipping_info') - 'recipient_email',
+        false
+      )
+      from line_pay_initialization_payload
+    )
+  );
+  raise exception 'line_pay_initialization_missing_optional_shipping_key_was_accepted';
+exception
+  when sqlstate '22023' then
+    if sqlerrm <> 'line_pay_initialization_invalid_input' then
+      raise;
+    end if;
+end;
+$$;
+
+do $$
+declare
+  v_path text[];
+  v_value jsonb;
+  v_invalid_payload jsonb;
+begin
+  for v_path, v_value in
+    select fixture.path, fixture.value
+    from (
+      values
+        (array['customer_email']::text[], '"not-an-email"'::jsonb),
+        (array['customer_phone']::text[], '"call-me-maybe"'::jsonb),
+        (
+          array['shipping_info', 'recipient_email']::text[],
+          '"missing-domain@example"'::jsonb
+        ),
+        (
+          array['shipping_info', 'recipient_phone']::text[],
+          '"private-phone-value"'::jsonb
+        ),
+        (
+          array['shipping_info', 'postal_code']::text[],
+          '"100<script>"'::jsonb
+        ),
+        (
+          array['shipping_info', 'store_phone']::text[],
+          '"store-phone-value"'::jsonb
+        )
+    ) as fixture(path, value)
+  loop
+    select pg_catalog.jsonb_set(payload, v_path, v_value, false)
+    into strict v_invalid_payload
+    from line_pay_initialization_payload;
+
+    begin
+      perform *
+      from public.initialize_product_order_line_pay_checkout(v_invalid_payload);
+      raise exception 'line_pay_initialization_invalid_contact_format_was_accepted';
+    exception
+      when sqlstate '22023' then
+        if sqlerrm <> 'line_pay_initialization_invalid_input' then
+          raise;
+        end if;
+    end;
+  end loop;
+end;
+$$;
+
+do $$
 declare
   v_production_payload jsonb;
 begin
@@ -763,12 +834,7 @@ begin
         'environment', 'production',
         'order_no', 'PO-PROD-SHIP-OMIT-' || v_case::text,
         'merchant_order_no', 'LP_PROD_SHIP_OMIT_' || v_case::text,
-        'shipping_info', pg_catalog.jsonb_set(
-          v_shipping,
-          array[v_required_field],
-          'null'::jsonb,
-          false
-        ),
+        'shipping_info', v_shipping - v_required_field,
         'idempotency_key', 'production-shipping-omission-' || v_case::text,
         'request_body_sha256',
           pg_catalog.md5('request-' || v_case::text)

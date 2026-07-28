@@ -106,6 +106,9 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const SAFE_IDENTIFIER_PATTERN = /^[A-Za-z0-9_:-]{1,100}$/
 const SHA256_PATTERN = /^[0-9a-f]{64}$/
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const PHONE_PATTERN = /^(?=.*[0-9])[0-9+(). -]+$/
+const POSTAL_CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 -]*$/
 const RESULT_KEYS = [
   'result_code',
   'product_order_id',
@@ -152,12 +155,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function normalizeOptionalText(
   value: string | null | undefined,
   maxLength: number,
+  pattern?: RegExp,
 ) {
   if (value === null || value === undefined) return null
   if (typeof value !== 'string') invalidInput()
 
   const normalized = value.trim()
-  if (normalized.length > maxLength) invalidInput()
+  if (
+    normalized.length > maxLength
+    || (normalized.length > 0 && pattern && !pattern.test(normalized))
+  ) {
+    invalidInput()
+  }
   return normalized || null
 }
 
@@ -293,13 +302,19 @@ function buildPayload(
     recipient_phone: normalizeOptionalText(
       input.shippingInfo.recipientPhone,
       64,
+      PHONE_PATTERN,
     ),
     recipient_email: normalizeOptionalText(
       input.shippingInfo.recipientEmail,
       320,
+      EMAIL_PATTERN,
     ),
     shipping_method: input.shippingInfo.shippingMethod,
-    postal_code: normalizeOptionalText(input.shippingInfo.postalCode, 32),
+    postal_code: normalizeOptionalText(
+      input.shippingInfo.postalCode,
+      32,
+      POSTAL_CODE_PATTERN,
+    ),
     address: normalizeOptionalText(input.shippingInfo.address, 500),
     store_type: normalizeOptionalText(input.shippingInfo.storeType, 64),
     store_id: normalizeOptionalText(input.shippingInfo.storeId, 128),
@@ -308,7 +323,11 @@ function buildPayload(
       input.shippingInfo.storeAddress,
       500,
     ),
-    store_phone: normalizeOptionalText(input.shippingInfo.storePhone, 64),
+    store_phone: normalizeOptionalText(
+      input.shippingInfo.storePhone,
+      64,
+      PHONE_PATTERN,
+    ),
   }
   if (
     shippingInfo.shipping_method !== 'manual'
@@ -353,8 +372,16 @@ function buildPayload(
     order_no: orderNo,
     merchant_order_no: merchantOrderNo,
     customer_name: normalizeOptionalText(input.customerName, 200),
-    customer_email: normalizeOptionalText(input.customerEmail, 320),
-    customer_phone: normalizeOptionalText(input.customerPhone, 64),
+    customer_email: normalizeOptionalText(
+      input.customerEmail,
+      320,
+      EMAIL_PATTERN,
+    ),
+    customer_phone: normalizeOptionalText(
+      input.customerPhone,
+      64,
+      PHONE_PATTERN,
+    ),
     note: normalizeOptionalText(input.note, 1000),
     items,
     shipping_info: shippingInfo,

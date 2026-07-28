@@ -11,6 +11,11 @@ create unique index line_pay_payment_audit_events_checkout_initialized_once_idx
 on public.line_pay_payment_audit_events(checkout_attempt_id)
 where event_type = 'checkout_initialized';
 
+-- Policy intent:
+-- READ: no new read policy; existing owner-scoped audit visibility is unchanged.
+-- INSERT: only the dedicated function-owner role may add checkout_initialized.
+-- UPDATE: no policy or table privilege is added.
+-- DELETE: no policy or table privilege is added.
 create policy line_pay_payment_function_owner_checkout_initialized_audit_insert
 on public.line_pay_payment_audit_events
 for insert
@@ -250,6 +255,25 @@ begin
      or pg_catalog.length(coalesce(p_payload ->> 'customer_email', '')) > 320
      or pg_catalog.length(coalesce(p_payload ->> 'customer_phone', '')) > 64
      or pg_catalog.length(coalesce(p_payload ->> 'note', '')) > 1000
+     or (
+       nullif(
+         pg_catalog.btrim(coalesce(p_payload ->> 'customer_email', '')),
+         ''
+       ) is not null
+       and pg_catalog.btrim(p_payload ->> 'customer_email')
+         !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'
+     )
+     or (
+       nullif(
+         pg_catalog.btrim(coalesce(p_payload ->> 'customer_phone', '')),
+         ''
+       ) is not null
+       and (
+         pg_catalog.btrim(p_payload ->> 'customer_phone')
+           !~ '^[0-9+(). -]+$'
+         or pg_catalog.btrim(p_payload ->> 'customer_phone') !~ '[0-9]'
+       )
+     )
      or pg_catalog.jsonb_typeof(p_payload -> 'items') <> 'array'
      or pg_catalog.jsonb_array_length(p_payload -> 'items') not between 1 and 100
      or pg_catalog.jsonb_typeof(p_payload -> 'shipping_info') <> 'object'
@@ -319,7 +343,45 @@ begin
      or pg_catalog.length(coalesce(v_shipping_info ->> 'store_id', '')) > 128
      or pg_catalog.length(coalesce(v_shipping_info ->> 'store_name', '')) > 200
      or pg_catalog.length(coalesce(v_shipping_info ->> 'store_address', '')) > 500
-     or pg_catalog.length(coalesce(v_shipping_info ->> 'store_phone', '')) > 64 then
+     or pg_catalog.length(coalesce(v_shipping_info ->> 'store_phone', '')) > 64
+     or (
+       nullif(
+         pg_catalog.btrim(coalesce(v_shipping_info ->> 'recipient_email', '')),
+         ''
+       ) is not null
+       and pg_catalog.btrim(v_shipping_info ->> 'recipient_email')
+         !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'
+     )
+     or (
+       nullif(
+         pg_catalog.btrim(coalesce(v_shipping_info ->> 'recipient_phone', '')),
+         ''
+       ) is not null
+       and (
+         pg_catalog.btrim(v_shipping_info ->> 'recipient_phone')
+           !~ '^[0-9+(). -]+$'
+         or pg_catalog.btrim(v_shipping_info ->> 'recipient_phone') !~ '[0-9]'
+       )
+     )
+     or (
+       nullif(
+         pg_catalog.btrim(coalesce(v_shipping_info ->> 'postal_code', '')),
+         ''
+       ) is not null
+       and pg_catalog.btrim(v_shipping_info ->> 'postal_code')
+         !~ '^[A-Za-z0-9][A-Za-z0-9 -]*$'
+     )
+     or (
+       nullif(
+         pg_catalog.btrim(coalesce(v_shipping_info ->> 'store_phone', '')),
+         ''
+       ) is not null
+       and (
+         pg_catalog.btrim(v_shipping_info ->> 'store_phone')
+           !~ '^[0-9+(). -]+$'
+         or pg_catalog.btrim(v_shipping_info ->> 'store_phone') !~ '[0-9]'
+       )
+     ) then
     raise exception using
       errcode = '22023',
       message = 'line_pay_initialization_invalid_input';
