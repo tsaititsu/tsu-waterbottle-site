@@ -2,6 +2,8 @@
 -- This migration does not enable LINE Pay Runtime and must not be applied to
 -- any remote database without a separately reviewed exact-file deployment.
 
+begin;
+
 grant line_pay_payment_function_owner to current_user
   with inherit true, set true;
 
@@ -48,6 +50,8 @@ begin
          and payment.environment = p_environment
          and payment.request_state = 'initialized'
          and payment.status = 'pending'
+         and payment.user_id = product_order.user_id
+         and product_order.user_id = attempt.user_id
          and product_order.payment_method = 'line_pay'
          and product_order.environment = p_environment
          and product_order.payment_id is not distinct from payment.id
@@ -59,6 +63,42 @@ begin
          and attempt.payment_id = payment.id
          and attempt.product_order_id = product_order.id
          and attempt.request_state = 'queued'
+         and (
+           select pg_catalog.count(*)
+           from public.line_pay_request_outbox as request_outbox
+           where request_outbox.checkout_attempt_id = attempt.id
+             and request_outbox.payment_id = payment.id
+             and request_outbox.provider = 'line_pay'
+             and request_outbox.environment = p_environment
+             and request_outbox.operation = 'request'
+             and request_outbox.idempotency_key = attempt.idempotency_key
+             and request_outbox.request_body_sha256 =
+               attempt.request_body_sha256
+             and request_outbox.state = 'queued'
+             and request_outbox.attempt_count = 0
+             and request_outbox.next_attempt_at is null
+             and request_outbox.claim_id is null
+             and request_outbox.claimed_at is null
+             and request_outbox.claim_expires_at is null
+             and request_outbox.last_error_code is null
+             and request_outbox.completed_at is null
+         ) = 1
+         and (
+           select pg_catalog.count(*)
+           from public.line_pay_callback_capabilities as capability
+           where capability.payment_id = payment.id
+             and capability.product_order_id = product_order.id
+             and capability.checkout_attempt_id = attempt.id
+             and capability.environment = p_environment
+             and capability.purpose in ('confirm', 'cancel')
+             and capability.capability_version = 1
+             and capability.claim_id is null
+             and capability.claimed_at is null
+             and capability.claim_expires_at is null
+             and capability.expires_at > pg_catalog.clock_timestamp()
+             and capability.consumed_at is null
+             and capability.revoked_at is null
+         ) = 2
      ) then
     raise exception using
       errcode = '23514',
@@ -1039,3 +1079,5 @@ begin
   end if;
 end;
 $$;
+
+commit;

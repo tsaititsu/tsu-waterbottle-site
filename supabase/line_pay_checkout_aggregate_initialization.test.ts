@@ -46,7 +46,17 @@ test('initializer creates the complete aggregate inside one RPC transaction', ()
   assert.match(migration, /pg_catalog\.pg_advisory_xact_lock/i)
   assert.match(migration, /already_initialized/i)
   assert.match(migration, /line_pay_initialization_idempotency_conflict/i)
-  assert.doesNotMatch(migration, /\b(begin|commit|rollback)\s*;/i)
+})
+
+test('the additive migration has one explicit outer transaction boundary', () => {
+  assert.match(
+    migration,
+    /^--[\s\S]*?\n\nbegin;\s*\n\s*grant\s+line_pay_payment_function_owner\s+to\s+current_user/i,
+  )
+  assert.match(migration, /\ncommit;\s*$/i)
+  assert.equal((migration.match(/\bbegin\s*;/gi) ?? []).length, 1)
+  assert.equal((migration.match(/\bcommit\s*;/gi) ?? []).length, 1)
+  assert.equal((migration.match(/\brollback\s*;/gi) ?? []).length, 0)
 })
 
 test('initializer is exact-shape, fail-closed, and secret-minimizing', () => {
@@ -156,6 +166,18 @@ test('initializer writes one bounded audit event through a least-privilege helpe
   assert.match(
     migration,
     /grant\s+execute\s+on\s+function\s+line_pay_private\.record_line_pay_checkout_initialized_audit[\s\S]*?to\s+service_role/i,
+  )
+  assert.match(
+    migration,
+    /payment\.user_id\s*=\s*product_order\.user_id[\s\S]*?product_order\.user_id\s*=\s*attempt\.user_id/i,
+  )
+  assert.match(
+    migration,
+    /from\s+public\.line_pay_request_outbox\s+as\s+request_outbox[\s\S]*?request_outbox\.idempotency_key\s*=\s*attempt\.idempotency_key[\s\S]*?request_outbox\.request_body_sha256\s*=\s*attempt\.request_body_sha256[\s\S]*?request_outbox\.state\s*=\s*'queued'/i,
+  )
+  assert.match(
+    migration,
+    /from\s+public\.line_pay_callback_capabilities\s+as\s+capability[\s\S]*?capability\.purpose\s+in\s*\(\s*'confirm',\s*'cancel'\s*\)[\s\S]*?capability\.capability_version\s*=\s*1[\s\S]*?capability\.consumed_at\s+is\s+null[\s\S]*?capability\.revoked_at\s+is\s+null/i,
   )
   assert.match(
     migration,

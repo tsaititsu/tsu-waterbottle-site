@@ -261,6 +261,145 @@ begin
 end;
 $$;
 
+insert into auth.users (id)
+values ('41000000-0000-4000-8000-000000000099')
+on conflict (id) do nothing;
+
+begin;
+
+update public.line_pay_checkout_attempts
+set user_id = '41000000-0000-4000-8000-000000000099'
+where id = (
+  select attempt_id
+  from line_pay_initialization_first_result
+);
+
+set local role service_role;
+
+do $$
+begin
+  perform line_pay_private.record_line_pay_checkout_initialized_audit(
+    (select payment_id from line_pay_initialization_first_result),
+    (select product_order_id from line_pay_initialization_first_result),
+    (select attempt_id from line_pay_initialization_first_result),
+    'sandbox'
+  );
+  raise exception 'line_pay_initialization_cross_user_audit_was_accepted';
+exception
+  when check_violation then
+    if sqlerrm <> 'line_pay_initialization_audit_binding_invalid' then
+      raise;
+    end if;
+end;
+$$;
+
+rollback;
+
+begin;
+
+delete from public.line_pay_request_outbox
+where id = (
+  select outbox_id
+  from line_pay_initialization_first_result
+);
+
+insert into public.line_pay_request_outbox (
+  checkout_attempt_id,
+  payment_id,
+  environment,
+  idempotency_key,
+  request_body_sha256,
+  state
+)
+select
+  attempt_id,
+  payment_id,
+  'sandbox',
+  'sandbox-wrong-audit-outbox-0001',
+  pg_catalog.repeat('f', 64),
+  'queued'
+from line_pay_initialization_first_result;
+
+set local role service_role;
+
+do $$
+begin
+  perform line_pay_private.record_line_pay_checkout_initialized_audit(
+    (select payment_id from line_pay_initialization_first_result),
+    (select product_order_id from line_pay_initialization_first_result),
+    (select attempt_id from line_pay_initialization_first_result),
+    'sandbox'
+  );
+  raise exception 'line_pay_initialization_wrong_outbox_audit_was_accepted';
+exception
+  when check_violation then
+    if sqlerrm <> 'line_pay_initialization_audit_binding_invalid' then
+      raise;
+    end if;
+end;
+$$;
+
+rollback;
+
+begin;
+
+delete from public.line_pay_callback_capabilities
+where id = (
+  select confirm_capability_id
+  from line_pay_initialization_first_result
+);
+
+set local role service_role;
+
+do $$
+begin
+  perform line_pay_private.record_line_pay_checkout_initialized_audit(
+    (select payment_id from line_pay_initialization_first_result),
+    (select product_order_id from line_pay_initialization_first_result),
+    (select attempt_id from line_pay_initialization_first_result),
+    'sandbox'
+  );
+  raise exception 'line_pay_initialization_missing_confirm_audit_was_accepted';
+exception
+  when check_violation then
+    if sqlerrm <> 'line_pay_initialization_audit_binding_invalid' then
+      raise;
+    end if;
+end;
+$$;
+
+rollback;
+
+begin;
+
+update public.line_pay_callback_capabilities
+set consumed_at = pg_catalog.clock_timestamp()
+where id = (
+  select cancel_capability_id
+  from line_pay_initialization_first_result
+);
+
+set local role service_role;
+
+do $$
+begin
+  perform line_pay_private.record_line_pay_checkout_initialized_audit(
+    (select payment_id from line_pay_initialization_first_result),
+    (select product_order_id from line_pay_initialization_first_result),
+    (select attempt_id from line_pay_initialization_first_result),
+    'sandbox'
+  );
+  raise exception 'line_pay_initialization_consumed_cancel_audit_was_accepted';
+exception
+  when check_violation then
+    if sqlerrm <> 'line_pay_initialization_audit_binding_invalid' then
+      raise;
+    end if;
+end;
+$$;
+
+rollback;
+
 set role service_role;
 
 do $$
@@ -574,6 +713,122 @@ $$;
 
 rollback;
 
+begin;
+
+do $$
+declare
+  v_method text;
+  v_required_field text;
+  v_required_fields text[];
+  v_shipping jsonb;
+  v_payload jsonb;
+  v_result record;
+  v_case integer := 0;
+begin
+  foreach v_method in array array[
+    'manual',
+    'home_delivery',
+    'convenience_store_c2c',
+    'convenience_store_b2c'
+  ]::text[] loop
+    v_shipping := pg_catalog.jsonb_build_object(
+      'recipient_name', 'Production Recipient',
+      'recipient_phone', '0900000000',
+      'recipient_email', null,
+      'shipping_method', v_method,
+      'postal_code', '100',
+      'address', 'Synthetic production address',
+      'store_type', 'synthetic_store',
+      'store_id', 'SYNTHETIC-STORE-001',
+      'store_name', 'Synthetic Store',
+      'store_address', 'Synthetic store address',
+      'store_phone', null
+    );
+    v_required_fields := case
+      when v_method in ('manual', 'home_delivery')
+        then array['recipient_name', 'recipient_phone', 'address']::text[]
+      else array[
+        'recipient_name',
+        'recipient_phone',
+        'store_type',
+        'store_id',
+        'store_name',
+        'store_address'
+      ]::text[]
+    end;
+
+    foreach v_required_field in array v_required_fields loop
+      v_case := v_case + 1;
+      select payload || pg_catalog.jsonb_build_object(
+        'environment', 'production',
+        'order_no', 'PO-PROD-SHIP-OMIT-' || v_case::text,
+        'merchant_order_no', 'LP_PROD_SHIP_OMIT_' || v_case::text,
+        'shipping_info', pg_catalog.jsonb_set(
+          v_shipping,
+          array[v_required_field],
+          'null'::jsonb,
+          false
+        ),
+        'idempotency_key', 'production-shipping-omission-' || v_case::text,
+        'request_body_sha256',
+          pg_catalog.md5('request-' || v_case::text)
+          || pg_catalog.md5('body-' || v_case::text),
+        'confirm_token_hash',
+          pg_catalog.md5('confirm-' || v_case::text)
+          || pg_catalog.md5('token-' || v_case::text),
+        'cancel_token_hash',
+          pg_catalog.md5('cancel-' || v_case::text)
+          || pg_catalog.md5('token-' || v_case::text)
+      )
+      into strict v_payload
+      from line_pay_initialization_payload;
+
+      begin
+        perform *
+        from public.initialize_product_order_line_pay_checkout(v_payload);
+        raise exception
+          'line_pay_initialization_required_shipping_field_was_accepted';
+      exception
+        when sqlstate '22023' then
+          if sqlerrm <> 'line_pay_initialization_invalid_input' then
+            raise;
+          end if;
+      end;
+    end loop;
+
+    v_case := v_case + 1;
+    select payload || pg_catalog.jsonb_build_object(
+      'environment', 'production',
+      'order_no', 'PO-PROD-SHIP-VALID-' || v_case::text,
+      'merchant_order_no', 'LP_PROD_SHIP_VALID_' || v_case::text,
+      'shipping_info', v_shipping,
+      'idempotency_key', 'production-shipping-valid-' || v_case::text,
+      'request_body_sha256',
+        pg_catalog.md5('request-' || v_case::text)
+        || pg_catalog.md5('body-' || v_case::text),
+      'confirm_token_hash',
+        pg_catalog.md5('confirm-' || v_case::text)
+        || pg_catalog.md5('token-' || v_case::text),
+      'cancel_token_hash',
+        pg_catalog.md5('cancel-' || v_case::text)
+        || pg_catalog.md5('token-' || v_case::text)
+    )
+    into strict v_payload
+    from line_pay_initialization_payload;
+
+    select *
+    into strict v_result
+    from public.initialize_product_order_line_pay_checkout(v_payload);
+
+    if v_result.result_code <> 'initialized' then
+      raise exception 'line_pay_initialization_valid_shipping_method_failed';
+    end if;
+  end loop;
+end;
+$$;
+
+rollback;
+
 do $$
 declare
   v_oversized_payload jsonb;
@@ -584,12 +839,21 @@ begin
     (
       select pg_catalog.jsonb_agg(
         pg_catalog.jsonb_build_object(
-          'product_slug', 'oversized-contract-item-' || item_index::text,
-          'product_name', 'Oversized contract item',
+          'product_slug',
+            'oversized-'
+            || pg_catalog.lpad(item_index::text, 3, '0')
+            || pg_catalog.repeat('s', 180),
+          'product_name', pg_catalog.repeat('N', 500),
           'unit_price_twd', 1,
           'quantity', 1,
           'product_snapshot', pg_catalog.jsonb_build_object(
-            'source', pg_catalog.repeat('x', 700)
+            'slug',
+              'oversized-'
+              || pg_catalog.lpad(item_index::text, 3, '0')
+              || pg_catalog.repeat('s', 180),
+            'name', pg_catalog.repeat('N', 500),
+            'category', '符咒商品',
+            'priceTwd', 1
           )
         )
       )

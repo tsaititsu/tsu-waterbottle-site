@@ -386,6 +386,122 @@ test('rejects incomplete production shipping before calling RPC', async () => {
   assert.equal(rpc.calls.length, 0)
 })
 
+test('rejects every omitted production shipping field for every method', async () => {
+  const shippingCases = [
+    {
+      method: 'manual',
+      requiredFields: ['recipientName', 'recipientPhone', 'address'],
+    },
+    {
+      method: 'home_delivery',
+      requiredFields: ['recipientName', 'recipientPhone', 'address'],
+    },
+    {
+      method: 'convenience_store_c2c',
+      requiredFields: [
+        'recipientName',
+        'recipientPhone',
+        'storeType',
+        'storeId',
+        'storeName',
+        'storeAddress',
+      ],
+    },
+    {
+      method: 'convenience_store_b2c',
+      requiredFields: [
+        'recipientName',
+        'recipientPhone',
+        'storeType',
+        'storeId',
+        'storeName',
+        'storeAddress',
+      ],
+    },
+  ] as const
+
+  for (const shippingCase of shippingCases) {
+    const completeShipping = {
+      ...input.shippingInfo,
+      recipientName: 'Production Recipient',
+      recipientPhone: '0900000000',
+      shippingMethod: shippingCase.method,
+      address: 'Synthetic production address',
+      storeType: 'synthetic_store',
+      storeId: 'SYNTHETIC-STORE-001',
+      storeName: 'Synthetic Store',
+      storeAddress: 'Synthetic store address',
+    }
+
+    for (const field of shippingCase.requiredFields) {
+      const rpc = createRpcClient([])
+      await assert.rejects(
+        () => initializeProductOrderLinePayCheckout(
+          {
+            ...input,
+            shippingInfo: {
+              ...completeShipping,
+              [field]: null,
+            },
+          },
+          {
+            ...trustedContext,
+            environment: 'production',
+          },
+          rpc.client,
+        ),
+        (error: unknown) =>
+          error instanceof LinePayCheckoutInitializationError
+          && error.code === 'invalid_input'
+          && error.message === 'line_pay_checkout_initialization_error',
+      )
+      assert.equal(
+        rpc.calls.length,
+        0,
+        `${shippingCase.method}.${field} reached RPC`,
+      )
+    }
+  }
+})
+
+test('accepts complete production shipping for every supported method', async () => {
+  for (const shippingMethod of [
+    'manual',
+    'home_delivery',
+    'convenience_store_c2c',
+    'convenience_store_b2c',
+  ] as const) {
+    const rpc = createRpcClient([{ data: result, error: null }])
+    await initializeProductOrderLinePayCheckout(
+      {
+        ...input,
+        shippingInfo: {
+          ...input.shippingInfo,
+          recipientName: 'Production Recipient',
+          recipientPhone: '0900000000',
+          shippingMethod,
+          address: 'Synthetic production address',
+          storeType: 'synthetic_store',
+          storeId: 'SYNTHETIC-STORE-001',
+          storeName: 'Synthetic Store',
+          storeAddress: 'Synthetic store address',
+        },
+      },
+      {
+        ...trustedContext,
+        environment: 'production',
+      },
+      rpc.client,
+    )
+
+    assert.equal(rpc.calls.length, 1)
+    const payload = rpc.calls[0].args.p_payload as {
+      shipping_info: { shipping_method: string }
+    }
+    assert.equal(payload.shipping_info.shipping_method, shippingMethod)
+  }
+})
+
 test('accepts complete production manual shipping', async () => {
   const rpc = createRpcClient([{ data: result, error: null }])
 
