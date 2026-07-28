@@ -78,10 +78,38 @@ test('initializer is exact-shape, fail-closed, and secret-minimizing', () => {
     migration,
     /pg_catalog\.octet_length\(\s*\(entry\.item\s*->\s*'product_snapshot'\)::text\s*\)\s*>\s*16384/i,
   )
+  for (const snapshotKey of ['slug', 'name', 'category', 'priceTwd']) {
+    assert.match(migration, new RegExp(`'${snapshotKey}'`))
+  }
+  assert.match(
+    migration,
+    /entry\.item\s*->\s*'product_snapshot'\s*->>\s*'slug'\s*<>\s*entry\.item\s*->>\s*'product_slug'/i,
+  )
+  assert.match(
+    migration,
+    /entry\.item\s*->\s*'product_snapshot'\s*->>\s*'priceTwd'[\s\S]*?<>\s*\(entry\.item\s*->>\s*'unit_price_twd'\)::bigint/i,
+  )
   assert.doesNotMatch(
     migration,
     /channel[_ ]?secret|authorization|gateway[_ ]?secret|private[_ ]?key/i,
   )
+})
+
+test('initializer replay validates reciprocal aggregate bindings before success', () => {
+  for (const invariant of [
+    'v_existing_payment.product_order_id',
+    'v_existing_payment.checkout_attempt_id',
+    'v_existing_order.payment_id',
+    'v_existing_order.checkout_attempt_id',
+    'v_existing_outbox.payment_id',
+    'v_existing_outbox.idempotency_key',
+    'v_existing_confirm.product_order_id',
+    'v_existing_confirm.checkout_attempt_id',
+    'v_existing_cancel.product_order_id',
+    'v_existing_cancel.checkout_attempt_id',
+  ]) {
+    assert.match(migration, new RegExp(invariant.replaceAll('.', '\\.')))
+  }
 })
 
 test('initializer execute ACL is service-role only with an exact catalog postcondition', () => {
@@ -114,7 +142,7 @@ test('LINE Pay DB CI runs both static and PostgreSQL 17 initialization contracts
   )
   assert.match(
     workflow,
-    /node --test src\/lib\/supabase\/linePayCheckoutInitialization\.test\.ts/,
+    /node --import tsx --test src\/lib\/supabase\/linePayCheckoutInitialization\.test\.ts/,
   )
   assert.match(
     workflow,

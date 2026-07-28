@@ -105,7 +105,7 @@ jobs:
           node --test supabase/line_pay_production_exact_file_runner.test.ts
           node --test supabase/line_pay_production_deployment_workflow.test.ts
           node --test src/lib/supabase/linePayDatabaseContracts.test.ts
-          node --test src/lib/supabase/linePayCheckoutInitialization.test.ts
+          node --import tsx --test src/lib/supabase/linePayCheckoutInitialization.test.ts
 
       - name: Run LINE Pay Production exact-file contracts
         run: node supabase/tests/run_line_pay_production_exact_file_contracts.mjs

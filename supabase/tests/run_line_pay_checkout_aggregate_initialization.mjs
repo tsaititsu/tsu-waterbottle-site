@@ -206,7 +206,12 @@ async function testConcurrentInitialization(database) {
         product_name: 'Sandbox concurrent item',
         unit_price_twd: 100,
         quantity: 1,
-        product_snapshot: null,
+        product_snapshot: {
+          slug: 'sandbox-concurrent-item',
+          name: 'Sandbox concurrent item',
+          category: '符咒商品',
+          priceTwd: 100,
+        },
       },
     ],
     shipping_info: {

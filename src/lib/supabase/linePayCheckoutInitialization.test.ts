@@ -1,16 +1,70 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import Module, { createRequire } from 'node:module'
 import { test } from 'node:test'
 import type {
   InitializeProductOrderLinePayCheckoutInput,
   LinePayCheckoutInitializationRpcClient,
+  LinePayCheckoutInitializationTrustedServerContext,
 } from './linePayCheckoutInitialization'
+
+type NodeModuleInternals = {
+  _resolveFilename: (
+    request: string,
+    parent: unknown,
+    isMain: boolean,
+    options?: unknown,
+  ) => string
+  _load: (
+    request: string,
+    parent: unknown,
+    isMain: boolean,
+  ) => unknown
+}
+
+const moduleInternals = Module as unknown as NodeModuleInternals
+const originalResolveFilename = moduleInternals._resolveFilename
+const originalLoad = moduleInternals._load
+const testRequire = createRequire(import.meta.url)
+const serverOnlyStubPath = testRequire.resolve('../spiritualProducts.ts')
+
+let serverModule: typeof import('./linePayCheckoutInitialization')
+try {
+  moduleInternals._resolveFilename = function resolveFilenameForTest(
+    this: unknown,
+    request: string,
+    parent: unknown,
+    isMain: boolean,
+    options?: unknown,
+  ) {
+    if (request === 'server-only') return serverOnlyStubPath
+    return originalResolveFilename.call(this, request, parent, isMain, options)
+  }
+  moduleInternals._load = function loadForTest(
+    this: unknown,
+    request: string,
+    parent: unknown,
+    isMain: boolean,
+  ) {
+    if (request === 'server-only') return {}
+    return originalLoad.call(this, request, parent, isMain)
+  }
+  serverModule = testRequire(
+    './linePayCheckoutInitialization.ts',
+  ) as typeof import('./linePayCheckoutInitialization')
+} finally {
+  moduleInternals._resolveFilename = originalResolveFilename
+  moduleInternals._load = originalLoad
+}
 
 const {
   LinePayCheckoutInitializationError,
   initializeProductOrderLinePayCheckout,
-} = (await import(
-  new URL('./linePayCheckoutInitialization.ts', import.meta.url).href
-)) as typeof import('./linePayCheckoutInitialization')
+} = serverModule
+const adapterSource = readFileSync(
+  new URL('./linePayCheckoutInitialization.ts', import.meta.url),
+  'utf8',
+)
 
 type RpcResponse = {
   data: unknown
@@ -43,8 +97,6 @@ function createRpcClient(responses: RpcResponse[]) {
 }
 
 const input: InitializeProductOrderLinePayCheckoutInput = {
-  userId: '41000000-0000-4000-8000-000000000001',
-  environment: 'sandbox',
   orderNo: 'PO-SANDBOX-ATOMIC-1',
   merchantOrderNo: 'LP_SANDBOX_ATOMIC_1',
   customerName: 'Sandbox Tester',
@@ -53,13 +105,8 @@ const input: InitializeProductOrderLinePayCheckoutInput = {
   note: 'synthetic sandbox contract',
   items: [
     {
-      productSlug: 'sandbox-contract-item',
-      productName: 'Sandbox contract item',
-      unitPriceTwd: 100,
+      productSlug: 'ren-yuan-fu',
       quantity: 1,
-      productSnapshot: {
-        source: 'synthetic_contract',
-      },
     },
   ],
   shippingInfo: {
@@ -82,6 +129,11 @@ const input: InitializeProductOrderLinePayCheckoutInput = {
   capabilityExpiresAt: '2026-07-28T06:00:00.000Z',
 }
 
+const trustedContext: LinePayCheckoutInitializationTrustedServerContext = {
+  authenticatedUserId: '41000000-0000-4000-8000-000000000001',
+  environment: 'sandbox',
+}
+
 const result = {
   result_code: 'initialized',
   product_order_id: '51000000-0000-4000-8000-000000000001',
@@ -94,15 +146,45 @@ const result = {
   request_state: 'queued',
 }
 
+test('keeps the trusted initialization adapter on the server boundary', () => {
+  assert.equal(adapterSource.split('\n')[0], "import 'server-only'")
+  assert.match(adapterSource, /spiritualProducts/)
+  assert.doesNotMatch(
+    adapterSource,
+    /NEXT_PUBLIC_(?:SUPABASE_SERVICE_ROLE_KEY|LINE_PAY_CHANNEL_SECRET)/,
+  )
+})
+
 test('calls the single atomic initializer with an exact normalized payload', async () => {
   const rpc = createRpcClient([{ data: result, error: null }])
   const initialized = await initializeProductOrderLinePayCheckout(
     {
       ...input,
       ignoredSecret: 'must-not-cross-rpc-contract',
+      userId: '42000000-0000-4000-8000-000000000002',
+      environment: 'production',
+      items: [
+        {
+          productSlug: 'ren-yuan-fu',
+          quantity: 1,
+          unitPriceTwd: 1,
+          productName: 'client-spoofed-name',
+          productSnapshot: {
+            channelSecret: 'must-not-cross-rpc-contract',
+          },
+        },
+      ],
     } as InitializeProductOrderLinePayCheckoutInput & {
       ignoredSecret: string
+      userId: string
+      environment: string
+      items: Array<InitializeProductOrderLinePayCheckoutInput['items'][number] & {
+        unitPriceTwd: number
+        productName: string
+        productSnapshot: Record<string, unknown>
+      }>
     },
+    trustedContext,
     rpc.client,
   )
 
@@ -111,7 +193,7 @@ test('calls the single atomic initializer with an exact normalized payload', asy
       functionName: 'initialize_product_order_line_pay_checkout',
       args: {
         p_payload: {
-          user_id: input.userId,
+          user_id: trustedContext.authenticatedUserId,
           environment: 'sandbox',
           order_no: input.orderNo,
           merchant_order_no: input.merchantOrderNo,
@@ -121,12 +203,15 @@ test('calls the single atomic initializer with an exact normalized payload', asy
           note: input.note,
           items: [
             {
-              product_slug: 'sandbox-contract-item',
-              product_name: 'Sandbox contract item',
-              unit_price_twd: 100,
+              product_slug: 'ren-yuan-fu',
+              product_name: '人緣符',
+              unit_price_twd: 1500,
               quantity: 1,
               product_snapshot: {
-                source: 'synthetic_contract',
+                slug: 'ren-yuan-fu',
+                name: '人緣符',
+                category: '符咒商品',
+                priceTwd: 1500,
               },
             },
           ],
@@ -169,11 +254,47 @@ test('accepts an exact already_initialized replay result', async () => {
 
   const initialized = await initializeProductOrderLinePayCheckout(
     input,
+    trustedContext,
     rpc.client,
   )
 
   assert.equal(initialized.result_code, 'already_initialized')
   assert.equal(initialized.product_order_id, result.product_order_id)
+})
+
+test('accepts a replay after the request state has advanced', async () => {
+  for (const requestState of [
+    'claimed',
+    'requesting',
+    'pending',
+    'succeeded',
+    'failed',
+    'unknown',
+    'reconciliation_required',
+    'confirmation_processing',
+    'paid',
+    'canceled',
+  ] as const) {
+    const rpc = createRpcClient([
+      {
+        data: {
+          ...result,
+          result_code: 'already_initialized',
+          request_state: requestState,
+        },
+        error: null,
+      },
+    ])
+
+    const initialized = await initializeProductOrderLinePayCheckout(
+      input,
+      trustedContext,
+      rpc.client,
+    )
+
+    assert.equal(initialized.result_code, 'already_initialized')
+    assert.equal(initialized.request_state, requestState)
+  }
 })
 
 test('rejects unsafe or malformed input before calling RPC', async () => {
@@ -195,11 +316,7 @@ test('rejects unsafe or malformed input before calling RPC', async () => {
       items: [
         {
           ...input.items[0],
-          productSnapshot: {
-            nested: {
-              channelSecret: 'synthetic-sensitive-value',
-            },
-          },
+          productSlug: 'not-a-server-catalog-product',
         },
       ],
     },
@@ -208,12 +325,41 @@ test('rejects unsafe or malformed input before calling RPC', async () => {
   for (const invalidInput of invalidInputs) {
     const rpc = createRpcClient([])
     await assert.rejects(
-      () => initializeProductOrderLinePayCheckout(invalidInput, rpc.client),
+      () => initializeProductOrderLinePayCheckout(
+        invalidInput,
+        trustedContext,
+        rpc.client,
+      ),
       (error: unknown) =>
         error instanceof LinePayCheckoutInitializationError
         && error.code === 'invalid_input'
         && error.message === 'line_pay_checkout_initialization_error'
         && !JSON.stringify(error).includes('synthetic-sensitive-value'),
+    )
+    assert.equal(rpc.calls.length, 0)
+  }
+
+  for (const invalidContext of [
+    {
+      ...trustedContext,
+      authenticatedUserId: 'not-a-user-id',
+    },
+    {
+      ...trustedContext,
+      environment: 'preview',
+    },
+  ]) {
+    const rpc = createRpcClient([])
+    await assert.rejects(
+      () => initializeProductOrderLinePayCheckout(
+        input,
+        invalidContext as LinePayCheckoutInitializationTrustedServerContext,
+        rpc.client,
+      ),
+      (error: unknown) =>
+        error instanceof LinePayCheckoutInitializationError
+        && error.code === 'invalid_input'
+        && error.message === 'line_pay_checkout_initialization_error',
     )
     assert.equal(rpc.calls.length, 0)
   }
@@ -231,7 +377,11 @@ test('maps database failures to a stable non-sensitive error', async () => {
   ])
 
   await assert.rejects(
-    () => initializeProductOrderLinePayCheckout(input, rpc.client),
+    () => initializeProductOrderLinePayCheckout(
+      input,
+      trustedContext,
+      rpc.client,
+    ),
     (error: unknown) =>
       error instanceof LinePayCheckoutInitializationError
       && error.code === 'rpc_failed'
@@ -252,12 +402,21 @@ test('fails closed on extra fields or inconsistent RPC results', async () => {
     },
     {
       ...result,
-      request_state: 'initialized',
+      request_state: 'not-a-request-state',
+    },
+    {
+      ...result,
+      result_code: 'initialized',
+      request_state: 'claimed',
     },
   ]) {
     const rpc = createRpcClient([{ data: invalidResult, error: null }])
     await assert.rejects(
-      () => initializeProductOrderLinePayCheckout(input, rpc.client),
+      () => initializeProductOrderLinePayCheckout(
+        input,
+        trustedContext,
+        rpc.client,
+      ),
       (error: unknown) =>
         error instanceof LinePayCheckoutInitializationError
         && error.code === 'contract_mismatch'

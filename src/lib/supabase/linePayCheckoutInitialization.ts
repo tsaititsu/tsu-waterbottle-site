@@ -1,11 +1,11 @@
+import 'server-only'
+import { spiritualProducts } from '../spiritualProducts'
+
 export type LinePayCheckoutInitializationEnvironment = 'sandbox' | 'production'
 
 export type LinePayCheckoutInitializationItem = {
   productSlug: string
-  productName: string
-  unitPriceTwd: number
   quantity: number
-  productSnapshot?: Record<string, unknown> | null
 }
 
 export type LinePayCheckoutInitializationShippingInfo = {
@@ -27,8 +27,6 @@ export type LinePayCheckoutInitializationShippingInfo = {
 }
 
 export type InitializeProductOrderLinePayCheckoutInput = {
-  userId: string
-  environment: LinePayCheckoutInitializationEnvironment
   orderNo: string
   merchantOrderNo: string
   customerName?: string | null
@@ -44,6 +42,25 @@ export type InitializeProductOrderLinePayCheckoutInput = {
   capabilityExpiresAt: string
 }
 
+export type LinePayCheckoutInitializationTrustedServerContext = {
+  authenticatedUserId: string
+  environment: LinePayCheckoutInitializationEnvironment
+}
+
+export type LinePayCheckoutInitializationRequestState =
+  | 'initialized'
+  | 'queued'
+  | 'claimed'
+  | 'requesting'
+  | 'pending'
+  | 'succeeded'
+  | 'failed'
+  | 'unknown'
+  | 'reconciliation_required'
+  | 'confirmation_processing'
+  | 'paid'
+  | 'canceled'
+
 export type InitializeProductOrderLinePayCheckoutResult = {
   result_code: 'initialized' | 'already_initialized'
   product_order_id: string
@@ -53,7 +70,7 @@ export type InitializeProductOrderLinePayCheckoutResult = {
   confirm_capability_id: string
   cancel_capability_id: string
   merchant_order_no: string
-  request_state: 'queued'
+  request_state: LinePayCheckoutInitializationRequestState
 }
 
 type LinePayCheckoutInitializationRpcResponse = {
@@ -89,8 +106,6 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const SAFE_IDENTIFIER_PATTERN = /^[A-Za-z0-9_:-]{1,100}$/
 const SHA256_PATTERN = /^[0-9a-f]{64}$/
-const BLOCKED_SNAPSHOT_KEY_PATTERN =
-  /channelSecret|channelId|TradeInfo|TradeSha|HashKey|HashIV|signature|authorization|privateKey|gatewaySecret|creditCard|cardNumber|cardCvv|cardExpiry|paymentForm/i
 const RESULT_KEYS = [
   'result_code',
   'product_order_id',
@@ -102,9 +117,25 @@ const RESULT_KEYS = [
   'merchant_order_no',
   'request_state',
 ] as const
+const LINE_PAY_CHECKOUT_INITIALIZATION_REQUEST_STATES =
+  new Set<LinePayCheckoutInitializationRequestState>([
+    'initialized',
+    'queued',
+    'claimed',
+    'requesting',
+    'pending',
+    'succeeded',
+    'failed',
+    'unknown',
+    'reconciliation_required',
+    'confirmation_processing',
+    'paid',
+    'canceled',
+  ])
+const productBySlug = new Map(
+  spiritualProducts.map((product) => [product.slug, product]),
+)
 const MAX_RPC_PAYLOAD_BYTES = 65536
-const MAX_SNAPSHOT_BYTES = 16384
-const MAX_SNAPSHOT_DEPTH = 16
 
 function invalidInput(): never {
   throw new LinePayCheckoutInitializationError('invalid_input')
@@ -148,80 +179,22 @@ function normalizeRequiredText(
   return normalized
 }
 
-function cloneSafeSnapshotValue(
-  value: unknown,
-  depth: number,
-  seen: WeakSet<object>,
-): unknown {
-  if (depth > MAX_SNAPSHOT_DEPTH) invalidInput()
-
-  if (
-    value === null
-    || typeof value === 'string'
-    || typeof value === 'boolean'
-  ) {
-    return value
-  }
-
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) invalidInput()
-    return value
-  }
-
-  if (typeof value !== 'object') invalidInput()
-  if (seen.has(value)) invalidInput()
-  seen.add(value)
-
-  if (Array.isArray(value)) {
-    const cloned = value.map((entry) =>
-      cloneSafeSnapshotValue(entry, depth + 1, seen),
-    )
-    seen.delete(value)
-    return cloned
-  }
-
-  const source = value as Record<string, unknown>
-  const cloned: Record<string, unknown> = {}
-
-  for (const [key, entry] of Object.entries(source)) {
-    if (
-      key.length === 0
-      || key.length > 200
-      || BLOCKED_SNAPSHOT_KEY_PATTERN.test(key)
-    ) {
-      invalidInput()
-    }
-    cloned[key] = cloneSafeSnapshotValue(entry, depth + 1, seen)
-  }
-
-  seen.delete(value)
-  return cloned
-}
-
-function normalizeProductSnapshot(
-  value: Record<string, unknown> | null | undefined,
+function buildPayload(
+  input: InitializeProductOrderLinePayCheckoutInput,
+  trustedContext: LinePayCheckoutInitializationTrustedServerContext,
 ) {
-  if (value === null || value === undefined) return null
-  if (!isRecord(value)) invalidInput()
-
-  const cloned = cloneSafeSnapshotValue(
-    value,
-    0,
-    new WeakSet<object>(),
-  ) as Record<string, unknown>
-  const serialized = JSON.stringify(cloned)
-
-  if (new TextEncoder().encode(serialized).byteLength > MAX_SNAPSHOT_BYTES) {
-    invalidInput()
-  }
-  return cloned
-}
-
-function buildPayload(input: InitializeProductOrderLinePayCheckoutInput) {
   if (!isRecord(input)) invalidInput()
+  if (!isRecord(trustedContext)) invalidInput()
 
-  const userId = normalizeRequiredText(input.userId, 36, UUID_PATTERN)
-  if (input.environment !== 'sandbox' && input.environment !== 'production') {
+  const userId = normalizeRequiredText(
+    trustedContext.authenticatedUserId,
+    36,
+    UUID_PATTERN,
+  )
+  if (
+    trustedContext.environment !== 'sandbox'
+    && trustedContext.environment !== 'production'
+  ) {
     invalidInput()
   }
 
@@ -272,10 +245,10 @@ function buildPayload(input: InitializeProductOrderLinePayCheckoutInput) {
   let totalAmountTwd = 0
   const items = input.items.map((item) => {
     if (!isRecord(item)) invalidInput()
+    const productSlug = normalizeRequiredText(item.productSlug, 200)
+    const product = productBySlug.get(productSlug)
     if (
-      !Number.isSafeInteger(item.unitPriceTwd)
-      || item.unitPriceTwd < 0
-      || item.unitPriceTwd > 2147483647
+      !product
       || !Number.isSafeInteger(item.quantity)
       || item.quantity <= 0
       || item.quantity > 2147483647
@@ -283,18 +256,23 @@ function buildPayload(input: InitializeProductOrderLinePayCheckoutInput) {
       invalidInput()
     }
 
-    const subtotal = item.unitPriceTwd * item.quantity
+    const subtotal = product.priceTwd * item.quantity
     if (!Number.isSafeInteger(subtotal) || subtotal > 2147483647) {
       invalidInput()
     }
     totalAmountTwd += subtotal
 
     return {
-      product_slug: normalizeRequiredText(item.productSlug, 200),
-      product_name: normalizeRequiredText(item.productName, 500),
-      unit_price_twd: item.unitPriceTwd,
+      product_slug: product.slug,
+      product_name: product.name,
+      unit_price_twd: product.priceTwd,
       quantity: item.quantity,
-      product_snapshot: normalizeProductSnapshot(item.productSnapshot),
+      product_snapshot: {
+        slug: product.slug,
+        name: product.name,
+        category: product.category,
+        priceTwd: product.priceTwd,
+      },
     }
   })
 
@@ -343,7 +321,7 @@ function buildPayload(input: InitializeProductOrderLinePayCheckoutInput) {
 
   const payload = {
     user_id: userId,
-    environment: input.environment,
+    environment: trustedContext.environment,
     order_no: orderNo,
     merchant_order_no: merchantOrderNo,
     customer_name: normalizeOptionalText(input.customerName, 200),
@@ -387,7 +365,11 @@ function parseResult(
   if (
     (value.result_code !== 'initialized'
       && value.result_code !== 'already_initialized')
-    || value.request_state !== 'queued'
+    || typeof value.request_state !== 'string'
+    || !LINE_PAY_CHECKOUT_INITIALIZATION_REQUEST_STATES.has(
+      value.request_state as LinePayCheckoutInitializationRequestState,
+    )
+    || (value.result_code === 'initialized' && value.request_state !== 'queued')
     || value.merchant_order_no !== expectedMerchantOrderNo
   ) {
     contractMismatch()
@@ -421,9 +403,10 @@ function parseResult(
 
 export async function initializeProductOrderLinePayCheckout(
   input: InitializeProductOrderLinePayCheckoutInput,
+  trustedContext: LinePayCheckoutInitializationTrustedServerContext,
   client: LinePayCheckoutInitializationRpcClient,
 ): Promise<InitializeProductOrderLinePayCheckoutResult> {
-  const payload = buildPayload(input)
+  const payload = buildPayload(input, trustedContext)
   let response: LinePayCheckoutInitializationRpcResponse
 
   try {

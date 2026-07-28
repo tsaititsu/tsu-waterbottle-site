@@ -216,8 +216,53 @@ begin
        or pg_catalog.length(entry.item ->> 'quantity') > 10
        or entry.item ->> 'quantity' !~ '^[1-9][0-9]*$'
        or (entry.item ->> 'quantity')::bigint > 2147483647
-       or pg_catalog.jsonb_typeof(entry.item -> 'product_snapshot')
-         not in ('object', 'null')
+       or pg_catalog.jsonb_typeof(entry.item -> 'product_snapshot') <> 'object'
+       or not (
+         (entry.item -> 'product_snapshot') ?& array[
+           'slug',
+           'name',
+           'category',
+           'priceTwd'
+         ]::text[]
+       )
+       or exists (
+         select 1
+         from pg_catalog.jsonb_object_keys(
+           entry.item -> 'product_snapshot'
+         ) as supplied(key)
+         where supplied.key not in (
+           'slug',
+           'name',
+           'category',
+           'priceTwd'
+         )
+       )
+       or pg_catalog.jsonb_typeof(
+         entry.item -> 'product_snapshot' -> 'slug'
+       ) <> 'string'
+       or entry.item -> 'product_snapshot' ->> 'slug'
+         <> entry.item ->> 'product_slug'
+       or pg_catalog.jsonb_typeof(
+         entry.item -> 'product_snapshot' -> 'name'
+       ) <> 'string'
+       or entry.item -> 'product_snapshot' ->> 'name'
+         <> entry.item ->> 'product_name'
+       or pg_catalog.jsonb_typeof(
+         entry.item -> 'product_snapshot' -> 'category'
+       ) <> 'string'
+       or entry.item -> 'product_snapshot' ->> 'category'
+         not in ('符咒商品', '聚寶盆')
+       or pg_catalog.jsonb_typeof(
+         entry.item -> 'product_snapshot' -> 'priceTwd'
+       ) <> 'number'
+       or pg_catalog.length(
+         entry.item -> 'product_snapshot' ->> 'priceTwd'
+       ) > 10
+       or entry.item -> 'product_snapshot' ->> 'priceTwd'
+         !~ '^[0-9]+$'
+       or (
+         entry.item -> 'product_snapshot' ->> 'priceTwd'
+       )::bigint <> (entry.item ->> 'unit_price_twd')::bigint
        or pg_catalog.octet_length(
          (entry.item -> 'product_snapshot')::text
        ) > 16384
@@ -297,10 +342,23 @@ begin
        or v_existing_payment.request_idempotency_key <> v_idempotency_key
        or v_existing_payment.request_body_sha256 <> v_request_body_sha256
        or v_existing_payment.merchant_order_no <> v_merchant_order_no
+       or v_existing_payment.provider <> 'line_pay'
+       or v_existing_payment.item_type <> 'spiritual_product_order'
+       or v_existing_payment.item_id <> v_existing_order.id::text
+       or v_existing_payment.amount_twd <> v_total_amount_twd
+       or v_existing_payment.product_order_id is distinct from
+         v_existing_order.id
+       or v_existing_payment.checkout_attempt_id is distinct from
+         v_existing_attempt.id
        or v_existing_order.user_id <> v_user_id
        or v_existing_order.environment <> v_environment
        or v_existing_order.order_no <> v_order_no
        or v_existing_order.total_amount_twd <> v_total_amount_twd
+       or v_existing_order.payment_method <> 'line_pay'
+       or v_existing_order.payment_id is distinct from
+         v_existing_payment.id
+       or v_existing_order.checkout_attempt_id is distinct from
+         v_existing_attempt.id
        or v_existing_order.customer_name is distinct from
          nullif(pg_catalog.btrim(coalesce(p_payload ->> 'customer_name', '')), '')
        or v_existing_order.customer_email is distinct from
@@ -309,7 +367,17 @@ begin
          nullif(pg_catalog.btrim(coalesce(p_payload ->> 'customer_phone', '')), '')
        or v_existing_order.note is distinct from
          nullif(pg_catalog.btrim(coalesce(p_payload ->> 'note', '')), '')
+       or v_existing_outbox.payment_id <> v_existing_payment.id
+       or v_existing_outbox.environment <> v_environment
+       or v_existing_outbox.provider <> 'line_pay'
+       or v_existing_outbox.idempotency_key <> v_idempotency_key
        or v_existing_outbox.request_body_sha256 <> v_request_body_sha256
+       or v_existing_confirm.product_order_id <> v_existing_order.id
+       or v_existing_confirm.checkout_attempt_id <> v_existing_attempt.id
+       or v_existing_confirm.environment <> v_environment
+       or v_existing_cancel.product_order_id <> v_existing_order.id
+       or v_existing_cancel.checkout_attempt_id <> v_existing_attempt.id
+       or v_existing_cancel.environment <> v_environment
        or v_existing_confirm.token_hash <> v_confirm_token_hash
        or v_existing_cancel.token_hash <> v_cancel_token_hash
        or v_existing_confirm.expires_at <> v_capability_expires_at

@@ -28,7 +28,10 @@ values (
         'unit_price_twd', 40,
         'quantity', 2,
         'product_snapshot', pg_catalog.jsonb_build_object(
-          'source', 'synthetic_contract'
+          'slug', 'sandbox-contract-item',
+          'name', 'Sandbox contract item',
+          'category', '符咒商品',
+          'priceTwd', 40
         )
       ),
       pg_catalog.jsonb_build_object(
@@ -36,7 +39,12 @@ values (
         'product_name', 'Sandbox contract addon',
         'unit_price_twd', 20,
         'quantity', 1,
-        'product_snapshot', null
+        'product_snapshot', pg_catalog.jsonb_build_object(
+          'slug', 'sandbox-contract-addon',
+          'name', 'Sandbox contract addon',
+          'category', '符咒商品',
+          'priceTwd', 20
+        )
       )
     ),
     'shipping_info', pg_catalog.jsonb_build_object(
@@ -222,6 +230,151 @@ end;
 $$;
 
 do $$
+declare
+  v_invalid_snapshot_payload jsonb;
+begin
+  select pg_catalog.jsonb_set(
+    payload || pg_catalog.jsonb_build_object(
+      'order_no', 'PO-SANDBOX-SNAPSHOT-ALLOWLIST-1',
+      'merchant_order_no', 'LP_SANDBOX_SNAPSHOT_ALLOWLIST_1',
+      'idempotency_key', 'sandbox-snapshot-allowlist-0001',
+      'request_body_sha256', pg_catalog.repeat('4', 64),
+      'confirm_token_hash', pg_catalog.repeat('8', 64),
+      'cancel_token_hash', pg_catalog.repeat('5', 64)
+    ),
+    '{items,0,product_snapshot,unexpected_key}',
+    '"must-not-cross-database-contract"'::jsonb,
+    true
+  )
+  into strict v_invalid_snapshot_payload
+  from line_pay_initialization_payload;
+
+  perform *
+  from public.initialize_product_order_line_pay_checkout(
+    v_invalid_snapshot_payload
+  );
+  raise exception 'line_pay_initialization_snapshot_allowlist_was_bypassed';
+exception
+  when sqlstate '22023' then
+    if sqlerrm <> 'line_pay_initialization_invalid_input' then
+      raise;
+    end if;
+end;
+$$;
+
+do $$
+declare
+  v_mismatched_snapshot_payload jsonb;
+begin
+  select pg_catalog.jsonb_set(
+    payload || pg_catalog.jsonb_build_object(
+      'order_no', 'PO-SANDBOX-SNAPSHOT-BINDING-1',
+      'merchant_order_no', 'LP_SANDBOX_SNAPSHOT_BINDING_1',
+      'idempotency_key', 'sandbox-snapshot-binding-0001',
+      'request_body_sha256', pg_catalog.repeat('6', 64),
+      'confirm_token_hash', pg_catalog.repeat('9', 64),
+      'cancel_token_hash', pg_catalog.repeat('7', 64)
+    ),
+    '{items,0,product_snapshot,priceTwd}',
+    '1'::jsonb,
+    false
+  )
+  into strict v_mismatched_snapshot_payload
+  from line_pay_initialization_payload;
+
+  perform *
+  from public.initialize_product_order_line_pay_checkout(
+    v_mismatched_snapshot_payload
+  );
+  raise exception 'line_pay_initialization_snapshot_binding_was_bypassed';
+exception
+  when sqlstate '22023' then
+    if sqlerrm <> 'line_pay_initialization_invalid_input' then
+      raise;
+    end if;
+end;
+$$;
+
+begin;
+
+update public.line_pay_checkout_attempts
+set
+  request_state = 'claimed',
+  claim_id = '62000000-0000-4000-8000-000000000001',
+  claimed_at = pg_catalog.clock_timestamp(),
+  claim_expires_at = pg_catalog.clock_timestamp() + interval '5 minutes'
+where id = (
+  select attempt_id
+  from line_pay_initialization_first_result
+);
+
+do $$
+declare
+  v_replay record;
+begin
+  select *
+  into strict v_replay
+  from public.initialize_product_order_line_pay_checkout(
+    (select payload from line_pay_initialization_payload)
+  );
+
+  if v_replay.result_code <> 'already_initialized'
+     or v_replay.request_state <> 'claimed' then
+    raise exception 'line_pay_initialization_advanced_replay_contract_failed';
+  end if;
+end;
+$$;
+
+rollback;
+
+begin;
+
+do $$
+declare
+  v_second record;
+begin
+  select *
+  into strict v_second
+  from public.initialize_product_order_line_pay_checkout(
+    (
+      select payload || pg_catalog.jsonb_build_object(
+        'order_no', 'PO-SANDBOX-BINDING-2',
+        'merchant_order_no', 'LP_SANDBOX_BINDING_2',
+        'idempotency_key', 'sandbox-aggregate-binding-0002',
+        'request_body_sha256', pg_catalog.repeat('d', 64),
+        'confirm_token_hash', pg_catalog.repeat('e', 64),
+        'cancel_token_hash', pg_catalog.repeat('f', 64)
+      )
+      from line_pay_initialization_payload
+    )
+  );
+
+  update public.line_pay_request_outbox
+  set payment_id = v_second.payment_id
+  where id = (
+    select outbox_id
+    from line_pay_initialization_first_result
+  );
+
+  begin
+    perform *
+    from public.initialize_product_order_line_pay_checkout(
+      (select payload from line_pay_initialization_payload)
+    );
+    raise exception
+      'line_pay_initialization_aggregate_binding_drift_was_accepted';
+  exception
+    when unique_violation then
+      if sqlerrm <> 'line_pay_initialization_idempotency_conflict' then
+        raise;
+      end if;
+  end;
+end;
+$$;
+
+rollback;
+
+do $$
 begin
   perform *
   from public.initialize_product_order_line_pay_checkout(
@@ -282,8 +435,8 @@ declare
 begin
   select pg_catalog.jsonb_set(
     payload,
-    '{items,0,product_name}',
-    '"Different item with same claimed body hash"'::jsonb
+    '{customer_name}',
+    '"Different customer with same claimed body hash"'::jsonb
   )
   into strict v_mismatched_payload
   from line_pay_initialization_payload;
