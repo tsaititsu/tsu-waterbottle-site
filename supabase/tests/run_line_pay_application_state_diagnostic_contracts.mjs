@@ -125,24 +125,48 @@ function psqlFile(relativePath) {
 }
 
 function waitForPostgres() {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  let consecutiveReadyChecks = 0
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const finalProcess = spawnSync(
+      'docker',
+      ['exec', containerName, 'cat', '/proc/1/comm'],
+      { cwd: root, encoding: 'utf8' },
+    )
+    if (
+      finalProcess.status !== 0
+      || finalProcess.stdout.trim() !== 'postgres'
+    ) {
+      consecutiveReadyChecks = 0
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250)
+      continue
+    }
+
     const result = spawnSync(
       'docker',
       [
         'exec',
         containerName,
-        'pg_isready',
+        'psql',
+        '-X',
+        '--no-align',
+        '--tuples-only',
         '-U',
         'postgres',
         '-d',
         'postgres',
+        '-c',
+        'select 1',
       ],
       { cwd: root, encoding: 'utf8' },
     )
-    if (result.status === 0) return
-    spawnSync('sleep', ['1'])
+    consecutiveReadyChecks =
+      result.status === 0 && result.stdout.trim() === '1'
+        ? consecutiveReadyChecks + 1
+        : 0
+    if (consecutiveReadyChecks >= 2) return
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250)
   }
-  throw new Error('POSTGRES_START_TIMEOUT')
+  throw new Error('POSTGRES_STABLE_READINESS_TIMEOUT')
 }
 
 function prepareBaseline() {
