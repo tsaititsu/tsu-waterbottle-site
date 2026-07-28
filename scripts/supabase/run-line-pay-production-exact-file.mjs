@@ -50,6 +50,26 @@ export const SUCCESS_MESSAGES = Object.freeze({
   deploy: 'DEPLOYMENT_VALIDATED',
 })
 
+export const DEFAULT_DATABASE_CONTRACT = Object.freeze({
+  phaseFiles: PHASE_FILES,
+  successMessages: SUCCESS_MESSAGES,
+  fixedFiles: Object.freeze([
+    Object.freeze({
+      path: MIGRATION_FILE,
+      sha256: EXPECTED_MIGRATION_SHA256,
+    }),
+    Object.freeze({
+      path: FENCE_MIGRATION_FILE,
+      sha256: EXPECTED_FENCE_SHA256,
+    }),
+  ]),
+  parsePreflightOutput: (text) =>
+    parseAndValidateAuditOutput(text, 'preflight'),
+  parseDeployOutput: (text) =>
+    parseAndValidateAuditOutput(text, 'postflight'),
+  buildDeploySuccessAttestation,
+})
+
 export const DEPLOY_ATTESTATION_MARKERS = Object.freeze({
   migrationStarted: 'LINE_PAY_DEPLOY_MIGRATION_STARTED',
   migrationCommitted: 'LINE_PAY_DEPLOY_MIGRATION_COMMITTED',
@@ -261,8 +281,13 @@ function determineConnectionMode(hostname, username, projectId) {
   fail('DATABASE_URL_INVALID')
 }
 
-export function validatePhase(phase) {
-  if (typeof phase !== 'string' || !Object.hasOwn(PHASE_FILES, phase)) {
+export function validatePhase(phase, phaseFiles = PHASE_FILES) {
+  if (
+    typeof phase !== 'string' ||
+    !phaseFiles ||
+    typeof phaseFiles !== 'object' ||
+    !Object.hasOwn(phaseFiles, phase)
+  ) {
     fail('UNSUPPORTED_DATABASE_PHASE')
   }
   return phase
@@ -346,15 +371,15 @@ export function buildPgpassLine(connection) {
     .join(':')
 }
 
-export function buildPsqlArgs(phase) {
-  validatePhase(phase)
+export function buildPsqlArgs(phase, phaseFiles = PHASE_FILES) {
+  validatePhase(phase, phaseFiles)
   return [
     '--no-psqlrc',
     '--set=ON_ERROR_STOP=1',
     '--quiet',
     '--no-align',
     '--tuples-only',
-    `--file=${join(CONTAINER_REPOSITORY_ROOT, PHASE_FILES[phase])}`,
+    `--file=${join(CONTAINER_REPOSITORY_ROOT, phaseFiles[phase])}`,
   ]
 }
 
@@ -378,8 +403,13 @@ export function buildChildEnvironment(connection) {
   return environment
 }
 
-export function buildDockerRunArgs(phase, connection, pgpassFile) {
-  validatePhase(phase)
+export function buildDockerRunArgs(
+  phase,
+  connection,
+  pgpassFile,
+  phaseFiles = PHASE_FILES,
+) {
+  validatePhase(phase, phaseFiles)
   validatePostgresImage(POSTGRES_IMAGE)
   const childEnvironment = buildChildEnvironment(connection)
   const user = `${process.getuid?.() ?? 1001}:${process.getgid?.() ?? 1001}`
@@ -403,7 +433,7 @@ export function buildDockerRunArgs(phase, connection, pgpassFile) {
     ]),
     POSTGRES_IMAGE,
     'psql',
-    ...buildPsqlArgs(phase),
+    ...buildPsqlArgs(phase, phaseFiles),
   ]
 }
 
@@ -697,12 +727,20 @@ function interruptedDeployFailureCode(evidence) {
   return 'MIGRATION_COMMIT_STATE_UNKNOWN'
 }
 
-export function validateDeployExecutionResult(result, evidence) {
+export function validateFixedDeployExecutionResult(
+  result,
+  evidence,
+  contract,
+) {
   if (
     !result ||
     typeof result !== 'object' ||
     !evidence ||
-    typeof evidence !== 'object'
+    typeof evidence !== 'object' ||
+    !contract ||
+    typeof contract !== 'object' ||
+    typeof contract.parseDeployOutput !== 'function' ||
+    typeof contract.buildDeploySuccessAttestation !== 'function'
   ) {
     fail('MIGRATION_COMMIT_STATE_UNKNOWN')
   }
@@ -722,14 +760,16 @@ export function validateDeployExecutionResult(result, evidence) {
     }
     let validatedPostflight
     try {
-      validatedPostflight = parseAndValidateAuditOutput(
+      validatedPostflight = contract.parseDeployOutput(
         evidence.auditOutput,
-        'postflight',
       )
     } catch {
       fail('OUTPUT_VALIDATION_FAILED_AFTER_BOTH_COMMITS_OBSERVED')
     }
-    return buildDeploySuccessAttestation(evidence, validatedPostflight)
+    return contract.buildDeploySuccessAttestation(
+      evidence,
+      validatedPostflight,
+    )
   }
   if (evidence.migration_commit_observed) {
     if (!evidence.postflight_started_observed) {
@@ -759,8 +799,17 @@ export function validateDeployExecutionResult(result, evidence) {
   fail('MIGRATION_COMMIT_STATE_UNKNOWN')
 }
 
-export async function runDatabasePhase(
+export function validateDeployExecutionResult(result, evidence) {
+  return validateFixedDeployExecutionResult(
+    result,
+    evidence,
+    DEFAULT_DATABASE_CONTRACT,
+  )
+}
+
+export async function runFixedDatabasePhase(
   phase,
+  contract,
   {
     environment = process.env,
     filesystem = fs,
@@ -768,19 +817,35 @@ export async function runDatabasePhase(
     spawnImplementation = spawn,
   } = {},
 ) {
-  validatePhase(phase)
+  if (
+    !contract ||
+    typeof contract !== 'object' ||
+    !contract.phaseFiles ||
+    !contract.successMessages ||
+    !Array.isArray(contract.fixedFiles) ||
+    typeof contract.parsePreflightOutput !== 'function' ||
+    typeof contract.parseDeployOutput !== 'function' ||
+    typeof contract.buildDeploySuccessAttestation !== 'function'
+  ) {
+    fail('DEPLOY_CONTRACT_FAILED')
+  }
+  validatePhase(phase, contract.phaseFiles)
   validateNodeVersion()
   validateProductionChannel(environment)
-  readAndValidateFixedFile(
-    repositoryRoot,
-    MIGRATION_FILE,
-    EXPECTED_MIGRATION_SHA256,
-  )
-  readAndValidateFixedFile(
-    repositoryRoot,
-    FENCE_MIGRATION_FILE,
-    EXPECTED_FENCE_SHA256,
-  )
+  for (const fixedFile of contract.fixedFiles) {
+    if (
+      !fixedFile ||
+      typeof fixedFile.path !== 'string' ||
+      typeof fixedFile.sha256 !== 'string'
+    ) {
+      fail('DEPLOY_CONTRACT_FAILED')
+    }
+    readAndValidateFixedFile(
+      repositoryRoot,
+      fixedFile.path,
+      fixedFile.sha256,
+    )
+  }
   const connection = parseDatabaseUrl(
     environment.SUPABASE_PRODUCTION_DB_URL,
     environment.SUPABASE_PROJECT_ID,
@@ -793,7 +858,10 @@ export async function runDatabasePhase(
   let cleanupCompleted = false
   let cleanupPromise = null
   let deployEvidence = emptyDeployEvidence()
-  let completedResult = SUCCESS_MESSAGES[phase]
+  let completedResult = contract.successMessages[phase]
+  if (typeof completedResult !== 'string' || !completedResult) {
+    fail('DEPLOY_CONTRACT_FAILED')
+  }
   const ensureNotInterrupted = () => {
     if (interrupted) fail('PROCESS_INTERRUPTED')
   }
@@ -862,6 +930,7 @@ export async function runDatabasePhase(
       phase,
       connection,
       credentials.pgpassFile,
+      contract.phaseFiles,
     )
     ensureNotInterrupted()
     let result
@@ -885,17 +954,18 @@ export async function runDatabasePhase(
     }
     if (phase === 'deploy') {
       deployEvidence = inspectDeployOutput(result.stdout)
-      completedResult = validateDeployExecutionResult(
+      completedResult = validateFixedDeployExecutionResult(
         interrupted && !result.signal
           ? { ...result, signal: 'RUNNER_INTERRUPTED' }
           : result,
         deployEvidence,
+        contract,
       )
     } else {
       ensureNotInterrupted()
       if (result.code !== 0 || result.signal) fail(phaseFailureCode(phase))
       try {
-        parseAndValidateAuditOutput(result.stdout, 'preflight')
+        contract.parsePreflightOutput(result.stdout)
       } catch (error) {
         if (
           error instanceof Error &&
@@ -976,6 +1046,10 @@ export async function runDatabasePhase(
     throw operationError
   }
   return completedResult
+}
+
+export function runDatabasePhase(phase, options = {}) {
+  return runFixedDatabasePhase(phase, DEFAULT_DATABASE_CONTRACT, options)
 }
 
 export function safeFailureCode(error) {

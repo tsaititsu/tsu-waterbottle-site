@@ -1,7 +1,8 @@
 # LINE Pay 結帳聚合初始化部署與回復邊界
 
-本文件只封存 `20260728053215_line_pay_checkout_aggregate_initialization.sql`
-的審查條件。本 PR 不部署、不連線 Production Supabase，也不啟用 LINE Pay。
+本文件封存 `20260728053215_line_pay_checkout_aggregate_initialization.sql`
+的審查條件與專用受控管道。本 PR 只建立管道，不 dispatch、不連線
+Production Supabase、不執行 Migration，也不啟用 LINE Pay。
 
 ## 影響範圍
 
@@ -44,6 +45,45 @@ Policy 意圖如下：
 7. Runtime 切換必須是另一個 PR、另一輪 Preview／Sandbox 驗證與另一份授權。
 
 禁止 `supabase db push`、`migration up`、apply-all、retry 或 fallback。
+
+## 專用 Production 管道
+
+Initializer 不得使用舊的 LINE Pay remediation workflow。兩條專用 workflow
+都是 `workflow_dispatch`、`main`、完整 commit SHA 與
+`supabase-production` Environment gate：
+
+- 唯讀狀態診斷：
+  `.github/workflows/supabase-production-line-pay-checkout-initializer-diagnostic.yml`
+- 單次 exact-file 部署：
+  `.github/workflows/supabase-production-line-pay-checkout-initializer.yml`
+
+唯讀診斷固定輸出 `UNAPPLIED`、`PARTIAL` 或 `FULL`，只回傳 catalog 計數、
+布林 contract 與 `checkout_initialized` audit 筆數；不輸出 row、function
+body、Policy expression、連線資訊或 Secret。
+
+部署 workflow 只接受固定 commit、project ref、Migration SHA-256、Backup／PITR
+確認字串與一次性授權字串；不能輸入 SQL、路徑、command 或 Runtime flag。它只
+能依序執行：
+
+1. exact source validation；
+2. protected Environment channel validation；
+3. read-only `UNAPPLIED` preflight；
+4. 對相關 relations 取得 `ACCESS EXCLUSIVE` lock；
+5. 擷取五張商業／audit relations 的 row count 與完整 row digest；
+6. 執行一次 exact initializer Migration；
+7. 重新鎖定並驗證 `FULL` catalog contract 與資料 fingerprint；
+8. 輸出 commit-boundary attestation。
+
+Migration 前必須人工提供精確確認：
+
+`CONFIRM_SUPABASE_BACKUP_PITR_RESTORE_POINT_AVAILABLE`
+
+即使 workflow 與 CI 全綠，仍不代表已授權 Production。必須另外取得使用者在
+當次任務中對固定 main commit、project ref、exact file 與 SHA-256 的明確授權，
+而且只能 dispatch 一次。診斷授權與 Migration 授權互不共用。
+
+本管道不寫 Supabase Migration history，也不切換任何 Vercel／LINE Pay
+Runtime 設定。Migration 成功後 Runtime 仍必須維持 disabled。
 
 ## 舊程式相容性
 

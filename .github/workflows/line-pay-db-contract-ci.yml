@@ -8,6 +8,8 @@ on:
       - ".github/workflows/supabase-production-bank-transfer-forensic.yml"
       - ".github/workflows/supabase-production-line-pay-diagnostic.yml"
       - ".github/workflows/supabase-production-line-pay-application-state-diagnostic.yml"
+      - ".github/workflows/supabase-production-line-pay-checkout-initializer-diagnostic.yml"
+      - ".github/workflows/supabase-production-line-pay-checkout-initializer.yml"
       - ".github/workflows/supabase-production-line-pay-migration.yml"
       - "package.json"
       - "package-lock.json"
@@ -16,10 +18,13 @@ on:
       - "scripts/supabase/run-line-pay-production-exact-file.mjs"
       - "scripts/supabase/run-line-pay-production-diagnostic.mjs"
       - "scripts/supabase/run-line-pay-application-state-diagnostic.mjs"
+      - "scripts/supabase/run-line-pay-checkout-initializer-application-state.mjs"
+      - "scripts/supabase/run-line-pay-checkout-initializer-exact-file.mjs"
       - "scripts/supabase/validate-bank-transfer-production-forensic.mjs"
       - "scripts/supabase/validate-bank-transfer-production-baseline-capture.mjs"
       - "scripts/supabase/validate-line-pay-production-diagnostic.mjs"
       - "scripts/supabase/validate-line-pay-application-state-diagnostic.mjs"
+      - "scripts/supabase/validate-line-pay-checkout-initializer-production.mjs"
       - "scripts/supabase/validate-line-pay-production-deployment.mjs"
       - "src/lib/supabase/linePayDatabaseContracts.ts"
       - "src/lib/supabase/linePayDatabaseContracts.test.ts"
@@ -39,9 +44,15 @@ on:
       - "supabase/deployment/line_pay_remediation_diagnostic.sql"
       - "supabase/deployment/line_pay_application_state_diagnostic.sql"
       - "supabase/deployment/line_pay_checkout_aggregate_initialization_recovery.sql"
+      - "supabase/deployment/line_pay_checkout_aggregate_initialization_application_state.sql"
+      - "supabase/deployment/line_pay_checkout_aggregate_initialization_preflight.sql"
+      - "supabase/deployment/line_pay_checkout_aggregate_initialization_postflight.sql"
+      - "supabase/deployment/line_pay_checkout_aggregate_initialization_deploy.sql"
       - "docs/line-pay-checkout-aggregate-initialization-deployment.md"
       - "supabase/line_pay_remediation_contracts.test.ts"
       - "supabase/line_pay_checkout_aggregate_initialization.test.ts"
+      - "supabase/line_pay_checkout_initializer_production_runner.test.ts"
+      - "supabase/line_pay_checkout_initializer_production_workflow.test.ts"
       - "supabase/line_pay_production_diagnostic_runner.test.ts"
       - "supabase/line_pay_production_diagnostic_workflow.test.ts"
       - "supabase/line_pay_application_state_diagnostic_runner.test.ts"
@@ -56,6 +67,7 @@ on:
       - "supabase/tests/run_bank_transfer_submissions_readonly_fence.mjs"
       - "supabase/tests/run_line_pay_production_diagnostic_contracts.mjs"
       - "supabase/tests/run_line_pay_application_state_diagnostic_contracts.mjs"
+      - "supabase/tests/run_line_pay_checkout_initializer_production_contracts.mjs"
       - "supabase/tests/run_line_pay_production_exact_file_contracts.mjs"
       - "supabase/tests/line_pay_*.sql"
       - "supabase/tests/run_line_pay_remediation_*.mjs"
@@ -100,6 +112,8 @@ jobs:
           node --test supabase/bank_transfer_historical_forensic_runner.test.ts
           node --test supabase/line_pay_remediation_contracts.test.ts
           node --test supabase/line_pay_checkout_aggregate_initialization.test.ts
+          node --test supabase/line_pay_checkout_initializer_production_runner.test.ts
+          node --test supabase/line_pay_checkout_initializer_production_workflow.test.ts
           node --test supabase/line_pay_production_diagnostic_workflow.test.ts
           node --test supabase/line_pay_production_diagnostic_runner.test.ts
           node --test supabase/line_pay_application_state_diagnostic_workflow.test.ts
@@ -132,6 +146,9 @@ jobs:
 
       - name: Run atomic LINE Pay checkout initialization contracts
         run: node supabase/tests/run_line_pay_checkout_aggregate_initialization.mjs
+
+      - name: Run LINE Pay checkout initializer Production contracts
+        run: node supabase/tests/run_line_pay_checkout_initializer_production_contracts.mjs
 
       - name: Run fail-closed conflict fixtures
         run: node supabase/tests/run_line_pay_second_remediation_conflicts.mjs
@@ -173,6 +190,12 @@ jobs:
           docker volume ls -q --filter label=task=line-pay-application-state-diagnostic |
             xargs -r docker volume rm
           docker network ls -q --filter label=task=line-pay-application-state-diagnostic |
+            xargs -r docker network rm
+          docker ps -aq --filter label=task=line-pay-checkout-initializer-production |
+            xargs -r docker rm --force
+          docker volume ls -q --filter label=task=line-pay-checkout-initializer-production |
+            xargs -r docker volume rm
+          docker network ls -q --filter label=task=line-pay-checkout-initializer-production |
             xargs -r docker network rm
           docker ps -aq --filter label=task=bank-transfer-historical-forensic |
             xargs -r docker rm --force
