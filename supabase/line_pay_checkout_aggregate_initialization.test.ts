@@ -230,6 +230,10 @@ test('initializer writes one bounded audit event through a least-privilege helpe
   )
   assert.match(
     migration,
+    /capability\.expires_at\s*<=\s*capability\.created_at\s*\+\s*interval\s*'24 hours'/i,
+  )
+  assert.match(
+    migration,
     /count\s*\(\s*distinct\s+capability\.expires_at\s*\)[\s\S]*?capability\.purpose\s+in\s*\(\s*'confirm',\s*'cancel'\s*\)[\s\S]*?=\s*1/i,
   )
   assert.match(
@@ -285,6 +289,7 @@ test('migration locks the audit index to the exact reviewed catalog shape', () =
   assert.match(migration, /index_catalog\.indisready/i)
   assert.match(migration, /index_catalog\.indnkeyatts\s*=\s*1/i)
   assert.match(migration, /index_catalog\.indnatts\s*=\s*1/i)
+  assert.match(migration, /not\s+index_catalog\.indnullsnotdistinct/i)
   assert.match(migration, /index_catalog\.indexprs\s+is\s+null/i)
   assert.match(
     migration,

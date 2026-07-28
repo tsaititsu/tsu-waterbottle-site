@@ -296,6 +296,8 @@ begin
              and capability.expires_at > pg_catalog.clock_timestamp()
              and capability.expires_at <=
                pg_catalog.clock_timestamp() + interval '24 hours'
+             and capability.expires_at <=
+               capability.created_at + interval '24 hours'
              and capability.consumed_at is null
              and capability.revoked_at is null
          ) = 2
@@ -348,7 +350,7 @@ comment on function line_pay_private.record_line_pay_checkout_initialized_audit(
   uuid,
   uuid,
   text
-) is 'line_pay_definition_md5:fecfa1877b0f9280c582b918bc29ce7b';
+) is 'line_pay_definition_md5:58527777d0bd2138231218673699b634';
 
 revoke all on function line_pay_private.record_line_pay_checkout_initialized_audit(
   uuid,
@@ -1303,9 +1305,9 @@ begin
         or procedure.proconfig is null
         or not ('search_path=""' = any (procedure.proconfig))
         or pg_catalog.obj_description(procedure.oid, 'pg_proc')
-          <> 'line_pay_definition_md5:fecfa1877b0f9280c582b918bc29ce7b'
+          <> 'line_pay_definition_md5:58527777d0bd2138231218673699b634'
         or pg_catalog.md5(pg_catalog.pg_get_functiondef(procedure.oid))
-          <> 'fecfa1877b0f9280c582b918bc29ce7b'
+          <> '58527777d0bd2138231218673699b634'
       )
   )
   or not pg_catalog.has_function_privilege(
@@ -1377,6 +1379,7 @@ begin
       and index_catalog.indisready
       and index_catalog.indnkeyatts = 1
       and index_catalog.indnatts = 1
+      and not index_catalog.indnullsnotdistinct
       and index_catalog.indexprs is null
       and index_catalog.indkey[0] = key_attribute.attnum
       and pg_catalog.pg_get_indexdef(index_catalog.indexrelid)

@@ -852,21 +852,39 @@ function testRecoveryRejectsTableSelectGrantOption(database) {
   }
 }
 
-function mutateAuditIndexIncludeColumn(migration) {
+const auditIndexShapeMutations = Object.freeze({
+  include: Object.freeze({
+    clause: 'include (event_type)',
+    preservedExpression: 'index_catalog.indnatts = 2',
+  }),
+  nulls_not_distinct: Object.freeze({
+    clause: 'nulls not distinct',
+    preservedExpression: 'index_catalog.indnullsnotdistinct',
+  }),
+})
+
+function auditIndexShapeMutation(target) {
+  const mutation = auditIndexShapeMutations[target]
+  if (!mutation) throw new Error(`unknown audit index shape mutation: ${target}`)
+  return mutation
+}
+
+function mutateAuditIndexShape(migration, target) {
+  const mutation = auditIndexShapeMutation(target)
   const mutatedMigration = migration.replace(
     `on public.line_pay_payment_audit_events(checkout_attempt_id)
 where event_type = 'checkout_initialized';`,
     `on public.line_pay_payment_audit_events(checkout_attempt_id)
-include (event_type)
+${mutation.clause}
 where event_type = 'checkout_initialized';`,
   )
   if (mutatedMigration === migration) {
-    throw new Error('audit index INCLUDE mutation did not change the migration')
+    throw new Error(`${target} audit index mutation did not change the migration`)
   }
   return mutatedMigration
 }
 
-function testMigrationRejectsAuditIndexIncludeColumn(database) {
+function testMigrationRejectsAuditIndexShape(database, target) {
   psqlFile(database, 'supabase/tests/line_pay_local_postgres_bootstrap.sql')
   for (const file of baselineFiles) psqlFile(database, file)
   psqlFile(database, baseMigration)
@@ -876,8 +894,8 @@ function testMigrationRejectsAuditIndexIncludeColumn(database) {
     containerName,
     database,
     'postgres',
-    mutateAuditIndexIncludeColumn(migration),
-    'audit index INCLUDE migration mutation',
+    mutateAuditIndexShape(migration, target),
+    `${target} audit index migration mutation`,
     true,
   )
   if (
@@ -886,7 +904,7 @@ function testMigrationRejectsAuditIndexIncludeColumn(database) {
     )
   ) {
     throw new Error(
-      'audit index INCLUDE mutation was not rejected by the exact catalog postcondition',
+      `${target} audit index mutation was not rejected by the exact catalog postcondition`,
     )
   }
 
@@ -911,23 +929,24 @@ function testMigrationRejectsAuditIndexIncludeColumn(database) {
           )
         ) to stdout;
       `,
-      'audit index INCLUDE migration rollback',
+      `${target} audit index migration rollback`,
     ),
   )
   if (Object.values(rollbackState).some((value) => value !== true)) {
     throw new Error(
-      `audit index INCLUDE migration did not roll back atomically: ${JSON.stringify(
+      `${target} audit index migration did not roll back atomically: ${JSON.stringify(
         rollbackState,
       )}`,
     )
   }
 }
 
-function testRecoveryRejectsAuditIndexIncludeColumn(database) {
+function testRecoveryRejectsAuditIndexShape(database, target) {
   psqlFile(database, 'supabase/tests/line_pay_local_postgres_bootstrap.sql')
   for (const file of baselineFiles) psqlFile(database, file)
   psqlFile(database, baseMigration)
   psqlFile(database, initializationMigration)
+  const mutation = auditIndexShapeMutation(target)
 
   psql(
     database,
@@ -937,10 +956,10 @@ function testRecoveryRejectsAuditIndexIncludeColumn(database) {
       create unique index
         line_pay_payment_audit_events_checkout_initialized_once_idx
       on public.line_pay_payment_audit_events(checkout_attempt_id)
-      include (event_type)
+      ${mutation.clause}
       where event_type = 'checkout_initialized';
     `,
-    'audit index INCLUDE recovery fixture',
+    `${target} audit index recovery fixture`,
   )
 
   const recoveryOutput = psqlAsInContainer(
@@ -948,7 +967,7 @@ function testRecoveryRejectsAuditIndexIncludeColumn(database) {
     database,
     'postgres',
     readFileSync(initializationRecovery, 'utf8'),
-    'audit index INCLUDE recovery mutation',
+    `${target} audit index recovery mutation`,
     true,
   )
   if (
@@ -957,7 +976,7 @@ function testRecoveryRejectsAuditIndexIncludeColumn(database) {
     )
   ) {
     throw new Error(
-      'audit index INCLUDE drift was not rejected by the recovery precondition',
+      `${target} audit index drift was not rejected by the recovery precondition`,
     )
   }
 
@@ -977,7 +996,7 @@ function testRecoveryRejectsAuditIndexIncludeColumn(database) {
               ) is not null,
             'index_drift_preserved',
               coalesce((
-                select index_catalog.indnatts = 2
+                select ${mutation.preservedExpression}
                 from pg_catalog.pg_index as index_catalog
                 join pg_catalog.pg_class as index_relation
                   on index_relation.oid = index_catalog.indexrelid
@@ -990,12 +1009,12 @@ function testRecoveryRejectsAuditIndexIncludeColumn(database) {
           )
         ) to stdout;
       `,
-      'audit index INCLUDE recovery preservation',
+      `${target} audit index recovery preservation`,
     ),
   )
   if (Object.values(preservedState).some((value) => value !== true)) {
     throw new Error(
-      `audit index INCLUDE recovery changed state: ${JSON.stringify(
+      `${target} audit index recovery changed state: ${JSON.stringify(
         preservedState,
       )}`,
     )
@@ -1782,16 +1801,18 @@ async function main() {
     'create database line_pay_initialization_table_recovery_grant;',
     'create table recovery grant database',
   )
-  psql(
-    'postgres',
-    'create database line_pay_initialization_index_shape_mutation;',
-    'create index shape mutation database',
-  )
-  psql(
-    'postgres',
-    'create database line_pay_initialization_index_recovery_drift;',
-    'create index recovery drift database',
-  )
+  for (const target of Object.keys(auditIndexShapeMutations)) {
+    psql(
+      'postgres',
+      `create database line_pay_initialization_index_${target}_mutation;`,
+      `create ${target} index mutation database`,
+    )
+    psql(
+      'postgres',
+      `create database line_pay_initialization_index_${target}_recovery;`,
+      `create ${target} index recovery database`,
+    )
+  }
 
   prepareDatabase('line_pay_initialization_contract')
   psqlFile(
@@ -1840,12 +1861,16 @@ async function main() {
   testRecoveryRejectsTableSelectGrantOption(
     'line_pay_initialization_table_recovery_grant',
   )
-  testMigrationRejectsAuditIndexIncludeColumn(
-    'line_pay_initialization_index_shape_mutation',
-  )
-  testRecoveryRejectsAuditIndexIncludeColumn(
-    'line_pay_initialization_index_recovery_drift',
-  )
+  for (const target of Object.keys(auditIndexShapeMutations)) {
+    testMigrationRejectsAuditIndexShape(
+      `line_pay_initialization_index_${target}_mutation`,
+      target,
+    )
+    testRecoveryRejectsAuditIndexShape(
+      `line_pay_initialization_index_${target}_recovery`,
+      target,
+    )
+  }
   testHostedNonSuperuserUpgrade()
 
   process.stdout.write(

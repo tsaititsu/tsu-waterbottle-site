@@ -695,6 +695,19 @@ begin
           $mutation$
         ),
         (
+          'capability historical lifetime drift',
+          $mutation$
+            update public.line_pay_callback_capabilities
+            set
+              created_at = pg_catalog.clock_timestamp() - interval '48 hours',
+              expires_at = pg_catalog.clock_timestamp() + interval '23 hours'
+            where checkout_attempt_id = (
+              select attempt_id
+              from line_pay_initialization_first_result
+            )
+          $mutation$
+        ),
+        (
           'capability lifetime mismatch',
           $mutation$
             update public.line_pay_callback_capabilities
