@@ -43,6 +43,31 @@ export const PUBLIC_PAGE_METADATA = {
     description: '查看 WATERBOTTLE 開運商品介紹、價格、購買須知與配送資訊。',
     path: '/spiritual-products',
   },
+  contact: {
+    title: '聯絡我們',
+    description: '如有訂單、付款、課程或預約相關問題，請透過客服信箱或官方 LINE 聯繫 WATERBOTTLE。',
+    path: '/contact',
+  },
+  consumerRights: {
+    title: '消費者權益說明',
+    description: '查看 WATERBOTTLE 服務購買、付款紀錄、退款方式、客服聯絡與爭議處理等消費者權益資訊。',
+    path: '/consumer-rights',
+  },
+  privacy: {
+    title: '隱私權政策',
+    description: '了解 WATERBOTTLE 如何蒐集、使用、保存及保護會員、訂單與服務所需資料。',
+    path: '/privacy',
+  },
+  refundPolicy: {
+    title: '退款政策',
+    description: '查看 WATERBOTTLE 各項服務的取消、改期、退款申請方式與退款處理時間。',
+    path: '/refund-policy',
+  },
+  terms: {
+    title: '服務條款',
+    description: '使用 WATERBOTTLE 網站與紫微命理服務前，請先閱讀服務內容、付款、使用規範與免責聲明。',
+    path: '/terms',
+  },
 } as const satisfies Record<string, PublicMetadataInput>
 
 export function createPublicMetadata({
