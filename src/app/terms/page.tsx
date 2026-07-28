@@ -1,6 +1,10 @@
+import type { Metadata } from 'next'
 import { PageHero } from '@/components/PageHero'
 import { LineSupportText } from '@/components/LineSupportText'
 import { PUBLIC_BUSINESS_INFO } from '@/lib/publicBusinessInfo'
+import { createPublicMetadata, PUBLIC_PAGE_METADATA } from '@/lib/seo/publicMetadata'
+
+export const metadata: Metadata = createPublicMetadata(PUBLIC_PAGE_METADATA.terms)
 
 const sections = [
   {

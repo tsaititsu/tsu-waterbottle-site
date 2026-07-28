@@ -11,7 +11,7 @@ const root = process.cwd()
 const entries = Object.values(PUBLIC_PAGE_METADATA)
 const metadata = entries.map(createPublicMetadata)
 
-assert.equal(entries.length, 6)
+assert.equal(entries.length, 11)
 assert.equal(new Set(entries.map((entry) => entry.title)).size, entries.length)
 assert.equal(new Set(entries.map((entry) => entry.description)).size, entries.length)
 
@@ -40,6 +40,11 @@ assert.equal(metadata[0].openGraph?.title, SITE_TITLE)
 const publicPaths = new Set<string>(entries.map((entry) => entry.path))
 assert.equal(publicPaths.has('/products'), false)
 assert.equal(publicPaths.has('/spiritual-products'), true)
+assert.equal(publicPaths.has('/contact'), true)
+assert.equal(publicPaths.has('/consumer-rights'), true)
+assert.equal(publicPaths.has('/privacy'), true)
+assert.equal(publicPaths.has('/refund-policy'), true)
+assert.equal(publicPaths.has('/terms'), true)
 
 assert.throws(
   () => createPublicMetadata({ title: '外部頁面', description: '不接受外部網址', path: '//example.com' }),
@@ -57,6 +62,11 @@ const routeSources: Array<[string, string]> = [
   ['src/app/booking/page.tsx', 'PUBLIC_PAGE_METADATA.booking'],
   ['src/app/courses/page.tsx', 'PUBLIC_PAGE_METADATA.courses'],
   ['src/app/spiritual-products/layout.tsx', 'PUBLIC_PAGE_METADATA.spiritualProducts'],
+  ['src/app/contact/page.tsx', 'PUBLIC_PAGE_METADATA.contact'],
+  ['src/app/consumer-rights/page.tsx', 'PUBLIC_PAGE_METADATA.consumerRights'],
+  ['src/app/privacy/page.tsx', 'PUBLIC_PAGE_METADATA.privacy'],
+  ['src/app/refund-policy/page.tsx', 'PUBLIC_PAGE_METADATA.refundPolicy'],
+  ['src/app/terms/page.tsx', 'PUBLIC_PAGE_METADATA.terms'],
 ]
 
 for (const [file, metadataKey] of routeSources) {

@@ -1,6 +1,10 @@
+import type { Metadata } from 'next'
 import { PageHero } from '@/components/PageHero'
 import { LineSupportText } from '@/components/LineSupportText'
+import { createPublicMetadata, PUBLIC_PAGE_METADATA } from '@/lib/seo/publicMetadata'
 import { shouldHideConsultationServices, shouldHideCoursesServices } from '@/lib/siteVisibility'
+
+export const metadata: Metadata = createPublicMetadata(PUBLIC_PAGE_METADATA.privacy)
 
 function getSections() {
   const hideConsultationServices = shouldHideConsultationServices()
