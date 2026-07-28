@@ -209,6 +209,14 @@ test('initializer writes one bounded audit event through a least-privilege helpe
     migration,
     /payment\.merchant_order_no\s*=\s*attempt\.merchant_order_no[\s\S]*?payment\.request_idempotency_key\s*=\s*attempt\.idempotency_key[\s\S]*?payment\.request_body_sha256\s*=\s*attempt\.request_body_sha256/i,
   )
+  assert.match(
+    migration,
+    /payment\.item_name\s*=\s*pg_catalog\.left\([\s\S]*?product_order\.order_no[\s\S]*?50[\s\S]*?payment\.raw_payload\s*=\s*pg_catalog\.jsonb_build_object\([\s\S]*?'orderId',\s*attempt\.merchant_order_no[\s\S]*?'sourceId',\s*product_order\.id::text/i,
+  )
+  assert.match(
+    migration,
+    /product_order\.order_status\s*=\s*'pending_payment'[\s\S]*?product_order\.shipping_status\s*=\s*case[\s\S]*?product_order\.fulfillment_mode\s*=\s*case[\s\S]*?product_order\.sandbox_test\s*=\s*\(p_environment\s*=\s*'sandbox'\)/i,
+  )
   assert.match(migration, /payment\.state_version\s*=\s*0/i)
   assert.match(migration, /product_order\.state_version\s*=\s*1/i)
   assert.match(migration, /attempt\.state_version\s*=\s*0/i)
@@ -218,7 +226,11 @@ test('initializer writes one bounded audit event through a least-privilege helpe
   )
   assert.match(
     migration,
-    /from\s+public\.line_pay_callback_capabilities\s+as\s+capability[\s\S]*?capability\.purpose\s+in\s*\(\s*'confirm',\s*'cancel'\s*\)[\s\S]*?capability\.capability_version\s*=\s*1[\s\S]*?capability\.consumed_at\s+is\s+null[\s\S]*?capability\.revoked_at\s+is\s+null/i,
+    /from\s+public\.line_pay_callback_capabilities\s+as\s+capability[\s\S]*?capability\.purpose\s+in\s*\(\s*'confirm',\s*'cancel'\s*\)[\s\S]*?capability\.capability_version\s*=\s*1[\s\S]*?capability\.expires_at\s*<=\s*pg_catalog\.clock_timestamp\(\)\s*\+\s*interval\s*'24 hours'[\s\S]*?capability\.consumed_at\s+is\s+null[\s\S]*?capability\.revoked_at\s+is\s+null/i,
+  )
+  assert.match(
+    migration,
+    /count\s*\(\s*distinct\s+capability\.expires_at\s*\)[\s\S]*?capability\.purpose\s+in\s*\(\s*'confirm',\s*'cancel'\s*\)[\s\S]*?=\s*1/i,
   )
   assert.match(
     migration,
@@ -248,6 +260,36 @@ test('initializer execute ACL is service-role only with an exact catalog postcon
   assert.match(migration, /pg_catalog\.aclexplode/i)
   assert.match(migration, /acl\.is_grantable/i)
   assert.match(migration, /line_pay_initialization_rpc_security_postcondition_failed/i)
+})
+
+test('item and shipping SELECT ACLs reject grant option in migration and recovery', () => {
+  for (const source of [migration, recovery]) {
+    assert.match(
+      source,
+      /pg_catalog\.aclexplode\(relation\.relacl\)\s+as\s+table_acl/i,
+    )
+    assert.match(
+      source,
+      /table_acl\.privilege_type\s*=\s*'SELECT'/i,
+    )
+    assert.match(source, /not\s+table_acl\.is_grantable/i)
+    assert.match(
+      source,
+      /table_acl\.grantor\s*=\s*relation\.relowner/i,
+    )
+  }
+})
+
+test('migration locks the audit index to the exact reviewed catalog shape', () => {
+  assert.match(migration, /access_method\.amname\s*=\s*'btree'/i)
+  assert.match(migration, /index_catalog\.indisready/i)
+  assert.match(migration, /index_catalog\.indnkeyatts\s*=\s*1/i)
+  assert.match(migration, /index_catalog\.indnatts\s*=\s*1/i)
+  assert.match(migration, /index_catalog\.indexprs\s+is\s+null/i)
+  assert.match(
+    migration,
+    /index_catalog\.indkey\[0\]\s*=\s*key_attribute\.attnum/i,
+  )
 })
 
 test('LINE Pay DB CI runs both static and PostgreSQL 17 initialization contracts', () => {

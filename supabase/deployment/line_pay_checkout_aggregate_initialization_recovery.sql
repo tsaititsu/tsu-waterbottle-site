@@ -101,9 +101,9 @@ begin
            or procedure.proconfig is null
            or not ('search_path=""' = any (procedure.proconfig))
            or pg_catalog.obj_description(procedure.oid, 'pg_proc')
-             <> 'line_pay_definition_md5:f09b8ffbe020e547dbbf87616883d619'
+             <> 'line_pay_definition_md5:fecfa1877b0f9280c582b918bc29ce7b'
            or pg_catalog.md5(pg_catalog.pg_get_functiondef(procedure.oid))
-             <> 'f09b8ffbe020e547dbbf87616883d619'
+             <> 'fecfa1877b0f9280c582b918bc29ce7b'
          )
      )
      or not pg_catalog.has_function_privilege(
@@ -269,6 +269,60 @@ begin
        'line_pay_payment_function_owner',
        'public.product_shipping_info',
        'insert,update,delete,truncate,references,trigger'
+     )
+     or (
+       select pg_catalog.count(*)
+       from pg_catalog.pg_class as relation
+       join pg_catalog.pg_namespace as namespace
+         on namespace.oid = relation.relnamespace
+       cross join lateral pg_catalog.aclexplode(relation.relacl) as table_acl
+       where namespace.nspname = 'public'
+         and relation.relname in (
+           'product_order_items',
+           'product_shipping_info'
+         )
+         and table_acl.grantee = (
+           select role.oid
+           from pg_catalog.pg_roles as role
+           where role.rolname = 'line_pay_payment_function_owner'
+         )
+         and table_acl.privilege_type = 'SELECT'
+         and not table_acl.is_grantable
+         and table_acl.grantor = relation.relowner
+     ) <> 2
+     or exists (
+       select 1
+       from pg_catalog.pg_class as relation
+       join pg_catalog.pg_namespace as namespace
+         on namespace.oid = relation.relnamespace
+       cross join lateral pg_catalog.aclexplode(relation.relacl) as table_acl
+       where namespace.nspname = 'public'
+         and relation.relname in (
+           'product_order_items',
+           'product_shipping_info'
+         )
+         and (
+           (
+             table_acl.grantee = (
+               select role.oid
+               from pg_catalog.pg_roles as role
+               where role.rolname = 'line_pay_payment_function_owner'
+             )
+             and (
+               table_acl.privilege_type <> 'SELECT'
+               or table_acl.is_grantable
+               or table_acl.grantor <> relation.relowner
+             )
+           )
+           or (
+             table_acl.grantor = (
+               select role.oid
+               from pg_catalog.pg_roles as role
+               where role.rolname = 'line_pay_payment_function_owner'
+             )
+             and table_acl.grantee <> table_acl.grantor
+           )
+         )
      ) then
     raise exception using
       errcode = '55000',

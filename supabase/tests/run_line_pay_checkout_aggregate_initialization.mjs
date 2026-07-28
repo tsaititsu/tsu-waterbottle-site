@@ -715,6 +715,293 @@ function testRecoveryRejectsGrantOption(database, target) {
   }
 }
 
+function mutateTableSelectGrantOption(migration) {
+  const mutatedMigration = migration.replace(
+    /grant select on table\s+public\.product_order_items,\s+public\.product_shipping_info\s+to line_pay_payment_function_owner;/i,
+    `grant select on table
+  public.product_order_items,
+  public.product_shipping_info
+to line_pay_payment_function_owner with grant option;`,
+  )
+  if (mutatedMigration === migration) {
+    throw new Error('table SELECT grant-option mutation did not change the migration')
+  }
+  return mutatedMigration
+}
+
+function testMigrationRejectsTableSelectGrantOption(database) {
+  psqlFile(database, 'supabase/tests/line_pay_local_postgres_bootstrap.sql')
+  for (const file of baselineFiles) psqlFile(database, file)
+  psqlFile(database, baseMigration)
+
+  const migration = readFileSync(initializationMigration, 'utf8')
+  const failureOutput = psqlAsInContainer(
+    containerName,
+    database,
+    'postgres',
+    mutateTableSelectGrantOption(migration),
+    'table SELECT grant-option migration mutation',
+    true,
+  )
+  if (
+    !failureOutput.includes(
+      'line_pay_initialization_rpc_security_postcondition_failed',
+    )
+  ) {
+    throw new Error(
+      'table SELECT grant-option mutation was not rejected by the exact ACL postcondition',
+    )
+  }
+
+  const rollbackState = JSON.parse(
+    psql(
+      database,
+      `
+        copy (
+          select pg_catalog.jsonb_build_object(
+            'initializer_absent',
+              pg_catalog.to_regprocedure(
+                'public.initialize_product_order_line_pay_checkout(jsonb)'
+              ) is null,
+            'helper_absent',
+              pg_catalog.to_regprocedure(
+                'line_pay_private.record_line_pay_checkout_initialized_audit(uuid,uuid,uuid,text)'
+              ) is null,
+            'index_absent',
+              pg_catalog.to_regclass(
+                'public.line_pay_payment_audit_events_checkout_initialized_once_idx'
+              ) is null
+          )
+        ) to stdout;
+      `,
+      'table SELECT grant-option migration rollback',
+    ),
+  )
+  if (Object.values(rollbackState).some((value) => value !== true)) {
+    throw new Error(
+      `table SELECT grant-option migration did not roll back atomically: ${JSON.stringify(
+        rollbackState,
+      )}`,
+    )
+  }
+}
+
+function testRecoveryRejectsTableSelectGrantOption(database) {
+  psqlFile(database, 'supabase/tests/line_pay_local_postgres_bootstrap.sql')
+  for (const file of baselineFiles) psqlFile(database, file)
+  psqlFile(database, baseMigration)
+  psqlFile(database, initializationMigration)
+
+  psql(
+    database,
+    `grant select on table
+      public.product_order_items,
+      public.product_shipping_info
+    to line_pay_payment_function_owner with grant option;`,
+    'table SELECT recovery grant-option fixture',
+  )
+
+  const recoveryOutput = psqlAsInContainer(
+    containerName,
+    database,
+    'postgres',
+    readFileSync(initializationRecovery, 'utf8'),
+    'table SELECT recovery grant-option mutation',
+    true,
+  )
+  if (
+    !recoveryOutput.includes(
+      'line_pay_initialization_recovery_state_mismatch',
+    )
+  ) {
+    throw new Error(
+      'table SELECT grant option was not rejected by the recovery precondition',
+    )
+  }
+
+  const preservedState = JSON.parse(
+    psql(
+      database,
+      `
+        copy (
+          select pg_catalog.jsonb_build_object(
+            'initializer_preserved',
+              pg_catalog.to_regprocedure(
+                'public.initialize_product_order_line_pay_checkout(jsonb)'
+              ) is not null,
+            'helper_preserved',
+              pg_catalog.to_regprocedure(
+                'line_pay_private.record_line_pay_checkout_initialized_audit(uuid,uuid,uuid,text)'
+              ) is not null,
+            'index_preserved',
+              pg_catalog.to_regclass(
+                'public.line_pay_payment_audit_events_checkout_initialized_once_idx'
+              ) is not null
+          )
+        ) to stdout;
+      `,
+      'table SELECT recovery grant-option preservation',
+    ),
+  )
+  if (Object.values(preservedState).some((value) => value !== true)) {
+    throw new Error(
+      `table SELECT grant-option recovery changed state: ${JSON.stringify(
+        preservedState,
+      )}`,
+    )
+  }
+}
+
+function mutateAuditIndexIncludeColumn(migration) {
+  const mutatedMigration = migration.replace(
+    `on public.line_pay_payment_audit_events(checkout_attempt_id)
+where event_type = 'checkout_initialized';`,
+    `on public.line_pay_payment_audit_events(checkout_attempt_id)
+include (event_type)
+where event_type = 'checkout_initialized';`,
+  )
+  if (mutatedMigration === migration) {
+    throw new Error('audit index INCLUDE mutation did not change the migration')
+  }
+  return mutatedMigration
+}
+
+function testMigrationRejectsAuditIndexIncludeColumn(database) {
+  psqlFile(database, 'supabase/tests/line_pay_local_postgres_bootstrap.sql')
+  for (const file of baselineFiles) psqlFile(database, file)
+  psqlFile(database, baseMigration)
+
+  const migration = readFileSync(initializationMigration, 'utf8')
+  const failureOutput = psqlAsInContainer(
+    containerName,
+    database,
+    'postgres',
+    mutateAuditIndexIncludeColumn(migration),
+    'audit index INCLUDE migration mutation',
+    true,
+  )
+  if (
+    !failureOutput.includes(
+      'line_pay_initialization_rpc_security_postcondition_failed',
+    )
+  ) {
+    throw new Error(
+      'audit index INCLUDE mutation was not rejected by the exact catalog postcondition',
+    )
+  }
+
+  const rollbackState = JSON.parse(
+    psql(
+      database,
+      `
+        copy (
+          select pg_catalog.jsonb_build_object(
+            'initializer_absent',
+              pg_catalog.to_regprocedure(
+                'public.initialize_product_order_line_pay_checkout(jsonb)'
+              ) is null,
+            'helper_absent',
+              pg_catalog.to_regprocedure(
+                'line_pay_private.record_line_pay_checkout_initialized_audit(uuid,uuid,uuid,text)'
+              ) is null,
+            'index_absent',
+              pg_catalog.to_regclass(
+                'public.line_pay_payment_audit_events_checkout_initialized_once_idx'
+              ) is null
+          )
+        ) to stdout;
+      `,
+      'audit index INCLUDE migration rollback',
+    ),
+  )
+  if (Object.values(rollbackState).some((value) => value !== true)) {
+    throw new Error(
+      `audit index INCLUDE migration did not roll back atomically: ${JSON.stringify(
+        rollbackState,
+      )}`,
+    )
+  }
+}
+
+function testRecoveryRejectsAuditIndexIncludeColumn(database) {
+  psqlFile(database, 'supabase/tests/line_pay_local_postgres_bootstrap.sql')
+  for (const file of baselineFiles) psqlFile(database, file)
+  psqlFile(database, baseMigration)
+  psqlFile(database, initializationMigration)
+
+  psql(
+    database,
+    `
+      drop index
+        public.line_pay_payment_audit_events_checkout_initialized_once_idx;
+      create unique index
+        line_pay_payment_audit_events_checkout_initialized_once_idx
+      on public.line_pay_payment_audit_events(checkout_attempt_id)
+      include (event_type)
+      where event_type = 'checkout_initialized';
+    `,
+    'audit index INCLUDE recovery fixture',
+  )
+
+  const recoveryOutput = psqlAsInContainer(
+    containerName,
+    database,
+    'postgres',
+    readFileSync(initializationRecovery, 'utf8'),
+    'audit index INCLUDE recovery mutation',
+    true,
+  )
+  if (
+    !recoveryOutput.includes(
+      'line_pay_initialization_recovery_state_mismatch',
+    )
+  ) {
+    throw new Error(
+      'audit index INCLUDE drift was not rejected by the recovery precondition',
+    )
+  }
+
+  const preservedState = JSON.parse(
+    psql(
+      database,
+      `
+        copy (
+          select pg_catalog.jsonb_build_object(
+            'initializer_preserved',
+              pg_catalog.to_regprocedure(
+                'public.initialize_product_order_line_pay_checkout(jsonb)'
+              ) is not null,
+            'helper_preserved',
+              pg_catalog.to_regprocedure(
+                'line_pay_private.record_line_pay_checkout_initialized_audit(uuid,uuid,uuid,text)'
+              ) is not null,
+            'index_drift_preserved',
+              coalesce((
+                select index_catalog.indnatts = 2
+                from pg_catalog.pg_index as index_catalog
+                join pg_catalog.pg_class as index_relation
+                  on index_relation.oid = index_catalog.indexrelid
+                join pg_catalog.pg_namespace as index_namespace
+                  on index_namespace.oid = index_relation.relnamespace
+                where index_namespace.nspname = 'public'
+                  and index_relation.relname =
+                    'line_pay_payment_audit_events_checkout_initialized_once_idx'
+              ), false)
+          )
+        ) to stdout;
+      `,
+      'audit index INCLUDE recovery preservation',
+    ),
+  )
+  if (Object.values(preservedState).some((value) => value !== true)) {
+    throw new Error(
+      `audit index INCLUDE recovery changed state: ${JSON.stringify(
+        preservedState,
+      )}`,
+    )
+  }
+}
+
 function testHostedNonSuperuserUpgrade() {
   const database = 'line_pay_initialization_hosted'
   const clusterAdmin = 'line_pay_initialization_cluster_admin'
@@ -1485,6 +1772,26 @@ async function main() {
       `create ${target} recovery grant database`,
     )
   }
+  psql(
+    'postgres',
+    'create database line_pay_initialization_table_grant_mutation;',
+    'create table grant mutation database',
+  )
+  psql(
+    'postgres',
+    'create database line_pay_initialization_table_recovery_grant;',
+    'create table recovery grant database',
+  )
+  psql(
+    'postgres',
+    'create database line_pay_initialization_index_shape_mutation;',
+    'create index shape mutation database',
+  )
+  psql(
+    'postgres',
+    'create database line_pay_initialization_index_recovery_drift;',
+    'create index recovery drift database',
+  )
 
   prepareDatabase('line_pay_initialization_contract')
   psqlFile(
@@ -1527,10 +1834,22 @@ async function main() {
       target,
     )
   }
+  testMigrationRejectsTableSelectGrantOption(
+    'line_pay_initialization_table_grant_mutation',
+  )
+  testRecoveryRejectsTableSelectGrantOption(
+    'line_pay_initialization_table_recovery_grant',
+  )
+  testMigrationRejectsAuditIndexIncludeColumn(
+    'line_pay_initialization_index_shape_mutation',
+  )
+  testRecoveryRejectsAuditIndexIncludeColumn(
+    'line_pay_initialization_index_recovery_drift',
+  )
   testHostedNonSuperuserUpgrade()
 
   process.stdout.write(
-    'line_pay_checkout_aggregate_initialization: PASS (PostgreSQL 17, atomic migration, hosted non-superuser upgrade, atomic aggregate, replay, concurrency, rollback, recovery relation-lock timeline, fail-forward guard, exact ACL grant-option mutations, audit binding drift fixtures, payload-size mutation caught)\n',
+    'line_pay_checkout_aggregate_initialization: PASS (PostgreSQL 17, atomic migration, hosted non-superuser upgrade, atomic aggregate, replay, concurrency, rollback, recovery relation-lock timeline, fail-forward guard, exact function/table ACL grant-option and index-shape mutations, audit binding drift fixtures, payload-size mutation caught)\n',
   )
 }
 

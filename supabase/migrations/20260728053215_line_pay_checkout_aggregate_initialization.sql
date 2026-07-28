@@ -98,6 +98,19 @@ begin
          and payment.request_body_sha256 = attempt.request_body_sha256
          and not payment.reconciliation_required
          and payment.state_version = 0
+         and payment.item_name =
+           pg_catalog.left(
+             '開運商品訂單 ' || product_order.order_no,
+             50
+           )
+         and payment.raw_payload = pg_catalog.jsonb_build_object(
+           'linePay',
+           pg_catalog.jsonb_build_object(
+             'orderId', attempt.merchant_order_no,
+             'sourceType', 'product_order',
+             'sourceId', product_order.id::text
+           )
+         )
          and product_order.payment_method = 'line_pay'
          and product_order.environment = p_environment
          and product_order.currency = 'TWD'
@@ -105,6 +118,16 @@ begin
          and product_order.checkout_attempt_id is not distinct from attempt.id
          and product_order.payment_request_state = 'initialized'
          and product_order.payment_status = 'pending'
+         and product_order.order_status = 'pending_payment'
+         and product_order.shipping_status = case
+           when p_environment = 'sandbox' then 'not_applicable'
+           else 'not_shipped'
+         end
+         and product_order.fulfillment_mode = case
+           when p_environment = 'sandbox' then 'none'
+           else 'physical'
+         end
+         and product_order.sandbox_test = (p_environment = 'sandbox')
          and not product_order.reconciliation_required
          and product_order.state_version = 1
          and attempt.provider = 'line_pay'
@@ -271,9 +294,21 @@ begin
              and capability.claimed_at is null
              and capability.claim_expires_at is null
              and capability.expires_at > pg_catalog.clock_timestamp()
+             and capability.expires_at <=
+               pg_catalog.clock_timestamp() + interval '24 hours'
              and capability.consumed_at is null
              and capability.revoked_at is null
          ) = 2
+         and (
+           select pg_catalog.count(distinct capability.expires_at)
+           from public.line_pay_callback_capabilities as capability
+           where capability.payment_id = payment.id
+             and capability.product_order_id = product_order.id
+             and capability.checkout_attempt_id = attempt.id
+             and capability.environment = p_environment
+             and capability.purpose in ('confirm', 'cancel')
+             and capability.capability_version = 1
+         ) = 1
      ) then
     raise exception using
       errcode = '23514',
@@ -313,7 +348,7 @@ comment on function line_pay_private.record_line_pay_checkout_initialized_audit(
   uuid,
   uuid,
   text
-) is 'line_pay_definition_md5:f09b8ffbe020e547dbbf87616883d619';
+) is 'line_pay_definition_md5:fecfa1877b0f9280c582b918bc29ce7b';
 
 revoke all on function line_pay_private.record_line_pay_checkout_initialized_audit(
   uuid,
@@ -1268,9 +1303,9 @@ begin
         or procedure.proconfig is null
         or not ('search_path=""' = any (procedure.proconfig))
         or pg_catalog.obj_description(procedure.oid, 'pg_proc')
-          <> 'line_pay_definition_md5:f09b8ffbe020e547dbbf87616883d619'
+          <> 'line_pay_definition_md5:fecfa1877b0f9280c582b918bc29ce7b'
         or pg_catalog.md5(pg_catalog.pg_get_functiondef(procedure.oid))
-          <> 'f09b8ffbe020e547dbbf87616883d619'
+          <> 'fecfa1877b0f9280c582b918bc29ce7b'
       )
   )
   or not pg_catalog.has_function_privilege(
@@ -1324,13 +1359,26 @@ begin
       on table_relation.oid = index_catalog.indrelid
     join pg_catalog.pg_namespace as table_namespace
       on table_namespace.oid = table_relation.relnamespace
+    join pg_catalog.pg_am as access_method
+      on access_method.oid = index_relation.relam
+    join pg_catalog.pg_attribute as key_attribute
+      on key_attribute.attrelid = table_relation.oid
+     and key_attribute.attname = 'checkout_attempt_id'
+     and key_attribute.attnum > 0
+     and not key_attribute.attisdropped
     where index_namespace.nspname = 'public'
       and index_relation.relname =
         'line_pay_payment_audit_events_checkout_initialized_once_idx'
       and table_namespace.nspname = 'public'
       and table_relation.relname = 'line_pay_payment_audit_events'
+      and access_method.amname = 'btree'
       and index_catalog.indisunique
       and index_catalog.indisvalid
+      and index_catalog.indisready
+      and index_catalog.indnkeyatts = 1
+      and index_catalog.indnatts = 1
+      and index_catalog.indexprs is null
+      and index_catalog.indkey[0] = key_attribute.attnum
       and pg_catalog.pg_get_indexdef(index_catalog.indexrelid)
         ~ '\(checkout_attempt_id\)'
       and pg_catalog.pg_get_expr(
@@ -1433,6 +1481,60 @@ begin
     'line_pay_payment_function_owner',
     'public.product_shipping_info',
     'insert,update,delete,truncate,references,trigger'
+  )
+  or (
+    select pg_catalog.count(*)
+    from pg_catalog.pg_class as relation
+    join pg_catalog.pg_namespace as namespace
+      on namespace.oid = relation.relnamespace
+    cross join lateral pg_catalog.aclexplode(relation.relacl) as table_acl
+    where namespace.nspname = 'public'
+      and relation.relname in (
+        'product_order_items',
+        'product_shipping_info'
+      )
+      and table_acl.grantee = (
+        select role.oid
+        from pg_catalog.pg_roles as role
+        where role.rolname = 'line_pay_payment_function_owner'
+      )
+      and table_acl.privilege_type = 'SELECT'
+      and not table_acl.is_grantable
+      and table_acl.grantor = relation.relowner
+  ) <> 2
+  or exists (
+    select 1
+    from pg_catalog.pg_class as relation
+    join pg_catalog.pg_namespace as namespace
+      on namespace.oid = relation.relnamespace
+    cross join lateral pg_catalog.aclexplode(relation.relacl) as table_acl
+    where namespace.nspname = 'public'
+      and relation.relname in (
+        'product_order_items',
+        'product_shipping_info'
+      )
+      and (
+        (
+          table_acl.grantee = (
+            select role.oid
+            from pg_catalog.pg_roles as role
+            where role.rolname = 'line_pay_payment_function_owner'
+          )
+          and (
+            table_acl.privilege_type <> 'SELECT'
+            or table_acl.is_grantable
+            or table_acl.grantor <> relation.relowner
+          )
+        )
+        or (
+          table_acl.grantor = (
+            select role.oid
+            from pg_catalog.pg_roles as role
+            where role.rolname = 'line_pay_payment_function_owner'
+          )
+          and table_acl.grantee <> table_acl.grantor
+        )
+      )
   )
   or pg_catalog.has_table_privilege(
     'service_role',

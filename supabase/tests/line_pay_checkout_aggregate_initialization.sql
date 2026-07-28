@@ -523,6 +523,11 @@ $$;
 
 rollback;
 
+alter table public.product_orders
+disable trigger line_pay_product_orders_transition_guard;
+alter table public.payments
+disable trigger line_pay_payments_transition_guard;
+
 do $$
 declare
   v_case record;
@@ -607,6 +612,98 @@ begin
               from line_pay_initialization_first_result
             )
           $mutation$
+        ),
+        (
+          'order status drift',
+          $mutation$
+            update public.product_orders
+            set order_status = 'payment_requesting'
+            where id = (
+              select product_order_id
+              from line_pay_initialization_first_result
+            )
+          $mutation$
+        ),
+        (
+          'order sandbox flag drift',
+          $mutation$
+            update public.product_orders
+            set sandbox_test = false
+            where id = (
+              select product_order_id
+              from line_pay_initialization_first_result
+            )
+          $mutation$
+        ),
+        (
+          'order shipping status drift',
+          $mutation$
+            update public.product_orders
+            set
+              sandbox_test = false,
+              shipping_status = 'not_shipped'
+            where id = (
+              select product_order_id
+              from line_pay_initialization_first_result
+            )
+          $mutation$
+        ),
+        (
+          'order fulfillment mode drift',
+          $mutation$
+            update public.product_orders
+            set
+              sandbox_test = false,
+              fulfillment_mode = 'physical'
+            where id = (
+              select product_order_id
+              from line_pay_initialization_first_result
+            )
+          $mutation$
+        ),
+        (
+          'payment item name drift',
+          $mutation$
+            update public.payments
+            set item_name = 'Synthetic mismatched item'
+            where id = (
+              select payment_id
+              from line_pay_initialization_first_result
+            )
+          $mutation$
+        ),
+        (
+          'payment raw payload drift',
+          $mutation$
+            update public.payments
+            set raw_payload = '{"linePay":{"orderId":"mismatched"}}'::jsonb
+            where id = (
+              select payment_id
+              from line_pay_initialization_first_result
+            )
+          $mutation$
+        ),
+        (
+          'capability maximum lifetime drift',
+          $mutation$
+            update public.line_pay_callback_capabilities
+            set expires_at = pg_catalog.clock_timestamp() + interval '48 hours'
+            where checkout_attempt_id = (
+              select attempt_id
+              from line_pay_initialization_first_result
+            )
+          $mutation$
+        ),
+        (
+          'capability lifetime mismatch',
+          $mutation$
+            update public.line_pay_callback_capabilities
+            set expires_at = pg_catalog.clock_timestamp() + interval '23 hours'
+            where id = (
+              select confirm_capability_id
+              from line_pay_initialization_first_result
+            )
+          $mutation$
         )
     ) as fixture(label, statement)
   loop
@@ -631,6 +728,11 @@ begin
   end loop;
 end;
 $$;
+
+alter table public.product_orders
+enable trigger line_pay_product_orders_transition_guard;
+alter table public.payments
+enable trigger line_pay_payments_transition_guard;
 
 set role service_role;
 
