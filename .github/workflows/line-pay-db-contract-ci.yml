@@ -23,6 +23,8 @@ on:
       - "scripts/supabase/validate-line-pay-production-deployment.mjs"
       - "src/lib/supabase/linePayDatabaseContracts.ts"
       - "src/lib/supabase/linePayDatabaseContracts.test.ts"
+      - "src/lib/supabase/linePayCheckoutInitialization.ts"
+      - "src/lib/supabase/linePayCheckoutInitialization.test.ts"
       - "supabase/bank_transfer_submissions_patch.sql"
       - "supabase/bank_transfer_baseline_capture_runner.test.ts"
       - "supabase/bank_transfer_baseline_capture_workflow.test.ts"
@@ -37,6 +39,7 @@ on:
       - "supabase/deployment/line_pay_remediation_diagnostic.sql"
       - "supabase/deployment/line_pay_application_state_diagnostic.sql"
       - "supabase/line_pay_remediation_contracts.test.ts"
+      - "supabase/line_pay_checkout_aggregate_initialization.test.ts"
       - "supabase/line_pay_production_diagnostic_runner.test.ts"
       - "supabase/line_pay_production_diagnostic_workflow.test.ts"
       - "supabase/line_pay_application_state_diagnostic_runner.test.ts"
@@ -45,6 +48,7 @@ on:
       - "supabase/line_pay_production_exact_file_runner.test.ts"
       - "supabase/migrations/*_retire_bank_transfer_submissions_writes.sql"
       - "supabase/migrations/20260719033404_line_pay_remediation_contracts.sql"
+      - "supabase/migrations/20260728053215_line_pay_checkout_aggregate_initialization.sql"
       - "supabase/tests/run_bank_transfer_historical_forensic_contracts.mjs"
       - "supabase/tests/run_bank_transfer_baseline_capture_contracts.mjs"
       - "supabase/tests/run_bank_transfer_submissions_readonly_fence.mjs"
@@ -54,6 +58,7 @@ on:
       - "supabase/tests/line_pay_*.sql"
       - "supabase/tests/run_line_pay_remediation_*.mjs"
       - "supabase/tests/run_line_pay_second_remediation_conflicts.mjs"
+      - "supabase/tests/run_line_pay_checkout_aggregate_initialization.mjs"
 
 permissions:
   contents: read
@@ -92,6 +97,7 @@ jobs:
           node --test supabase/bank_transfer_historical_forensic_workflow.test.ts
           node --test supabase/bank_transfer_historical_forensic_runner.test.ts
           node --test supabase/line_pay_remediation_contracts.test.ts
+          node --test supabase/line_pay_checkout_aggregate_initialization.test.ts
           node --test supabase/line_pay_production_diagnostic_workflow.test.ts
           node --test supabase/line_pay_production_diagnostic_runner.test.ts
           node --test supabase/line_pay_application_state_diagnostic_workflow.test.ts
@@ -99,6 +105,7 @@ jobs:
           node --test supabase/line_pay_production_exact_file_runner.test.ts
           node --test supabase/line_pay_production_deployment_workflow.test.ts
           node --test src/lib/supabase/linePayDatabaseContracts.test.ts
+          node --test src/lib/supabase/linePayCheckoutInitialization.test.ts
 
       - name: Run LINE Pay Production exact-file contracts
         run: node supabase/tests/run_line_pay_production_exact_file_contracts.mjs
@@ -120,6 +127,9 @@ jobs:
 
       - name: Run disposable PostgreSQL contract suite
         run: node supabase/tests/run_line_pay_remediation_db_contracts.mjs
+
+      - name: Run atomic LINE Pay checkout initialization contracts
+        run: node supabase/tests/run_line_pay_checkout_aggregate_initialization.mjs
 
       - name: Run fail-closed conflict fixtures
         run: node supabase/tests/run_line_pay_second_remediation_conflicts.mjs
@@ -173,4 +183,10 @@ jobs:
           docker volume ls -q --filter label=task=bank-transfer-baseline-capture |
             xargs -r docker volume rm
           docker network ls -q --filter label=task=bank-transfer-baseline-capture |
+            xargs -r docker network rm
+          docker ps -aq --filter label=task=line-pay-initialize-aggregate-v1 |
+            xargs -r docker rm --force
+          docker volume ls -q --filter label=task=line-pay-initialize-aggregate-v1 |
+            xargs -r docker volume rm
+          docker network ls -q --filter label=task=line-pay-initialize-aggregate-v1 |
             xargs -r docker network rm
