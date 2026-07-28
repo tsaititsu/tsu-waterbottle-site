@@ -93,6 +93,11 @@ begin
          and payment.amount_twd = attempt.amount_twd
          and payment.user_id = product_order.user_id
          and product_order.user_id = attempt.user_id
+         and payment.merchant_order_no = attempt.merchant_order_no
+         and payment.request_idempotency_key = attempt.idempotency_key
+         and payment.request_body_sha256 = attempt.request_body_sha256
+         and not payment.reconciliation_required
+         and payment.state_version = 0
          and product_order.payment_method = 'line_pay'
          and product_order.environment = p_environment
          and product_order.currency = 'TWD'
@@ -100,12 +105,16 @@ begin
          and product_order.checkout_attempt_id is not distinct from attempt.id
          and product_order.payment_request_state = 'initialized'
          and product_order.payment_status = 'pending'
+         and not product_order.reconciliation_required
+         and product_order.state_version = 1
          and attempt.provider = 'line_pay'
          and attempt.environment = p_environment
          and attempt.currency = 'TWD'
          and attempt.payment_id = payment.id
          and attempt.product_order_id = product_order.id
          and attempt.request_state = 'queued'
+         and not attempt.reconciliation_required
+         and attempt.state_version = 0
          and (
            select pg_catalog.count(*)
            from public.product_order_items as item
@@ -304,7 +313,7 @@ comment on function line_pay_private.record_line_pay_checkout_initialized_audit(
   uuid,
   uuid,
   text
-) is 'line_pay_definition_md5:93202b38912b59f67084524354c99c5f';
+) is 'line_pay_definition_md5:f09b8ffbe020e547dbbf87616883d619';
 
 revoke all on function line_pay_private.record_line_pay_checkout_initialized_audit(
   uuid,
@@ -387,12 +396,12 @@ declare
   v_outbox_id uuid := pg_catalog.gen_random_uuid();
   v_confirm_capability_id uuid := pg_catalog.gen_random_uuid();
   v_cancel_capability_id uuid := pg_catalog.gen_random_uuid();
-  v_existing_attempt public.line_pay_checkout_attempts%rowtype;
-  v_existing_payment public.payments%rowtype;
-  v_existing_order public.product_orders%rowtype;
-  v_existing_outbox public.line_pay_request_outbox%rowtype;
-  v_existing_confirm public.line_pay_callback_capabilities%rowtype;
-  v_existing_cancel public.line_pay_callback_capabilities%rowtype;
+  v_existing_attempt record;
+  v_existing_payment record;
+  v_existing_order record;
+  v_existing_outbox record;
+  v_existing_confirm record;
+  v_existing_cancel record;
 begin
   if p_payload is null
      or pg_catalog.jsonb_typeof(p_payload) <> 'object'
@@ -694,7 +703,15 @@ begin
     )
   );
 
-  select attempt.*
+  select
+    attempt.id,
+    attempt.user_id,
+    attempt.product_order_id,
+    attempt.payment_id,
+    attempt.request_body_sha256,
+    attempt.request_state,
+    attempt.amount_twd,
+    attempt.merchant_order_no
   into v_existing_attempt
   from public.line_pay_checkout_attempts as attempt
   where attempt.environment = v_environment
@@ -703,30 +720,72 @@ begin
   for update;
 
   if found then
-    select payment.*
+    select
+      payment.id,
+      payment.user_id,
+      payment.provider,
+      payment.item_type,
+      payment.item_id,
+      payment.amount_twd,
+      payment.merchant_order_no,
+      payment.product_order_id,
+      payment.environment,
+      payment.checkout_attempt_id,
+      payment.request_idempotency_key,
+      payment.request_body_sha256
     into strict v_existing_payment
     from public.payments as payment
     where payment.id = v_existing_attempt.payment_id;
 
-    select product_order.*
+    select
+      product_order.id,
+      product_order.order_no,
+      product_order.user_id,
+      product_order.customer_name,
+      product_order.customer_email,
+      product_order.customer_phone,
+      product_order.total_amount_twd,
+      product_order.payment_method,
+      product_order.note,
+      product_order.environment,
+      product_order.payment_id,
+      product_order.checkout_attempt_id
     into strict v_existing_order
     from public.product_orders as product_order
     where product_order.id = v_existing_attempt.product_order_id;
 
-    select request_outbox.*
+    select
+      request_outbox.id,
+      request_outbox.payment_id,
+      request_outbox.environment,
+      request_outbox.provider,
+      request_outbox.idempotency_key,
+      request_outbox.request_body_sha256
     into strict v_existing_outbox
     from public.line_pay_request_outbox as request_outbox
     where request_outbox.checkout_attempt_id = v_existing_attempt.id
       and request_outbox.operation = 'request';
 
-    select capability.*
+    select
+      capability.id,
+      capability.product_order_id,
+      capability.checkout_attempt_id,
+      capability.environment,
+      capability.token_hash,
+      capability.expires_at
     into strict v_existing_confirm
     from public.line_pay_callback_capabilities as capability
     where capability.payment_id = v_existing_payment.id
       and capability.purpose = 'confirm'
       and capability.capability_version = 1;
 
-    select capability.*
+    select
+      capability.id,
+      capability.product_order_id,
+      capability.checkout_attempt_id,
+      capability.environment,
+      capability.token_hash,
+      capability.expires_at
     into strict v_existing_cancel
     from public.line_pay_callback_capabilities as capability
     where capability.payment_id = v_existing_payment.id
@@ -1131,7 +1190,7 @@ end;
 $$;
 
 comment on function public.initialize_product_order_line_pay_checkout(jsonb)
-is 'line_pay_definition_md5:bd574bd743ce0b523e487d303efb0318';
+is 'line_pay_definition_md5:01f23508c326066dd4c7ef214c27b60e';
 
 revoke all on function public.initialize_product_order_line_pay_checkout(jsonb)
 from public, anon, authenticated;
@@ -1189,9 +1248,9 @@ begin
         or procedure.proconfig is null
         or not ('search_path=""' = any (procedure.proconfig))
         or pg_catalog.obj_description(procedure.oid, 'pg_proc')
-          <> 'line_pay_definition_md5:bd574bd743ce0b523e487d303efb0318'
+          <> 'line_pay_definition_md5:01f23508c326066dd4c7ef214c27b60e'
         or pg_catalog.md5(pg_catalog.pg_get_functiondef(procedure.oid))
-          <> 'bd574bd743ce0b523e487d303efb0318'
+          <> '01f23508c326066dd4c7ef214c27b60e'
       )
   )
   or exists (
@@ -1209,9 +1268,9 @@ begin
         or procedure.proconfig is null
         or not ('search_path=""' = any (procedure.proconfig))
         or pg_catalog.obj_description(procedure.oid, 'pg_proc')
-          <> 'line_pay_definition_md5:93202b38912b59f67084524354c99c5f'
+          <> 'line_pay_definition_md5:f09b8ffbe020e547dbbf87616883d619'
         or pg_catalog.md5(pg_catalog.pg_get_functiondef(procedure.oid))
-          <> '93202b38912b59f67084524354c99c5f'
+          <> 'f09b8ffbe020e547dbbf87616883d619'
       )
   )
   or not pg_catalog.has_function_privilege(
@@ -1235,9 +1294,23 @@ begin
     cross join lateral pg_catalog.aclexplode(procedure.proacl) as acl
     where procedure.oid = v_audit_function_oid
       and acl.privilege_type = 'EXECUTE'
-      and acl.grantee not in (
-        procedure.proowner,
-        (select role.oid from pg_catalog.pg_roles as role where role.rolname = 'service_role')
+      and (
+        acl.grantee not in (
+          procedure.proowner,
+          (
+            select role.oid
+            from pg_catalog.pg_roles as role
+            where role.rolname = 'service_role'
+          )
+        )
+        or (
+          acl.grantee = (
+            select role.oid
+            from pg_catalog.pg_roles as role
+            where role.rolname = 'service_role'
+          )
+          and acl.is_grantable
+        )
       )
   )
   or (
@@ -1386,9 +1459,23 @@ begin
     cross join lateral pg_catalog.aclexplode(procedure.proacl) as acl
     where procedure.oid = v_function_oid
       and acl.privilege_type = 'EXECUTE'
-      and acl.grantee not in (
-        procedure.proowner,
-        (select role.oid from pg_catalog.pg_roles as role where role.rolname = 'service_role')
+      and (
+        acl.grantee not in (
+          procedure.proowner,
+          (
+            select role.oid
+            from pg_catalog.pg_roles as role
+            where role.rolname = 'service_role'
+          )
+        )
+        or (
+          acl.grantee = (
+            select role.oid
+            from pg_catalog.pg_roles as role
+            where role.rolname = 'service_role'
+          )
+          and acl.is_grantable
+        )
       )
   ) then
     raise exception using

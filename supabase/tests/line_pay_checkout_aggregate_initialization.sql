@@ -523,6 +523,115 @@ $$;
 
 rollback;
 
+do $$
+declare
+  v_case record;
+begin
+  for v_case in
+    select fixture.label, fixture.statement
+    from (
+      values
+        (
+          'payment merchant order drift',
+          $mutation$
+            update public.payments
+            set merchant_order_no = 'LP_SANDBOX_AUDIT_DRIFT_1'
+            where id = (
+              select payment_id
+              from line_pay_initialization_first_result
+            )
+          $mutation$
+        ),
+        (
+          'payment idempotency drift',
+          $mutation$
+            update public.payments
+            set request_idempotency_key = 'sandbox-audit-drift-idempotency-0001'
+            where id = (
+              select payment_id
+              from line_pay_initialization_first_result
+            )
+          $mutation$
+        ),
+        (
+          'payment body hash drift',
+          $mutation$
+            update public.payments
+            set request_body_sha256 = pg_catalog.repeat('9', 64)
+            where id = (
+              select payment_id
+              from line_pay_initialization_first_result
+            )
+          $mutation$
+        ),
+        (
+          'attempt merchant order drift',
+          $mutation$
+            update public.line_pay_checkout_attempts
+            set merchant_order_no = 'LP_SANDBOX_AUDIT_DRIFT_2'
+            where id = (
+              select attempt_id
+              from line_pay_initialization_first_result
+            )
+          $mutation$
+        ),
+        (
+          'payment state version drift',
+          $mutation$
+            update public.payments
+            set state_version = 99
+            where id = (
+              select payment_id
+              from line_pay_initialization_first_result
+            )
+          $mutation$
+        ),
+        (
+          'order state version drift',
+          $mutation$
+            update public.product_orders
+            set state_version = 99
+            where id = (
+              select product_order_id
+              from line_pay_initialization_first_result
+            )
+          $mutation$
+        ),
+        (
+          'attempt state version drift',
+          $mutation$
+            update public.line_pay_checkout_attempts
+            set state_version = 99
+            where id = (
+              select attempt_id
+              from line_pay_initialization_first_result
+            )
+          $mutation$
+        )
+    ) as fixture(label, statement)
+  loop
+    begin
+      execute v_case.statement;
+
+      perform line_pay_private.record_line_pay_checkout_initialized_audit(
+        (select payment_id from line_pay_initialization_first_result),
+        (select product_order_id from line_pay_initialization_first_result),
+        (select attempt_id from line_pay_initialization_first_result),
+        'sandbox'
+      );
+      raise exception
+        'line_pay_initialization_audit_drift_was_accepted: %',
+        v_case.label;
+    exception
+      when check_violation then
+        if sqlerrm <> 'line_pay_initialization_audit_binding_invalid' then
+          raise;
+        end if;
+    end;
+  end loop;
+end;
+$$;
+
 set role service_role;
 
 do $$

@@ -10,6 +10,12 @@ begin;
 set local lock_timeout = '5s';
 set local statement_timeout = '30s';
 
+lock table
+  public.product_order_items,
+  public.product_shipping_info,
+  public.line_pay_payment_audit_events
+in share row exclusive mode;
+
 do $recovery_precondition$
 declare
   v_initializer_oid oid := pg_catalog.to_regprocedure(
@@ -45,9 +51,9 @@ begin
            or procedure.proconfig is null
            or not ('search_path=""' = any (procedure.proconfig))
            or pg_catalog.obj_description(procedure.oid, 'pg_proc')
-             <> 'line_pay_definition_md5:bd574bd743ce0b523e487d303efb0318'
+             <> 'line_pay_definition_md5:01f23508c326066dd4c7ef214c27b60e'
            or pg_catalog.md5(pg_catalog.pg_get_functiondef(procedure.oid))
-             <> 'bd574bd743ce0b523e487d303efb0318'
+             <> '01f23508c326066dd4c7ef214c27b60e'
          )
      )
      or not pg_catalog.has_function_privilege(
@@ -61,12 +67,22 @@ begin
        cross join lateral pg_catalog.aclexplode(procedure.proacl) as acl
        where procedure.oid = v_initializer_oid
          and acl.privilege_type = 'EXECUTE'
-         and acl.grantee not in (
-           procedure.proowner,
-           (
-             select role.oid
-             from pg_catalog.pg_roles as role
-             where role.rolname = 'service_role'
+         and (
+           acl.grantee not in (
+             procedure.proowner,
+             (
+               select role.oid
+               from pg_catalog.pg_roles as role
+               where role.rolname = 'service_role'
+             )
+           )
+           or (
+             acl.grantee = (
+               select role.oid
+               from pg_catalog.pg_roles as role
+               where role.rolname = 'service_role'
+             )
+             and acl.is_grantable
            )
          )
      )
@@ -85,9 +101,9 @@ begin
            or procedure.proconfig is null
            or not ('search_path=""' = any (procedure.proconfig))
            or pg_catalog.obj_description(procedure.oid, 'pg_proc')
-             <> 'line_pay_definition_md5:93202b38912b59f67084524354c99c5f'
+             <> 'line_pay_definition_md5:f09b8ffbe020e547dbbf87616883d619'
            or pg_catalog.md5(pg_catalog.pg_get_functiondef(procedure.oid))
-             <> '93202b38912b59f67084524354c99c5f'
+             <> 'f09b8ffbe020e547dbbf87616883d619'
          )
      )
      or not pg_catalog.has_function_privilege(
@@ -101,12 +117,22 @@ begin
        cross join lateral pg_catalog.aclexplode(procedure.proacl) as acl
        where procedure.oid = v_audit_helper_oid
          and acl.privilege_type = 'EXECUTE'
-         and acl.grantee not in (
-           procedure.proowner,
-           (
-             select role.oid
-             from pg_catalog.pg_roles as role
-             where role.rolname = 'service_role'
+         and (
+           acl.grantee not in (
+             procedure.proowner,
+             (
+               select role.oid
+               from pg_catalog.pg_roles as role
+               where role.rolname = 'service_role'
+             )
+           )
+           or (
+             acl.grantee = (
+               select role.oid
+               from pg_catalog.pg_roles as role
+               where role.rolname = 'service_role'
+             )
+             and acl.is_grantable
            )
          )
      )

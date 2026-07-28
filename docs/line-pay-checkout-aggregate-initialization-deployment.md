@@ -63,10 +63,14 @@ Policy 意圖如下：
 - initializer、private helper、三條 Policy、SELECT ACL 與 index 均通過
   owner、security mode、definition digest、ACL 與 canonical expression
   的 exact catalog 驗證。
+- `service_role` 的 function `EXECUTE` ACL 不得帶 `GRANT OPTION`。
 - Backup／PITR 與可用 restore point 已核對。
 
 Recovery 只移除本 Migration 新增的 function、Policy 與 index；不處理資料，
 不使用 CASCADE。只要已有任何 `checkout_initialized` audit event，Recovery
 會以 `line_pay_initialization_recovery_requires_fail_forward` fail closed。
+零筆檢查前會在同一 transaction 先鎖定品項、收件資料與 audit relations；
+若 initializer 已經開始，Recovery 必須等它完成後重新觀察 audit，若 Recovery
+先取得鎖，並行 initializer 必須等待且不能留下部分 aggregate。
 此時必須保持 Runtime disabled，另建、另審並另行授權 exact fail-forward
 recovery Migration，不得硬退、重試或直接操作 Production。

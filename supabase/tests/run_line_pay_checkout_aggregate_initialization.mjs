@@ -560,6 +560,161 @@ function testPayloadLimitMutationSensitivity(database) {
   }
 }
 
+function mutateFunctionGrantOption(migration, target) {
+  const patterns = {
+    initializer: {
+      pattern:
+        /grant execute on function public\.initialize_product_order_line_pay_checkout\(jsonb\)\s+to service_role;/i,
+      replacement:
+        'grant execute on function public.initialize_product_order_line_pay_checkout(jsonb)\nto service_role with grant option;',
+    },
+    helper: {
+      pattern:
+        /grant execute on function line_pay_private\.record_line_pay_checkout_initialized_audit\(\s*uuid,\s*uuid,\s*uuid,\s*text\s*\) to service_role;/i,
+      replacement: `grant execute on function line_pay_private.record_line_pay_checkout_initialized_audit(
+  uuid,
+  uuid,
+  uuid,
+  text
+) to service_role with grant option;`,
+    },
+  }
+  const selected = patterns[target]
+  if (!selected) throw new Error(`unknown grant-option mutation target: ${target}`)
+  const mutatedMigration = migration.replace(
+    selected.pattern,
+    selected.replacement,
+  )
+  if (mutatedMigration === migration) {
+    throw new Error(`${target} grant-option mutation did not change the migration`)
+  }
+  return mutatedMigration
+}
+
+function testMigrationRejectsGrantOption(database, target) {
+  psqlFile(database, 'supabase/tests/line_pay_local_postgres_bootstrap.sql')
+  for (const file of baselineFiles) psqlFile(database, file)
+  psqlFile(database, baseMigration)
+
+  const migration = readFileSync(initializationMigration, 'utf8')
+  const failureOutput = psqlAsInContainer(
+    containerName,
+    database,
+    'postgres',
+    mutateFunctionGrantOption(migration, target),
+    `${target} grant-option migration mutation`,
+    true,
+  )
+  if (
+    !failureOutput.includes(
+      'line_pay_initialization_rpc_security_postcondition_failed',
+    )
+  ) {
+    throw new Error(
+      `${target} grant-option mutation was not rejected by the exact ACL postcondition`,
+    )
+  }
+
+  const rollbackState = JSON.parse(
+    psql(
+      database,
+      `
+        copy (
+          select pg_catalog.jsonb_build_object(
+            'initializer_absent',
+              pg_catalog.to_regprocedure(
+                'public.initialize_product_order_line_pay_checkout(jsonb)'
+              ) is null,
+            'helper_absent',
+              pg_catalog.to_regprocedure(
+                'line_pay_private.record_line_pay_checkout_initialized_audit(uuid,uuid,uuid,text)'
+              ) is null,
+            'index_absent',
+              pg_catalog.to_regclass(
+                'public.line_pay_payment_audit_events_checkout_initialized_once_idx'
+              ) is null
+          )
+        ) to stdout;
+      `,
+      `${target} grant-option migration rollback`,
+    ),
+  )
+  if (Object.values(rollbackState).some((value) => value !== true)) {
+    throw new Error(
+      `${target} grant-option migration did not roll back atomically: ${JSON.stringify(
+        rollbackState,
+      )}`,
+    )
+  }
+}
+
+function testRecoveryRejectsGrantOption(database, target) {
+  psqlFile(database, 'supabase/tests/line_pay_local_postgres_bootstrap.sql')
+  for (const file of baselineFiles) psqlFile(database, file)
+  psqlFile(database, baseMigration)
+  psqlFile(database, initializationMigration)
+
+  const signature =
+    target === 'initializer'
+      ? 'public.initialize_product_order_line_pay_checkout(jsonb)'
+      : 'line_pay_private.record_line_pay_checkout_initialized_audit(uuid,uuid,uuid,text)'
+  psql(
+    database,
+    `grant execute on function ${signature} to service_role with grant option;`,
+    `${target} recovery grant-option fixture`,
+  )
+
+  const recoveryOutput = psqlAsInContainer(
+    containerName,
+    database,
+    'postgres',
+    readFileSync(initializationRecovery, 'utf8'),
+    `${target} recovery grant-option mutation`,
+    true,
+  )
+  if (
+    !recoveryOutput.includes(
+      'line_pay_initialization_recovery_state_mismatch',
+    )
+  ) {
+    throw new Error(
+      `${target} grant option was not rejected by the recovery precondition`,
+    )
+  }
+
+  const preservedState = JSON.parse(
+    psql(
+      database,
+      `
+        copy (
+          select pg_catalog.jsonb_build_object(
+            'initializer_preserved',
+              pg_catalog.to_regprocedure(
+                'public.initialize_product_order_line_pay_checkout(jsonb)'
+              ) is not null,
+            'helper_preserved',
+              pg_catalog.to_regprocedure(
+                'line_pay_private.record_line_pay_checkout_initialized_audit(uuid,uuid,uuid,text)'
+              ) is not null,
+            'index_preserved',
+              pg_catalog.to_regclass(
+                'public.line_pay_payment_audit_events_checkout_initialized_once_idx'
+              ) is not null
+          )
+        ) to stdout;
+      `,
+      `${target} recovery grant-option preservation`,
+    ),
+  )
+  if (Object.values(preservedState).some((value) => value !== true)) {
+    throw new Error(
+      `${target} grant-option recovery changed state: ${JSON.stringify(
+        preservedState,
+      )}`,
+    )
+  }
+}
+
 function testHostedNonSuperuserUpgrade() {
   const database = 'line_pay_initialization_hosted'
   const clusterAdmin = 'line_pay_initialization_cluster_admin'
@@ -750,6 +905,341 @@ function runPsqlAsync(database, sql) {
     })
     child.stdin.end(sql)
   })
+}
+
+function startInteractivePsql(database) {
+  const child = spawn(
+    'docker',
+    [
+      'exec',
+      '-i',
+      containerName,
+      'psql',
+      '-X',
+      '-A',
+      '-t',
+      '-F',
+      '|',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-U',
+      'postgres',
+      '-d',
+      database,
+    ],
+    { cwd: root, encoding: 'utf8' },
+  )
+  let stdout = ''
+  let stderr = ''
+  let closed = false
+  const completion = new Promise((resolvePromise, rejectPromise) => {
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk
+    })
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk
+    })
+    child.on('error', rejectPromise)
+    child.on('close', (code) => {
+      closed = true
+      resolvePromise({
+        code,
+        stdout,
+        stderr,
+      })
+    })
+  })
+
+  return {
+    child,
+    completion,
+    get closed() {
+      return closed
+    },
+    get output() {
+      return `${stdout}\n${stderr}`
+    },
+  }
+}
+
+function wait(milliseconds) {
+  return new Promise((resolvePromise) => {
+    setTimeout(resolvePromise, milliseconds)
+  })
+}
+
+async function waitForSessionMatch(session, pattern, label) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const match = session.output.match(pattern)
+    if (match) return match
+    if (session.closed) {
+      throw new Error(`${label} exited before emitting its marker\n${session.output}`)
+    }
+    await wait(50)
+  }
+
+  throw new Error(`${label} did not emit its marker before timeout`)
+}
+
+async function waitForCompletion(session, label) {
+  return Promise.race([
+    session.completion,
+    wait(15_000).then(() => {
+      throw new Error(`${label} did not complete before timeout`)
+    }),
+  ])
+}
+
+async function waitForRecoveryRelationLock(
+  database,
+  recoveryPid,
+  initializerPid,
+  initializerSession,
+) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const stateOutput = psql(
+      database,
+      `
+        copy (
+          select pg_catalog.jsonb_build_object(
+            'waiting_on_lock',
+              activity.wait_event_type = 'Lock',
+            'blocked_by_recovery',
+              ${recoveryPid} = any (
+                pg_catalog.pg_blocking_pids(activity.pid)
+              ),
+            'waiting_on_recovery_relation',
+              exists (
+                select 1
+                from pg_catalog.pg_locks as relation_lock
+                where relation_lock.pid = activity.pid
+                  and relation_lock.relation = any (
+                    array[
+                      'public.product_order_items'::regclass,
+                      'public.product_shipping_info'::regclass,
+                      'public.line_pay_payment_audit_events'::regclass
+                    ]::oid[]
+                  )
+                  and relation_lock.mode = 'RowExclusiveLock'
+                  and not relation_lock.granted
+              )
+          )
+          from pg_catalog.pg_stat_activity as activity
+          where activity.pid = ${initializerPid}
+        ) to stdout;
+      `,
+      'recovery relation-lock wait evidence',
+    )
+    if (stateOutput) {
+      const state = JSON.parse(stateOutput)
+      if (Object.values(state).every((value) => value === true)) return state
+    }
+    if (initializerSession.closed) break
+    await wait(100)
+  }
+
+  throw new Error(
+    'recovery did not block the concurrent initializer on a protected relation lock',
+  )
+}
+
+async function testReviewedRecoveryBlocksConcurrentInitializer(database) {
+  psqlFile(database, 'supabase/tests/line_pay_local_postgres_bootstrap.sql')
+  for (const file of baselineFiles) psqlFile(database, file)
+  psqlFile(database, baseMigration)
+  psqlFile(database, initializationMigration)
+  psql(
+    database,
+    `
+      insert into auth.users (id)
+      values ('41000000-0000-4000-8000-000000000003');
+    `,
+    'recovery race auth fixture',
+  )
+
+  const recovery = readFileSync(initializationRecovery, 'utf8')
+  const pauseMarker = '$recovery_precondition$;'
+  const pauseIndex = recovery.indexOf(pauseMarker)
+  if (pauseIndex < 0) {
+    throw new Error('recovery race fixture could not locate the precondition boundary')
+  }
+  const recoveryPrefix = recovery.slice(
+    0,
+    pauseIndex + pauseMarker.length,
+  )
+  const recoveryRemainder = recovery.slice(
+    pauseIndex + pauseMarker.length,
+  )
+
+  const capabilityExpiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString()
+  const payloadLiteral = JSON.stringify({
+    user_id: '41000000-0000-4000-8000-000000000003',
+    environment: 'sandbox',
+    order_no: 'PO-SANDBOX-RECOVERY-RACE-1',
+    merchant_order_no: 'LP_SANDBOX_RECOVERY_RACE_1',
+    customer_name: null,
+    customer_email: null,
+    customer_phone: null,
+    note: null,
+    items: [
+      {
+        product_slug: 'sandbox-recovery-race-item',
+        product_name: 'Sandbox recovery race item',
+        unit_price_twd: 100,
+        quantity: 1,
+        product_snapshot: {
+          slug: 'sandbox-recovery-race-item',
+          name: 'Sandbox recovery race item',
+          category: '符咒商品',
+          priceTwd: 100,
+        },
+      },
+    ],
+    shipping_info: {
+      recipient_name: null,
+      recipient_phone: null,
+      recipient_email: null,
+      shipping_method: 'manual',
+      postal_code: null,
+      address: null,
+      store_type: null,
+      store_id: null,
+      store_name: null,
+      store_address: null,
+      store_phone: null,
+    },
+    idempotency_key: 'sandbox-recovery-race-idempotency-0001',
+    request_body_sha256: '4'.repeat(64),
+    confirm_token_hash: '5'.repeat(64),
+    cancel_token_hash: '6'.repeat(64),
+    capability_expires_at: capabilityExpiresAt,
+  }).replaceAll("'", "''")
+
+  const recoverySession = startInteractivePsql(database)
+  const initializerSession = startInteractivePsql(database)
+  let recoveryReleased = false
+
+  try {
+    recoverySession.child.stdin.write(`
+${recoveryPrefix}
+select 'RECOVERY_GUARD_PAUSED', pg_catalog.pg_backend_pid();
+`)
+    const recoveryMatch = await waitForSessionMatch(
+      recoverySession,
+      /RECOVERY_GUARD_PAUSED\|([0-9]+)/,
+      'recovery session',
+    )
+    const recoveryPid = Number(recoveryMatch[1])
+
+    initializerSession.child.stdin.write(`
+select 'INITIALIZER_STARTED', pg_catalog.pg_backend_pid();
+set role service_role;
+select result_code
+from public.initialize_product_order_line_pay_checkout(
+  '${payloadLiteral}'::jsonb
+);
+`)
+    initializerSession.child.stdin.end()
+    const initializerMatch = await waitForSessionMatch(
+      initializerSession,
+      /INITIALIZER_STARTED\|([0-9]+)/,
+      'initializer session',
+    )
+    const initializerPid = Number(initializerMatch[1])
+
+    await waitForRecoveryRelationLock(
+      database,
+      recoveryPid,
+      initializerPid,
+      initializerSession,
+    )
+    if (initializerSession.closed) {
+      throw new Error(
+        'initializer completed before the recovery transaction released its lock',
+      )
+    }
+
+    recoverySession.child.stdin.write(recoveryRemainder)
+    recoverySession.child.stdin.end()
+    recoveryReleased = true
+
+    const recoveryResult = await waitForCompletion(
+      recoverySession,
+      'recovery session',
+    )
+    if (recoveryResult.code !== 0) {
+      throw new Error(
+        `recovery session failed\n${recoveryResult.stderr || recoveryResult.stdout}`,
+      )
+    }
+
+    const initializerResult = await waitForCompletion(
+      initializerSession,
+      'initializer session',
+    )
+    if (
+      initializerResult.code === 0
+      || !/permission denied|row-level security|does not exist/i.test(
+        `${initializerResult.stdout}\n${initializerResult.stderr}`,
+      )
+    ) {
+      throw new Error(
+        `concurrent initializer did not fail closed after recovery\n${
+          initializerResult.stderr || initializerResult.stdout
+        }`,
+      )
+    }
+
+    const finalState = JSON.parse(
+      psql(
+        database,
+        `
+          copy (
+            select pg_catalog.jsonb_build_object(
+              'aggregate_absent',
+                not exists (
+                  select 1
+                  from public.line_pay_checkout_attempts as attempt
+                  where attempt.idempotency_key =
+                    'sandbox-recovery-race-idempotency-0001'
+                ),
+              'audit_absent',
+                not exists (
+                  select 1
+                  from public.line_pay_payment_audit_events as audit
+                  where audit.event_type = 'checkout_initialized'
+                ),
+              'initializer_absent',
+                pg_catalog.to_regprocedure(
+                  'public.initialize_product_order_line_pay_checkout(jsonb)'
+                ) is null,
+              'helper_absent',
+                pg_catalog.to_regprocedure(
+                  'line_pay_private.record_line_pay_checkout_initialized_audit(uuid,uuid,uuid,text)'
+                ) is null
+            )
+          ) to stdout;
+        `,
+        'recovery race final state',
+      ),
+    )
+    if (Object.values(finalState).some((value) => value !== true)) {
+      throw new Error(
+        `recovery race left unsafe state: ${JSON.stringify(finalState)}`,
+      )
+    }
+  } finally {
+    if (!recoveryReleased && !recoverySession.closed) {
+      recoverySession.child.stdin.end('\nrollback;\n')
+    }
+    if (!initializerSession.closed) {
+      initializerSession.child.kill('SIGTERM')
+    }
+    await Promise.allSettled([
+      recoverySession.completion,
+      initializerSession.completion,
+    ])
+  }
 }
 
 async function testConcurrentInitialization(database) {
@@ -978,6 +1468,23 @@ async function main() {
     'create database line_pay_initialization_recovery_drift;',
     'create recovery drift database',
   )
+  psql(
+    'postgres',
+    'create database line_pay_initialization_recovery_race;',
+    'create recovery race database',
+  )
+  for (const target of ['initializer', 'helper']) {
+    psql(
+      'postgres',
+      `create database line_pay_initialization_${target}_grant_mutation;`,
+      `create ${target} grant mutation database`,
+    )
+    psql(
+      'postgres',
+      `create database line_pay_initialization_${target}_recovery_grant;`,
+      `create ${target} recovery grant database`,
+    )
+  }
 
   prepareDatabase('line_pay_initialization_contract')
   psqlFile(
@@ -1007,10 +1514,23 @@ async function main() {
   testReviewedRecoveryRejectsDefinitionDrift(
     'line_pay_initialization_recovery_drift',
   )
+  await testReviewedRecoveryBlocksConcurrentInitializer(
+    'line_pay_initialization_recovery_race',
+  )
+  for (const target of ['initializer', 'helper']) {
+    testMigrationRejectsGrantOption(
+      `line_pay_initialization_${target}_grant_mutation`,
+      target,
+    )
+    testRecoveryRejectsGrantOption(
+      `line_pay_initialization_${target}_recovery_grant`,
+      target,
+    )
+  }
   testHostedNonSuperuserUpgrade()
 
   process.stdout.write(
-    'line_pay_checkout_aggregate_initialization: PASS (PostgreSQL 17, atomic migration, hosted non-superuser upgrade, atomic aggregate, replay, concurrency, rollback, reviewed recovery, fail-forward guard, ACL, payload-size mutation caught)\n',
+    'line_pay_checkout_aggregate_initialization: PASS (PostgreSQL 17, atomic migration, hosted non-superuser upgrade, atomic aggregate, replay, concurrency, rollback, recovery relation-lock timeline, fail-forward guard, exact ACL grant-option mutations, audit binding drift fixtures, payload-size mutation caught)\n',
   )
 }
 

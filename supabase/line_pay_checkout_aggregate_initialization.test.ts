@@ -155,10 +155,17 @@ test('initializer replay validates reciprocal aggregate bindings before success'
     /v_existing_payment\.item_id\s+is\s+distinct\s+from\s+v_existing_order\.id::text/i,
   )
   assert.ok(
-    migration.indexOf('select attempt.*')
+    migration.indexOf('attempt.request_body_sha256,')
       < migration.indexOf(
         "v_capability_expires_at <= pg_catalog.clock_timestamp() + interval '5 minutes'",
       ),
+  )
+})
+
+test('initializer replay only projects reviewed aggregate fields', () => {
+  assert.doesNotMatch(
+    migration,
+    /select\s+(?:attempt|payment|product_order|request_outbox|capability)\.\*/i,
   )
 })
 
@@ -200,6 +207,13 @@ test('initializer writes one bounded audit event through a least-privilege helpe
   )
   assert.match(
     migration,
+    /payment\.merchant_order_no\s*=\s*attempt\.merchant_order_no[\s\S]*?payment\.request_idempotency_key\s*=\s*attempt\.idempotency_key[\s\S]*?payment\.request_body_sha256\s*=\s*attempt\.request_body_sha256/i,
+  )
+  assert.match(migration, /payment\.state_version\s*=\s*0/i)
+  assert.match(migration, /product_order\.state_version\s*=\s*1/i)
+  assert.match(migration, /attempt\.state_version\s*=\s*0/i)
+  assert.match(
+    migration,
     /from\s+public\.line_pay_request_outbox\s+as\s+request_outbox[\s\S]*?request_outbox\.idempotency_key\s*=\s*attempt\.idempotency_key[\s\S]*?request_outbox\.request_body_sha256\s*=\s*attempt\.request_body_sha256[\s\S]*?request_outbox\.state\s*=\s*'queued'/i,
   )
   assert.match(
@@ -232,6 +246,7 @@ test('initializer execute ACL is service-role only with an exact catalog postcon
     /grant\s+execute\s+on\s+function\s+public\.initialize_product_order_line_pay_checkout\s*\(\s*jsonb\s*\)\s+to\s+service_role/i,
   )
   assert.match(migration, /pg_catalog\.aclexplode/i)
+  assert.match(migration, /acl\.is_grantable/i)
   assert.match(migration, /line_pay_initialization_rpc_security_postcondition_failed/i)
 })
 
@@ -304,6 +319,7 @@ test('provides a reviewed fail-closed recovery artifact without wiring Productio
   assert.match(recovery, /pg_catalog\.pg_get_functiondef/i)
   assert.match(recovery, /pg_catalog\.obj_description/i)
   assert.match(recovery, /pg_catalog\.aclexplode/i)
+  assert.match(recovery, /acl\.is_grantable/i)
   assert.match(recovery, /pg_catalog\.pg_get_indexdef/i)
   assert.match(recovery, /pg_catalog\.pg_get_expr/i)
   assert.match(recovery, /index_catalog\.indnkeyatts\s*=\s*1/i)
@@ -314,6 +330,16 @@ test('provides a reviewed fail-closed recovery artifact without wiring Productio
   assert.match(recovery, /policy\.polcmd\s*=\s*'a'/i)
   assert.match(recovery, /policy\.polwithcheck/i)
   assert.match(recovery, /line_pay_initialization_recovery_state_mismatch/i)
+  assert.match(
+    recovery,
+    /lock\s+table[\s\S]*?public\.product_order_items[\s\S]*?public\.product_shipping_info[\s\S]*?public\.line_pay_payment_audit_events[\s\S]*?share\s+row\s+exclusive/i,
+  )
+  assert.ok(
+    recovery.search(/lock\s+table/i)
+      < recovery.search(
+        /from\s+public\.line_pay_payment_audit_events\s+as\s+audit/i,
+      ),
+  )
 })
 
 test('documents impact, backup, deployment order, compatibility, and fail-forward boundary', () => {
