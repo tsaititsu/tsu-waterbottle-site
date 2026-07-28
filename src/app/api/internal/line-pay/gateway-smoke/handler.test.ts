@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { LinePayGatewaySmokeResult, LinePayTransportEnv } from '../../../../../lib/linePay/transport'
+import {
+  LinePayTransportError,
+  type LinePayGatewaySmokeResult,
+  type LinePayTransportEnv,
+} from '../../../../../lib/linePay/transport'
 import { handleLinePayGatewaySmoke } from './handler'
 
 const enabledEnv = {
@@ -160,6 +164,50 @@ test('smoke errors return a stable redacted response without stack or secrets', 
   assert.equal(body.includes('stack'), false)
   assert.equal(body.includes('HTML'), false)
   assert.deepEqual(JSON.parse(body), { ok: false, error: 'gateway_smoke_failed' })
+})
+
+test('unknown transport error codes cannot escape through the diagnostic allowlist prototype', async () => {
+  const response = await handleLinePayGatewaySmoke({
+    request: request(),
+    env: enabledEnv,
+    authorize: async () => true,
+    runSmoke: async () => {
+      throw new LinePayTransportError('__proto__')
+    },
+  })
+
+  assert.equal(response.status, 502)
+  assert.deepEqual(await json(response), { ok: false, error: 'gateway_smoke_failed' })
+})
+
+test('Gateway transport failures return only their fixed allowlisted diagnostic reason', async () => {
+  for (const [code, reason] of [
+    ['line_pay_gateway_unavailable', 'gateway_unavailable'],
+    ['line_pay_gateway_timeout', 'gateway_timeout'],
+    ['invalid_line_pay_gateway_response', 'gateway_response_invalid'],
+    ['line_pay_gateway_smoke_failed', 'gateway_response_unexpected'],
+    ['missing_line_pay_gateway_config', 'gateway_config_invalid'],
+    ['invalid_line_pay_gateway_url', 'gateway_config_invalid'],
+    ['invalid_line_pay_gateway_timeout', 'gateway_config_invalid'],
+    ['line_pay_preview_requires_gateway', 'gateway_config_invalid'],
+    ['invalid_line_pay_transport', 'gateway_config_invalid'],
+  ] as const) {
+    const response = await handleLinePayGatewaySmoke({
+      request: request(),
+      env: enabledEnv,
+      authorize: async () => true,
+      runSmoke: async () => {
+        throw new LinePayTransportError(code)
+      },
+    })
+
+    assert.equal(response.status, 502)
+    assert.deepEqual(await json(response), {
+      ok: false,
+      error: 'gateway_smoke_failed',
+      reason,
+    })
+  }
 })
 
 test('route uses existing admin authorization, exports only POST and website source never references the Proxy Token env', () => {
