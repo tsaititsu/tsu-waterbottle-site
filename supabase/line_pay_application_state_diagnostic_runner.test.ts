@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import test, { before } from 'node:test'
@@ -17,6 +18,10 @@ const sharedRunnerPath = join(
 const validatorPath = join(
   root,
   'scripts/supabase/validate-line-pay-application-state-diagnostic.mjs',
+)
+const disposableRunnerPath = join(
+  root,
+  'supabase/tests/run_line_pay_application_state_diagnostic_contracts.mjs',
 )
 let runner: any
 let sharedRunner: any
@@ -265,4 +270,12 @@ test('shared runner defaults remain unchanged for the existing diagnostic', () =
     '--file=/workspace/supabase/deployment/line_pay_remediation_diagnostic.sql',
   ])
   assert.equal(sharedRunner.DATABASE_SESSION_LIMIT, 1)
+})
+
+test('disposable PostgreSQL runner waits for stable SQL readiness', () => {
+  const source = readFileSync(disposableRunnerPath, 'utf8')
+  assert.match(source, /let consecutiveReadyChecks = 0/u)
+  assert.match(source, /['"]select 1['"]/u)
+  assert.match(source, /consecutiveReadyChecks >= 2/u)
+  assert.doesNotMatch(source, /if \(result[.]status === 0\) return/u)
 })
