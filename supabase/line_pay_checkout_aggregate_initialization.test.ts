@@ -20,7 +20,10 @@ test('adds one JSON-only atomic LINE Pay checkout initializer', () => {
   assert.match(migration, /language\s+plpgsql/i)
   assert.match(migration, /security\s+invoker/i)
   assert.match(migration, /set\s+search_path\s*=\s*''/i)
-  assert.doesNotMatch(migration, /security\s+definer/i)
+  assert.match(
+    migration,
+    /create\s+or\s+replace\s+function\s+line_pay_private\.record_line_pay_checkout_initialized_audit[\s\S]*?security\s+definer[\s\S]*?set\s+search_path\s*=\s*''/i,
+  )
   assert.doesNotMatch(migration, /create\s+table/i)
   assert.doesNotMatch(migration, /alter\s+table/i)
   assert.doesNotMatch(migration, /drop\s+(table|column|constraint|function)/i)
@@ -110,6 +113,60 @@ test('initializer replay validates reciprocal aggregate bindings before success'
   ]) {
     assert.match(migration, new RegExp(invariant.replaceAll('.', '\\.')))
   }
+  assert.match(
+    migration,
+    /v_existing_payment\.item_id\s+is\s+distinct\s+from\s+v_existing_order\.id::text/i,
+  )
+  assert.ok(
+    migration.indexOf('select attempt.*')
+      < migration.indexOf(
+        "v_capability_expires_at <= pg_catalog.clock_timestamp() + interval '5 minutes'",
+      ),
+  )
+})
+
+test('production shipping fails closed before creating a physical order', () => {
+  assert.match(
+    migration,
+    /v_environment\s*=\s*'production'[\s\S]*?recipient_name[\s\S]*?recipient_phone[\s\S]*?shipping_method' in \('manual', 'home_delivery'\)[\s\S]*?address/i,
+  )
+  assert.match(
+    migration,
+    /shipping_method' in \([\s\S]*?'convenience_store_c2c'[\s\S]*?'convenience_store_b2c'[\s\S]*?store_type[\s\S]*?store_id[\s\S]*?store_name[\s\S]*?store_address/i,
+  )
+})
+
+test('initializer writes one bounded audit event through a least-privilege helper', () => {
+  assert.match(
+    migration,
+    /create\s+unique\s+index\s+line_pay_payment_audit_events_checkout_initialized_once_idx[\s\S]*?where\s+event_type\s*=\s*'checkout_initialized'/i,
+  )
+  assert.match(
+    migration,
+    /create\s+policy\s+line_pay_payment_function_owner_checkout_initialized_audit_insert[\s\S]*?to\s+line_pay_payment_function_owner[\s\S]*?with\s+check\s*\(\s*event_type\s*=\s*'checkout_initialized'\s*\)/i,
+  )
+  assert.match(
+    migration,
+    /'checkout_initialized'[\s\S]*?'\{"reason_code":"checkout_initialized"\}'::jsonb/i,
+  )
+  assert.match(
+    migration,
+    /alter\s+function\s+line_pay_private\.record_line_pay_checkout_initialized_audit[\s\S]*?owner\s+to\s+line_pay_payment_function_owner/i,
+  )
+  assert.match(
+    migration,
+    /grant\s+execute\s+on\s+function\s+line_pay_private\.record_line_pay_checkout_initialized_audit[\s\S]*?to\s+service_role/i,
+  )
+  assert.match(
+    migration,
+    /revoke\s+line_pay_payment_function_owner\s+from\s+current_user/i,
+  )
+  assert.match(migration, /membership\.inherit_option\s+or\s+membership\.set_option/i)
+  assert.match(
+    migration,
+    /has_table_privilege\([\s\S]*?'service_role'[\s\S]*?'public\.line_pay_payment_audit_events'/i,
+  )
+  assert.match(migration, /v_audit_function_oid/i)
 })
 
 test('initializer execute ACL is service-role only with an exact catalog postcondition', () => {

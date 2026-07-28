@@ -229,6 +229,40 @@ begin
 end;
 $$;
 
+reset role;
+
+do $$
+begin
+  if (
+    select pg_catalog.count(*)
+    from public.line_pay_payment_audit_events as audit
+    where audit.checkout_attempt_id = (
+      select attempt_id
+      from line_pay_initialization_first_result
+    )
+      and audit.payment_id = (
+        select payment_id
+        from line_pay_initialization_first_result
+      )
+      and audit.product_order_id = (
+        select product_order_id
+        from line_pay_initialization_first_result
+      )
+      and audit.environment = 'sandbox'
+      and audit.event_type = 'checkout_initialized'
+      and audit.from_state is null
+      and audit.to_state = 'initialized'
+      and audit.error_code is null
+      and audit.request_id is null
+      and audit.evidence = '{"reason_code":"checkout_initialized"}'::jsonb
+  ) <> 1 then
+    raise exception 'line_pay_initialization_audit_contract_failed';
+  end if;
+end;
+$$;
+
+set role service_role;
+
 do $$
 declare
   v_invalid_snapshot_payload jsonb;
@@ -329,6 +363,49 @@ rollback;
 
 begin;
 
+update line_pay_initialization_payload
+set payload = pg_catalog.jsonb_set(
+  payload,
+  '{capability_expires_at}',
+  pg_catalog.to_jsonb(
+    pg_catalog.to_char(
+      pg_catalog.clock_timestamp() + interval '4 minutes',
+      'YYYY-MM-DD"T"HH24:MI:SS.USOF'
+    )
+  ),
+  false
+);
+
+update public.line_pay_callback_capabilities
+set expires_at = (
+  select (payload ->> 'capability_expires_at')::timestamptz
+  from line_pay_initialization_payload
+)
+where checkout_attempt_id = (
+  select attempt_id
+  from line_pay_initialization_first_result
+);
+
+do $$
+declare
+  v_replay record;
+begin
+  select *
+  into strict v_replay
+  from public.initialize_product_order_line_pay_checkout(
+    (select payload from line_pay_initialization_payload)
+  );
+
+  if v_replay.result_code <> 'already_initialized' then
+    raise exception 'line_pay_initialization_near_expiry_replay_contract_failed';
+  end if;
+end;
+$$;
+
+rollback;
+
+begin;
+
 do $$
 declare
   v_second record;
@@ -374,6 +451,35 @@ $$;
 
 rollback;
 
+begin;
+
+update public.payments
+set item_id = null
+where id = (
+  select payment_id
+  from line_pay_initialization_first_result
+);
+
+do $$
+begin
+  begin
+    perform *
+    from public.initialize_product_order_line_pay_checkout(
+      (select payload from line_pay_initialization_payload)
+    );
+    raise exception
+      'line_pay_initialization_null_reciprocal_item_id_was_accepted';
+  exception
+    when unique_violation then
+      if sqlerrm <> 'line_pay_initialization_idempotency_conflict' then
+        raise;
+      end if;
+  end;
+end;
+$$;
+
+rollback;
+
 do $$
 begin
   perform *
@@ -388,6 +494,85 @@ exception
     end if;
 end;
 $$;
+
+do $$
+declare
+  v_production_payload jsonb;
+begin
+  select payload || pg_catalog.jsonb_build_object(
+    'environment', 'production',
+    'order_no', 'PO-PRODUCTION-SHIPPING-1',
+    'merchant_order_no', 'LP_PRODUCTION_SHIPPING_1',
+    'idempotency_key', 'production-shipping-guard-0001',
+    'request_body_sha256', pg_catalog.repeat('1', 64),
+    'confirm_token_hash', pg_catalog.repeat('2', 64),
+    'cancel_token_hash', pg_catalog.repeat('3', 64)
+  )
+  into strict v_production_payload
+  from line_pay_initialization_payload;
+
+  perform *
+  from public.initialize_product_order_line_pay_checkout(v_production_payload);
+  raise exception 'line_pay_initialization_incomplete_production_shipping_was_accepted';
+exception
+  when sqlstate '22023' then
+    if sqlerrm <> 'line_pay_initialization_invalid_input' then
+      raise;
+    end if;
+end;
+$$;
+
+begin;
+
+do $$
+declare
+  v_production_result record;
+begin
+  select *
+  into strict v_production_result
+  from public.initialize_product_order_line_pay_checkout(
+    (
+      select payload || pg_catalog.jsonb_build_object(
+        'environment', 'production',
+        'order_no', 'PO-PRODUCTION-SHIPPING-2',
+        'merchant_order_no', 'LP_PRODUCTION_SHIPPING_2',
+        'shipping_info', pg_catalog.jsonb_build_object(
+          'recipient_name', 'Production Recipient',
+          'recipient_phone', '0900000000',
+          'recipient_email', null,
+          'shipping_method', 'manual',
+          'postal_code', null,
+          'address', 'Synthetic production address',
+          'store_type', null,
+          'store_id', null,
+          'store_name', null,
+          'store_address', null,
+          'store_phone', null
+        ),
+        'idempotency_key', 'production-shipping-guard-0002',
+        'request_body_sha256', pg_catalog.repeat('4', 64),
+        'confirm_token_hash', pg_catalog.repeat('5', 64),
+        'cancel_token_hash', pg_catalog.repeat('6', 64)
+      )
+      from line_pay_initialization_payload
+    )
+  );
+
+  if v_production_result.result_code <> 'initialized'
+     or not exists (
+       select 1
+       from public.product_orders as product_order
+       where product_order.id = v_production_result.product_order_id
+         and product_order.environment = 'production'
+         and product_order.fulfillment_mode = 'physical'
+         and product_order.shipping_status = 'not_shipped'
+     ) then
+    raise exception 'line_pay_initialization_complete_production_shipping_failed';
+  end if;
+end;
+$$;
+
+rollback;
 
 do $$
 declare

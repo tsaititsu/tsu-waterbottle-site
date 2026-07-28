@@ -2,6 +2,113 @@
 -- This migration does not enable LINE Pay Runtime and must not be applied to
 -- any remote database without a separately reviewed exact-file deployment.
 
+grant line_pay_payment_function_owner to current_user
+  with inherit true, set true;
+
+create unique index line_pay_payment_audit_events_checkout_initialized_once_idx
+on public.line_pay_payment_audit_events(checkout_attempt_id)
+where event_type = 'checkout_initialized';
+
+create policy line_pay_payment_function_owner_checkout_initialized_audit_insert
+on public.line_pay_payment_audit_events
+for insert
+to line_pay_payment_function_owner
+with check (event_type = 'checkout_initialized');
+
+create or replace function line_pay_private.record_line_pay_checkout_initialized_audit(
+  p_payment_id uuid,
+  p_product_order_id uuid,
+  p_checkout_attempt_id uuid,
+  p_environment text
+)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+begin
+  if p_payment_id is null
+     or p_product_order_id is null
+     or p_checkout_attempt_id is null
+     or p_environment not in ('sandbox', 'production')
+     or not exists (
+       select 1
+       from public.payments as payment
+       join public.product_orders as product_order
+         on product_order.id = payment.product_order_id
+       join public.line_pay_checkout_attempts as attempt
+         on attempt.id = payment.checkout_attempt_id
+       where payment.id = p_payment_id
+         and product_order.id = p_product_order_id
+         and attempt.id = p_checkout_attempt_id
+         and payment.provider = 'line_pay'
+         and payment.item_type = 'spiritual_product_order'
+         and payment.item_id is not distinct from product_order.id::text
+         and payment.environment = p_environment
+         and payment.request_state = 'initialized'
+         and payment.status = 'pending'
+         and product_order.payment_method = 'line_pay'
+         and product_order.environment = p_environment
+         and product_order.payment_id is not distinct from payment.id
+         and product_order.checkout_attempt_id is not distinct from attempt.id
+         and product_order.payment_request_state = 'initialized'
+         and product_order.payment_status = 'pending'
+         and attempt.provider = 'line_pay'
+         and attempt.environment = p_environment
+         and attempt.payment_id = payment.id
+         and attempt.product_order_id = product_order.id
+         and attempt.request_state = 'queued'
+     ) then
+    raise exception using
+      errcode = '23514',
+      message = 'line_pay_initialization_audit_binding_invalid';
+  end if;
+
+  insert into public.line_pay_payment_audit_events (
+    payment_id,
+    product_order_id,
+    checkout_attempt_id,
+    environment,
+    event_type,
+    from_state,
+    to_state,
+    evidence
+  ) values (
+    p_payment_id,
+    p_product_order_id,
+    p_checkout_attempt_id,
+    p_environment,
+    'checkout_initialized',
+    null,
+    'initialized',
+    '{"reason_code":"checkout_initialized"}'::jsonb
+  );
+end;
+$$;
+
+alter function line_pay_private.record_line_pay_checkout_initialized_audit(
+  uuid,
+  uuid,
+  uuid,
+  text
+) owner to line_pay_payment_function_owner;
+
+revoke all on function line_pay_private.record_line_pay_checkout_initialized_audit(
+  uuid,
+  uuid,
+  uuid,
+  text
+) from public, anon, authenticated, service_role, line_pay_payment_executor;
+grant execute on function line_pay_private.record_line_pay_checkout_initialized_audit(
+  uuid,
+  uuid,
+  uuid,
+  text
+) to service_role;
+
+revoke line_pay_payment_function_owner from current_user;
+
 create or replace function public.initialize_product_order_line_pay_checkout(
   p_payload jsonb
 )
@@ -138,9 +245,7 @@ begin
     (p_payload ->> 'capability_expires_at')::timestamptz;
   v_shipping_info := p_payload -> 'shipping_info';
 
-  if v_capability_expires_at <= pg_catalog.clock_timestamp() + interval '5 minutes'
-     or v_capability_expires_at > pg_catalog.clock_timestamp() + interval '24 hours'
-     or not (v_shipping_info ?& v_shipping_expected_keys)
+  if not (v_shipping_info ?& v_shipping_expected_keys)
      or exists (
        select 1
        from pg_catalog.jsonb_object_keys(v_shipping_info) as supplied(key)
@@ -175,6 +280,32 @@ begin
      or pg_catalog.length(coalesce(v_shipping_info ->> 'store_name', '')) > 200
      or pg_catalog.length(coalesce(v_shipping_info ->> 'store_address', '')) > 500
      or pg_catalog.length(coalesce(v_shipping_info ->> 'store_phone', '')) > 64 then
+    raise exception using
+      errcode = '22023',
+      message = 'line_pay_initialization_invalid_input';
+  end if;
+
+  if v_environment = 'production'
+     and (
+       nullif(pg_catalog.btrim(coalesce(v_shipping_info ->> 'recipient_name', '')), '') is null
+       or nullif(pg_catalog.btrim(coalesce(v_shipping_info ->> 'recipient_phone', '')), '') is null
+       or (
+         v_shipping_info ->> 'shipping_method' in ('manual', 'home_delivery')
+         and nullif(pg_catalog.btrim(coalesce(v_shipping_info ->> 'address', '')), '') is null
+       )
+       or (
+         v_shipping_info ->> 'shipping_method' in (
+           'convenience_store_c2c',
+           'convenience_store_b2c'
+         )
+         and (
+           nullif(pg_catalog.btrim(coalesce(v_shipping_info ->> 'store_type', '')), '') is null
+           or nullif(pg_catalog.btrim(coalesce(v_shipping_info ->> 'store_id', '')), '') is null
+           or nullif(pg_catalog.btrim(coalesce(v_shipping_info ->> 'store_name', '')), '') is null
+           or nullif(pg_catalog.btrim(coalesce(v_shipping_info ->> 'store_address', '')), '') is null
+         )
+       )
+     ) then
     raise exception using
       errcode = '22023',
       message = 'line_pay_initialization_invalid_input';
@@ -344,7 +475,7 @@ begin
        or v_existing_payment.merchant_order_no <> v_merchant_order_no
        or v_existing_payment.provider <> 'line_pay'
        or v_existing_payment.item_type <> 'spiritual_product_order'
-       or v_existing_payment.item_id <> v_existing_order.id::text
+       or v_existing_payment.item_id is distinct from v_existing_order.id::text
        or v_existing_payment.amount_twd <> v_total_amount_twd
        or v_existing_payment.product_order_id is distinct from
          v_existing_order.id
@@ -464,6 +595,13 @@ begin
       v_existing_attempt.merchant_order_no,
       v_existing_attempt.request_state;
     return;
+  end if;
+
+  if v_capability_expires_at <= pg_catalog.clock_timestamp() + interval '5 minutes'
+     or v_capability_expires_at > pg_catalog.clock_timestamp() + interval '24 hours' then
+    raise exception using
+      errcode = '22023',
+      message = 'line_pay_initialization_invalid_input';
   end if;
 
   insert into public.product_orders (
@@ -702,6 +840,13 @@ begin
       v_capability_expires_at
     );
 
+  perform line_pay_private.record_line_pay_checkout_initialized_audit(
+    v_payment_id,
+    v_product_order_id,
+    v_attempt_id,
+    v_environment
+  );
+
   return query
   select
     'initialized'::text,
@@ -724,6 +869,7 @@ to service_role;
 do $$
 declare
   v_function_oid oid;
+  v_audit_function_oid oid;
 begin
   if (
     select pg_catalog.count(*)
@@ -747,6 +893,15 @@ begin
     and procedure.proname = 'initialize_product_order_line_pay_checkout'
     and pg_catalog.oidvectortypes(procedure.proargtypes) = 'jsonb';
 
+  select procedure.oid
+  into strict v_audit_function_oid
+  from pg_catalog.pg_proc as procedure
+  join pg_catalog.pg_namespace as namespace
+    on namespace.oid = procedure.pronamespace
+  where namespace.nspname = 'line_pay_private'
+    and procedure.proname = 'record_line_pay_checkout_initialized_audit'
+    and pg_catalog.oidvectortypes(procedure.proargtypes) = 'uuid, uuid, uuid, text';
+
   if exists (
     select 1
     from pg_catalog.pg_proc as procedure
@@ -756,6 +911,113 @@ begin
         or procedure.proconfig is null
         or not ('search_path=""' = any (procedure.proconfig))
       )
+  )
+  or exists (
+    select 1
+    from pg_catalog.pg_proc as procedure
+    where procedure.oid = v_audit_function_oid
+      and (
+        not procedure.prosecdef
+        or procedure.proowner <> (
+          select role.oid
+          from pg_catalog.pg_roles as role
+          where role.rolname = 'line_pay_payment_function_owner'
+        )
+        or procedure.provolatile <> 'v'
+        or procedure.proconfig is null
+        or not ('search_path=""' = any (procedure.proconfig))
+      )
+  )
+  or not pg_catalog.has_function_privilege(
+    'service_role',
+    v_audit_function_oid,
+    'execute'
+  )
+  or pg_catalog.has_function_privilege(
+    'anon',
+    v_audit_function_oid,
+    'execute'
+  )
+  or pg_catalog.has_function_privilege(
+    'authenticated',
+    v_audit_function_oid,
+    'execute'
+  )
+  or exists (
+    select 1
+    from pg_catalog.pg_proc as procedure
+    cross join lateral pg_catalog.aclexplode(procedure.proacl) as acl
+    where procedure.oid = v_audit_function_oid
+      and acl.privilege_type = 'EXECUTE'
+      and acl.grantee not in (
+        procedure.proowner,
+        (select role.oid from pg_catalog.pg_roles as role where role.rolname = 'service_role')
+      )
+  )
+  or (
+    select pg_catalog.count(*)
+    from pg_catalog.pg_index as index_catalog
+    join pg_catalog.pg_class as index_relation
+      on index_relation.oid = index_catalog.indexrelid
+    join pg_catalog.pg_namespace as index_namespace
+      on index_namespace.oid = index_relation.relnamespace
+    join pg_catalog.pg_class as table_relation
+      on table_relation.oid = index_catalog.indrelid
+    join pg_catalog.pg_namespace as table_namespace
+      on table_namespace.oid = table_relation.relnamespace
+    where index_namespace.nspname = 'public'
+      and index_relation.relname =
+        'line_pay_payment_audit_events_checkout_initialized_once_idx'
+      and table_namespace.nspname = 'public'
+      and table_relation.relname = 'line_pay_payment_audit_events'
+      and index_catalog.indisunique
+      and index_catalog.indisvalid
+      and pg_catalog.pg_get_indexdef(index_catalog.indexrelid)
+        ~ '\(checkout_attempt_id\)'
+      and pg_catalog.pg_get_expr(
+        index_catalog.indpred,
+        index_catalog.indrelid
+      ) = '(event_type = ''checkout_initialized''::text)'
+  ) <> 1
+  or (
+    select pg_catalog.count(*)
+    from pg_catalog.pg_policy as policy
+    join pg_catalog.pg_class as relation
+      on relation.oid = policy.polrelid
+    join pg_catalog.pg_namespace as namespace
+      on namespace.oid = relation.relnamespace
+    where namespace.nspname = 'public'
+      and relation.relname = 'line_pay_payment_audit_events'
+      and policy.polname =
+        'line_pay_payment_function_owner_checkout_initialized_audit_insert'
+      and policy.polcmd = 'a'
+      and policy.polpermissive
+      and policy.polroles = array[
+        (
+          select role.oid
+          from pg_catalog.pg_roles as role
+          where role.rolname = 'line_pay_payment_function_owner'
+        )
+      ]::oid[]
+      and policy.polqual is null
+      and pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid)
+        = '(event_type = ''checkout_initialized''::text)'
+  ) <> 1
+  or pg_catalog.has_table_privilege(
+    'service_role',
+    'public.line_pay_payment_audit_events',
+    'select,insert,update,delete,truncate,references,trigger'
+  )
+  or exists (
+    select 1
+    from pg_catalog.pg_auth_members as membership
+    join pg_catalog.pg_roles as granted_role
+      on granted_role.oid = membership.roleid
+    join pg_catalog.pg_roles as member_role
+      on member_role.oid = membership.member
+    where granted_role.rolname = 'line_pay_payment_function_owner'
+      and member_role.rolname = current_user
+      and (membership.inherit_option or membership.set_option)
   )
   or pg_catalog.has_function_privilege('anon', v_function_oid, 'execute')
   or pg_catalog.has_function_privilege('authenticated', v_function_oid, 'execute')

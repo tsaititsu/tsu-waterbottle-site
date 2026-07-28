@@ -365,6 +365,68 @@ test('rejects unsafe or malformed input before calling RPC', async () => {
   }
 })
 
+test('rejects incomplete production shipping before calling RPC', async () => {
+  const rpc = createRpcClient([])
+
+  await assert.rejects(
+    () => initializeProductOrderLinePayCheckout(
+      input,
+      {
+        ...trustedContext,
+        environment: 'production',
+      },
+      rpc.client,
+    ),
+    (error: unknown) =>
+      error instanceof LinePayCheckoutInitializationError
+      && error.code === 'invalid_input'
+      && error.message === 'line_pay_checkout_initialization_error',
+  )
+
+  assert.equal(rpc.calls.length, 0)
+})
+
+test('accepts complete production manual shipping', async () => {
+  const rpc = createRpcClient([{ data: result, error: null }])
+
+  await initializeProductOrderLinePayCheckout(
+    {
+      ...input,
+      shippingInfo: {
+        ...input.shippingInfo,
+        recipientName: 'Production Recipient',
+        recipientPhone: '0900000000',
+        address: 'Synthetic production address',
+      },
+    },
+    {
+      ...trustedContext,
+      environment: 'production',
+    },
+    rpc.client,
+  )
+
+  assert.equal(rpc.calls.length, 1)
+  const payload = rpc.calls[0].args.p_payload as {
+    environment: string
+    shipping_info: Record<string, unknown>
+  }
+  assert.equal(payload.environment, 'production')
+  assert.deepEqual(payload.shipping_info, {
+    recipient_name: 'Production Recipient',
+    recipient_phone: '0900000000',
+    recipient_email: null,
+    shipping_method: 'manual',
+    postal_code: null,
+    address: 'Synthetic production address',
+    store_type: null,
+    store_id: null,
+    store_name: null,
+    store_address: null,
+    store_phone: null,
+  })
+})
+
 test('maps database failures to a stable non-sensitive error', async () => {
   const rpc = createRpcClient([
     {

@@ -318,6 +318,34 @@ function buildPayload(
   ) {
     invalidInput()
   }
+  if (
+    trustedContext.environment === 'production'
+    && (
+      shippingInfo.recipient_name === null
+      || shippingInfo.recipient_phone === null
+      || (
+        (
+          shippingInfo.shipping_method === 'manual'
+          || shippingInfo.shipping_method === 'home_delivery'
+        )
+        && shippingInfo.address === null
+      )
+      || (
+        (
+          shippingInfo.shipping_method === 'convenience_store_c2c'
+          || shippingInfo.shipping_method === 'convenience_store_b2c'
+        )
+        && (
+          shippingInfo.store_type === null
+          || shippingInfo.store_id === null
+          || shippingInfo.store_name === null
+          || shippingInfo.store_address === null
+        )
+      )
+    )
+  ) {
+    invalidInput()
+  }
 
   const payload = {
     user_id: userId,

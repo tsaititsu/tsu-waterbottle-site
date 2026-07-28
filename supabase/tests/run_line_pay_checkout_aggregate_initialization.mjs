@@ -299,6 +299,16 @@ async function testConcurrentInitialization(database) {
           select pg_catalog.count(*)
           from public.line_pay_request_outbox
           where idempotency_key = 'sandbox-concurrent-idempotency-0001'
+        ) <> 1
+        or (
+          select pg_catalog.count(*)
+          from public.line_pay_payment_audit_events
+          where checkout_attempt_id = (
+            select id
+            from public.line_pay_checkout_attempts
+            where idempotency_key = 'sandbox-concurrent-idempotency-0001'
+          )
+            and event_type = 'checkout_initialized'
         ) <> 1 then
           raise exception 'concurrent_initializer_created_duplicate_aggregate';
         end if;
