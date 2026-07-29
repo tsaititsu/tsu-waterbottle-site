@@ -33,6 +33,10 @@ const fencePath = join(
   root,
   'supabase/migrations/20260722065311_retire_bank_transfer_submissions_writes.sql',
 )
+const partialRecoveryPath = join(
+  root,
+  'supabase/migrations/20260729130000_line_pay_partial_acl_metadata_recovery.sql',
+)
 const runnerPath = join(
   root,
   'scripts/supabase/run-line-pay-application-state-diagnostic.mjs',
@@ -257,6 +261,130 @@ function findDetailRow(rows, identity, label) {
   const row = rows.find((detail) => detail.identity === identity)
   assert.ok(row, `${label}:${identity}:missing detail row`)
   return row
+}
+
+function assertNoLinePayMigrationHistory(label) {
+  const versionPresent = psql(
+    `
+      select exists (
+        select 1
+        from supabase_migrations.schema_migrations
+        where version = '20260719033404'
+      )::text;
+    `,
+    label,
+  )
+  assert.equal(
+    versionPresent,
+    'false',
+    `${label}:migration history must stay empty`,
+  )
+}
+
+function assertRuntimeWriteBoundary(label) {
+  const boundary = psql(
+    `
+      select pg_catalog.jsonb_build_object(
+        'payments_anon_insert',
+          pg_catalog.has_table_privilege('anon', 'public.payments', 'insert'),
+        'payments_authenticated_insert',
+          pg_catalog.has_table_privilege(
+            'authenticated',
+            'public.payments',
+            'insert'
+          ),
+        'payments_service_insert',
+          pg_catalog.has_table_privilege(
+            'service_role',
+            'public.payments',
+            'insert'
+          ),
+        'payments_service_update',
+          pg_catalog.has_table_privilege(
+            'service_role',
+            'public.payments',
+            'update'
+          ),
+        'orders_anon_insert',
+          pg_catalog.has_table_privilege(
+            'anon',
+            'public.product_orders',
+            'insert'
+          ),
+        'orders_authenticated_insert',
+          pg_catalog.has_table_privilege(
+            'authenticated',
+            'public.product_orders',
+            'insert'
+          ),
+        'orders_service_insert',
+          pg_catalog.has_table_privilege(
+            'service_role',
+            'public.product_orders',
+            'insert'
+          ),
+        'orders_service_update',
+          pg_catalog.has_table_privilege(
+            'service_role',
+            'public.product_orders',
+            'update'
+          )
+      )::text;
+    `,
+    label,
+  )
+  assert.deepEqual(JSON.parse(boundary), {
+    payments_anon_insert: false,
+    payments_authenticated_insert: false,
+    payments_service_insert: true,
+    payments_service_update: true,
+    orders_anon_insert: false,
+    orders_authenticated_insert: false,
+    orders_service_insert: true,
+    orders_service_update: true,
+  })
+}
+
+function readRelationAclSnapshot(label) {
+  return JSON.parse(
+    psql(
+      `
+        select coalesce(
+          pg_catalog.jsonb_agg(
+            pg_catalog.jsonb_build_object(
+              'identity', namespace.nspname || '.' || relation.relname,
+              'owner', owner.rolname,
+              'acl', relation.relacl::text,
+              'effective_acl',
+                coalesce(
+                  relation.relacl,
+                  pg_catalog.acldefault('r', relation.relowner)
+                )::text
+            )
+            order by namespace.nspname || '.' || relation.relname
+          ),
+          '[]'::jsonb
+        )::text
+        from (
+          values
+            ('public', 'app_environment_attestation'),
+            ('public', 'line_pay_checkout_attempts'),
+            ('public', 'line_pay_request_outbox'),
+            ('public', 'line_pay_callback_capabilities'),
+            ('public', 'line_pay_callback_events'),
+            ('public', 'line_pay_payment_audit_events'),
+            ('line_pay_private', 'line_pay_completion_proofs')
+        ) as expected(schema_name, relation_name)
+        join pg_catalog.pg_namespace as namespace
+          on namespace.nspname = expected.schema_name
+        join pg_catalog.pg_class as relation
+          on relation.relnamespace = namespace.oid
+         and relation.relname = expected.relation_name
+        join pg_catalog.pg_roles as owner on owner.oid = relation.relowner;
+      `,
+      label,
+    ),
+  )
 }
 
 function catchMutation(name, callback) {
@@ -692,6 +820,55 @@ try {
     false,
     'combined relation and existing access mismatch: access ACL boolean',
   )
+  psql(
+    `
+      grant select on public.line_pay_checkout_attempts to anon;
+      grant insert on public.payments to authenticated;
+    `,
+    'recoverable Production PARTIAL fixture',
+  )
+  const recoverablePartial = parseAndValidateDiagnosticOutput(
+    `${psql(diagnosticSql, 'recoverable Production PARTIAL', {
+      readOnly: true,
+    })}\n`,
+  )
+  assert.equal(recoverablePartial.application_state, 'PARTIAL')
+  assertIncompleteCategories(
+    recoverablePartial,
+    ['existing_relation_access', 'relations'],
+    'recoverable Production PARTIAL details',
+  )
+  psql(
+    readFileSync(partialRecoveryPath, 'utf8'),
+    'partial ACL metadata recovery',
+  )
+  const recovered = parseAndValidateDiagnosticOutput(
+    `${psql(diagnosticSql, 'recovered Production PARTIAL', {
+      readOnly: true,
+    })}\n`,
+  )
+  assert.equal(
+    recovered.application_state,
+    'FULL_WITHOUT_HISTORY',
+    `recovered Production PARTIAL:${JSON.stringify({
+      details: recovered.details,
+      relationAcl: readRelationAclSnapshot('recovered relation ACL snapshot'),
+    })}`,
+  )
+  assertIncompleteCategories(recovered, [], 'recovered details')
+  assertDetailIdentityRows(
+    recovered.details.relation_metadata,
+    [],
+    'recovered relation metadata details',
+  )
+  assertDetailIdentityRows(
+    recovered.details.existing_relation_access,
+    [],
+    'recovered existing relation access details',
+  )
+  assertNoLinePayMigrationHistory('partial recovery history preservation')
+  assertRuntimeWriteBoundary('partial recovery runtime write boundary')
+  restoreDatabaseFromTemplate('line_pay_applied_template')
   runApplicationStateScenario(
     'ownership mismatch',
     'PARTIAL',
