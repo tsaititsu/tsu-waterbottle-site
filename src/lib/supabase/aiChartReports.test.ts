@@ -9,6 +9,7 @@ import {
   AI_CHART_SNAPSHOT_VERSION,
   type CanonicalAiChartSnapshot,
 } from '@/lib/ai-chart/chartSnapshot'
+import { normalizeAiChartD1N0 } from '@/lib/ai-chart/d1N0'
 import {
   buildAiChartReportCompletedPayload,
   buildAiChartReportFailedPayload,
@@ -20,7 +21,9 @@ import {
   decideAiChartReportResultAccess,
   decideAiChartReportPaidUpdate,
   decideAiChartReportPendingPaymentLink,
+  getAiChartReportCompletionSubject,
   getAiChartReportForUser,
+  getAiChartReportReviewSubject,
   getAiChartReportResultById,
   getAiChartReportPaymentContext,
   linkAiChartReportPendingPayment,
@@ -202,6 +205,15 @@ const canonicalChartSnapshot: CanonicalAiChartSnapshot = {
   })),
 }
 
+const canonicalChartSnapshotSha256 = normalizeAiChartD1N0(
+  canonicalChartSnapshot,
+  { chartId: 'chart:report-create-contract' },
+).sourceSnapshotSha256
+assert.equal(
+  canonicalChartSnapshotSha256,
+  '70a369b02849b64fb12b2d25ffa59f5c27f2943d367b796fbbe87a39e8448dd2',
+)
+
 const pendingReportPayload = buildPendingAiChartReportPayload(
   {
     userId: 'user-1',
@@ -220,6 +232,7 @@ assert.deepEqual(pendingReportPayload, {
   user_id: 'user-1',
   birth_input_snapshot: canonicalBirthInput,
   chart_snapshot: canonicalChartSnapshot,
+  chart_snapshot_sha256: canonicalChartSnapshotSha256,
   chart_profile_id: 'chart-profile-1',
   title: '紫微命盤完整分析',
   product_name: 'AI 命盤分析',
@@ -336,6 +349,13 @@ mutableChartSnapshot.palaces[0].name = '修改後宮名'
 mutableChartSnapshot.palaces[0].majorStars[0].name = '修改後星曜'
 mutableChartSnapshot.palaces[0].ages[0] = 999
 assert.deepEqual(isolatedChartPayload.chart_snapshot, expectedIsolatedChartSnapshot)
+assert.equal(
+  isolatedChartPayload.chart_snapshot_sha256,
+  normalizeAiChartD1N0(
+    expectedIsolatedChartSnapshot,
+    { chartId: 'chart:report-create-isolation-contract' },
+  ).sourceSnapshotSha256,
+)
 for (const forbiddenField of [
   'horoscope',
   'chartContext',
@@ -735,6 +755,10 @@ async function runAsyncHelperTests() {
   assert.equal(createMock.calls.inserts[0].user_id, 'session-owner-1')
   assert.deepEqual(createMock.calls.inserts[0].birth_input_snapshot, canonicalBirthInput)
   assert.deepEqual(createMock.calls.inserts[0].chart_snapshot, canonicalChartSnapshot)
+  assert.equal(
+    createMock.calls.inserts[0].chart_snapshot_sha256,
+    canonicalChartSnapshotSha256,
+  )
   assert.notEqual(createMock.calls.inserts[0].chart_snapshot, canonicalChartSnapshot)
   assert.equal(createMock.calls.inserts[0].chart_profile_id, null)
   assert.equal(createMock.calls.inserts[0].title, '紫微命盤完整分析')
@@ -895,6 +919,80 @@ async function runAsyncHelperTests() {
   assertNoUnsafePaymentKeys(resultContext as unknown as Record<string, unknown>)
   assertNoOtherProductKeys(resultContext as unknown as Record<string, unknown>)
 
+  const completionSubjectMock = createMockSupabase({
+    data: {
+      id: 'report-completion-subject-1',
+      title: 'AI 命盤分析',
+      product_name: 'AI 命盤分析',
+      amount_twd: 100,
+      status: 'pending',
+      payment_status: 'paid',
+      report_content: null,
+      paid_at: '2026-07-06T17:00:00.000Z',
+      completed_at: null,
+      error_message: null,
+      chart_snapshot: canonicalChartSnapshot,
+      chart_snapshot_sha256: canonicalChartSnapshotSha256,
+    },
+    error: null,
+  })
+  const completionSubject = await getAiChartReportCompletionSubject(
+    'report-completion-subject-1',
+    completionSubjectMock.supabase,
+  )
+
+  assert.equal(completionSubject?.id, 'report-completion-subject-1')
+  assert.equal(completionSubject?.paymentStatus, 'paid')
+  assert.deepEqual(completionSubject?.chartSnapshot, canonicalChartSnapshot)
+  assert.equal(
+    completionSubject?.chartSnapshotSha256,
+    canonicalChartSnapshotSha256,
+  )
+  assert.deepEqual(completionSubjectMock.calls.selects, [
+    'id,title,product_name,amount_twd,status,payment_status,report_content,paid_at,completed_at,error_message,chart_snapshot,chart_snapshot_sha256',
+  ])
+  assert.equal(
+    completionSubjectMock.calls.selects[0].includes('birth_input_snapshot'),
+    false,
+  )
+  assert.equal(
+    completionSubjectMock.calls.selects[0].includes('payment_id'),
+    false,
+  )
+  assert.equal(
+    completionSubjectMock.calls.selects[0].includes('merchant_order_no'),
+    false,
+  )
+
+  const failedCompletionSubjectMock = createMockSupabase({
+    data: null,
+    error: {
+      message:
+        'sensitive-provider-completion-subject-database-message',
+    },
+  })
+  await assert.rejects(
+    () =>
+      getAiChartReportCompletionSubject(
+        'report-completion-subject-1',
+        failedCompletionSubjectMock.supabase,
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.equal(
+        error.message,
+        'ai_chart_report_completion_subject_lookup_failed',
+      )
+      assert.equal(
+        JSON.stringify(error).includes(
+          'sensitive-provider-completion-subject-database-message',
+        ),
+        false,
+      )
+      return true
+    },
+  )
+
   const ownedResultContextMock = createMockSupabase({
     data: {
       id: 'report-result-1',
@@ -935,6 +1033,92 @@ async function runAsyncHelperTests() {
     ['id', 'report-result-1'],
     ['user_id', 'different-user-id'],
   ])
+
+  const reviewSubjectMock = createMockSupabase({
+    data: {
+      id: '3e0ba27e-95f8-4c22-92b1-a42fb9bfaed9',
+      user_id: 'f3ba29e1-7fde-4bc3-8d8f-158b24de81ae',
+      payment_status: 'paid',
+      chart_snapshot: canonicalChartSnapshot,
+    },
+    error: null,
+  })
+  const reviewSubject =
+    await getAiChartReportReviewSubject(
+      '3e0ba27e-95f8-4c22-92b1-a42fb9bfaed9',
+      reviewSubjectMock.supabase,
+    )
+
+  assert.deepEqual(reviewSubject, {
+    id: '3e0ba27e-95f8-4c22-92b1-a42fb9bfaed9',
+    ownerUserId: 'f3ba29e1-7fde-4bc3-8d8f-158b24de81ae',
+    paymentStatus: 'paid',
+    chartSnapshot: canonicalChartSnapshot,
+  })
+  assert.deepEqual(reviewSubjectMock.calls.tables, [
+    'ai_chart_reports',
+  ])
+  assert.deepEqual(reviewSubjectMock.calls.selects, [
+    'id,user_id,payment_status,chart_snapshot',
+  ])
+  assert.deepEqual(reviewSubjectMock.calls.eqs, [
+    ['id', '3e0ba27e-95f8-4c22-92b1-a42fb9bfaed9'],
+  ])
+  for (const forbiddenColumn of [
+    'birth_input_snapshot',
+    'report_content',
+    'email',
+    'payment_id',
+    'merchant_order_no',
+  ]) {
+    assert.equal(
+      reviewSubjectMock.calls.selects[0].includes(
+        forbiddenColumn,
+      ),
+      false,
+    )
+  }
+
+  const missingReviewSubjectMock = createMockSupabase({
+    data: null,
+    error: null,
+  })
+  assert.equal(
+    await getAiChartReportReviewSubject(
+      'ae0d8194-670e-451b-bd66-e65423cd5536',
+      missingReviewSubjectMock.supabase,
+    ),
+    null,
+  )
+
+  const failedReviewSubjectMock = createMockSupabase({
+    data: null,
+    error: {
+      message:
+        'sensitive-provider-database-message',
+    },
+  })
+  await assert.rejects(
+    () =>
+      getAiChartReportReviewSubject(
+        'ae0d8194-670e-451b-bd66-e65423cd5536',
+        failedReviewSubjectMock.supabase,
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.equal(
+        error.message,
+        'ai_chart_report_review_subject_lookup_failed',
+      )
+      assert.equal(
+        JSON.stringify(error).includes(
+          'sensitive-provider-database-message',
+        ),
+        false,
+      )
+      return true
+    },
+  )
 
   const missingResultContextMock = createMockSupabase({
     data: null,

@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict'
 import { generateAiChartReportContent, type AiChartReportGenerationInput } from './reportGenerator'
+import {
+  AI_CHART_D1_REPORT_WRITER_RUNTIME_NOT_READY,
+  AiChartD1ReportWriterRuntimeNotReadyError,
+} from './reportGenerationPipeline'
+import { createAiChartD1FlyingModelInputTestSnapshot } from './d1FlyingModelInputTestSupport'
 
 function test(name: string, fn: () => void) {
   try {
@@ -117,4 +122,24 @@ test('generateAiChartReportContent does not touch Supabase or NewebPay state', (
 
   assert.equal(Reflect.has(globalThis, 'supabase'), beforeSupabase)
   assert.equal(Reflect.has(globalThis, 'newebpay'), beforeNewebPay)
+})
+
+test('generateAiChartReportContent routes chart snapshots into D1 pipeline and fails closed', () => {
+  assert.throws(
+    () =>
+      generateAiChartReportContent({
+        reportId: 'report-generator-1',
+        chartSnapshot: createAiChartD1FlyingModelInputTestSnapshot(),
+      }),
+    (error: unknown) => {
+      assert.equal(error instanceof AiChartD1ReportWriterRuntimeNotReadyError, true)
+      assert.equal(
+        (error as AiChartD1ReportWriterRuntimeNotReadyError).code,
+        AI_CHART_D1_REPORT_WRITER_RUNTIME_NOT_READY,
+      )
+      assert.equal(String(error).includes('output_text'), false)
+      assert.equal(String(error).includes('OpenAI request'), false)
+      return true
+    },
+  )
 })

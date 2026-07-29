@@ -27,6 +27,7 @@ import {
   AI_CHART_D1_MAJOR_STAR_NAMES,
   AI_CHART_D1_MODELED_SUPPORTING_STARS,
   AI_CHART_D1_MUTAGEN_TYPES,
+  AI_CHART_D1_OBSERVATION_ONLY_STAR_NAMES,
   AI_CHART_D1_PALACE_IDENTITIES,
   AI_CHART_D1_P1_STRUCTURAL_INPUT_CONTRACT_VERSION,
   AI_CHART_D1_P1_INPUT_INVALID,
@@ -77,6 +78,7 @@ export type AiChartD1P1StructuralPalace = Readonly<{
   isBodyPalace: boolean
   canonicalMajorStars: readonly AiChartD1P1StructuralStar[]
   modeledSupportingStars: readonly AiChartD1P1StructuralStar[]
+  observationOnlyStars: readonly AiChartD1P1StructuralStar[]
   isEmptyOfMajorStars: boolean
   borrowStatus: AiChartD1N0BorrowStatus
   borrowBlockerPlacementIds: readonly string[]
@@ -186,6 +188,7 @@ const PALACE_FIELDS = Object.freeze([
   'isBodyPalace',
   'canonicalMajorStars',
   'modeledSupportingStars',
+  'observationOnlyStars',
   'isEmptyOfMajorStars',
   'borrowStatus',
   'borrowBlockerPlacementIds',
@@ -325,6 +328,24 @@ function parseSupportingStar(value: unknown): AiChartD1P1StructuralStar {
   return star
 }
 
+function parseObservationOnlyStar(
+  value: unknown,
+): AiChartD1P1StructuralStar {
+  const star = parseStar(value)
+  if (
+    !AI_CHART_D1_OBSERVATION_ONLY_STAR_NAMES.includes(
+      star.name as (typeof AI_CHART_D1_OBSERVATION_ONLY_STAR_NAMES)[number],
+    ) ||
+    star.type !== 'tough' ||
+    star.sourceCollection !== 'minorStars' ||
+    star.canonicalOrder !== null ||
+    star.natalMutagen !== null
+  ) {
+    invalid()
+  }
+  return star
+}
+
 function parseBorrowedStar(value: unknown): AiChartD1N0BorrowedMajorStar {
   const record = requireAiChartD1ExactObject(value, BORROWED_STAR_FIELDS)
   return Object.freeze({
@@ -379,6 +400,12 @@ function parsePalace(value: unknown): AiChartD1P1StructuralPalace {
       0,
       32,
       parseSupportingStar,
+    ),
+    observationOnlyStars: parseArray(
+      record.observationOnlyStars,
+      0,
+      32,
+      parseObservationOnlyStar,
     ),
     isEmptyOfMajorStars: parseAiChartD1Boolean(record.isEmptyOfMajorStars),
     borrowStatus: parseAiChartD1Enum(record.borrowStatus, BORROW_STATUSES),
@@ -561,9 +588,31 @@ function validatePalaceSemantics(palace: AiChartD1P1StructuralPalace): void {
     invalid()
   }
 
+  if (
+    palace.observationOnlyStars.some(
+      (star) =>
+        !AI_CHART_D1_OBSERVATION_ONLY_STAR_NAMES.includes(
+          star.name as (typeof AI_CHART_D1_OBSERVATION_ONLY_STAR_NAMES)[number],
+        ) ||
+        star.type !== 'tough' ||
+        star.sourceCollection !== 'minorStars' ||
+        star.placementId !==
+          createAiChartD1StarPlacementId(
+            palace.palaceId,
+            'minorStars',
+            star.sourceIndex,
+          ) ||
+        star.canonicalOrder !== null ||
+        star.natalMutagen !== null,
+    )
+  ) {
+    invalid()
+  }
+
   const allPlacements = [
     ...palace.canonicalMajorStars,
     ...palace.modeledSupportingStars,
+    ...palace.observationOnlyStars,
   ]
   if (
     new Set(allPlacements.map((star) => star.placementId)).size !==
@@ -779,6 +828,7 @@ function parseInput(value: unknown): AiChartD1P1StructuralInput {
     for (const star of [
       ...palace.canonicalMajorStars,
       ...palace.modeledSupportingStars,
+      ...palace.observationOnlyStars,
     ]) {
       if (placementOwners.has(star.placementId)) invalid()
       placementOwners.set(star.placementId, {
@@ -901,6 +951,20 @@ function toStar(star: AiChartD1N0StarPlacement): AiChartD1P1StructuralStar {
   })
 }
 
+function toObservationOnlyStar(
+  star: AiChartD1N0Palace['excludedStarSummary'][number],
+): AiChartD1P1StructuralStar {
+  return Object.freeze({
+    placementId: star.placementId,
+    name: star.name,
+    type: star.type,
+    sourceCollection: star.sourceCollection,
+    sourceIndex: star.sourceIndex,
+    canonicalOrder: null,
+    natalMutagen: star.natalMutagen,
+  })
+}
+
 function toBorrowedStar(
   star: AiChartD1N0BorrowedMajorStar,
 ): AiChartD1N0BorrowedMajorStar {
@@ -918,6 +982,11 @@ function toPalace(palace: AiChartD1N0Palace): AiChartD1P1StructuralPalace {
     canonicalMajorStars: Object.freeze(palace.canonicalMajorStars.map(toStar)),
     modeledSupportingStars: Object.freeze(
       palace.modeledSupportingStars.map(toStar),
+    ),
+    observationOnlyStars: Object.freeze(
+      palace.excludedStarSummary
+        .filter((star) => star.reason === 'observation_only')
+        .map(toObservationOnlyStar),
     ),
     isEmptyOfMajorStars: palace.isEmptyOfMajorStars,
     borrowStatus: palace.borrowStatus,
@@ -1135,6 +1204,21 @@ const SUPPORTING_STAR_SCHEMA = createAiChartD1StrictObjectSchema({
   canonicalOrder: NULL_SCHEMA,
   natalMutagen: NULLABLE_MUTAGEN_SCHEMA,
 })
+const OBSERVATION_ONLY_STAR_SCHEMA = createAiChartD1StrictObjectSchema({
+  placementId: ID_SCHEMA,
+  name: createAiChartD1StringSchema({
+    enumValues: AI_CHART_D1_OBSERVATION_ONLY_STAR_NAMES,
+  }),
+  type: createAiChartD1StringSchema({
+    enumValues: ['tough'],
+  }),
+  sourceCollection: createAiChartD1StringSchema({
+    enumValues: ['minorStars'],
+  }),
+  sourceIndex: SOURCE_INDEX_SCHEMA,
+  canonicalOrder: NULL_SCHEMA,
+  natalMutagen: NULL_SCHEMA,
+})
 const BORROWED_STAR_SCHEMA = createAiChartD1StrictObjectSchema({
   borrowedPlacementId: ID_SCHEMA,
   sourcePlacementId: ID_SCHEMA,
@@ -1163,6 +1247,12 @@ const PALACE_SCHEMA = createAiChartD1StrictObjectSchema({
   }),
   modeledSupportingStars: createAiChartD1ArraySchema(
     SUPPORTING_STAR_SCHEMA,
+    {
+      maximumItems: 32,
+    },
+  ),
+  observationOnlyStars: createAiChartD1ArraySchema(
+    OBSERVATION_ONLY_STAR_SCHEMA,
     {
       maximumItems: 32,
     },

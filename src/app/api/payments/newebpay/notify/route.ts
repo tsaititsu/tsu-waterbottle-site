@@ -1,4 +1,8 @@
-import { NextResponse } from 'next/server'
+import { after, NextResponse } from 'next/server'
+import { completePaidAiChartReport } from '@/lib/ai-chart/reportCompletion'
+import {
+  startPaidAiChartReportCompletionInBackground,
+} from '@/lib/ai-chart/reportCompletionBackground'
 import { getNewebPayConfig } from '@/lib/newebpay/config'
 import { verifyTradeSha } from '@/lib/newebpay/crypto'
 import {
@@ -141,6 +145,14 @@ async function syncAiChartAfterPayment(input: {
   const aiChartSync = await syncNewebPayAiChartAfterPayment({
     payment: input.payment,
     merchantOrderNo: input.merchantOrderNo,
+    startPaidAiChartReportCompletionInBackground: ({ reportId }) =>
+      startPaidAiChartReportCompletionInBackground(
+        { reportId },
+        {
+          completePaidAiChartReport,
+          schedule: (task) => after(task),
+        },
+      ),
   })
 
   if (aiChartSync.aiChartSync === 'skipped_not_ai_chart') {

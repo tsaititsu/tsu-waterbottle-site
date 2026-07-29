@@ -1,5 +1,8 @@
 import { decryptTradeInfo, getEncryptedTradeInfoDiagnostics, verifyTradeSha } from './crypto'
-import { syncAiChartReportAfterPayment } from './aiChartSync'
+import {
+  syncAiChartReportAfterPayment,
+  type StartPaidAiChartReportCompletionHandler,
+} from './aiChartSync'
 import { syncDivinationReadingAfterPayment } from './divinationSync'
 import { parseNewebPayTaipeiPayTime } from './payTime'
 import type { NewebPayQueryResult, QueryNewebPayTradeInput } from './query'
@@ -447,10 +450,13 @@ export async function syncNewebPayAiChartAfterPayment({
   payment,
   merchantOrderNo,
   syncAiChartReport = syncAiChartReportAfterPayment,
+  startPaidAiChartReportCompletionInBackground,
 }: {
   payment: PaymentPaidContext
   merchantOrderNo: string
   syncAiChartReport?: SyncAiChartReportHandler
+  startPaidAiChartReportCompletionInBackground?:
+    StartPaidAiChartReportCompletionHandler
 }): Promise<NewebPayAiChartSyncResult> {
   if (payment.itemType !== 'ai_chart_report') {
     return {
@@ -471,6 +477,8 @@ export async function syncNewebPayAiChartAfterPayment({
       itemId: payment.itemId,
       merchantOrderNo,
       paidAt: payment.paidAt,
+    }, {
+      startPaidAiChartReportCompletionInBackground,
     })
 
     if (result.result === 'skipped_not_ai_chart') {

@@ -1184,14 +1184,21 @@ async function runDivinationSyncAssertions() {
 async function runAiChartSyncAssertions() {
   const reportId = '2df1a8da-3893-4b81-8d00-774a9cc0e472'
   let aiChartSyncInput: unknown
+  const completionStartCalls: string[] = []
   const updated = await syncNewebPayAiChartAfterPayment({
     payment: createPaymentPaidContext({
       itemType: 'ai_chart_report',
       itemId: reportId,
     }),
     merchantOrderNo: 'WB20260703172530A1B2',
-    syncAiChartReport: async (input) => {
+    startPaidAiChartReportCompletionInBackground: ({ reportId }) => {
+      completionStartCalls.push(reportId)
+    },
+    syncAiChartReport: async (input, deps) => {
       aiChartSyncInput = input
+      deps?.startPaidAiChartReportCompletionInBackground?.({
+        reportId: input.itemId || '',
+      })
       return { result: 'updated', reportId: input.itemId || '' }
     },
   })
@@ -1207,6 +1214,7 @@ async function runAiChartSyncAssertions() {
     merchantOrderNo: 'WB20260703172530A1B2',
     paidAt: '2026-07-04 16:00:00',
   })
+  assert.deepEqual(completionStartCalls, [reportId])
 
   const alreadyPaid = await syncNewebPayAiChartAfterPayment({
     payment: createPaymentPaidContext({

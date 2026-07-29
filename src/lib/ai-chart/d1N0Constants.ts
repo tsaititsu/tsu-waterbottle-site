@@ -59,6 +59,14 @@ export const AI_CHART_D1_MODELED_SUPPORTING_STARS = Object.freeze({
 export type AiChartD1ModeledSupportingStarName =
   keyof typeof AI_CHART_D1_MODELED_SUPPORTING_STARS
 
+export const AI_CHART_D1_OBSERVATION_ONLY_STAR_NAMES = Object.freeze([
+  '地空',
+  '地劫',
+] as const)
+
+export type AiChartD1ObservationOnlyStarName =
+  (typeof AI_CHART_D1_OBSERVATION_ONLY_STAR_NAMES)[number]
+
 export const AI_CHART_D1_BORROW_BLOCKING_STAR_NAMES = Object.freeze([
   '擎羊',
   '陀羅',

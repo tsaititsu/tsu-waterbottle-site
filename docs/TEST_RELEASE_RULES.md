@@ -75,7 +75,7 @@ Runner 逐字驗證 `process.versions.node === '24.16.0'`；patch 或 minor 版�
 都會 fail closed。
 Runner 只接受 regular file、拒絕 symlink，以 Repository-relative path 做
 deterministic 排序與去重，逐檔循序執行並 fail fast。Runner contract 目前固定
-驗證 Repository 應發現 27 個測試檔；新增或移除測試時必須明確更新 contract，
+驗證 Repository 應發現 76 個測試檔；新增或移除測試時必須明確更新 contract，
 不得在 Workflow 另建人工檔案清單。
 
 每個測試 child process 固定使用 `NODE_ENV=test`，並移除以下環境變數：

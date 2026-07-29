@@ -1,17 +1,20 @@
 import assert from 'node:assert/strict'
 import {
+  AI_CHART_REPORT_COMPLETION_CHART_SNAPSHOT_REQUIRED,
   AI_CHART_REPORT_GENERATION_FAILED,
   completePaidAiChartReport,
   type CompleteAiChartReportResult,
 } from './reportCompletion'
 import type { AiChartReportGenerationInput } from './reportGenerator'
 import type {
+  AiChartReportCompletionSubject,
   AiChartReportResultContext,
   MarkAiChartReportCompletedInput,
   MarkAiChartReportCompletedResult,
   MarkAiChartReportFailedInput,
   MarkAiChartReportFailedResult,
 } from '../supabase/aiChartReports'
+import { createAiChartD1FlyingModelInputTestSnapshot } from './d1FlyingModelInputTestSupport'
 
 function test(name: string, fn: () => void | Promise<void>) {
   Promise.resolve()
@@ -28,7 +31,7 @@ function test(name: string, fn: () => void | Promise<void>) {
 function createReport(
   paymentStatus: AiChartReportResultContext['paymentStatus'],
   reportContent: string | null,
-): AiChartReportResultContext {
+): AiChartReportCompletionSubject {
   return {
     id: 'report-completion-1',
     title: 'AI 命盤分析',
@@ -40,6 +43,19 @@ function createReport(
     paidAt: paymentStatus === 'paid' ? '2026-07-06T18:00:00.000Z' : null,
     completedAt: null,
     errorMessage: null,
+    chartSnapshot: null,
+    chartSnapshotSha256: null,
+  }
+}
+
+function createReportWithSnapshot(
+  paymentStatus: AiChartReportResultContext['paymentStatus'],
+  reportContent: string | null,
+): AiChartReportCompletionSubject {
+  return {
+    ...createReport(paymentStatus, reportContent),
+    chartSnapshot: { safe: 'server-chart-snapshot' },
+    chartSnapshotSha256: 'safe-test-chart-snapshot-sha',
   }
 }
 
@@ -60,7 +76,7 @@ function assertNoUnsafeText(value: string) {
 }
 
 async function runWithMockDeps(input: {
-  report: AiChartReportResultContext | null
+  report: AiChartReportCompletionSubject | null
   completedResult?: MarkAiChartReportCompletedResult
   generator?: (chartInput: AiChartReportGenerationInput) => string
   failedResult?: MarkAiChartReportFailedResult
@@ -89,7 +105,7 @@ async function runWithMockDeps(input: {
       },
     },
     {
-      getAiChartReportResultById: async (requestedReportId) => {
+      getAiChartReportCompletionSubject: async (requestedReportId) => {
         readCalls.push(requestedReportId)
         return input.report
       },
@@ -99,7 +115,12 @@ async function runWithMockDeps(input: {
       },
       markAiChartReportCompleted: async (completedInput) => {
         completedCalls.push(completedInput)
-        return input.completedResult ?? { result: 'updated', reportId: completedInput.reportId }
+        return (
+          input.completedResult ?? {
+            result: 'updated',
+            reportId: completedInput.reportId,
+          }
+        )
       },
       markAiChartReportFailed: async (failedInput) => {
         failedCalls.push(failedInput)
@@ -174,9 +195,25 @@ test('invalid_state returns invalid_state without rewriting content', async () =
   assert.equal(failedCalls.length, 0)
 })
 
-test('paid_missing_content generates report content and marks completed', async () => {
+test('paid_missing_content without server chart snapshot stays blocked and does not use legacy fallback', async () => {
   const { result, readCalls, generatorCalls, completedCalls, failedCalls } = await runWithMockDeps({
     report: createReport('paid', null),
+  })
+
+  assert.deepEqual(result, {
+    result: 'chart_snapshot_required',
+    reportId: 'report-completion-1',
+    error: AI_CHART_REPORT_COMPLETION_CHART_SNAPSHOT_REQUIRED,
+  })
+  assert.deepEqual(readCalls, ['report-completion-1'])
+  assert.equal(generatorCalls.length, 0)
+  assert.equal(completedCalls.length, 0)
+  assert.equal(failedCalls.length, 0)
+})
+
+test('paid_missing_content with server chart snapshot generates report content and marks completed', async () => {
+  const { result, readCalls, generatorCalls, completedCalls, failedCalls } = await runWithMockDeps({
+    report: createReportWithSnapshot('paid', null),
   })
 
   assert.deepEqual(result, {
@@ -195,7 +232,7 @@ test('paid_missing_content generates report content and marks completed', async 
 
 test('mark completed already_completed maps to already_completed', async () => {
   const { result, generatorCalls, completedCalls, failedCalls } = await runWithMockDeps({
-    report: createReport('paid', null),
+    report: createReportWithSnapshot('paid', null),
     completedResult: {
       result: 'already_completed',
       reportId: 'report-completion-1',
@@ -213,7 +250,7 @@ test('mark completed already_completed maps to already_completed', async () => {
 
 test('mark completed payment_required maps to payment_required', async () => {
   const { result, generatorCalls, completedCalls, failedCalls } = await runWithMockDeps({
-    report: createReport('paid', null),
+    report: createReportWithSnapshot('paid', null),
     completedResult: {
       result: 'payment_required',
       reportId: 'report-completion-1',
@@ -231,7 +268,7 @@ test('mark completed payment_required maps to payment_required', async () => {
 
 test('mark completed not_found maps to not_found', async () => {
   const { result, generatorCalls, completedCalls, failedCalls } = await runWithMockDeps({
-    report: createReport('paid', null),
+    report: createReportWithSnapshot('paid', null),
     completedResult: {
       result: 'not_found',
       reportId: 'report-completion-1',
@@ -249,7 +286,7 @@ test('mark completed not_found maps to not_found', async () => {
 
 test('mark completed invalid_state maps to invalid_state', async () => {
   const { result, generatorCalls, completedCalls, failedCalls } = await runWithMockDeps({
-    report: createReport('paid', null),
+    report: createReportWithSnapshot('paid', null),
     completedResult: {
       result: 'invalid_state',
       reportId: 'report-completion-1',
@@ -270,7 +307,7 @@ test('mark completed invalid_state maps to invalid_state', async () => {
 
 test('generator throw marks failed with a safe error code', async () => {
   const { result, completedCalls, failedCalls } = await runWithMockDeps({
-    report: createReport('paid', null),
+    report: createReportWithSnapshot('paid', null),
     generator: () => {
       throw new Error('unsafe full stack should not be returned')
     },
@@ -290,6 +327,37 @@ test('generator throw marks failed with a safe error code', async () => {
   assertNoUnsafeText(failedCalls[0].errorMessage)
 })
 
+test('default generator uses chart snapshot pipeline and keeps the paid report recoverable until writer runtime exists', async () => {
+  const failedCalls: MarkAiChartReportFailedInput[] = []
+  const result = await completePaidAiChartReport(
+    {
+      reportId: 'report-completion-1',
+      chartInput: null,
+    },
+    {
+      getAiChartReportCompletionSubject: async () => ({
+        ...createReport('paid', null),
+        chartSnapshot: createAiChartD1FlyingModelInputTestSnapshot(),
+        chartSnapshotSha256: 'safe-test-sha',
+      }),
+      markAiChartReportCompleted: async () => {
+        throw new Error('should_not_complete_placeholder_report')
+      },
+      markAiChartReportFailed: async (failedInput) => {
+        failedCalls.push(failedInput)
+        return { result: 'updated', reportId: failedInput.reportId }
+      },
+    },
+  )
+
+  assert.deepEqual(result, {
+    result: 'runtime_not_ready',
+    reportId: 'report-completion-1',
+    error: 'AI_CHART_D1_REPORT_WRITER_RUNTIME_NOT_READY',
+  })
+  assert.deepEqual(failedCalls, [])
+})
+
 test('mark completed throw marks failed with a safe error code', async () => {
   const failedCalls: MarkAiChartReportFailedInput[] = []
   const result = await completePaidAiChartReport(
@@ -298,7 +366,8 @@ test('mark completed throw marks failed with a safe error code', async () => {
       chartInput: null,
     },
     {
-      getAiChartReportResultById: async () => createReport('paid', null),
+      getAiChartReportCompletionSubject: async () =>
+        createReportWithSnapshot('paid', null),
       generateAiChartReportContent: () => '短測試報告內容',
       markAiChartReportCompleted: async () => {
         throw new Error('unsafe write failure detail')

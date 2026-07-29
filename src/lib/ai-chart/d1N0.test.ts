@@ -371,8 +371,35 @@ for (const [label, mutate] of [
 
 check('Ming and body can be different palaces', () => {
   const result = normalize()
+  assert.match(result.sourceSnapshotSha256, /^[a-f0-9]{64}$/u)
   assert.equal(result.sameAsMingPalace, false)
   assert.notEqual(result.mingPalaceId, result.bodyPalaceId)
+})
+
+check('canonical Snapshot digest is stable and changes with source content', () => {
+  const first = fixtureA()
+  const reordered = Object.fromEntries(
+    Object.entries(first).reverse(),
+  )
+  const changed = structuredClone(first)
+  changed.lunarDate = 'different-synthetic-lunar-marker'
+
+  assert.equal(
+    normalize(first).sourceSnapshotSha256,
+    normalize(reordered).sourceSnapshotSha256,
+  )
+  assert.notEqual(
+    normalize(first).sourceSnapshotSha256,
+    normalize(changed).sourceSnapshotSha256,
+  )
+})
+
+check('N0 parser rejects a malformed Snapshot digest', () => {
+  const forged = structuredClone(normalize()) as MutableRecord
+  forged.sourceSnapshotSha256 = 'f'.repeat(63)
+  assert.throws(() => parseAiChartD1N0(forged), {
+    message: AI_CHART_D1_N0_INVALID,
+  })
 })
 
 check('Ming and body can be the same palace', () => {
@@ -479,6 +506,15 @@ check('modeled star type mismatch is rejected', () => {
   })
 })
 
+check('duplicate modeled supporting star is rejected', () => {
+  expectInvalidMutation((snapshot) => {
+    palaces(snapshot)[5].minorStars = [
+      star('文昌', 'soft'),
+      star('文昌', 'soft'),
+    ]
+  })
+})
+
 for (const [name, type, collection] of [
   ['地空', 'tough', 'minorStars'],
   ['地劫', 'tough', 'minorStars'],
@@ -487,7 +523,7 @@ for (const [name, type, collection] of [
   ['天才', 'adjective', 'adjectiveStars'],
   ['博士', 'helper', 'adjectiveStars'],
 ] as const) {
-  check(`${name} is excluded from modeled P1 stars with a warning`, () => {
+  check(`${name} is preserved outside modeled semantic rules with a warning`, () => {
     const snapshot = fixtureB()
     palaces(snapshot)[5][collection] = [star(name, type)]
     const result = normalize(snapshot)
@@ -496,6 +532,35 @@ for (const [name, type, collection] of [
     assert.equal(result.dataWarnings.some((warning) => warning.code === 'unmodeled_stars_present'), true)
   })
 }
+
+check('duplicate unmodeled adjective star names retain distinct source placements', () => {
+  const snapshot = fixtureB()
+  palaces(snapshot)[5].adjectiveStars = [
+    star('小耗', 'adjective'),
+    star('小耗', 'adjective'),
+  ]
+
+  const result = normalize(snapshot)
+  const excluded = result.palaces[5].excludedStarSummary.filter(
+    (item) => item.name === '小耗',
+  )
+
+  assert.equal(excluded.length, 2)
+  assert.equal(new Set(excluded.map((item) => item.placementId)).size, 2)
+  assert.deepEqual(
+    excluded.map((item) => item.sourceIndex),
+    [0, 1],
+  )
+  assert.equal(
+    result.dataWarnings.some(
+      (warning) =>
+        warning.code === 'unmodeled_stars_present' &&
+        warning.placementIds.includes(excluded[0].placementId) &&
+        warning.placementIds.includes(excluded[1].placementId),
+    ),
+    true,
+  )
+})
 
 for (const mutagen of ['化祿', '化權', '化科', '化忌'] as const) {
   check(`${mutagen} placement is indexed`, () => {
@@ -700,6 +765,29 @@ check('祿存 does not block borrowing', () => {
   assert.equal(palace.borrowStatus, 'eligible_and_borrowed')
   assert.deepEqual(palace.borrowedMajorStars.map((item) => item.name), ['天梁'])
 })
+
+for (const name of ['地空', '地劫'] as const) {
+  check(`${name} is observation-only and does not block borrowing`, () => {
+    const snapshot = fixtureB()
+    palaces(snapshot)[5].minorStars = [star(name, 'tough')]
+    const palace = normalize(snapshot).palaces[5]
+
+    assert.equal(palace.modeledSupportingStars.length, 0)
+    assert.deepEqual(palace.excludedStarSummary, [
+      {
+        placementId: 'palace:health:star:minor:0',
+        name,
+        type: 'tough',
+        sourceCollection: 'minorStars',
+        sourceIndex: 0,
+        natalMutagen: null,
+        reason: 'observation_only',
+      },
+    ])
+    assert.equal(palace.borrowStatus, 'eligible_and_borrowed')
+    assert.deepEqual(palace.borrowBlockerPlacementIds, [])
+  })
+}
 
 check('opposite double stars are borrowed in canonical order with mutagen reference', () => {
   const palace = normalize(fixtureB()).palaces[5]

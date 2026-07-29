@@ -12,15 +12,24 @@ const aiChartPayment: AiChartPaymentContext = {
 
 async function runWithMock(payment: AiChartPaymentContext, result: MarkAiChartReportPaidResult) {
   const calls: MarkAiChartReportPaidInput[] = []
+  const completionStartCalls: string[] = []
   const syncResult = await syncAiChartReportAfterPayment(payment, {
     markAiChartReportPaidByPayment: async (input) => {
       calls.push(input)
       return result
     },
+    startPaidAiChartReportCompletionInBackground: (input) => {
+      completionStartCalls.push(input.reportId)
+      return {
+        result: 'scheduled',
+        reportId: input.reportId,
+      }
+    },
   })
 
   return {
     calls,
+    completionStartCalls,
     syncResult,
   }
 }
@@ -43,6 +52,7 @@ async function main() {
       paidAt: '2026-07-06T17:00:00.000Z',
     },
   ])
+  assert.deepEqual(updated.completionStartCalls, [aiChartPayment.itemId])
 
   const alreadyPaid = await runWithMock(aiChartPayment, {
     result: 'already_paid',
@@ -54,6 +64,7 @@ async function main() {
     reportId: aiChartPayment.itemId,
   })
   assert.equal(alreadyPaid.calls.length, 1)
+  assert.deepEqual(alreadyPaid.completionStartCalls, [aiChartPayment.itemId])
 
   const notFound = await runWithMock(aiChartPayment, {
     result: 'not_found',
@@ -65,6 +76,7 @@ async function main() {
     reportId: aiChartPayment.itemId,
   })
   assert.equal(notFound.calls.length, 1)
+  assert.deepEqual(notFound.completionStartCalls, [])
 
   const invalidState = await runWithMock(aiChartPayment, {
     result: 'invalid_state',
@@ -78,6 +90,22 @@ async function main() {
     paymentStatus: 'failed',
   })
   assert.equal(invalidState.calls.length, 1)
+  assert.deepEqual(invalidState.completionStartCalls, [])
+
+  const backgroundStartFailure = await syncAiChartReportAfterPayment(aiChartPayment, {
+    markAiChartReportPaidByPayment: async () => ({
+      result: 'updated',
+      reportId: aiChartPayment.itemId || '',
+    }),
+    startPaidAiChartReportCompletionInBackground: () => {
+      throw new Error('unsafe background scheduler failure')
+    },
+  })
+
+  assert.deepEqual(backgroundStartFailure, {
+    result: 'updated',
+    reportId: aiChartPayment.itemId,
+  })
 
   for (const itemType of ['booking', 'course', 'ai_divination', null]) {
     let called = false
@@ -90,6 +118,9 @@ async function main() {
         markAiChartReportPaidByPayment: async () => {
           called = true
           throw new Error('should_not_call')
+        },
+        startPaidAiChartReportCompletionInBackground: () => {
+          throw new Error('should_not_schedule')
         },
       },
     )
@@ -110,6 +141,9 @@ async function main() {
       markAiChartReportPaidByPayment: async () => {
         called = true
         throw new Error('should_not_call')
+      },
+      startPaidAiChartReportCompletionInBackground: () => {
+        throw new Error('should_not_schedule')
       },
     })
 

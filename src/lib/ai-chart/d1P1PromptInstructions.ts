@@ -99,6 +99,7 @@ formal_teacher_confirmed
 - top-level palaceId 只能是 userInput.targetPalaceId。
 - Candidate palaceIds 只能使用 structuralContext 五個宮位視圖：targetPalace、oppositePalace、hiddenCombinationPalace 與 otherTrinePalaces 中實際存在的 palaceId，不得使用其他七宮或外部宮位。
 - starBasis 只能使用上述五個宮位視圖中實際存在的 canonicalMajorStars[].name、borrowedMajorStars[].name 與 modeledSupportingStars[].name。
+- observationOnlyStars[] 只表示星曜確實落在該宮位；在 knowledgeContext 沒有對應固定規則前，不得把它加入 starBasis、不得自行解釋，也不得用模型記憶補造其命理含義。
 - usedRuleIds 只能使用 knowledgeContext.rules[].ruleId。
 - coverage.directMeaningsConsidered 的每個元素必須逐字複製自 userInput.knowledgeContext.meanings[].meaningId，且該 meaning 的 palaceRole 必須逐字等於 target。
 - coverage.directMeaningsConsidered 不得填入 meaning 文字、text、title、summary、中文說明、ruleId、placementId、palaceId、hash 或模型自行產生的 ID。
