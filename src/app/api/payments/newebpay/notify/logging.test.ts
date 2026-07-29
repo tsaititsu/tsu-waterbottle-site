@@ -30,6 +30,12 @@ for (const call of consoleCalls) {
 
 assert.ok(
   source.includes(
+    "import { after, NextResponse } from 'next/server'",
+  ),
+  'payment notify route must use the Next request lifecycle scheduler',
+)
+assert.ok(
+  source.includes(
     "import { completePaidAiChartReport } from '@/lib/ai-chart/reportCompletion'",
   ),
   'payment notify route must inject the real AI chart report completion handler',
@@ -47,6 +53,10 @@ assert.ok(
 assert.ok(
   source.includes('{ completePaidAiChartReport }'),
   'AI chart background completion must receive the server completion handler',
+)
+assert.ok(
+  source.includes('schedule: (task) => after(task)'),
+  'AI chart background completion must run through Next after()',
 )
 
 console.log('NewebPay notify redacted logging contract passed')

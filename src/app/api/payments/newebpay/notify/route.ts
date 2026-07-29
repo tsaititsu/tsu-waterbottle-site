@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { after, NextResponse } from 'next/server'
 import { completePaidAiChartReport } from '@/lib/ai-chart/reportCompletion'
 import {
   startPaidAiChartReportCompletionInBackground,
@@ -148,7 +148,10 @@ async function syncAiChartAfterPayment(input: {
     startPaidAiChartReportCompletionInBackground: ({ reportId }) =>
       startPaidAiChartReportCompletionInBackground(
         { reportId },
-        { completePaidAiChartReport },
+        {
+          completePaidAiChartReport,
+          schedule: (task) => after(task),
+        },
       ),
   })
 
