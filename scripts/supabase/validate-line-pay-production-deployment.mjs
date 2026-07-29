@@ -650,8 +650,9 @@ export function assertDeployAttestationSource(source) {
     'export const DEPLOY_ATTESTATION_MARKERS = Object.freeze({',
     'export const DEPLOYMENT_RECORDING_POLICY =',
     'export function buildDeploySuccessAttestation(',
-    'validatedPostflight = parseAndValidateAuditOutput(',
-    'return buildDeploySuccessAttestation(evidence, validatedPostflight)',
+    "parseAndValidateAuditOutput(text, 'postflight')",
+    'validatedPostflight = contract.parseDeployOutput(',
+    'return contract.buildDeploySuccessAttestation(',
     'deployEvidence = inspectDeployOutput(result.stdout)',
     "error.attestation = buildDeploymentFailureAttestation(",
     'export function safeFailureOutput(error) {',
@@ -687,7 +688,7 @@ export function assertDeployAttestationSource(source) {
     'deployEvidence = inspectDeployOutput(result.stdout)',
   )
   const validationIndex = source.indexOf(
-    'completedResult = validateDeployExecutionResult(',
+    'completedResult = validateFixedDeployExecutionResult(',
     inspectIndex,
   )
   const cleanupClassificationIndex = source.indexOf(
