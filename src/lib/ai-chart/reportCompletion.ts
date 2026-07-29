@@ -37,6 +37,18 @@ export type CompleteAiChartReportResult =
     }
   | { result: 'failed'; reportId: string; error: string }
 
+type AiChartD1K0CatalogCompiler = () => Promise<unknown>
+type AiChartReportContentGenerator = (
+  chartInput: AiChartReportGenerationInput,
+) => string | Promise<string>
+
+async function compileDefaultAiChartD1K0Catalog(): Promise<unknown> {
+  const { compileAiChartD1K0Catalog } = await import(
+    './d1K0Catalog.server'
+  )
+  return compileAiChartD1K0Catalog()
+}
+
 function isAiChartD1ReportWriterRuntimeNotReadyError(error: unknown) {
   return (
     error instanceof AiChartD1ReportWriterRuntimeNotReadyError ||
@@ -91,7 +103,8 @@ export async function completePaidAiChartReport(
     getAiChartReportCompletionSubject?: typeof getAiChartReportCompletionSubject
     markAiChartReportCompleted?: typeof markAiChartReportCompleted
     markAiChartReportFailed?: typeof markAiChartReportFailed
-    generateAiChartReportContent?: typeof generateAiChartReportContent
+    generateAiChartReportContent?: AiChartReportContentGenerator
+    compileAiChartD1K0Catalog?: AiChartD1K0CatalogCompiler
   },
 ): Promise<CompleteAiChartReportResult> {
   const readReport =
@@ -100,6 +113,9 @@ export async function completePaidAiChartReport(
   const markCompleted = deps?.markAiChartReportCompleted ?? markAiChartReportCompleted
   const markFailed = deps?.markAiChartReportFailed ?? markAiChartReportFailed
   const generateReportContent = deps?.generateAiChartReportContent ?? generateAiChartReportContent
+  const compileD1K0Catalog =
+    deps?.compileAiChartD1K0Catalog ??
+    compileDefaultAiChartD1K0Catalog
 
   const report = await readReport(input.reportId)
   if (report === null) {
@@ -150,11 +166,16 @@ export async function completePaidAiChartReport(
 
   let reportContent: string
   try {
-    reportContent = generateReportContent({
+    const d1K0Catalog =
+      deps?.generateAiChartReportContent === undefined
+        ? await compileD1K0Catalog()
+        : undefined
+    reportContent = await generateReportContent({
       ...(input.chartInput ?? {}),
       reportId: input.reportId,
       chartSnapshot: report.chartSnapshot,
       chartSnapshotSha256: report.chartSnapshotSha256,
+      d1K0Catalog,
     })
   } catch (error) {
     if (isAiChartD1ReportWriterRuntimeNotReadyError(error)) {

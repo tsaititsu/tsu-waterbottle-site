@@ -1431,11 +1431,14 @@ async function run() {
       join(repositoryRoot, 'src/lib/ai-chart/openAiResponses.server.ts'),
       'utf8',
     )
+    const relativeProductionFiles = productionFiles.map((path) =>
+      relative(repositoryRoot, path),
+    )
 
     check('Preview Gate file starts with the exact server-only import', () => {
       assert.equal(gateSource.split('\n')[0], "import 'server-only'")
     })
-    check('Adapter Bridge builder production consumer is only Preview Gate', () => {
+    check('Adapter Bridge builder production consumers are Preview Gate and Report pipeline', () => {
       const consumers = productionFiles
         .filter((path) =>
           readFileSync(path, 'utf8').includes('buildAiChartD1P1AdapterBridges'),
@@ -1444,6 +1447,7 @@ async function run() {
         .filter((path) => !path.endsWith('d1P1AdapterBridge.ts'))
       assert.deepEqual(consumers, [
         'src/lib/ai-chart/d1P1PreviewRequestGate.server.ts',
+        'src/lib/ai-chart/reportGenerationPipeline.ts',
       ])
     })
     check('Preview Gate execute function has zero production consumers', () => {
@@ -1456,19 +1460,27 @@ async function run() {
       assert.deepEqual(consumers, [])
     })
     for (const [name, matcher] of [
-      ['src/app', /\/src\/app\//u],
+      ['src/app', /^src\/app\//u],
       ['API Route', /\/route\.ts$/u],
       ['Report', /report/iu],
       ['Supabase', /supabase/iu],
       ['Payment', /payment/iu],
       ['Cron or background', /cron|background/iu],
     ] as const) {
+      check(`${name} Preview Gate forbidden scope matches production files`, () => {
+        assert.equal(
+          relativeProductionFiles.some((path) => matcher.test(path)),
+          true,
+        )
+      })
       check(`${name} imports zero Preview Gate modules`, () => {
         assert.equal(
-          productionFiles
+          relativeProductionFiles
             .filter((path) => matcher.test(path))
             .some((path) =>
-              readFileSync(path, 'utf8').includes('d1P1PreviewRequestGate'),
+              readFileSync(join(repositoryRoot, path), 'utf8').includes(
+                'd1P1PreviewRequestGate',
+              ),
             ),
           false,
         )

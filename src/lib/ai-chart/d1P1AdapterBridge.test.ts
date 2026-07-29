@@ -2923,7 +2923,7 @@ async function run() {
       ]),
     )
   })
-  check('Adapter Bridge production consumer is only Preview Gate', () => {
+  check('Adapter Bridge production consumers are Preview Gate and Report pipeline', () => {
     const consumers = sourceFiles
       .filter((path) => path.endsWith('.ts') || path.endsWith('.tsx'))
       .filter((path) =>
@@ -2940,6 +2940,7 @@ async function run() {
       )
     assert.deepEqual(consumers, [
       'src/lib/ai-chart/d1P1PreviewRequestGate.server.ts',
+      'src/lib/ai-chart/reportGenerationPipeline.ts',
     ])
   })
   check('Local Preview Bridge builder production consumer is only Preview Gate', () => {
@@ -2962,7 +2963,7 @@ async function run() {
       'src/lib/ai-chart/d1P1PreviewRequestGate.server.ts',
     ])
   })
-  check('Prompt Package builder production consumer is only the Bridge', () => {
+  check('Prompt Package builder production consumers are Bridge and Report pipeline', () => {
     const consumers = sourceFiles
       .filter((path) => path.endsWith('.ts') || path.endsWith('.tsx'))
       .filter((path) =>
@@ -2978,7 +2979,10 @@ async function run() {
           !path.endsWith('d1P1AdapterBridgeTestSupport.ts') &&
           !path.endsWith('d1P1PreviewRequestGate.server.test.ts'),
       )
-    assert.deepEqual(consumers, ['src/lib/ai-chart/d1P1AdapterBridge.ts'])
+    assert.deepEqual(consumers, [
+      'src/lib/ai-chart/d1P1AdapterBridge.ts',
+      'src/lib/ai-chart/reportGenerationPipeline.ts',
+    ])
   })
   check('src/app imports no Adapter Bridge', () => {
     const appFiles = sourceFilesUnder(join(repositoryRoot, 'src', 'app'))

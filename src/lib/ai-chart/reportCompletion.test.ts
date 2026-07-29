@@ -14,7 +14,7 @@ import type {
   MarkAiChartReportFailedInput,
   MarkAiChartReportFailedResult,
 } from '../supabase/aiChartReports'
-import { createAiChartD1FlyingModelInputTestSnapshot } from './d1FlyingModelInputTestSupport'
+import { completeModelInputSnapshot, getTestCatalog } from './d1P1ModelInputTestSupport'
 
 function test(name: string, fn: () => void | Promise<void>) {
   Promise.resolve()
@@ -337,7 +337,7 @@ test('default generator uses chart snapshot pipeline and keeps the paid report r
     {
       getAiChartReportCompletionSubject: async () => ({
         ...createReport('paid', null),
-        chartSnapshot: createAiChartD1FlyingModelInputTestSnapshot(),
+        chartSnapshot: completeModelInputSnapshot(),
         chartSnapshotSha256: 'safe-test-sha',
       }),
       markAiChartReportCompleted: async () => {
@@ -347,6 +347,7 @@ test('default generator uses chart snapshot pipeline and keeps the paid report r
         failedCalls.push(failedInput)
         return { result: 'updated', reportId: failedInput.reportId }
       },
+      compileAiChartD1K0Catalog: getTestCatalog,
     },
   )
 

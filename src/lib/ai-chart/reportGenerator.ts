@@ -9,6 +9,7 @@ export type AiChartReportGenerationInput = {
   birthPlace?: string | null
   chartSnapshot?: unknown
   chartSnapshotSha256?: string | null
+  d1K0Catalog?: unknown
   chartSummary?: {
     mainStar?: string | null
     bodyPalace?: string | null
@@ -77,6 +78,7 @@ export function generateAiChartReportContent(input: AiChartReportGenerationInput
     return generateAiChartD1ReportContentFromSnapshot({
       reportId: input.reportId ?? 'report:unknown',
       chartSnapshot: input.chartSnapshot,
+      d1K0Catalog: input.d1K0Catalog,
     })
   }
 
