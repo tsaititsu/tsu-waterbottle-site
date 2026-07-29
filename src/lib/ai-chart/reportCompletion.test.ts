@@ -299,7 +299,7 @@ test('generator throw marks failed with a safe error code', async () => {
   assertNoUnsafeText(failedCalls[0].errorMessage)
 })
 
-test('default generator uses chart snapshot pipeline and fails closed until writer runtime exists', async () => {
+test('default generator uses chart snapshot pipeline and keeps the paid report recoverable until writer runtime exists', async () => {
   const failedCalls: MarkAiChartReportFailedInput[] = []
   const result = await completePaidAiChartReport(
     {
@@ -323,17 +323,11 @@ test('default generator uses chart snapshot pipeline and fails closed until writ
   )
 
   assert.deepEqual(result, {
-    result: 'failed',
+    result: 'runtime_not_ready',
     reportId: 'report-completion-1',
-    error: AI_CHART_REPORT_GENERATION_FAILED,
+    error: 'AI_CHART_D1_REPORT_WRITER_RUNTIME_NOT_READY',
   })
-  assert.deepEqual(failedCalls, [
-    {
-      reportId: 'report-completion-1',
-      errorMessage: AI_CHART_REPORT_GENERATION_FAILED,
-    },
-  ])
-  assertNoUnsafeText(failedCalls[0].errorMessage)
+  assert.deepEqual(failedCalls, [])
 })
 
 test('mark completed throw marks failed with a safe error code', async () => {

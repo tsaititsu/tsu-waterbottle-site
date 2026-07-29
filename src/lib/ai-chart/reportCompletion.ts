@@ -4,6 +4,10 @@ import {
   markAiChartReportCompleted,
   markAiChartReportFailed,
 } from '../supabase/aiChartReports'
+import {
+  AI_CHART_D1_REPORT_WRITER_RUNTIME_NOT_READY,
+  AiChartD1ReportWriterRuntimeNotReadyError,
+} from './reportGenerationPipeline'
 import { generateAiChartReportContent, type AiChartReportGenerationInput } from './reportGenerator'
 
 export const AI_CHART_REPORT_GENERATION_FAILED = 'AI_CHART_REPORT_GENERATION_FAILED'
@@ -19,7 +23,44 @@ export type CompleteAiChartReportResult =
   | { result: 'payment_required'; reportId: string }
   | { result: 'not_found'; reportId: string }
   | { result: 'invalid_state'; reportId: string; paymentStatus: string | null }
+  | {
+      result: 'runtime_not_ready'
+      reportId: string
+      error: typeof AI_CHART_D1_REPORT_WRITER_RUNTIME_NOT_READY
+    }
   | { result: 'failed'; reportId: string; error: string }
+
+function isAiChartD1ReportWriterRuntimeNotReadyError(error: unknown) {
+  return (
+    error instanceof AiChartD1ReportWriterRuntimeNotReadyError ||
+    (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === AI_CHART_D1_REPORT_WRITER_RUNTIME_NOT_READY
+    )
+  )
+}
+
+async function markAiChartReportGenerationFailed(
+  reportId: string,
+  markFailed: typeof markAiChartReportFailed,
+): Promise<CompleteAiChartReportResult> {
+  try {
+    await markFailed({
+      reportId,
+      errorMessage: AI_CHART_REPORT_GENERATION_FAILED,
+    })
+  } catch {
+    // Best effort only: callers should receive the safe generation failure code.
+  }
+
+  return {
+    result: 'failed',
+    reportId,
+    error: AI_CHART_REPORT_GENERATION_FAILED,
+  }
+}
 
 export async function completePaidAiChartReport(
   input: CompleteAiChartReportInput,
@@ -76,13 +117,27 @@ export async function completePaidAiChartReport(
     }
   }
 
+  let reportContent: string
   try {
-    const reportContent = generateReportContent({
+    reportContent = generateReportContent({
       ...(input.chartInput ?? {}),
       reportId: input.reportId,
       chartSnapshot: report.chartSnapshot,
       chartSnapshotSha256: report.chartSnapshotSha256,
     })
+  } catch (error) {
+    if (isAiChartD1ReportWriterRuntimeNotReadyError(error)) {
+      return {
+        result: 'runtime_not_ready',
+        reportId: input.reportId,
+        error: AI_CHART_D1_REPORT_WRITER_RUNTIME_NOT_READY,
+      }
+    }
+
+    return markAiChartReportGenerationFailed(input.reportId, markFailed)
+  }
+
+  try {
     const completedResult = await markCompleted({
       reportId: input.reportId,
       reportContent,
@@ -122,19 +177,6 @@ export async function completePaidAiChartReport(
       paymentStatus: completedResult.paymentStatus,
     }
   } catch {
-    try {
-      await markFailed({
-        reportId: input.reportId,
-        errorMessage: AI_CHART_REPORT_GENERATION_FAILED,
-      })
-    } catch {
-      // Best effort only: callers should receive the safe generation failure code.
-    }
-
-    return {
-      result: 'failed',
-      reportId: input.reportId,
-      error: AI_CHART_REPORT_GENERATION_FAILED,
-    }
+    return markAiChartReportGenerationFailed(input.reportId, markFailed)
   }
 }

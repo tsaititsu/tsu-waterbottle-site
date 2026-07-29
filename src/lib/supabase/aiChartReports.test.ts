@@ -964,6 +964,35 @@ async function runAsyncHelperTests() {
     false,
   )
 
+  const failedCompletionSubjectMock = createMockSupabase({
+    data: null,
+    error: {
+      message:
+        'sensitive-provider-completion-subject-database-message',
+    },
+  })
+  await assert.rejects(
+    () =>
+      getAiChartReportCompletionSubject(
+        'report-completion-subject-1',
+        failedCompletionSubjectMock.supabase,
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.equal(
+        error.message,
+        'ai_chart_report_completion_subject_lookup_failed',
+      )
+      assert.equal(
+        JSON.stringify(error).includes(
+          'sensitive-provider-completion-subject-database-message',
+        ),
+        false,
+      )
+      return true
+    },
+  )
+
   const ownedResultContextMock = createMockSupabase({
     data: {
       id: 'report-result-1',

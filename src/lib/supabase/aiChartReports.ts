@@ -594,7 +594,9 @@ export async function getAiChartReportCompletionSubject(
     .maybeSingle()
 
   if (error) {
-    throw new Error(error.message)
+    throw new Error(
+      'ai_chart_report_completion_subject_lookup_failed',
+    )
   }
 
   return data
