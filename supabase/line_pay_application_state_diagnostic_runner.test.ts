@@ -50,6 +50,34 @@ type DiagnosticContracts = Readonly<{
   acl_complete: boolean
 }>
 
+type DiagnosticDetailCategory = Readonly<{
+  category: string
+  expected_count: number
+  actual_count: number
+  count_matches: boolean
+  metadata_matches: boolean
+}>
+
+type DiagnosticDetails = Readonly<{
+  incomplete_categories: readonly DiagnosticDetailCategory[]
+}>
+
+const emptyDetails: DiagnosticDetails = Object.freeze({
+  incomplete_categories: Object.freeze([]),
+})
+
+const partialRelationDetails: DiagnosticDetails = Object.freeze({
+  incomplete_categories: Object.freeze([
+    Object.freeze({
+      category: 'relations',
+      expected_count: 7,
+      actual_count: 7,
+      count_matches: true,
+      metadata_matches: false,
+    }),
+  ]),
+})
+
 before(async () => {
   ;[runner, sharedRunner, validator] = await Promise.all([
     import(pathToFileURL(runnerPath).href),
@@ -108,11 +136,13 @@ function resultFor(
     versionPresent = false,
     inventory = zeroInventory,
     contracts = incompleteContracts,
+    details = emptyDetails,
   }: {
     tablePresent?: boolean
     versionPresent?: boolean
     inventory?: DiagnosticInventory
     contracts?: DiagnosticContracts
+    details?: DiagnosticDetails
   } = {},
 ) {
   return {
@@ -124,6 +154,7 @@ function resultFor(
     },
     inventory,
     contracts,
+    details,
     application_state: applicationState,
   }
 }
@@ -133,6 +164,17 @@ test('all six application states are uniquely classified', () => {
     resultFor('UNAPPLIED'),
     resultFor('PARTIAL', {
       inventory: { ...zeroInventory, relations_present: 1 },
+      details: {
+        incomplete_categories: [
+          {
+            category: 'relations',
+            expected_count: 7,
+            actual_count: 1,
+            count_matches: false,
+            metadata_matches: false,
+          },
+        ],
+      },
     }),
     resultFor('FULL_WITHOUT_HISTORY', {
       inventory: fullInventory,
@@ -169,6 +211,8 @@ test('output validation is frozen, exact and never accepts sensitive fields', ()
   assert.equal(Object.isFrozen(parsed.migration_history), true)
   assert.equal(Object.isFrozen(parsed.inventory), true)
   assert.equal(Object.isFrozen(parsed.contracts), true)
+  assert.equal(Object.isFrozen(parsed.details), true)
+  assert.equal(Object.isFrozen(parsed.details.incomplete_categories), true)
   const mutations = [
     { ...resultFor('UNAPPLIED'), extra: true },
     resultFor('PARTIAL'),
@@ -184,8 +228,95 @@ test('output validation is frozen, exact and never accepts sensitive fields', ()
       ...resultFor('UNAPPLIED'),
       function_body: 'synthetic sensitive body',
     },
+    {
+      ...resultFor('PARTIAL', { details: partialRelationDetails }),
+      details: {
+        incomplete_categories: [
+          {
+            category: 'relations',
+            expected_count: 7,
+            actual_count: 7,
+            count_matches: true,
+            metadata_matches: false,
+            digest: 'a'.repeat(64),
+          },
+        ],
+      },
+    },
   ]
   for (const mutation of mutations) {
+    assert.throws(
+      () =>
+        validator.parseAndValidateDiagnosticOutput(
+          `${JSON.stringify(mutation)}\n`,
+        ),
+      /APPLICATION_STATE_DIAGNOSTIC_OUTPUT_INVALID/,
+    )
+  }
+})
+
+test('diagnostic details expose only bounded category mismatches', () => {
+  const parsed = validator.parseAndValidateDiagnosticOutput(
+    `${JSON.stringify(
+      resultFor('PARTIAL', {
+        inventory: fullInventory,
+        details: partialRelationDetails,
+      }),
+    )}\n`,
+  )
+  assert.deepEqual(parsed.details.incomplete_categories, [
+    {
+      category: 'relations',
+      expected_count: 7,
+      actual_count: 7,
+      count_matches: true,
+      metadata_matches: false,
+    },
+  ])
+
+  const tooManyCategories = Array.from({ length: 11 }, (_, index) => ({
+    category: index === 0 ? 'roles' : `invalid_${index}`,
+    expected_count: 1,
+    actual_count: 0,
+    count_matches: false,
+    metadata_matches: false,
+  }))
+  const malformedDetails = [
+    {
+      ...resultFor('PARTIAL'),
+      details: {
+        incomplete_categories: [
+          {
+            category: 'unexpected_category',
+            expected_count: 1,
+            actual_count: 0,
+            count_matches: false,
+            metadata_matches: false,
+          },
+        ],
+      },
+    },
+    {
+      ...resultFor('PARTIAL'),
+      details: {
+        incomplete_categories: tooManyCategories,
+      },
+    },
+    {
+      ...resultFor('PARTIAL'),
+      details: {
+        incomplete_categories: [
+          {
+            category: 'relations',
+            expected_count: 7,
+            actual_count: 7,
+            count_matches: true,
+          },
+        ],
+      },
+    },
+  ]
+  for (const mutation of malformedDetails) {
     assert.throws(
       () =>
         validator.parseAndValidateDiagnosticOutput(

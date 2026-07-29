@@ -34,7 +34,7 @@ export const FENCE_MIGRATION_FILE =
 export const SHARED_RUNNER_FILE =
   'scripts/supabase/run-line-pay-production-diagnostic.mjs'
 export const EXPECTED_DIAGNOSTIC_SHA256 =
-  '242dcbf1c083691309fb34ce9bb758ea3d3b8c0a5d2faeb1efbf66ff5092bc57'
+  '4d047aa7a067720ebdf2cc72b7f3eaaa805043c103445df8fd3f6e9f485166eb'
 export const EXPECTED_MIGRATION_SHA256 =
   '8da1fb429aecb1c35b12a245b63907135dbe7c467ef0a5f069afd431d21e94b8'
 export const EXPECTED_FENCE_SHA256 =
@@ -83,6 +83,7 @@ const TOP_LEVEL_KEYS = Object.freeze([
   'migration_history',
   'inventory',
   'contracts',
+  'details',
   'application_state',
 ])
 const MIGRATION_HISTORY_KEYS = Object.freeze([
@@ -110,6 +111,27 @@ const CONTRACT_KEYS = Object.freeze([
   'roles_complete',
   'acl_complete',
 ])
+const DETAIL_KEYS = Object.freeze(['incomplete_categories'])
+const INCOMPLETE_CATEGORY_KEYS = Object.freeze([
+  'category',
+  'expected_count',
+  'actual_count',
+  'count_matches',
+  'metadata_matches',
+])
+const DIAGNOSTIC_CATEGORY_SET = new Set([
+  'roles',
+  'columns',
+  'indexes',
+  'schemas',
+  'policies',
+  'triggers',
+  'functions',
+  'relations',
+  'constraints',
+  'existing_relation_access',
+])
+const MAX_INCOMPLETE_CATEGORIES = DIAGNOSTIC_CATEGORY_SET.size
 const REQUIRED_SQL_IDENTITIES = Object.freeze([
   'app_environment_attestation',
   'line_pay_checkout_attempts',
@@ -269,6 +291,50 @@ export function classifyApplicationState(
   return inventoryEmpty ? 'UNAPPLIED' : 'PARTIAL'
 }
 
+function assertDiagnosticDetails(value) {
+  assertExactKeys(value, DETAIL_KEYS)
+  const categories = value.incomplete_categories
+  if (
+    !Array.isArray(categories) ||
+    categories.length > MAX_INCOMPLETE_CATEGORIES
+  ) {
+    fail('APPLICATION_STATE_DIAGNOSTIC_OUTPUT_INVALID')
+  }
+  let previousCategory = ''
+  const frozenCategories = categories.map((categoryDetail) => {
+    assertExactKeys(categoryDetail, INCOMPLETE_CATEGORY_KEYS)
+    if (
+      typeof categoryDetail.category !== 'string' ||
+      !DIAGNOSTIC_CATEGORY_SET.has(categoryDetail.category) ||
+      categoryDetail.category <= previousCategory
+    ) {
+      fail('APPLICATION_STATE_DIAGNOSTIC_OUTPUT_INVALID')
+    }
+    previousCategory = categoryDetail.category
+    assertCount(categoryDetail.expected_count)
+    assertCount(categoryDetail.actual_count)
+    assertBoolean(categoryDetail.count_matches)
+    assertBoolean(categoryDetail.metadata_matches)
+    if (
+      categoryDetail.count_matches !==
+        (categoryDetail.actual_count === categoryDetail.expected_count) ||
+      (categoryDetail.count_matches && categoryDetail.metadata_matches)
+    ) {
+      fail('APPLICATION_STATE_DIAGNOSTIC_OUTPUT_INVALID')
+    }
+    return Object.freeze({
+      category: categoryDetail.category,
+      expected_count: categoryDetail.expected_count,
+      actual_count: categoryDetail.actual_count,
+      count_matches: categoryDetail.count_matches,
+      metadata_matches: categoryDetail.metadata_matches,
+    })
+  })
+  return Object.freeze({
+    incomplete_categories: Object.freeze(frozenCategories),
+  })
+}
+
 export function assertApplicationStateDiagnosticSql(sql) {
   if (
     typeof sql !== 'string' ||
@@ -281,7 +347,10 @@ export function assertApplicationStateDiagnosticSql(sql) {
       /^BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY;$/gmu,
     ) ?? []).length !== 1 ||
     (sql.match(/^ROLLBACK;$/gmu) ?? []).length !== 1 ||
-    !/actual[.]digest = expected[.]digest/u.test(sql) ||
+    (sql.match(/actual[.]digest = expected[.]digest/gu) ?? []).length !== 3 ||
+    !/'details', pg_catalog[.]jsonb_build_object/u.test(sql) ||
+    !/'incomplete_categories'/u.test(sql) ||
+    !/'metadata_matches'/u.test(sql) ||
     !/then 'HISTORY_ONLY'/u.test(sql) ||
     !/then 'UNAPPLIED'/u.test(sql) ||
     !/then 'PARTIAL'/u.test(sql)
@@ -388,12 +457,14 @@ export function parseAndValidateDiagnosticOutput(text) {
   if (value.application_state !== expectedState) {
     fail('APPLICATION_STATE_DIAGNOSTIC_OUTPUT_INVALID')
   }
+  const details = assertDiagnosticDetails(value.details)
   return Object.freeze({
     status: value.status,
     database_identity_match: value.database_identity_match,
     migration_history: Object.freeze({ ...value.migration_history }),
     inventory: Object.freeze({ ...value.inventory }),
     contracts: Object.freeze({ ...value.contracts }),
+    details,
     application_state: value.application_state,
   })
 }

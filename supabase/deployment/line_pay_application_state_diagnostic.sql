@@ -568,6 +568,40 @@ category_contracts as (
   from expected_fingerprints as expected
   left join catalog_fingerprints as actual using (category)
 ),
+detail_categories as (
+  select
+    expected.category,
+    expected.row_count as expected_count,
+    coalesce(actual.row_count, 0) as actual_count,
+    coalesce(actual.row_count = expected.row_count, false)
+      as count_matches,
+    coalesce(actual.digest = expected.digest, false)
+      as metadata_matches
+  from expected_fingerprints as expected
+  left join catalog_fingerprints as actual using (category)
+  where not coalesce(
+    actual.row_count = expected.row_count
+      and actual.digest = expected.digest,
+    false
+  )
+),
+diagnostic_details as (
+  select
+    coalesce(
+      pg_catalog.jsonb_agg(
+        pg_catalog.jsonb_build_object(
+          'category', category,
+          'expected_count', expected_count,
+          'actual_count', actual_count,
+          'count_matches', count_matches,
+          'metadata_matches', metadata_matches
+        )
+        order by category
+      ),
+      '[]'::jsonb
+    ) as incomplete_categories
+  from detail_categories
+),
 role_integrity as (
   select
     not exists (
@@ -826,8 +860,12 @@ select pg_catalog.jsonb_build_object(
     'roles_complete', roles_complete,
     'acl_complete', acl_complete
   ),
+  'details', pg_catalog.jsonb_build_object(
+    'incomplete_categories', diagnostic_details.incomplete_categories
+  ),
   'application_state', application_state
 ) as audit_result
-from classified;
+from classified
+cross join diagnostic_details;
 
 ROLLBACK;
