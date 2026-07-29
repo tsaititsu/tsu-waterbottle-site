@@ -1,5 +1,9 @@
 import { buildAiChartD1P1StructuralInputs } from './d1P1InputContracts'
 import {
+  buildAiChartD1ReportWriterRuntimeCommand,
+  type AiChartD1ReportWriterRuntimeCommand,
+} from './d1ReportWriterRuntimeContracts'
+import {
   AI_CHART_D1_P1_STRUCTURAL_INPUT_CONTRACT_VERSION,
   AI_CHART_D1_PALACE_IDENTITIES,
 } from './d1N0Constants'
@@ -19,8 +23,9 @@ export type AiChartD1ReportGenerationPlan = Readonly<{
   p1StructuralInputVersion: typeof AI_CHART_D1_P1_STRUCTURAL_INPUT_CONTRACT_VERSION
   p1StructuralInputCount: 12
   targetPalaceIds: readonly string[]
+  writerRuntimeCommand: AiChartD1ReportWriterRuntimeCommand
   openAiCallable: false
-  nextStage: 'd1_palace_writer_runtime_required'
+  nextStage: 'd1_report_writer_runtime_disabled'
 }>
 
 export class AiChartD1ReportWriterRuntimeNotReadyError extends Error {
@@ -59,6 +64,18 @@ export function buildAiChartD1ReportGenerationPlan(input: {
     throw new Error('ai_chart_d1_report_structural_input_count_invalid')
   }
 
+  const targetPalaceIds = Object.freeze(
+    structuralInputs.map((input) => input.targetPalace.palaceId),
+  )
+  const writerRuntimeCommand =
+    buildAiChartD1ReportWriterRuntimeCommand({
+      pipelineVersion:
+        AI_CHART_D1_REPORT_GENERATION_PIPELINE_VERSION,
+      chartId: n0.chartId,
+      sourceSnapshotSha256: n0.sourceSnapshotSha256,
+      targetPalaceIds,
+    })
+
   return Object.freeze({
     contractVersion: AI_CHART_D1_REPORT_GENERATION_PIPELINE_VERSION,
     chartId: n0.chartId,
@@ -66,11 +83,10 @@ export function buildAiChartD1ReportGenerationPlan(input: {
     n0StructuralStatus: n0.readiness.structuralStatus,
     p1StructuralInputVersion: AI_CHART_D1_P1_STRUCTURAL_INPUT_CONTRACT_VERSION,
     p1StructuralInputCount: 12,
-    targetPalaceIds: Object.freeze(
-      structuralInputs.map((input) => input.targetPalace.palaceId),
-    ),
+    targetPalaceIds,
+    writerRuntimeCommand,
     openAiCallable: false,
-    nextStage: 'd1_palace_writer_runtime_required',
+    nextStage: 'd1_report_writer_runtime_disabled',
   })
 }
 

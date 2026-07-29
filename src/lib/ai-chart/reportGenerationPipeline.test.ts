@@ -23,13 +23,51 @@ async function main() {
   assert.equal(plan.chartId, 'chart:report-pipeline-1')
   assert.equal(plan.p1StructuralInputCount, 12)
   assert.equal(plan.openAiCallable, false)
-  assert.equal(plan.nextStage, 'd1_palace_writer_runtime_required')
+  assert.equal(plan.nextStage, 'd1_report_writer_runtime_disabled')
   assert.deepEqual(
     plan.targetPalaceIds,
     AI_CHART_D1_PALACE_IDENTITIES.map((identity) => identity.palaceId),
   )
+  assert.equal(
+    plan.writerRuntimeCommand.runtimeMode,
+    'PRODUCTION_REPORT_WRITER',
+  )
+  assert.equal(
+    plan.writerRuntimeCommand.runtimeStatus,
+    'DISABLED_PENDING_IMPLEMENTATION',
+  )
+  assert.equal(
+    plan.writerRuntimeCommand.nextRequiredAction,
+    'IMPLEMENT_D1_REPORT_WRITER_RUNTIME_ADAPTER',
+  )
+  assert.equal(plan.writerRuntimeCommand.productionCallable, false)
+  assert.equal(plan.writerRuntimeCommand.fetchAllowed, false)
+  assert.equal(plan.writerRuntimeCommand.openAiCallable, false)
+  assert.equal(plan.writerRuntimeCommand.attemptedRequests, 0)
+  assert.equal(plan.writerRuntimeCommand.executedRequests, 0)
+  assert.equal(plan.writerRuntimeCommand.fetchCount, 0)
+  assert.equal(plan.writerRuntimeCommand.openAiRequests, 0)
+  assert.equal(plan.writerRuntimeCommand.retryPerformed, false)
+  assert.equal(
+    plan.writerRuntimeCommand.customerDeliveryAllowed,
+    false,
+  )
+  assert.deepEqual(
+    plan.writerRuntimeCommand.targetPalaceIds,
+    plan.targetPalaceIds,
+  )
   assert.equal(Object.isFrozen(plan), true)
   assert.equal(Object.isFrozen(plan.targetPalaceIds), true)
+  assert.equal(
+    Object.isFrozen(plan.writerRuntimeCommand),
+    true,
+  )
+  assert.equal(
+    Object.isFrozen(
+      plan.writerRuntimeCommand.targetPalaceIds,
+    ),
+    true,
+  )
 
   try {
     generateAiChartD1ReportContentFromSnapshot({
