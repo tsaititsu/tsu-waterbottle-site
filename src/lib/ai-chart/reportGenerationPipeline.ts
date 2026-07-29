@@ -1,6 +1,7 @@
 import { buildAiChartD1P1StructuralInputs } from './d1P1InputContracts'
 import {
   buildAiChartD1ReportWriterRuntimeCommand,
+  prepareAiChartD1ReportWriterRuntimeAdapter,
   type AiChartD1ReportWriterRuntimeCommand,
 } from './d1ReportWriterRuntimeContracts'
 import {
@@ -94,6 +95,9 @@ export function generateAiChartD1ReportContentFromSnapshot(input: {
   reportId: string
   chartSnapshot: unknown
 }): string {
-  buildAiChartD1ReportGenerationPlan(input)
+  const plan = buildAiChartD1ReportGenerationPlan(input)
+  prepareAiChartD1ReportWriterRuntimeAdapter(
+    plan.writerRuntimeCommand,
+  )
   throw new AiChartD1ReportWriterRuntimeNotReadyError()
 }

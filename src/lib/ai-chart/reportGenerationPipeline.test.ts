@@ -8,6 +8,11 @@ import {
 } from './reportGenerationPipeline'
 import { AI_CHART_D1_PALACE_IDENTITIES } from './d1N0Constants'
 import { createAiChartD1FlyingModelInputTestSnapshot } from './d1FlyingModelInputTestSupport'
+import {
+  AI_CHART_D1_REPORT_WRITER_RUNTIME_ADAPTER_NOT_IMPLEMENTED,
+  createAiChartD1ReportWriterRuntimeCommandFingerprint,
+  prepareAiChartD1ReportWriterRuntimeAdapter,
+} from './d1ReportWriterRuntimeContracts'
 
 async function main() {
   const snapshot = createAiChartD1FlyingModelInputTestSnapshot()
@@ -67,6 +72,74 @@ async function main() {
       plan.writerRuntimeCommand.targetPalaceIds,
     ),
     true,
+  )
+  const adapterResult =
+    prepareAiChartD1ReportWriterRuntimeAdapter(
+      plan.writerRuntimeCommand,
+    )
+  assert.equal(
+    adapterResult.status,
+    'BLOCKED_RUNTIME_ADAPTER_NOT_IMPLEMENTED',
+  )
+  assert.equal(
+    adapterResult.stage,
+    'REPORT_WRITER_RUNTIME_ADAPTER_DECLARED',
+  )
+  assert.equal(
+    adapterResult.error,
+    AI_CHART_D1_REPORT_WRITER_RUNTIME_ADAPTER_NOT_IMPLEMENTED,
+  )
+  assert.equal(
+    adapterResult.commandFingerprint,
+    createAiChartD1ReportWriterRuntimeCommandFingerprint(
+      plan.writerRuntimeCommand,
+    ),
+  )
+  assert.equal(adapterResult.productionCallable, false)
+  assert.equal(adapterResult.fetchAllowed, false)
+  assert.equal(adapterResult.openAiCallable, false)
+  assert.equal(adapterResult.attemptedRequests, 0)
+  assert.equal(adapterResult.executedRequests, 0)
+  assert.equal(adapterResult.fetchCount, 0)
+  assert.equal(adapterResult.openAiRequests, 0)
+  assert.equal(adapterResult.retryPerformed, false)
+  assert.equal(adapterResult.customerDeliveryAllowed, false)
+  assert.equal(
+    adapterResult.reportContentStatus,
+    'NOT_CREATED',
+  )
+  assert.equal(Object.isFrozen(adapterResult), true)
+  assert.equal(
+    Object.isFrozen(adapterResult.targetPalaceIds),
+    true,
+  )
+  assert.deepEqual(
+    adapterResult.targetPalaceIds,
+    plan.targetPalaceIds,
+  )
+  const sensitiveMarker = 'sensitive prompt marker'
+  assert.throws(
+    () =>
+      prepareAiChartD1ReportWriterRuntimeAdapter({
+        ...plan.writerRuntimeCommand,
+        prompt: sensitiveMarker,
+      }),
+    (error) => {
+      assert.equal(
+        error instanceof Error &&
+          error.message.includes(sensitiveMarker),
+        false,
+      )
+      return true
+    },
+  )
+  assert.equal(
+    JSON.stringify(adapterResult).includes('OpenAI'),
+    false,
+  )
+  assert.equal(
+    JSON.stringify(adapterResult).includes('output_text'),
+    false,
   )
 
   try {
