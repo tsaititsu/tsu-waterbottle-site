@@ -112,7 +112,7 @@ describe('LINE Pay partial ACL metadata recovery', () => {
     )
     assert.equal(
       validator.EXPECTED_RECOVERY_MIGRATION_SHA256,
-      'b1b4cb7fec359bc83fa29bb9083475f8752f3a2db1820f114437fbe1fa6c617c',
+      'e3ae6bbd09ebe08823ae1a4c07f9177b3d98e5b04e1230ff6f0cba526957fbf9',
     )
     assert.equal(
       validator.EXPECTED_PREFLIGHT_SHA256,

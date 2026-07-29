@@ -28,6 +28,10 @@ const migrationPath = join(
   root,
   'supabase/migrations/20260719033404_line_pay_remediation_contracts.sql',
 )
+const partialRecoveryPath = join(
+  root,
+  'supabase/migrations/20260729130000_line_pay_partial_acl_metadata_recovery.sql',
+)
 const fencePath = join(
   root,
   'supabase/migrations/20260722065311_retire_bank_transfer_submissions_writes.sql',
@@ -1164,6 +1168,72 @@ rollback;`,
     throw new Error(
       `HOSTED_RESTORED_APPLICATION_STATE_INVALID:${restoredApplicationState.application_state}`,
     )
+  }
+
+  psqlAs(
+    database,
+    executor,
+    `
+      create schema if not exists supabase_migrations;
+      create table if not exists supabase_migrations.schema_migrations (
+        version text primary key,
+        statements text[],
+        name text
+      );
+
+      grant select on public.line_pay_checkout_attempts to anon;
+      grant insert on public.payments to authenticated;
+    `,
+    'hosted partial ACL metadata mutation',
+  )
+  const hostedPartialApplicationState = parseAndValidateDiagnosticOutput(
+    psqlAs(
+      database,
+      executor,
+      hostedApplicationStateDiagnostic,
+      'hosted partial ACL application-state diagnostic',
+    ),
+  )
+  if (
+    hostedPartialApplicationState.application_state !== 'PARTIAL' ||
+    hostedPartialApplicationState.details.incomplete_categories
+      .map((detail) => detail.category)
+      .join(',') !== 'existing_relation_access,relations'
+  ) {
+    throw new Error(
+      `HOSTED_PARTIAL_ACL_APPLICATION_STATE_INVALID:${JSON.stringify(
+        hostedPartialApplicationState.details,
+      )}`,
+    )
+  }
+  psqlAs(
+    database,
+    executor,
+    readFileSync(partialRecoveryPath, 'utf8'),
+    'hosted partial ACL metadata recovery exact file',
+  )
+  const hostedRecoveredApplicationState =
+    parseAndValidateDiagnosticOutput(
+      psqlAs(
+        database,
+        executor,
+        hostedApplicationStateDiagnostic,
+        'hosted recovered application-state diagnostic',
+      ),
+    )
+  if (
+    hostedRecoveredApplicationState.application_state !==
+      'FULL_WITHOUT_HISTORY'
+  ) {
+    throw new Error(
+      `HOSTED_RECOVERED_APPLICATION_STATE_INVALID:${JSON.stringify(
+        hostedRecoveredApplicationState.details,
+      )}`,
+    )
+  }
+  const afterPartialRecovery = readFingerprints(database, true, executor)
+  if (JSON.stringify(after) !== JSON.stringify(afterPartialRecovery)) {
+    throw new Error('HOSTED_PARTIAL_RECOVERY_EXISTING_DATA_FINGERPRINT_CHANGED')
   }
 
   psqlAs(
