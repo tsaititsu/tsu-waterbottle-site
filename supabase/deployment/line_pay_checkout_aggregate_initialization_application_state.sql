@@ -3,6 +3,43 @@
 \pset format unaligned
 \pset tuples_only on
 
+-- Do not parse relation- or role-dependent contract checks until the
+-- prerequisite LINE Pay remediation contract is present. This keeps the
+-- read-only diagnostic usable before the base Migration has been applied.
+select (
+  (
+    select pg_catalog.count(*) = 9
+    from (
+      values
+        ('public', 'product_orders'),
+        ('public', 'product_order_items'),
+        ('public', 'product_shipping_info'),
+        ('public', 'payments'),
+        ('public', 'line_pay_checkout_attempts'),
+        ('public', 'line_pay_request_outbox'),
+        ('public', 'line_pay_callback_capabilities'),
+        ('public', 'line_pay_callback_events'),
+        ('public', 'line_pay_payment_audit_events')
+    ) as expected(schema_name, relation_name)
+    join pg_catalog.pg_namespace as namespace
+      on namespace.nspname = expected.schema_name
+    join pg_catalog.pg_class as relation
+      on relation.relnamespace = namespace.oid
+     and relation.relname = expected.relation_name
+     and relation.relkind in ('r', 'p')
+  )
+  and pg_catalog.to_regprocedure(
+    'public.claim_product_order_line_pay_request(uuid,text,text,text,uuid,timestamp with time zone)'
+  ) is not null
+  and pg_catalog.to_regrole('line_pay_payment_function_owner') is not null
+  and pg_catalog.to_regrole('service_role') is not null
+  and pg_catalog.to_regrole('anon') is not null
+  and pg_catalog.to_regrole('authenticated') is not null
+) as line_pay_initializer_base_ready
+\gset
+
+\if :line_pay_initializer_base_ready
+
 with
 inventory as (
   select
@@ -493,3 +530,101 @@ select pg_catalog.jsonb_build_object(
   'application_state', state.value
 )::text
 from inventory, base_contract, initializer_contract, audit_count, state;
+
+\else
+
+with
+inventory as (
+  select
+    (
+      select pg_catalog.count(*)::integer
+      from pg_catalog.pg_proc as procedure
+      join pg_catalog.pg_namespace as namespace
+        on namespace.oid = procedure.pronamespace
+      where (
+        namespace.nspname = 'public'
+        and procedure.proname =
+          'initialize_product_order_line_pay_checkout'
+      )
+      or (
+        namespace.nspname = 'line_pay_private'
+        and procedure.proname =
+          'record_line_pay_checkout_initialized_audit'
+      )
+    ) as functions_present,
+    (
+      select pg_catalog.count(*)::integer
+      from pg_catalog.pg_class as index_relation
+      join pg_catalog.pg_namespace as namespace
+        on namespace.oid = index_relation.relnamespace
+      where namespace.nspname = 'public'
+        and index_relation.relkind = 'i'
+        and index_relation.relname =
+          'line_pay_payment_audit_events_checkout_initialized_once_idx'
+    ) as indexes_present,
+    (
+      select pg_catalog.count(*)::integer
+      from pg_catalog.pg_policy as policy
+      join pg_catalog.pg_class as relation
+        on relation.oid = policy.polrelid
+      join pg_catalog.pg_namespace as namespace
+        on namespace.oid = relation.relnamespace
+      where namespace.nspname = 'public'
+        and policy.polname in (
+          'line_pay_payment_function_owner_checkout_initialized_audit_insert',
+          'line_pay_payment_function_owner_initialization_items_select',
+          'line_pay_payment_function_owner_initialization_shipping_select'
+        )
+    ) as policies_present,
+    (
+      select pg_catalog.count(*)::integer
+      from pg_catalog.pg_class as relation
+      join pg_catalog.pg_namespace as namespace
+        on namespace.oid = relation.relnamespace
+      cross join lateral pg_catalog.aclexplode(relation.relacl) as acl
+      join pg_catalog.pg_roles as grantee on grantee.oid = acl.grantee
+      where namespace.nspname = 'public'
+        and relation.relname in (
+          'product_order_items',
+          'product_shipping_info'
+        )
+        and grantee.rolname = 'line_pay_payment_function_owner'
+        and acl.privilege_type = 'SELECT'
+        and not acl.is_grantable
+        and acl.grantor = relation.relowner
+    ) as table_select_grants_present
+),
+state as (
+  select
+    case
+      when inventory.functions_present = 0
+        and inventory.indexes_present = 0
+        and inventory.policies_present = 0
+        and inventory.table_select_grants_present = 0
+        then 'UNAPPLIED'
+      else 'PARTIAL'
+    end as value
+  from inventory
+)
+select pg_catalog.jsonb_build_object(
+  'status', 'LINE_PAY_CHECKOUT_INITIALIZER_APPLICATION_STATE',
+  'database_identity_match',
+    pg_catalog.current_database() = 'postgres'
+    and not pg_catalog.pg_is_in_recovery(),
+  'inventory', pg_catalog.jsonb_build_object(
+    'functions_present', inventory.functions_present,
+    'indexes_present', inventory.indexes_present,
+    'policies_present', inventory.policies_present,
+    'table_select_grants_present',
+      inventory.table_select_grants_present
+  ),
+  'contracts', pg_catalog.jsonb_build_object(
+    'base_remediation_ready', false,
+    'initializer_exact', false
+  ),
+  'checkout_initialized_audit_count', 0,
+  'application_state', state.value
+)::text
+from inventory, state;
+
+\endif
