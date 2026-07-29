@@ -4,6 +4,7 @@ import {
   copyCanonicalAiChartSnapshot,
   type CanonicalAiChartSnapshot,
 } from '@/lib/ai-chart/chartSnapshot'
+import { createAiChartD1CanonicalSha256 } from '@/lib/ai-chart/d1CanonicalDigest'
 
 export type AiChartReportPaymentStatus = 'pending' | 'paid' | 'failed' | 'canceled' | 'refunded'
 export const AI_CHART_REPORT_DEFAULT_AMOUNT_TWD = 100
@@ -39,6 +40,7 @@ export type PendingAiChartReportPayload = {
   user_id: string
   birth_input_snapshot: CanonicalAiChartBirthInput
   chart_snapshot: CanonicalAiChartSnapshot
+  chart_snapshot_sha256: string
   chart_profile_id: string | null
   title: string
   product_name: string
@@ -165,6 +167,30 @@ export type AiChartReportResultContextRow = {
   error_message: string | null
 }
 
+export type AiChartReportCompletionSubject = AiChartReportResultContext & {
+  chartSnapshot: unknown
+  chartSnapshotSha256: string | null
+}
+
+export type AiChartReportCompletionSubjectRow = AiChartReportResultContextRow & {
+  chart_snapshot: unknown
+  chart_snapshot_sha256: string | null
+}
+
+export type AiChartReportReviewSubject = Readonly<{
+  id: unknown
+  ownerUserId: unknown
+  paymentStatus: unknown
+  chartSnapshot: unknown
+}>
+
+export type AiChartReportReviewSubjectRow = {
+  id: unknown
+  user_id: unknown
+  payment_status: unknown
+  chart_snapshot: unknown
+}
+
 export type AiChartReportResultAccessDecision =
   | { result: 'not_found' }
   | { result: 'payment_required' }
@@ -261,6 +287,9 @@ export function buildPendingAiChartReportPayload(
   input: BuildPendingAiChartReportPayloadInput,
   now = new Date().toISOString(),
 ): PendingAiChartReportPayload {
+  const chartSnapshot =
+    copyCanonicalAiChartSnapshot(input.chartSnapshot)
+
   return {
     user_id: normalizeRequiredText(input.userId, 'userId'),
     birth_input_snapshot: {
@@ -271,7 +300,9 @@ export function buildPendingAiChartReportPayload(
       ...(input.birthInputSnapshot.name ? { name: input.birthInputSnapshot.name } : {}),
       fixLeap: input.birthInputSnapshot.fixLeap,
     },
-    chart_snapshot: copyCanonicalAiChartSnapshot(input.chartSnapshot),
+    chart_snapshot: chartSnapshot,
+    chart_snapshot_sha256:
+      createAiChartD1CanonicalSha256(chartSnapshot),
     chart_profile_id: normalizeOptionalText(input.chartProfileId),
     title: normalizeRequiredText(input.title, 'title'),
     product_name: normalizeRequiredText(input.productName, 'productName'),
@@ -437,6 +468,16 @@ export function mapAiChartReportResultContext(
   }
 }
 
+export function mapAiChartReportCompletionSubject(
+  row: AiChartReportCompletionSubjectRow,
+): AiChartReportCompletionSubject {
+  return {
+    ...mapAiChartReportResultContext(row),
+    chartSnapshot: row.chart_snapshot,
+    chartSnapshotSha256: row.chart_snapshot_sha256,
+  }
+}
+
 export function decideAiChartReportResultAccess(
   report: AiChartReportResultContext | null,
 ): AiChartReportResultAccessDecision {
@@ -538,6 +579,29 @@ export async function getAiChartReportResultById(
   return data ? mapAiChartReportResultContext(data as AiChartReportResultContextRow) : null
 }
 
+export async function getAiChartReportCompletionSubject(
+  reportId: string,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<AiChartReportCompletionSubject | null> {
+  assertRequiredText(reportId, 'reportId')
+
+  const { data, error } = await supabase
+    .from('ai_chart_reports')
+    .select(
+      'id,title,product_name,amount_twd,status,payment_status,report_content,paid_at,completed_at,error_message,chart_snapshot,chart_snapshot_sha256',
+    )
+    .eq('id', reportId)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return data
+    ? mapAiChartReportCompletionSubject(data as AiChartReportCompletionSubjectRow)
+    : null
+}
+
 export async function getAiChartReportForUser(
   reportId: string,
   userId: string,
@@ -558,6 +622,35 @@ export async function getAiChartReportForUser(
   }
 
   return data ? mapAiChartReportResultContext(data as AiChartReportResultContextRow) : null
+}
+
+export async function getAiChartReportReviewSubject(
+  reportId: string,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<AiChartReportReviewSubject | null> {
+  assertRequiredText(reportId, 'reportId')
+
+  const { data, error } = await supabase
+    .from('ai_chart_reports')
+    .select('id,user_id,payment_status,chart_snapshot')
+    .eq('id', reportId)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(
+      'ai_chart_report_review_subject_lookup_failed',
+    )
+  }
+
+  if (!data) return null
+
+  const row = data as AiChartReportReviewSubjectRow
+  return {
+    id: row.id,
+    ownerUserId: row.user_id,
+    paymentStatus: row.payment_status,
+    chartSnapshot: row.chart_snapshot,
+  }
 }
 
 export async function linkAiChartReportPendingPayment(

@@ -40,6 +40,7 @@ import {
   AI_CHART_D1_MAJOR_STAR_NAMES,
   AI_CHART_D1_MODELED_SUPPORTING_STARS,
   AI_CHART_D1_MUTAGEN_TYPES,
+  AI_CHART_D1_OBSERVATION_ONLY_STAR_NAMES,
   AI_CHART_D1_P1_STRUCTURAL_INPUT_CONTRACT_VERSION,
   type AiChartD1PalaceId,
 } from './d1N0Constants'
@@ -279,6 +280,7 @@ function isAllowedStarNamePath(path: readonly SemanticPathSegment[]): boolean {
   const isStarCollection = (value: SemanticPathSegment | undefined) =>
     value === 'canonicalMajorStars' ||
     value === 'modeledSupportingStars' ||
+    value === 'observationOnlyStars' ||
     value === 'borrowedMajorStars'
 
   if (
@@ -314,7 +316,11 @@ function assertAllowedStarNameValue(
     typeof value !== 'string' ||
     (collection === 'modeledSupportingStars'
       ? !SUPPORTING_STAR_NAMES.includes(value)
-      : !AI_CHART_D1_MAJOR_STAR_NAMES.includes(
+      : collection === 'observationOnlyStars'
+        ? !AI_CHART_D1_OBSERVATION_ONLY_STAR_NAMES.includes(
+            value as (typeof AI_CHART_D1_OBSERVATION_ONLY_STAR_NAMES)[number],
+          )
+        : !AI_CHART_D1_MAJOR_STAR_NAMES.includes(
           value as (typeof AI_CHART_D1_MAJOR_STAR_NAMES)[number],
         ))
   ) {

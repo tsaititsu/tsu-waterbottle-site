@@ -20,6 +20,9 @@ export type AiChartSyncResult =
   | { result: 'skipped_missing_ai_chart_context' }
 
 type MarkAiChartReportPaidHandler = typeof markAiChartReportPaidByPayment
+export type StartPaidAiChartReportCompletionHandler = (input: {
+  reportId: string
+}) => unknown
 
 function hasText(value: string | null | undefined): value is string {
   return typeof value === 'string' && value.trim().length > 0
@@ -33,6 +36,8 @@ export async function syncAiChartReportAfterPayment(
   payment: AiChartPaymentContext,
   deps: {
     markAiChartReportPaidByPayment?: MarkAiChartReportPaidHandler
+    startPaidAiChartReportCompletionInBackground?:
+      StartPaidAiChartReportCompletionHandler
   } = {},
 ): Promise<AiChartSyncResult> {
   if (payment.itemType !== 'ai_chart_report') {
@@ -55,5 +60,21 @@ export async function syncAiChartReportAfterPayment(
     paidAt: payment.paidAt,
   })
 
-  return mapMarkResult(result)
+  const syncResult = mapMarkResult(result)
+  const startCompletion = deps.startPaidAiChartReportCompletionInBackground
+  if (
+    syncResult.result === 'updated' ||
+    syncResult.result === 'already_paid'
+  ) {
+    try {
+      startCompletion?.({
+        reportId: syncResult.reportId,
+      })
+    } catch {
+      // Payment state is already persisted; background completion must not
+      // turn a successful payment notification into a failed webhook.
+    }
+  }
+
+  return syncResult
 }

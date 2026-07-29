@@ -29,6 +29,7 @@ import {
   AI_CHART_D1_MUTAGEN_TYPES,
   AI_CHART_D1_N0_CONTRACT_VERSION,
   AI_CHART_D1_N0_INVALID,
+  AI_CHART_D1_OBSERVATION_ONLY_STAR_NAMES,
   AI_CHART_D1_PALACE_IDENTITIES,
   createAiChartD1BorrowedMajorPlacementId,
   createAiChartD1NatalMutagenId,
@@ -97,7 +98,7 @@ export type AiChartD1N0ExcludedStar = Readonly<{
   sourceCollection: 'minorStars' | 'adjectiveStars'
   sourceIndex: number
   natalMutagen: AiChartD1MutagenType | null
-  reason: 'not_in_p1_allowlist'
+  reason: 'not_in_p1_allowlist' | 'observation_only'
 }>
 
 export type AiChartD1N0BorrowedMajorStar = Readonly<{
@@ -187,10 +188,23 @@ export type AiChartD1N0Readiness = Readonly<{
   openAiCallable: false
 }>
 
+const SHA256_PATTERN = /^[a-f0-9]{64}$/u
+
+function parseSnapshotSha256(value: unknown): string {
+  if (
+    typeof value !== 'string' ||
+    !SHA256_PATTERN.test(value)
+  ) {
+    invalid()
+  }
+  return value
+}
+
 export type AiChartD1N0 = Readonly<{
   contractVersion: typeof AI_CHART_D1_N0_CONTRACT_VERSION
   chartId: string
   sourceSnapshotVersion: 'ai-chart-chart-snapshot/v1'
+  sourceSnapshotSha256: string
   sourceEngine: 'waterbottle-ziwei-native'
   sourceEngineVersion: 'v1'
   palaces: readonly AiChartD1N0Palace[]
@@ -365,6 +379,7 @@ const N0_FIELDS = Object.freeze([
   'contractVersion',
   'chartId',
   'sourceSnapshotVersion',
+  'sourceSnapshotSha256',
   'sourceEngine',
   'sourceEngineVersion',
   'palaces',
@@ -450,15 +465,30 @@ function parseExcludedStar(value: unknown): AiChartD1N0ExcludedStar {
     'minorStars',
     'adjectiveStars',
   ] as const)
-  if (record.reason !== 'not_in_p1_allowlist') invalid()
+  const reason = parseAiChartD1Enum(record.reason, [
+    'not_in_p1_allowlist',
+    'observation_only',
+  ] as const)
+  const name = parseAiChartD1Text(
+    record.name,
+    AI_CHART_D1_MAX_SHORT_TEXT_LENGTH,
+  )
+  if (
+    (reason === 'observation_only') !==
+    AI_CHART_D1_OBSERVATION_ONLY_STAR_NAMES.includes(
+      name as (typeof AI_CHART_D1_OBSERVATION_ONLY_STAR_NAMES)[number],
+    )
+  ) {
+    invalid()
+  }
   return Object.freeze({
     placementId: parseAiChartD1Id(record.placementId),
-    name: parseAiChartD1Text(record.name, AI_CHART_D1_MAX_SHORT_TEXT_LENGTH),
+    name,
     type: parseAiChartD1Enum(record.type, STAR_TYPES),
     sourceCollection,
     sourceIndex: parseInteger(record.sourceIndex, 0, 127),
     natalMutagen: parseNullableMutagen(record.natalMutagen),
-    reason: 'not_in_p1_allowlist',
+    reason,
   })
 }
 
@@ -1146,6 +1176,9 @@ function parseN0(value: unknown): AiChartD1N0 {
     contractVersion: AI_CHART_D1_N0_CONTRACT_VERSION,
     chartId: parseAiChartD1Id(record.chartId),
     sourceSnapshotVersion: 'ai-chart-chart-snapshot/v1',
+    sourceSnapshotSha256: parseSnapshotSha256(
+      record.sourceSnapshotSha256,
+    ),
     sourceEngine: 'waterbottle-ziwei-native',
     sourceEngineVersion: 'v1',
     palaces,

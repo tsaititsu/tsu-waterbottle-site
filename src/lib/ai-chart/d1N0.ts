@@ -16,6 +16,7 @@ import {
   parseAiChartD1Text,
   requireAiChartD1ExactObject,
 } from './d1CommonContracts'
+import { createAiChartD1CanonicalSha256 } from './d1CanonicalDigest'
 import {
   AI_CHART_D1_BORROW_BLOCKING_STAR_NAMES,
   AI_CHART_D1_EARTHLY_BRANCHES,
@@ -26,6 +27,7 @@ import {
   AI_CHART_D1_MODELED_SUPPORTING_STARS,
   AI_CHART_D1_MUTAGEN_TYPES,
   AI_CHART_D1_N0_CONTRACT_VERSION,
+  AI_CHART_D1_OBSERVATION_ONLY_STAR_NAMES,
   AI_CHART_D1_PALACE_IDENTITIES,
   createAiChartD1BorrowedMajorPlacementId,
   createAiChartD1NatalMutagenId,
@@ -247,10 +249,22 @@ function parseSnapshotPalace(value: unknown): ParsedSnapshotPalace {
   const majorStars = parseSnapshotStarArray(record.majorStars)
   const minorStars = parseSnapshotStarArray(record.minorStars)
   const adjectiveStars = parseSnapshotStarArray(record.adjectiveStars)
-  const allNames = [...majorStars, ...minorStars, ...adjectiveStars].map(
-    (star) => star.name,
-  )
-  if (new Set(allNames).size !== allNames.length) invalid()
+  const majorStarNames = majorStars.map((star) => star.name)
+  const modeledSupportingStarNames = minorStars
+    .filter(
+      (star) =>
+        AI_CHART_D1_MODELED_SUPPORTING_STARS[
+          star.name as AiChartD1ModeledSupportingStarName
+        ] !== undefined,
+    )
+    .map((star) => star.name)
+  if (
+    new Set(majorStarNames).size !== majorStarNames.length ||
+    new Set(modeledSupportingStarNames).size !==
+      modeledSupportingStarNames.length
+  ) {
+    invalid()
+  }
 
   return Object.freeze({
     index: parseInteger(record.index, 0, 11),
@@ -418,7 +432,11 @@ function buildOtherStars(
           sourceCollection: collection,
           sourceIndex: index,
           natalMutagen: star.mutagen,
-          reason: 'not_in_p1_allowlist',
+          reason: AI_CHART_D1_OBSERVATION_ONLY_STAR_NAMES.includes(
+            star.name as (typeof AI_CHART_D1_OBSERVATION_ONLY_STAR_NAMES)[number],
+          )
+            ? 'observation_only'
+            : 'not_in_p1_allowlist',
         }),
       )
     }
@@ -670,7 +688,11 @@ function buildSignals(
   )
 }
 
-function buildRawN0(snapshot: ParsedSnapshot, chartId: string): AiChartD1N0 {
+function buildRawN0(
+  snapshot: ParsedSnapshot,
+  chartId: string,
+  sourceSnapshotSha256: string,
+): AiChartD1N0 {
   const basePalaces = buildBasePalaces(snapshot)
   const palaces = buildPalaces(basePalaces)
   const relationships = buildAiChartD1N0PalaceRelations(palaces)
@@ -738,6 +760,7 @@ function buildRawN0(snapshot: ParsedSnapshot, chartId: string): AiChartD1N0 {
     contractVersion: AI_CHART_D1_N0_CONTRACT_VERSION,
     chartId,
     sourceSnapshotVersion: AI_CHART_SNAPSHOT_VERSION,
+    sourceSnapshotSha256,
     sourceEngine: AI_CHART_ENGINE_NAME,
     sourceEngineVersion: AI_CHART_ENGINE_VERSION,
     palaces,
@@ -777,7 +800,16 @@ export function normalizeAiChartD1N0(
     assertAiChartD1SafeGraph(identity)
     const identityRecord = requireAiChartD1ExactObject(identity, ['chartId'])
     const chartId = assertAiChartD1N0Id(identityRecord.chartId)
-    return parseAiChartD1N0(buildRawN0(parseSnapshot(snapshot), chartId))
+    const parsedSnapshot = parseSnapshot(snapshot)
+    const sourceSnapshotSha256 =
+      createAiChartD1CanonicalSha256(snapshot)
+    return parseAiChartD1N0(
+      buildRawN0(
+        parsedSnapshot,
+        chartId,
+        sourceSnapshotSha256,
+      ),
+    )
   } catch {
     invalid()
   }

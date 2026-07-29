@@ -89,7 +89,11 @@ function syntheticSnapshot(): MutableRecord {
   palaces[11].majorStars = [star('紫微', 'major'), star('天府', 'major')]
   palaces[2].minorStars = [star('擎羊', 'tough')]
   palaces[3].minorStars = [star('祿存', 'lucun')]
-  palaces[5].minorStars = [star('地空', 'tough')]
+  palaces[5].minorStars = [
+    star('地空', 'tough'),
+    star('地劫', 'tough'),
+    star('天馬', 'tianma'),
+  ]
   return snapshot
 }
 
@@ -291,10 +295,31 @@ check('P1 star lists use canonical double-star order', () => {
   )
 })
 
-check('excluded stars do not enter P1 structural palace views', () => {
-  const serialized = JSON.stringify(createInputs().inputs)
-  assert.equal(serialized.includes('地空'), false)
+check('地空 and 地劫 enter P1 as observation-only while other small stars stay excluded', () => {
+  const inputs = createInputs().inputs
+  const serialized = JSON.stringify(inputs)
+  assert.equal(serialized.includes('地空'), true)
+  assert.equal(serialized.includes('地劫'), true)
+  assert.equal(serialized.includes('天馬'), false)
   assert.equal(serialized.includes('excludedStarSummary'), false)
+  const health = inputs
+    .flatMap((input) => [
+      input.targetPalace,
+      input.oppositePalace,
+      input.hiddenCombinationPalace,
+      ...input.otherTrinePalaces,
+    ])
+    .find((palace) => palace.palaceId === 'palace:health')
+  assert.deepEqual(
+    health?.observationOnlyStars.map((star) => star.name),
+    ['地空', '地劫'],
+  )
+  assert.equal(
+    health?.modeledSupportingStars.some(
+      (star) => star.name === '地空' || star.name === '地劫',
+    ),
+    false,
+  )
 })
 
 check('target scan resolves signal IDs into strict signal records', () => {

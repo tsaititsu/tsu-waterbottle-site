@@ -56,10 +56,16 @@ function allowedNameGraph(
   collection:
     | 'canonicalMajorStars'
     | 'modeledSupportingStars'
+    | 'observationOnlyStars'
     | 'borrowedMajorStars',
   otherTrineIndex = 0,
 ): unknown {
-  const name = collection === 'modeledSupportingStars' ? '文昌' : '紫微'
+  const name =
+    collection === 'modeledSupportingStars'
+      ? '文昌'
+      : collection === 'observationOnlyStars'
+        ? '地空'
+        : '紫微'
   const palace = { [collection]: [{ name }] }
   return {
     structuralContext: {
@@ -162,6 +168,7 @@ async function run() {
     for (const collection of [
       'canonicalMajorStars',
       'modeledSupportingStars',
+      'observationOnlyStars',
       'borrowedMajorStars',
     ] as const) {
       check(`${role}.${collection}[].name is path-allowed`, () => {
@@ -181,6 +188,7 @@ async function run() {
     for (const collection of [
       'canonicalMajorStars',
       'modeledSupportingStars',
+      'observationOnlyStars',
       'borrowedMajorStars',
     ] as const) {
       check(`${role}.${collection}[].name is path-allowed`, () => {
@@ -288,6 +296,21 @@ async function run() {
   check('invalid modeled supporting star value is rejected', () => {
     assertInvalid(() =>
       assertAiChartD1P1ModelInputHasNoForbiddenData(invalidSupporting),
+    )
+  })
+  const invalidObservation = allowedNameGraph(
+    'targetPalace',
+    'observationOnlyStars',
+  ) as {
+    structuralContext: {
+      targetPalace: { observationOnlyStars: Array<{ name: string }> }
+    }
+  }
+  invalidObservation.structuralContext.targetPalace.observationOnlyStars[0].name =
+    '天馬'
+  check('invalid observation-only star value is rejected', () => {
+    assertInvalid(() =>
+      assertAiChartD1P1ModelInputHasNoForbiddenData(invalidObservation),
     )
   })
   const invalidBorrowed = allowedNameGraph(

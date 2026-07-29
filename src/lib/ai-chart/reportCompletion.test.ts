@@ -6,12 +6,14 @@ import {
 } from './reportCompletion'
 import type { AiChartReportGenerationInput } from './reportGenerator'
 import type {
+  AiChartReportCompletionSubject,
   AiChartReportResultContext,
   MarkAiChartReportCompletedInput,
   MarkAiChartReportCompletedResult,
   MarkAiChartReportFailedInput,
   MarkAiChartReportFailedResult,
 } from '../supabase/aiChartReports'
+import { createAiChartD1FlyingModelInputTestSnapshot } from './d1FlyingModelInputTestSupport'
 
 function test(name: string, fn: () => void | Promise<void>) {
   Promise.resolve()
@@ -28,7 +30,7 @@ function test(name: string, fn: () => void | Promise<void>) {
 function createReport(
   paymentStatus: AiChartReportResultContext['paymentStatus'],
   reportContent: string | null,
-): AiChartReportResultContext {
+): AiChartReportCompletionSubject {
   return {
     id: 'report-completion-1',
     title: 'AI 命盤分析',
@@ -40,6 +42,8 @@ function createReport(
     paidAt: paymentStatus === 'paid' ? '2026-07-06T18:00:00.000Z' : null,
     completedAt: null,
     errorMessage: null,
+    chartSnapshot: null,
+    chartSnapshotSha256: null,
   }
 }
 
@@ -60,7 +64,7 @@ function assertNoUnsafeText(value: string) {
 }
 
 async function runWithMockDeps(input: {
-  report: AiChartReportResultContext | null
+  report: AiChartReportCompletionSubject | null
   completedResult?: MarkAiChartReportCompletedResult
   generator?: (chartInput: AiChartReportGenerationInput) => string
   failedResult?: MarkAiChartReportFailedResult
@@ -89,7 +93,7 @@ async function runWithMockDeps(input: {
       },
     },
     {
-      getAiChartReportResultById: async (requestedReportId) => {
+      getAiChartReportCompletionSubject: async (requestedReportId) => {
         readCalls.push(requestedReportId)
         return input.report
       },
@@ -99,7 +103,12 @@ async function runWithMockDeps(input: {
       },
       markAiChartReportCompleted: async (completedInput) => {
         completedCalls.push(completedInput)
-        return input.completedResult ?? { result: 'updated', reportId: completedInput.reportId }
+        return (
+          input.completedResult ?? {
+            result: 'updated',
+            reportId: completedInput.reportId,
+          }
+        )
       },
       markAiChartReportFailed: async (failedInput) => {
         failedCalls.push(failedInput)
@@ -290,6 +299,43 @@ test('generator throw marks failed with a safe error code', async () => {
   assertNoUnsafeText(failedCalls[0].errorMessage)
 })
 
+test('default generator uses chart snapshot pipeline and fails closed until writer runtime exists', async () => {
+  const failedCalls: MarkAiChartReportFailedInput[] = []
+  const result = await completePaidAiChartReport(
+    {
+      reportId: 'report-completion-1',
+      chartInput: null,
+    },
+    {
+      getAiChartReportCompletionSubject: async () => ({
+        ...createReport('paid', null),
+        chartSnapshot: createAiChartD1FlyingModelInputTestSnapshot(),
+        chartSnapshotSha256: 'safe-test-sha',
+      }),
+      markAiChartReportCompleted: async () => {
+        throw new Error('should_not_complete_placeholder_report')
+      },
+      markAiChartReportFailed: async (failedInput) => {
+        failedCalls.push(failedInput)
+        return { result: 'updated', reportId: failedInput.reportId }
+      },
+    },
+  )
+
+  assert.deepEqual(result, {
+    result: 'failed',
+    reportId: 'report-completion-1',
+    error: AI_CHART_REPORT_GENERATION_FAILED,
+  })
+  assert.deepEqual(failedCalls, [
+    {
+      reportId: 'report-completion-1',
+      errorMessage: AI_CHART_REPORT_GENERATION_FAILED,
+    },
+  ])
+  assertNoUnsafeText(failedCalls[0].errorMessage)
+})
+
 test('mark completed throw marks failed with a safe error code', async () => {
   const failedCalls: MarkAiChartReportFailedInput[] = []
   const result = await completePaidAiChartReport(
@@ -298,7 +344,7 @@ test('mark completed throw marks failed with a safe error code', async () => {
       chartInput: null,
     },
     {
-      getAiChartReportResultById: async () => createReport('paid', null),
+      getAiChartReportCompletionSubject: async () => createReport('paid', null),
       generateAiChartReportContent: () => '短測試報告內容',
       markAiChartReportCompleted: async () => {
         throw new Error('unsafe write failure detail')

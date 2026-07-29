@@ -225,6 +225,32 @@ export function assertAiChartD1SafeGraph(value: unknown): void {
   assertSafeGraph(value, new WeakSet(), new WeakSet())
 }
 
+function canonicalizeAiChartD1Value(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeAiChartD1Value)
+  }
+  if (value === null || typeof value !== 'object') {
+    return value
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) =>
+        left.localeCompare(right, 'en'),
+      )
+      .map(([key, entry]) => [
+        key,
+        canonicalizeAiChartD1Value(entry),
+      ]),
+  )
+}
+
+export function createAiChartD1CanonicalJson(
+  value: unknown,
+): string {
+  assertAiChartD1SafeGraph(value)
+  return JSON.stringify(canonicalizeAiChartD1Value(value))
+}
+
 export function requireAiChartD1ExactObject(
   value: unknown,
   fields: readonly string[],

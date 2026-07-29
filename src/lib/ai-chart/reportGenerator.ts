@@ -1,9 +1,14 @@
+import { generateAiChartD1ReportContentFromSnapshot } from './reportGenerationPipeline'
+
 export type AiChartReportGenerationInput = {
+  reportId?: string | null
   name?: string | null
   gender?: string | null
   solarDate?: string | null
   birthTime?: string | null
   birthPlace?: string | null
+  chartSnapshot?: unknown
+  chartSnapshotSha256?: string | null
   chartSummary?: {
     mainStar?: string | null
     bodyPalace?: string | null
@@ -68,6 +73,13 @@ function renderBulletList(items: string[]) {
 }
 
 export function generateAiChartReportContent(input: AiChartReportGenerationInput): string {
+  if (input.chartSnapshot) {
+    return generateAiChartD1ReportContentFromSnapshot({
+      reportId: input.reportId ?? 'report:unknown',
+      chartSnapshot: input.chartSnapshot,
+    })
+  }
+
   const name = normalizeOptionalText(input.name)
   const gender = normalizeOptionalText(input.gender)
   const solarDate = normalizeOptionalText(input.solarDate)

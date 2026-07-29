@@ -36,9 +36,9 @@ import {
 } from './d1P1PromptPackageTestSupport'
 
 const PREVIOUS_INSTRUCTIONS_SHA256 =
-  'd5e6d8bba5d809e2dcf9c7a726f97888d643a79a9a968a6996f5b9d67c174d59'
-const EXPECTED_INSTRUCTIONS_SHA256 =
   '7a636a1aa1aee614bb2408893994e75dd6407e35ace116eb3470d7bc63f4b626'
+const EXPECTED_INSTRUCTIONS_SHA256 =
+  '308fecf055f3763db98969831ba6b7e9d7bedd4aa0d9db0296b759aa65488d59'
 const EXPECTED_OUTPUT_SCHEMA_SHA256 =
   'fcd63048ff242fbfd12e195722d3065def0960497efbcdb7162893e271052da1'
 
@@ -416,6 +416,16 @@ async function run() {
     assert.match(
       AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
       /canonicalMajorStars\[\]\.name、borrowedMajorStars\[\]\.name 與 modeledSupportingStars\[\]\.name/u,
+    )
+  })
+  check('instructions keep observation-only stars out of semantic inference', () => {
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /observationOnlyStars\[\] 只表示星曜確實落在該宮位/u,
+    )
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /不得把它加入 starBasis、不得自行解釋，也不得用模型記憶補造其命理含義/u,
     )
   })
   check('instructions bind all usedRuleIds to knowledge rules', () => {

@@ -1,6 +1,6 @@
 import {
   decideAiChartReportResultAccess,
-  getAiChartReportResultById,
+  getAiChartReportCompletionSubject,
   markAiChartReportCompleted,
   markAiChartReportFailed,
 } from '../supabase/aiChartReports'
@@ -24,18 +24,27 @@ export type CompleteAiChartReportResult =
 export async function completePaidAiChartReport(
   input: CompleteAiChartReportInput,
   deps?: {
-    getAiChartReportResultById?: typeof getAiChartReportResultById
+    getAiChartReportCompletionSubject?: typeof getAiChartReportCompletionSubject
     markAiChartReportCompleted?: typeof markAiChartReportCompleted
     markAiChartReportFailed?: typeof markAiChartReportFailed
     generateAiChartReportContent?: typeof generateAiChartReportContent
   },
 ): Promise<CompleteAiChartReportResult> {
-  const readReport = deps?.getAiChartReportResultById ?? getAiChartReportResultById
+  const readReport =
+    deps?.getAiChartReportCompletionSubject ??
+    getAiChartReportCompletionSubject
   const markCompleted = deps?.markAiChartReportCompleted ?? markAiChartReportCompleted
   const markFailed = deps?.markAiChartReportFailed ?? markAiChartReportFailed
   const generateReportContent = deps?.generateAiChartReportContent ?? generateAiChartReportContent
 
   const report = await readReport(input.reportId)
+  if (report === null) {
+    return {
+      result: 'not_found',
+      reportId: input.reportId,
+    }
+  }
+
   const decision = decideAiChartReportResultAccess(report)
 
   if (decision.result === 'not_found') {
@@ -68,7 +77,12 @@ export async function completePaidAiChartReport(
   }
 
   try {
-    const reportContent = generateReportContent(input.chartInput ?? {})
+    const reportContent = generateReportContent({
+      ...(input.chartInput ?? {}),
+      reportId: input.reportId,
+      chartSnapshot: report.chartSnapshot,
+      chartSnapshotSha256: report.chartSnapshotSha256,
+    })
     const completedResult = await markCompleted({
       reportId: input.reportId,
       reportContent,
