@@ -112,7 +112,7 @@ describe('LINE Pay partial ACL metadata recovery', () => {
     )
     assert.equal(
       validator.EXPECTED_RECOVERY_MIGRATION_SHA256,
-      'f644a1b8b1c9d679e23a14b4e2936fb57d2049dab350fa297da94b9fa11d1ba5',
+      'b1b4cb7fec359bc83fa29bb9083475f8752f3a2db1820f114437fbe1fa6c617c',
     )
     assert.equal(
       validator.EXPECTED_PREFLIGHT_SHA256,
@@ -166,6 +166,28 @@ describe('LINE Pay partial ACL metadata recovery', () => {
           'line_pay_partial_recovery_public_write_check_removed',
         ),
       ),
+    )
+  })
+
+  it('repairs owner-derived runtime write privileges before ACL postconditions', () => {
+    assert.match(
+      recoverySql,
+      /alter table %I[.]%I owner to current_user/u,
+    )
+    for (const role of [
+      'anon',
+      'authenticated',
+      'service_role',
+      'line_pay_payment_executor',
+      'line_pay_payment_function_owner',
+    ]) {
+      assert.match(recoverySql, new RegExp(`'${role}'`, 'u'))
+    }
+    assert.ok(
+      recoverySql.indexOf('alter table %I.%I owner to current_user')
+        < recoverySql.indexOf(
+          'line_pay_partial_recovery_public_write_postcondition_failed',
+        ),
     )
   })
 
