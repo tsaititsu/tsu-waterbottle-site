@@ -11,6 +11,8 @@ import {
 import { generateAiChartReportContent, type AiChartReportGenerationInput } from './reportGenerator'
 
 export const AI_CHART_REPORT_GENERATION_FAILED = 'AI_CHART_REPORT_GENERATION_FAILED'
+export const AI_CHART_REPORT_COMPLETION_CHART_SNAPSHOT_REQUIRED =
+  'AI_CHART_REPORT_COMPLETION_CHART_SNAPSHOT_REQUIRED' as const
 
 export type CompleteAiChartReportInput = {
   reportId: string
@@ -27,6 +29,11 @@ export type CompleteAiChartReportResult =
       result: 'runtime_not_ready'
       reportId: string
       error: typeof AI_CHART_D1_REPORT_WRITER_RUNTIME_NOT_READY
+    }
+  | {
+      result: 'chart_snapshot_required'
+      reportId: string
+      error: typeof AI_CHART_REPORT_COMPLETION_CHART_SNAPSHOT_REQUIRED
     }
   | { result: 'failed'; reportId: string; error: string }
 
@@ -60,6 +67,22 @@ async function markAiChartReportGenerationFailed(
     reportId,
     error: AI_CHART_REPORT_GENERATION_FAILED,
   }
+}
+
+function hasServerChartSnapshot(
+  report: Pick<
+    NonNullable<
+      Awaited<ReturnType<typeof getAiChartReportCompletionSubject>>
+    >,
+    'chartSnapshot' | 'chartSnapshotSha256'
+  >,
+) {
+  return (
+    report.chartSnapshot !== null &&
+    report.chartSnapshot !== undefined &&
+    typeof report.chartSnapshotSha256 === 'string' &&
+    report.chartSnapshotSha256.trim().length > 0
+  )
 }
 
 export async function completePaidAiChartReport(
@@ -114,6 +137,14 @@ export async function completePaidAiChartReport(
       result: 'invalid_state',
       reportId: input.reportId,
       paymentStatus: decision.paymentStatus,
+    }
+  }
+
+  if (!hasServerChartSnapshot(report)) {
+    return {
+      result: 'chart_snapshot_required',
+      reportId: input.reportId,
+      error: AI_CHART_REPORT_COMPLETION_CHART_SNAPSHOT_REQUIRED,
     }
   }
 
