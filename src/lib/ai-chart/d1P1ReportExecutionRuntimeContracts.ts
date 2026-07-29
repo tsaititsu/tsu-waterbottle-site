@@ -1,5 +1,7 @@
 import { createAiChartD1CanonicalSha256 } from './d1CanonicalDigest'
 import { freezeAiChartD1Value } from './d1CommonContracts'
+import { AI_CHART_D1_PALACE_IDENTITIES } from './d1N0Constants'
+import { AI_CHART_D1_P1_MAX_OUTPUT_TOKENS } from './d1P1AdapterBridgeContracts'
 import {
   createAiChartD1ReportWriterRuntimeCommandFingerprint,
   prepareAiChartD1ReportWriterRuntimeAdapter,
@@ -11,8 +13,15 @@ import {
   type AiChartD1P1SourceBoundValidationReasonCode,
 } from './d1P1SourceBoundDiagnostics'
 import {
+  AI_CHART_OPENAI_CONFIG_INVALID,
+  AI_CHART_OPENAI_OUTPUT_JSON_INVALID,
+  AI_CHART_OPENAI_OUTPUT_MISSING,
+  AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID,
   AI_CHART_OPENAI_REQUEST_FAILED,
+  AI_CHART_OPENAI_RESPONSE_INCOMPLETE,
   AI_CHART_OPENAI_RESPONSE_INVALID,
+  AI_CHART_OPENAI_RESPONSE_REFUSED,
+  AI_CHART_OPENAI_TIMEOUT,
   AiChartOpenAiError,
   type AiChartOpenAiErrorCode,
   type AiChartOpenAiResponseDiagnostic,
@@ -30,6 +39,8 @@ export const AI_CHART_D1_P1_REPORT_EXECUTION_LEDGER_VERSION =
   'ai-chart-d1-p1-report-execution-ledger/v1' as const
 export const AI_CHART_D1_P1_REPORT_EXECUTION_LEDGER_TASK =
   'D1_P1_REPORT_EXECUTION_LEDGER' as const
+export const AI_CHART_D1_P1_REPORT_EXECUTION_PLAN_INVALID =
+  'ai_chart_d1_p1_report_execution_plan_invalid' as const
 
 export type AiChartD1P1ReportExecutionRuntimePlan = Readonly<{
   contractVersion:
@@ -107,12 +118,60 @@ const SAFE_CONTENT_ITEM_TYPES = new Set<unknown>([
   'refusal',
   'invalid',
 ])
+const SAFE_OPENAI_ERROR_CODES = new Set<unknown>([
+  AI_CHART_OPENAI_CONFIG_INVALID,
+  AI_CHART_OPENAI_REQUEST_FAILED,
+  AI_CHART_OPENAI_TIMEOUT,
+  AI_CHART_OPENAI_RESPONSE_INCOMPLETE,
+  AI_CHART_OPENAI_RESPONSE_REFUSED,
+  AI_CHART_OPENAI_OUTPUT_MISSING,
+  AI_CHART_OPENAI_OUTPUT_JSON_INVALID,
+  AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID,
+  AI_CHART_OPENAI_RESPONSE_INVALID,
+])
 const TRANSPORT_FAILURE_KINDS = new Set<unknown>([
   'HTTP_ERROR',
   'NETWORK_ERROR',
   'TIMEOUT',
   'RESPONSE_BODY_INVALID',
 ])
+const RUNTIME_PLAN_FIELDS = Object.freeze([
+  'contractVersion',
+  'task',
+  'writerRuntimeCommandFingerprint',
+  'chartId',
+  'sourceSnapshotSha256',
+  'targetPalaceCount',
+  'targetPalaceIds',
+  'executionMode',
+  'maxRequests',
+  'p1AdapterBridgeDescriptorCount',
+  'p1AdapterBridgeDescriptors',
+  'productionCallable',
+  'fetchAllowed',
+  'openAiCallable',
+  'retryAllowed',
+  'fallbackAllowed',
+  'customerDeliveryAllowed',
+  'safeMetadataOnly',
+] as const)
+const RUNTIME_DESCRIPTOR_FIELDS = Object.freeze([
+  'targetPalaceId',
+  'callId',
+  'bridgeFingerprint',
+  'packageFingerprint',
+  'modelInputFingerprint',
+  'outputSchemaSha256',
+  'reasoningEffort',
+  'timeoutMs',
+  'maxOutputTokens',
+  'requestStatus',
+  'runtimeStatus',
+  'openAiCallable',
+] as const)
+const CANONICAL_PALACE_IDS = Object.freeze(
+  AI_CHART_D1_PALACE_IDENTITIES.map((identity) => identity.palaceId),
+)
 
 function isPlainObject(
   value: unknown,
@@ -124,10 +183,41 @@ function isPlainObject(
   return prototype === Object.prototype || prototype === null
 }
 
+function hasExactEnumerableDataKeys(
+  value: Record<string, unknown>,
+  expectedKeys: readonly string[],
+) {
+  const keys = Reflect.ownKeys(value)
+  return (
+    keys.length === expectedKeys.length &&
+    keys.every(
+      (key) =>
+        typeof key === 'string' && expectedKeys.includes(key),
+    ) &&
+    expectedKeys.every((key) => {
+      const descriptor =
+        Object.getOwnPropertyDescriptor(value, key)
+      return (
+        descriptor !== undefined &&
+        descriptor.enumerable &&
+        Object.hasOwn(descriptor, 'value')
+      )
+    })
+  )
+}
+
 function sanitizeDiagnosticToken(value: unknown): string | null {
   return typeof value === 'string' && SAFE_DIAGNOSTIC_TOKEN.test(value)
     ? value
     : null
+}
+
+function normalizeOpenAiErrorCode(
+  value: unknown,
+): AiChartOpenAiErrorCode {
+  return SAFE_OPENAI_ERROR_CODES.has(value)
+    ? (value as AiChartOpenAiErrorCode)
+    : AI_CHART_OPENAI_RESPONSE_INVALID
 }
 
 function sanitizeDiagnosticItemTypes(
@@ -237,6 +327,81 @@ function assertSha256(value: string, fieldName: string) {
   if (!SHA256_PATTERN.test(value)) {
     throw new Error(`${fieldName}_must_be_sha256`)
   }
+}
+
+function isSha256(value: unknown): value is string {
+  return typeof value === 'string' && SHA256_PATTERN.test(value)
+}
+
+function assertValidRuntimeDescriptor(
+  value: unknown,
+  targetPalaceId: string,
+) {
+  if (
+    !isPlainObject(value) ||
+    !hasExactEnumerableDataKeys(value, RUNTIME_DESCRIPTOR_FIELDS) ||
+    value.targetPalaceId !== targetPalaceId ||
+    typeof value.callId !== 'string' ||
+    value.callId.trim().length === 0 ||
+    !isSha256(value.bridgeFingerprint) ||
+    !isSha256(value.packageFingerprint) ||
+    !isSha256(value.modelInputFingerprint) ||
+    !isSha256(value.outputSchemaSha256) ||
+    typeof value.reasoningEffort !== 'string' ||
+    value.reasoningEffort.trim().length === 0 ||
+    typeof value.timeoutMs !== 'number' ||
+    !Number.isSafeInteger(value.timeoutMs) ||
+    value.timeoutMs <= 0 ||
+    value.maxOutputTokens !== AI_CHART_D1_P1_MAX_OUTPUT_TOKENS ||
+    value.requestStatus !== 'ready' ||
+    value.runtimeStatus !== 'runtime_wiring_required' ||
+    value.openAiCallable !== false
+  ) {
+    throw new Error(AI_CHART_D1_P1_REPORT_EXECUTION_PLAN_INVALID)
+  }
+}
+
+function assertValidRuntimePlan(
+  plan: AiChartD1P1ReportExecutionRuntimePlan,
+) {
+  if (
+    !isPlainObject(plan) ||
+    !hasExactEnumerableDataKeys(plan, RUNTIME_PLAN_FIELDS) ||
+    plan.contractVersion !==
+      AI_CHART_D1_P1_REPORT_EXECUTION_RUNTIME_PLAN_VERSION ||
+    plan.task !== AI_CHART_D1_P1_REPORT_EXECUTION_RUNTIME_PLAN_TASK ||
+    !isSha256(plan.writerRuntimeCommandFingerprint) ||
+    typeof plan.chartId !== 'string' ||
+    plan.chartId.trim().length === 0 ||
+    !isSha256(plan.sourceSnapshotSha256) ||
+    plan.targetPalaceCount !== 12 ||
+    !Array.isArray(plan.targetPalaceIds) ||
+    plan.targetPalaceIds.length !== 12 ||
+    plan.executionMode !== 'sequential_twelve_palaces' ||
+    plan.maxRequests !== 12 ||
+    plan.p1AdapterBridgeDescriptorCount !== 12 ||
+    !Array.isArray(plan.p1AdapterBridgeDescriptors) ||
+    plan.p1AdapterBridgeDescriptors.length !== 12 ||
+    plan.productionCallable !== false ||
+    plan.fetchAllowed !== false ||
+    plan.openAiCallable !== false ||
+    plan.retryAllowed !== false ||
+    plan.fallbackAllowed !== false ||
+    plan.customerDeliveryAllowed !== false ||
+    plan.safeMetadataOnly !== true
+  ) {
+    throw new Error(AI_CHART_D1_P1_REPORT_EXECUTION_PLAN_INVALID)
+  }
+
+  CANONICAL_PALACE_IDS.forEach((palaceId, index) => {
+    if (plan.targetPalaceIds[index] !== palaceId) {
+      throw new Error(AI_CHART_D1_P1_REPORT_EXECUTION_PLAN_INVALID)
+    }
+    assertValidRuntimeDescriptor(
+      plan.p1AdapterBridgeDescriptors[index],
+      palaceId,
+    )
+  })
 }
 
 export function buildAiChartD1P1ReportExecutionPlan(
@@ -352,6 +517,7 @@ function buildLedger(
 export function createAiChartD1P1ReportExecutionLedger(
   plan: AiChartD1P1ReportExecutionRuntimePlan,
 ): AiChartD1P1ReportExecutionLedger {
+  assertValidRuntimePlan(plan)
   return buildLedger(plan, {
     status: 'READY',
     currentPalaceId: null,
@@ -381,6 +547,7 @@ function createFailureEntry(
   error: unknown,
 ): AiChartD1P1ReportExecutionPalaceLedgerEntry {
   if (error instanceof AiChartOpenAiError) {
+    const errorCode = normalizeOpenAiErrorCode(error.code)
     const responseDiagnostic = normalizeResponseDiagnostic(error.diagnostic)
     return freezeAiChartD1Value({
       ...entry,
@@ -389,8 +556,9 @@ function createFailureEntry(
       executedRequests: 0 as const,
       fetchCount: 1 as const,
       openAiRequests: 1 as const,
-      errorCode: error.code,
-      retryable: error.retryable,
+      errorCode,
+      retryable:
+        errorCode === error.code ? error.retryable : false,
       responseDiagnostic,
       transportDiagnostic: normalizeTransportDiagnostic(
         error.transportDiagnostic,
@@ -418,6 +586,7 @@ export async function runAiChartD1P1ReportExecutionRuntime(
   plan: AiChartD1P1ReportExecutionRuntimePlan,
   executor: AiChartD1P1ReportExecutionRuntimeExecutor,
 ): Promise<AiChartD1P1ReportExecutionLedger> {
+  assertValidRuntimePlan(plan)
   const palaceExecutions =
     plan.p1AdapterBridgeDescriptors.map(createPendingEntry)
 

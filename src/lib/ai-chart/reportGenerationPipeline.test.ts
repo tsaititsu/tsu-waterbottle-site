@@ -18,6 +18,7 @@ import {
 } from './d1ReportWriterRuntimeContracts'
 import {
   AI_CHART_D1_P1_REPORT_EXECUTION_LEDGER_VERSION,
+  AI_CHART_D1_P1_REPORT_EXECUTION_PLAN_INVALID,
   AI_CHART_D1_P1_REPORT_EXECUTION_RUNTIME_PLAN_VERSION,
   buildAiChartD1P1ReportExecutionPlan,
   createAiChartD1P1ReportExecutionLedger,
@@ -26,6 +27,7 @@ import {
 } from './d1P1ReportExecutionRuntimeContracts'
 import {
   AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID,
+  AI_CHART_OPENAI_RESPONSE_INVALID,
   AiChartOpenAiError,
 } from './openAiResponses'
 
@@ -313,6 +315,60 @@ async function main() {
       failureLedger.palaceExecutions[0].responseDiagnostic,
     ),
     true,
+  )
+
+  let forgedPlanExecutorCalls = 0
+  const forgedThirteenPalacePlan = Object.freeze({
+    ...plan.p1ReportExecutionPlan,
+    targetPalaceIds: Object.freeze([
+      ...plan.p1ReportExecutionPlan.targetPalaceIds,
+      'palace:forged',
+    ]),
+    p1AdapterBridgeDescriptors: Object.freeze([
+      ...plan.p1ReportExecutionPlan.p1AdapterBridgeDescriptors,
+      {
+        ...plan.p1ReportExecutionPlan.p1AdapterBridgeDescriptors[0],
+        targetPalaceId: 'palace:forged',
+        callId: 'forged-call-id',
+      },
+    ]),
+  })
+  await assert.rejects(
+    () =>
+      runAiChartD1P1ReportExecutionRuntime(
+        forgedThirteenPalacePlan as never,
+        async (descriptor) => {
+          forgedPlanExecutorCalls += 1
+          return {
+            data: { targetPalaceId: descriptor.targetPalaceId },
+            usage: null,
+          }
+        },
+      ),
+    { message: AI_CHART_D1_P1_REPORT_EXECUTION_PLAN_INVALID },
+  )
+  assert.equal(forgedPlanExecutorCalls, 0)
+
+  const maliciousErrorCode =
+    'prompt-output-chart-marker must never be stored as an error code'
+  const maliciousCodeLedger =
+    await runAiChartD1P1ReportExecutionRuntime(
+      plan.p1ReportExecutionPlan,
+      async () => {
+        throw new AiChartOpenAiError(
+          maliciousErrorCode as never,
+          true,
+        )
+      },
+    )
+  assert.equal(
+    maliciousCodeLedger.palaceExecutions[0].errorCode,
+    AI_CHART_OPENAI_RESPONSE_INVALID,
+  )
+  assert.equal(maliciousCodeLedger.palaceExecutions[0].retryable, false)
+  assert.equal(
+    JSON.stringify(maliciousCodeLedger).includes(maliciousErrorCode),
+    false,
   )
 
   const runtimeSource = readFileSync(
