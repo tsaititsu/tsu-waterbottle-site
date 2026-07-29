@@ -230,6 +230,21 @@ function runApplicationStateScenario(
   }
 }
 
+function assertIncompleteCategories(result, expectedCategories, label) {
+  assert.deepEqual(
+    result.details.incomplete_categories.map((detail) => detail.category),
+    expectedCategories,
+    label,
+  )
+  for (const detail of result.details.incomplete_categories) {
+    assert.equal(
+      detail.count_matches && detail.metadata_matches,
+      false,
+      `${label}:${detail.category}:must explain an incomplete category`,
+    )
+  }
+}
+
 function catchMutation(name, callback) {
   assert.throws(callback, undefined, name)
   mutationsCaught += 1
@@ -311,6 +326,16 @@ function runStaticMutations() {
       () =>
         assertApplicationStateDiagnosticSql(
           diagnosticSql.replace("then 'PARTIAL'", "then 'UNAPPLIED'"),
+        ),
+    ],
+    [
+      'remove detail categories',
+      () =>
+        assertApplicationStateDiagnosticSql(
+          diagnosticSql.replace(
+            "'details', pg_catalog.jsonb_build_object",
+            "'opaque', pg_catalog.jsonb_build_object",
+          ),
         ),
     ],
     [
@@ -431,18 +456,63 @@ try {
   prepareBaseline()
   createDatabaseTemplate('line_pay_unapplied_template')
 
-  runApplicationStateScenario('unapplied', 'UNAPPLIED')
-  runApplicationStateScenario(
-    'one relation',
-    'PARTIAL',
-    'create table public.app_environment_attestation (id integer);',
-    'line_pay_unapplied_template',
+  assertIncompleteCategories(
+    runApplicationStateScenario('unapplied', 'UNAPPLIED'),
+    [
+      'columns',
+      'constraints',
+      'existing_relation_access',
+      'functions',
+      'indexes',
+      'policies',
+      'relations',
+      'roles',
+      'schemas',
+      'triggers',
+    ],
+    'unapplied details',
   )
-  runApplicationStateScenario(
-    'partial columns',
-    'PARTIAL',
-    'alter table public.payments add column environment text;',
-    'line_pay_unapplied_template',
+  assertIncompleteCategories(
+    runApplicationStateScenario(
+      'one relation',
+      'PARTIAL',
+      'create table public.app_environment_attestation (id integer);',
+      'line_pay_unapplied_template',
+    ),
+    [
+      'columns',
+      'constraints',
+      'existing_relation_access',
+      'functions',
+      'indexes',
+      'policies',
+      'relations',
+      'roles',
+      'schemas',
+      'triggers',
+    ],
+    'one relation details',
+  )
+  assertIncompleteCategories(
+    runApplicationStateScenario(
+      'partial columns',
+      'PARTIAL',
+      'alter table public.payments add column environment text;',
+      'line_pay_unapplied_template',
+    ),
+    [
+      'columns',
+      'constraints',
+      'existing_relation_access',
+      'functions',
+      'indexes',
+      'policies',
+      'relations',
+      'roles',
+      'schemas',
+      'triggers',
+    ],
+    'partial columns details',
   )
   runApplicationStateScenario(
     'roles only',
@@ -490,9 +560,13 @@ try {
 
   psql(readFileSync(migrationPath, 'utf8'), 'full LINE Pay fixture')
   createDatabaseTemplate('line_pay_applied_template')
-  runApplicationStateScenario(
-    'full without history',
-    'FULL_WITHOUT_HISTORY',
+  assertIncompleteCategories(
+    runApplicationStateScenario(
+      'full without history',
+      'FULL_WITHOUT_HISTORY',
+    ),
+    [],
+    'full without history details',
   )
   runApplicationStateScenario(
     'full with history',
@@ -504,11 +578,25 @@ try {
     `,
     'line_pay_applied_template',
   )
-  runApplicationStateScenario(
-    'ACL mismatch',
-    'PARTIAL',
-    'grant select on public.line_pay_checkout_attempts to anon;',
-    'line_pay_applied_template',
+  assertIncompleteCategories(
+    runApplicationStateScenario(
+      'ACL mismatch',
+      'PARTIAL',
+      'grant select on public.line_pay_checkout_attempts to anon;',
+      'line_pay_applied_template',
+    ),
+    ['relations'],
+    'ACL mismatch details',
+  )
+  assertIncompleteCategories(
+    runApplicationStateScenario(
+      'existing relation access mismatch',
+      'PARTIAL',
+      'grant insert on public.payments to authenticated;',
+      'line_pay_applied_template',
+    ),
+    ['existing_relation_access'],
+    'existing relation access mismatch details',
   )
   runApplicationStateScenario(
     'ownership mismatch',
@@ -562,14 +650,14 @@ try {
   )
 
   runStaticMutations()
-  assert.equal(scenariosPassed, 16)
-  assert.equal(mutationsCaught, 12)
+  assert.equal(scenariosPassed, 17)
+  assert.equal(mutationsCaught, 13)
 } finally {
   cleanup()
 }
 
-console.log(`Application state scenarios: ${scenariosPassed}/16 PASS`)
-console.log(`Mutations: ${mutationsCaught}/12 caught`)
+console.log(`Application state scenarios: ${scenariosPassed}/17 PASS`)
+console.log(`Mutations: ${mutationsCaught}/13 caught`)
 console.log('Uncaught mutations: 0')
 console.log('PostgreSQL: 17 PASS')
 console.log(`Docker cleanup: ${cleanupPassed ? 'PASS' : 'FAIL'}`)
