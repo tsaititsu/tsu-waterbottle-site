@@ -260,6 +260,19 @@ try {
 
   psqlFile('supabase/tests/line_pay_local_postgres_bootstrap.sql')
   for (const file of baselineFiles) psqlFile(file)
+
+  const baseUnapplied = parseAndValidateInitializerOutput(
+    `${psqlFile(diagnosticFile)}\n`,
+  )
+  if (
+    baseUnapplied.application_state !== 'UNAPPLIED' ||
+    baseUnapplied.contracts.base_remediation_ready ||
+    baseUnapplied.contracts.initializer_exact ||
+    baseUnapplied.checkout_initialized_audit_count !== 0
+  ) {
+    throw new Error('BASE_UNAPPLIED_STATE_NOT_OBSERVED')
+  }
+
   psqlFile(baseMigration)
 
   const unapplied = parseAndValidateInitializerOutput(
