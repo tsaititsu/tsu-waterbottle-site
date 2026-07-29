@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import {
   AI_CHART_D1_REPORT_GENERATION_PIPELINE_VERSION,
   AI_CHART_D1_REPORT_WRITER_RUNTIME_NOT_READY,
@@ -14,6 +16,20 @@ import {
   createAiChartD1ReportWriterRuntimeCommandFingerprint,
   prepareAiChartD1ReportWriterRuntimeAdapter,
 } from './d1ReportWriterRuntimeContracts'
+import {
+  AI_CHART_D1_P1_REPORT_EXECUTION_LEDGER_VERSION,
+  AI_CHART_D1_P1_REPORT_EXECUTION_PLAN_INVALID,
+  AI_CHART_D1_P1_REPORT_EXECUTION_RUNTIME_PLAN_VERSION,
+  buildAiChartD1P1ReportExecutionPlan,
+  createAiChartD1P1ReportExecutionLedger,
+  createAiChartD1P1ReportExecutionPlanFingerprint,
+  runAiChartD1P1ReportExecutionRuntime,
+} from './d1P1ReportExecutionRuntimeContracts'
+import {
+  AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID,
+  AI_CHART_OPENAI_RESPONSE_INVALID,
+  AiChartOpenAiError,
+} from './openAiResponses'
 
 async function main() {
   const snapshot = completeModelInputSnapshot()
@@ -76,6 +92,47 @@ async function main() {
     plan.writerRuntimeCommand.customerDeliveryAllowed,
     false,
   )
+  assert.equal(
+    plan.p1ReportExecutionPlan.contractVersion,
+    AI_CHART_D1_P1_REPORT_EXECUTION_RUNTIME_PLAN_VERSION,
+  )
+  assert.equal(
+    plan.p1ReportExecutionPlan.executionMode,
+    'sequential_twelve_palaces',
+  )
+  assert.equal(plan.p1ReportExecutionPlan.maxRequests, 12)
+  assert.equal(
+    plan.p1ReportExecutionPlan.p1AdapterBridgeDescriptorCount,
+    12,
+  )
+  assert.deepEqual(
+    plan.p1ReportExecutionPlan.targetPalaceIds,
+    plan.targetPalaceIds,
+  )
+  assert.deepEqual(
+    plan.p1ReportExecutionPlan.p1AdapterBridgeDescriptors.map(
+      (descriptor) => descriptor.targetPalaceId,
+    ),
+    plan.targetPalaceIds,
+  )
+  assert.equal(plan.p1ReportExecutionPlan.productionCallable, false)
+  assert.equal(plan.p1ReportExecutionPlan.fetchAllowed, false)
+  assert.equal(plan.p1ReportExecutionPlan.openAiCallable, false)
+  assert.equal(plan.p1ReportExecutionPlan.retryAllowed, false)
+  assert.equal(plan.p1ReportExecutionPlan.fallbackAllowed, false)
+  assert.equal(plan.p1ReportExecutionPlan.customerDeliveryAllowed, false)
+  assert.equal(plan.p1ReportExecutionPlan.safeMetadataOnly, true)
+  assert.equal(Object.isFrozen(plan.p1ReportExecutionPlan), true)
+  assert.equal(
+    Object.isFrozen(plan.p1ReportExecutionPlan.targetPalaceIds),
+    true,
+  )
+  assert.equal(
+    Object.isFrozen(
+      plan.p1ReportExecutionPlan.p1AdapterBridgeDescriptors,
+    ),
+    true,
+  )
   assert.deepEqual(
     plan.writerRuntimeCommand.targetPalaceIds,
     plan.targetPalaceIds,
@@ -104,6 +161,230 @@ async function main() {
     ),
     true,
   )
+
+  const independentlyBuiltExecutionPlan =
+    buildAiChartD1P1ReportExecutionPlan(plan.writerRuntimeCommand)
+  assert.deepEqual(
+    independentlyBuiltExecutionPlan,
+    plan.p1ReportExecutionPlan,
+  )
+  const executionPlanFingerprint =
+    createAiChartD1P1ReportExecutionPlanFingerprint(
+      plan.p1ReportExecutionPlan,
+    )
+  assert.match(executionPlanFingerprint, /^[a-f0-9]{64}$/u)
+  const readyLedger = createAiChartD1P1ReportExecutionLedger(
+    plan.p1ReportExecutionPlan,
+  )
+  assert.equal(
+    readyLedger.contractVersion,
+    AI_CHART_D1_P1_REPORT_EXECUTION_LEDGER_VERSION,
+  )
+  assert.equal(readyLedger.status, 'READY')
+  assert.equal(readyLedger.planFingerprint, executionPlanFingerprint)
+  assert.equal(readyLedger.palaceExecutionCount, 12)
+  assert.equal(readyLedger.attemptedRequests, 0)
+  assert.equal(readyLedger.executedRequests, 0)
+  assert.equal(readyLedger.fetchCount, 0)
+  assert.equal(readyLedger.openAiRequests, 0)
+  assert.equal(readyLedger.retryPerformed, false)
+  assert.equal(readyLedger.currentPalaceId, null)
+  assert.deepEqual(
+    readyLedger.palaceExecutions.map((entry) => entry.status),
+    Array.from({ length: 12 }, () => 'PENDING'),
+  )
+  assert.equal(Object.isFrozen(readyLedger), true)
+  assert.equal(Object.isFrozen(readyLedger.palaceExecutions), true)
+  assert.equal(Object.isFrozen(readyLedger.palaceExecutions[0]), true)
+
+  const successfulCalls: string[] = []
+  const successLedger = await runAiChartD1P1ReportExecutionRuntime(
+    plan.p1ReportExecutionPlan,
+    async (descriptor) => {
+      successfulCalls.push(descriptor.targetPalaceId)
+      return {
+        data: {
+          marker:
+            'raw model output marker must never be stored in execution ledger',
+          targetPalaceId: descriptor.targetPalaceId,
+        },
+        usage: {
+          inputTokens: 10,
+          outputTokens: 20,
+          reasoningTokens: 3,
+          totalTokens: 33,
+        },
+      }
+    },
+  )
+  assert.deepEqual(successfulCalls, plan.targetPalaceIds)
+  assert.equal(successLedger.status, 'SUCCEEDED')
+  assert.equal(successLedger.attemptedRequests, 12)
+  assert.equal(successLedger.executedRequests, 12)
+  assert.equal(successLedger.fetchCount, 12)
+  assert.equal(successLedger.openAiRequests, 12)
+  assert.equal(successLedger.retryPerformed, false)
+  assert.equal(successLedger.currentPalaceId, null)
+  assert.equal(
+    successLedger.palaceExecutions.every(
+      (entry) =>
+        entry.status === 'SUCCEEDED' &&
+        entry.attemptedRequests === 1 &&
+        entry.executedRequests === 1 &&
+        entry.fetchCount === 1 &&
+        entry.openAiRequests === 1 &&
+        entry.retryPerformed === false &&
+        typeof entry.resultFingerprint === 'string' &&
+        /^[a-f0-9]{64}$/u.test(entry.resultFingerprint) &&
+        entry.errorCode === null &&
+        entry.retryable === null &&
+        entry.responseDiagnostic === null &&
+        entry.transportDiagnostic === null &&
+        entry.usage?.totalTokens === 33,
+    ),
+    true,
+  )
+  assert.equal(
+    JSON.stringify(successLedger).includes('raw model output marker'),
+    false,
+  )
+
+  const failedCalls: string[] = []
+  const leakedOutputText = 'sensitive output_text marker'
+  const failureLedger = await runAiChartD1P1ReportExecutionRuntime(
+    plan.p1ReportExecutionPlan,
+    async (descriptor) => {
+      failedCalls.push(descriptor.targetPalaceId)
+      throw new AiChartOpenAiError(
+        AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID,
+        false,
+        {
+          responseStatus: 'completed',
+          incompleteReason: null,
+          responseErrorCode: null,
+          outputItemTypes: ['message'],
+          contentItemTypes: ['output_text'],
+          outputTextCount: 1,
+          outputSchemaValidationCode:
+            'COVERAGE_MAJOR_STARS_MISMATCH',
+          usage: {
+            inputTokens: 17,
+            outputTokens: 8,
+            reasoningTokens: 2,
+            totalTokens: 27,
+          },
+          unsafe: leakedOutputText,
+        } as never,
+      )
+    },
+  )
+  assert.deepEqual(failedCalls, [plan.targetPalaceIds[0]])
+  assert.equal(failureLedger.status, 'FAILED')
+  assert.equal(failureLedger.attemptedRequests, 1)
+  assert.equal(failureLedger.executedRequests, 0)
+  assert.equal(failureLedger.fetchCount, 1)
+  assert.equal(failureLedger.openAiRequests, 1)
+  assert.equal(failureLedger.retryPerformed, false)
+  assert.equal(failureLedger.currentPalaceId, plan.targetPalaceIds[0])
+  assert.equal(
+    failureLedger.palaceExecutions[0].errorCode,
+    AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID,
+  )
+  assert.equal(failureLedger.palaceExecutions[0].retryable, false)
+  assert.equal(
+    failureLedger.palaceExecutions[0].responseDiagnostic
+      ?.outputSchemaValidationCode,
+    'COVERAGE_MAJOR_STARS_MISMATCH',
+  )
+  assert.equal(
+    failureLedger.palaceExecutions[0].responseDiagnostic?.usage
+      ?.totalTokens,
+    27,
+  )
+  assert.deepEqual(
+    failureLedger.palaceExecutions
+      .slice(1)
+      .map((entry) => entry.status),
+    Array.from({ length: 11 }, () => 'PENDING'),
+  )
+  assert.equal(JSON.stringify(failureLedger).includes(leakedOutputText), false)
+  assert.equal(JSON.stringify(failureLedger).includes('output_text'), true)
+  assert.equal(Object.isFrozen(failureLedger), true)
+  assert.equal(
+    Object.isFrozen(
+      failureLedger.palaceExecutions[0].responseDiagnostic,
+    ),
+    true,
+  )
+
+  let forgedPlanExecutorCalls = 0
+  const forgedThirteenPalacePlan = Object.freeze({
+    ...plan.p1ReportExecutionPlan,
+    targetPalaceIds: Object.freeze([
+      ...plan.p1ReportExecutionPlan.targetPalaceIds,
+      'palace:forged',
+    ]),
+    p1AdapterBridgeDescriptors: Object.freeze([
+      ...plan.p1ReportExecutionPlan.p1AdapterBridgeDescriptors,
+      {
+        ...plan.p1ReportExecutionPlan.p1AdapterBridgeDescriptors[0],
+        targetPalaceId: 'palace:forged',
+        callId: 'forged-call-id',
+      },
+    ]),
+  })
+  await assert.rejects(
+    () =>
+      runAiChartD1P1ReportExecutionRuntime(
+        forgedThirteenPalacePlan as never,
+        async (descriptor) => {
+          forgedPlanExecutorCalls += 1
+          return {
+            data: { targetPalaceId: descriptor.targetPalaceId },
+            usage: null,
+          }
+        },
+      ),
+    { message: AI_CHART_D1_P1_REPORT_EXECUTION_PLAN_INVALID },
+  )
+  assert.equal(forgedPlanExecutorCalls, 0)
+
+  const maliciousErrorCode =
+    'prompt-output-chart-marker must never be stored as an error code'
+  const maliciousCodeLedger =
+    await runAiChartD1P1ReportExecutionRuntime(
+      plan.p1ReportExecutionPlan,
+      async () => {
+        throw new AiChartOpenAiError(
+          maliciousErrorCode as never,
+          true,
+        )
+      },
+    )
+  assert.equal(
+    maliciousCodeLedger.palaceExecutions[0].errorCode,
+    AI_CHART_OPENAI_RESPONSE_INVALID,
+  )
+  assert.equal(maliciousCodeLedger.palaceExecutions[0].retryable, false)
+  assert.equal(
+    JSON.stringify(maliciousCodeLedger).includes(maliciousErrorCode),
+    false,
+  )
+
+  const runtimeSource = readFileSync(
+    fileURLToPath(
+      new URL('./d1P1ReportExecutionRuntimeContracts.ts', import.meta.url),
+    ),
+    'utf8',
+  )
+  assert.equal(
+    runtimeSource.includes('requestAiChartOpenAiStructuredResponse'),
+    false,
+  )
+  assert.equal(runtimeSource.includes('OPENAI_API_KEY'), false)
+  assert.equal(runtimeSource.includes('process.env'), false)
+  assert.equal(/\bfetch\s*\(/u.test(runtimeSource), false)
+
   const adapterResult =
     prepareAiChartD1ReportWriterRuntimeAdapter(
       plan.writerRuntimeCommand,

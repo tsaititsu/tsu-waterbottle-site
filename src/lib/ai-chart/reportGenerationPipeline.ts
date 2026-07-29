@@ -10,6 +10,10 @@ import {
   type AiChartD1ReportWriterRuntimeCommand,
 } from './d1ReportWriterRuntimeContracts'
 import {
+  buildAiChartD1P1ReportExecutionPlan,
+  type AiChartD1P1ReportExecutionRuntimePlan,
+} from './d1P1ReportExecutionRuntimeContracts'
+import {
   AI_CHART_D1_P1_STRUCTURAL_INPUT_CONTRACT_VERSION,
   AI_CHART_D1_PALACE_IDENTITIES,
 } from './d1N0Constants'
@@ -30,6 +34,7 @@ export type AiChartD1ReportGenerationPlan = Readonly<{
   p1StructuralInputCount: 12
   targetPalaceIds: readonly string[]
   writerRuntimeCommand: AiChartD1ReportWriterRuntimeCommand
+  p1ReportExecutionPlan: AiChartD1P1ReportExecutionRuntimePlan
   openAiCallable: false
   nextStage: 'd1_p1_model_execution_required'
 }>
@@ -114,6 +119,8 @@ export function buildAiChartD1ReportGenerationPlan(input: {
       targetPalaceIds,
       p1AdapterBridgeDescriptors,
     })
+  const p1ReportExecutionPlan =
+    buildAiChartD1P1ReportExecutionPlan(writerRuntimeCommand)
 
   return Object.freeze({
     contractVersion: AI_CHART_D1_REPORT_GENERATION_PIPELINE_VERSION,
@@ -124,6 +131,7 @@ export function buildAiChartD1ReportGenerationPlan(input: {
     p1StructuralInputCount: 12,
     targetPalaceIds,
     writerRuntimeCommand,
+    p1ReportExecutionPlan,
     openAiCallable: false,
     nextStage: 'd1_p1_model_execution_required',
   })
