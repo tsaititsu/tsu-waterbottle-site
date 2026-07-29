@@ -11,6 +11,7 @@ on:
       - ".github/workflows/supabase-production-line-pay-checkout-initializer-diagnostic.yml"
       - ".github/workflows/supabase-production-line-pay-checkout-initializer.yml"
       - ".github/workflows/supabase-production-line-pay-migration.yml"
+      - ".github/workflows/supabase-production-line-pay-partial-acl-recovery.yml"
       - "package.json"
       - "package-lock.json"
       - "scripts/supabase/run-bank-transfer-production-forensic.mjs"
@@ -20,11 +21,13 @@ on:
       - "scripts/supabase/run-line-pay-application-state-diagnostic.mjs"
       - "scripts/supabase/run-line-pay-checkout-initializer-application-state.mjs"
       - "scripts/supabase/run-line-pay-checkout-initializer-exact-file.mjs"
+      - "scripts/supabase/run-line-pay-partial-acl-metadata-recovery.mjs"
       - "scripts/supabase/validate-bank-transfer-production-forensic.mjs"
       - "scripts/supabase/validate-bank-transfer-production-baseline-capture.mjs"
       - "scripts/supabase/validate-line-pay-production-diagnostic.mjs"
       - "scripts/supabase/validate-line-pay-application-state-diagnostic.mjs"
       - "scripts/supabase/validate-line-pay-checkout-initializer-production.mjs"
+      - "scripts/supabase/validate-line-pay-partial-acl-metadata-recovery.mjs"
       - "scripts/supabase/validate-line-pay-production-deployment.mjs"
       - "src/lib/supabase/linePayDatabaseContracts.ts"
       - "src/lib/supabase/linePayDatabaseContracts.test.ts"
@@ -48,6 +51,8 @@ on:
       - "supabase/deployment/line_pay_checkout_aggregate_initialization_preflight.sql"
       - "supabase/deployment/line_pay_checkout_aggregate_initialization_postflight.sql"
       - "supabase/deployment/line_pay_checkout_aggregate_initialization_deploy.sql"
+      - "supabase/deployment/line_pay_partial_acl_metadata_recovery_preflight.sql"
+      - "supabase/deployment/line_pay_partial_acl_metadata_recovery_deploy.sql"
       - "docs/line-pay-checkout-aggregate-initialization-deployment.md"
       - "supabase/line_pay_remediation_contracts.test.ts"
       - "supabase/line_pay_checkout_aggregate_initialization.test.ts"
@@ -57,11 +62,13 @@ on:
       - "supabase/line_pay_production_diagnostic_workflow.test.ts"
       - "supabase/line_pay_application_state_diagnostic_runner.test.ts"
       - "supabase/line_pay_application_state_diagnostic_workflow.test.ts"
+      - "supabase/line_pay_partial_acl_metadata_recovery.test.ts"
       - "supabase/line_pay_production_deployment_workflow.test.ts"
       - "supabase/line_pay_production_exact_file_runner.test.ts"
       - "supabase/migrations/*_retire_bank_transfer_submissions_writes.sql"
       - "supabase/migrations/20260719033404_line_pay_remediation_contracts.sql"
       - "supabase/migrations/20260728053215_line_pay_checkout_aggregate_initialization.sql"
+      - "supabase/migrations/20260729130000_line_pay_partial_acl_metadata_recovery.sql"
       - "supabase/tests/run_bank_transfer_historical_forensic_contracts.mjs"
       - "supabase/tests/run_bank_transfer_baseline_capture_contracts.mjs"
       - "supabase/tests/run_bank_transfer_submissions_readonly_fence.mjs"
@@ -118,6 +125,7 @@ jobs:
           node --test supabase/line_pay_production_diagnostic_runner.test.ts
           node --test supabase/line_pay_application_state_diagnostic_workflow.test.ts
           node --test supabase/line_pay_application_state_diagnostic_runner.test.ts
+          node --test supabase/line_pay_partial_acl_metadata_recovery.test.ts
           node --test supabase/line_pay_production_exact_file_runner.test.ts
           node --test supabase/line_pay_production_deployment_workflow.test.ts
           node --test src/lib/supabase/linePayDatabaseContracts.test.ts
