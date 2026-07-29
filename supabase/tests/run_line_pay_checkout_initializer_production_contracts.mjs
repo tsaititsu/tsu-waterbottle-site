@@ -115,7 +115,27 @@ function psqlFile(path, expectFailure = false) {
 }
 
 function waitForPostgres() {
+  let consecutiveReadyChecks = 0
   for (let attempt = 0; attempt < 120; attempt += 1) {
+    const finalProcess = spawnSync(
+      'docker',
+      ['exec', containerName, 'cat', '/proc/1/comm'],
+      { cwd: root, encoding: 'utf8' },
+    )
+    if (
+      finalProcess.status !== 0 ||
+      finalProcess.stdout.trim() !== 'postgres'
+    ) {
+      consecutiveReadyChecks = 0
+      Atomics.wait(
+        new Int32Array(new SharedArrayBuffer(4)),
+        0,
+        0,
+        250,
+      )
+      continue
+    }
+
     const result = spawnSync(
       'docker',
       [
@@ -123,13 +143,21 @@ function waitForPostgres() {
         '--env',
         `PGPASSWORD=${password}`,
         containerName,
-        'pg_isready',
+        'psql',
+        '-X',
+        '-A',
+        '-t',
         '--username=postgres',
         '--dbname=postgres',
+        '--command=select 1;',
       ],
-      { encoding: 'utf8' },
+      { cwd: root, encoding: 'utf8' },
     )
-    if (result.status === 0) return
+    consecutiveReadyChecks =
+      result.status === 0 && result.stdout.trim() === '1'
+        ? consecutiveReadyChecks + 1
+        : 0
+    if (consecutiveReadyChecks >= 2) return
     Atomics.wait(
       new Int32Array(new SharedArrayBuffer(4)),
       0,
@@ -137,7 +165,7 @@ function waitForPostgres() {
       250,
     )
   }
-  throw new Error('LOCAL_DB_RUNTIME_UNAVAILABLE')
+  throw new Error('POSTGRES_STABLE_READINESS_TIMEOUT')
 }
 
 function tableSnapshot() {
@@ -284,6 +312,211 @@ try {
   if (before !== after) throw new Error('HISTORICAL_DATA_CHANGED')
 
   psqlSql(`
+    create role line_pay_initializer_acl_probe nologin;
+    grant execute on function
+      public.initialize_product_order_line_pay_checkout(jsonb)
+    to line_pay_initializer_acl_probe;
+  `)
+  const initializerAclMutation = parseAndValidateInitializerOutput(
+    `${psqlFile(diagnosticFile)}\n`,
+  )
+  if (initializerAclMutation.application_state !== 'PARTIAL') {
+    throw new Error('INITIALIZER_FUNCTION_ACL_MUTATION_NOT_CAUGHT')
+  }
+  psqlSql(`
+    revoke execute on function
+      public.initialize_product_order_line_pay_checkout(jsonb)
+    from line_pay_initializer_acl_probe;
+    drop role line_pay_initializer_acl_probe;
+  `)
+
+  psqlSql(`
+    revoke execute on function
+      public.initialize_product_order_line_pay_checkout(jsonb)
+    from service_role;
+    grant line_pay_payment_function_owner to service_role
+      with inherit true, set true;
+  `)
+  const initializerInheritedAclMutation =
+    parseAndValidateInitializerOutput(`${psqlFile(diagnosticFile)}\n`)
+  if (initializerInheritedAclMutation.application_state !== 'PARTIAL') {
+    throw new Error('INITIALIZER_INHERITED_ACL_MUTATION_NOT_CAUGHT')
+  }
+  psqlSql(`
+    revoke line_pay_payment_function_owner from service_role;
+    grant execute on function
+      public.initialize_product_order_line_pay_checkout(jsonb)
+    to service_role;
+  `)
+
+  psqlSql(`
+    grant execute on function
+      public.initialize_product_order_line_pay_checkout(jsonb)
+    to service_role with grant option;
+  `)
+  const initializerGrantOptionMutation =
+    parseAndValidateInitializerOutput(`${psqlFile(diagnosticFile)}\n`)
+  if (initializerGrantOptionMutation.application_state !== 'PARTIAL') {
+    throw new Error('INITIALIZER_GRANT_OPTION_MUTATION_NOT_CAUGHT')
+  }
+  psqlSql(`
+    revoke grant option for execute on function
+      public.initialize_product_order_line_pay_checkout(jsonb)
+    from service_role;
+  `)
+
+  psqlSql(`
+    grant execute on function
+      line_pay_private.record_line_pay_checkout_initialized_audit(
+        uuid,
+        uuid,
+        uuid,
+        text
+      )
+    to service_role with grant option;
+  `)
+  const helperAclMutation = parseAndValidateInitializerOutput(
+    `${psqlFile(diagnosticFile)}\n`,
+  )
+  if (helperAclMutation.application_state !== 'PARTIAL') {
+    throw new Error('AUDIT_HELPER_ACL_MUTATION_NOT_CAUGHT')
+  }
+  psqlSql(`
+    revoke grant option for execute on function
+      line_pay_private.record_line_pay_checkout_initialized_audit(
+        uuid,
+        uuid,
+        uuid,
+        text
+      )
+    from service_role;
+  `)
+
+  psqlSql(`
+    create role line_pay_initializer_helper_acl_probe nologin;
+    grant execute on function
+      line_pay_private.record_line_pay_checkout_initialized_audit(
+        uuid,
+        uuid,
+        uuid,
+        text
+      )
+    to line_pay_initializer_helper_acl_probe;
+  `)
+  const helperUnknownAclMutation = parseAndValidateInitializerOutput(
+    `${psqlFile(diagnosticFile)}\n`,
+  )
+  if (helperUnknownAclMutation.application_state !== 'PARTIAL') {
+    throw new Error('AUDIT_HELPER_UNKNOWN_ACL_MUTATION_NOT_CAUGHT')
+  }
+  psqlSql(`
+    revoke execute on function
+      line_pay_private.record_line_pay_checkout_initialized_audit(
+        uuid,
+        uuid,
+        uuid,
+        text
+      )
+    from line_pay_initializer_helper_acl_probe;
+    drop role line_pay_initializer_helper_acl_probe;
+  `)
+
+  psqlSql(`
+    create role line_pay_initializer_table_acl_probe nologin;
+    grant select on table public.line_pay_payment_audit_events
+    to line_pay_initializer_table_acl_probe;
+  `)
+  const auditTableAclMutation = parseAndValidateInitializerOutput(
+    `${psqlFile(diagnosticFile)}\n`,
+  )
+  if (auditTableAclMutation.application_state !== 'PARTIAL') {
+    throw new Error('AUDIT_TABLE_ACL_MUTATION_NOT_CAUGHT')
+  }
+  psqlSql(`
+    revoke select on table public.line_pay_payment_audit_events
+    from line_pay_initializer_table_acl_probe;
+    drop role line_pay_initializer_table_acl_probe;
+  `)
+
+  psqlSql(`
+    create role line_pay_initializer_membership_probe nologin;
+    grant line_pay_initializer_membership_probe
+    to line_pay_payment_function_owner
+      with inherit true, set true;
+  `)
+  const functionOwnerMembershipMutation =
+    parseAndValidateInitializerOutput(`${psqlFile(diagnosticFile)}\n`)
+  if (functionOwnerMembershipMutation.application_state !== 'PARTIAL') {
+    throw new Error('FUNCTION_OWNER_MEMBERSHIP_MUTATION_NOT_CAUGHT')
+  }
+  psqlSql(`
+    revoke line_pay_initializer_membership_probe
+    from line_pay_payment_function_owner;
+    drop role line_pay_initializer_membership_probe;
+  `)
+
+  psqlSql(`
+    alter function public.initialize_product_order_line_pay_checkout(jsonb)
+    owner to line_pay_payment_function_owner;
+  `)
+  const initializerOwnerMutation = parseAndValidateInitializerOutput(
+    `${psqlFile(diagnosticFile)}\n`,
+  )
+  if (initializerOwnerMutation.application_state !== 'PARTIAL') {
+    throw new Error('INITIALIZER_FUNCTION_OWNER_MUTATION_NOT_CAUGHT')
+  }
+  psqlSql(`
+    alter function public.initialize_product_order_line_pay_checkout(jsonb)
+    owner to postgres;
+  `)
+
+  psqlSql(`
+    drop index
+      public.line_pay_payment_audit_events_checkout_initialized_once_idx;
+    create unique index
+      line_pay_payment_audit_events_checkout_initialized_once_idx
+    on public.line_pay_payment_audit_events (payment_id)
+    where event_type = 'checkout_initialized';
+  `)
+  const indexMutation = parseAndValidateInitializerOutput(
+    `${psqlFile(diagnosticFile)}\n`,
+  )
+  if (indexMutation.application_state !== 'PARTIAL') {
+    throw new Error('INITIALIZER_INDEX_DEFINITION_MUTATION_NOT_CAUGHT')
+  }
+  psqlSql(`
+    drop index
+      public.line_pay_payment_audit_events_checkout_initialized_once_idx;
+    create unique index
+      line_pay_payment_audit_events_checkout_initialized_once_idx
+    on public.line_pay_payment_audit_events (checkout_attempt_id)
+    where event_type = 'checkout_initialized';
+  `)
+
+  psqlSql(`
+    drop index
+      public.line_pay_payment_audit_events_checkout_initialized_once_idx;
+    create unique index
+      line_pay_payment_audit_events_checkout_initialized_once_idx
+    on public.line_pay_payment_audit_events (checkout_attempt_id)
+    where event_type = 'request_claimed';
+  `)
+  const indexPredicateMutation = parseAndValidateInitializerOutput(
+    `${psqlFile(diagnosticFile)}\n`,
+  )
+  if (indexPredicateMutation.application_state !== 'PARTIAL') {
+    throw new Error('INITIALIZER_INDEX_PREDICATE_MUTATION_NOT_CAUGHT')
+  }
+  psqlSql(`
+    drop index
+      public.line_pay_payment_audit_events_checkout_initialized_once_idx;
+    create unique index
+      line_pay_payment_audit_events_checkout_initialized_once_idx
+    on public.line_pay_payment_audit_events (checkout_attempt_id)
+    where event_type = 'checkout_initialized';
+  `)
+
+  psqlSql(`
     drop policy
       line_pay_payment_function_owner_initialization_items_select
     on public.product_order_items;
@@ -305,7 +538,7 @@ try {
     'line_pay_checkout_initializer_production_contracts: PASS ' +
       '(PostgreSQL 17, UNAPPLIED/PARTIAL/FULL, exact-file deploy, ' +
       'commit attestations, historical row digests preserved, ' +
-      'policy-expression mutation caught)\n',
+      'function owner/ACL, index definition, and policy mutations caught)\n',
   )
 } finally {
   if (started) {

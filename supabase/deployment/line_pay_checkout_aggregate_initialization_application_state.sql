@@ -101,12 +101,15 @@ initializer_contract as (
       from pg_catalog.pg_proc as procedure
       join pg_catalog.pg_namespace as namespace
         on namespace.oid = procedure.pronamespace
+      join pg_catalog.pg_roles as owner
+        on owner.oid = procedure.proowner
       where namespace.nspname = 'public'
         and procedure.proname =
           'initialize_product_order_line_pay_checkout'
         and pg_catalog.oidvectortypes(procedure.proargtypes) = 'jsonb'
         and not procedure.prosecdef
         and procedure.provolatile = 'v'
+        and owner.rolname = current_user
         and 'search_path=""' = any (procedure.proconfig)
         and pg_catalog.obj_description(procedure.oid, 'pg_proc')
           = 'line_pay_definition_md5:01f23508c326066dd4c7ef214c27b60e'
@@ -129,6 +132,35 @@ initializer_contract as (
         )
     )
     and (
+      select
+        pg_catalog.count(*) = 2
+        and pg_catalog.count(*) filter (
+          where acl.grantee = procedure.proowner
+            and acl.grantor = procedure.proowner
+            and not acl.is_grantable
+        ) = 1
+        and pg_catalog.count(*) filter (
+          where acl.grantee =
+              pg_catalog.to_regrole('service_role')::oid
+            and acl.grantor = procedure.proowner
+            and not acl.is_grantable
+        ) = 1
+      from pg_catalog.pg_proc as procedure
+      join pg_catalog.pg_namespace as namespace
+        on namespace.oid = procedure.pronamespace
+      cross join lateral pg_catalog.aclexplode(
+        coalesce(
+          procedure.proacl,
+          pg_catalog.acldefault('f', procedure.proowner)
+        )
+      ) as acl
+      where namespace.nspname = 'public'
+        and procedure.proname =
+          'initialize_product_order_line_pay_checkout'
+        and pg_catalog.oidvectortypes(procedure.proargtypes) = 'jsonb'
+        and acl.privilege_type = 'EXECUTE'
+    )
+    and (
       select pg_catalog.count(*) = 1
       from pg_catalog.pg_proc as procedure
       join pg_catalog.pg_namespace as namespace
@@ -147,20 +179,86 @@ initializer_contract as (
           = 'line_pay_definition_md5:58527777d0bd2138231218673699b634'
         and pg_catalog.md5(pg_catalog.pg_get_functiondef(procedure.oid))
           = '58527777d0bd2138231218673699b634'
+        and pg_catalog.has_function_privilege(
+          'service_role',
+          procedure.oid,
+          'execute'
+        )
+        and not pg_catalog.has_function_privilege(
+          'anon',
+          procedure.oid,
+          'execute'
+        )
+        and not pg_catalog.has_function_privilege(
+          'authenticated',
+          procedure.oid,
+          'execute'
+        )
+    )
+    and (
+      select
+        pg_catalog.count(*) = 2
+        and pg_catalog.count(*) filter (
+          where acl.grantee = procedure.proowner
+            and acl.grantor = procedure.proowner
+            and not acl.is_grantable
+        ) = 1
+        and pg_catalog.count(*) filter (
+          where acl.grantee =
+              pg_catalog.to_regrole('service_role')::oid
+            and acl.grantor = procedure.proowner
+            and not acl.is_grantable
+        ) = 1
+      from pg_catalog.pg_proc as procedure
+      join pg_catalog.pg_namespace as namespace
+        on namespace.oid = procedure.pronamespace
+      cross join lateral pg_catalog.aclexplode(
+        coalesce(
+          procedure.proacl,
+          pg_catalog.acldefault('f', procedure.proowner)
+        )
+      ) as acl
+      where namespace.nspname = 'line_pay_private'
+        and procedure.proname =
+          'record_line_pay_checkout_initialized_audit'
+        and pg_catalog.oidvectortypes(procedure.proargtypes)
+          = 'uuid, uuid, uuid, text'
+        and acl.privilege_type = 'EXECUTE'
     )
     and (
       select pg_catalog.count(*) = 1
       from pg_catalog.pg_index as index_catalog
       join pg_catalog.pg_class as index_relation
         on index_relation.oid = index_catalog.indexrelid
-      join pg_catalog.pg_namespace as namespace
-        on namespace.oid = index_relation.relnamespace
-      where namespace.nspname = 'public'
+      join pg_catalog.pg_namespace as index_namespace
+        on index_namespace.oid = index_relation.relnamespace
+      join pg_catalog.pg_class as table_relation
+        on table_relation.oid = index_catalog.indrelid
+      join pg_catalog.pg_namespace as table_namespace
+        on table_namespace.oid = table_relation.relnamespace
+      join pg_catalog.pg_am as access_method
+        on access_method.oid = index_relation.relam
+      join pg_catalog.pg_attribute as key_attribute
+        on key_attribute.attrelid = table_relation.oid
+       and key_attribute.attname = 'checkout_attempt_id'
+       and key_attribute.attnum > 0
+       and not key_attribute.attisdropped
+      where index_namespace.nspname = 'public'
         and index_relation.relname =
           'line_pay_payment_audit_events_checkout_initialized_once_idx'
+        and table_namespace.nspname = 'public'
+        and table_relation.relname = 'line_pay_payment_audit_events'
+        and access_method.amname = 'btree'
         and index_catalog.indisunique
         and index_catalog.indisvalid
         and index_catalog.indisready
+        and index_catalog.indnkeyatts = 1
+        and index_catalog.indnatts = 1
+        and not index_catalog.indnullsnotdistinct
+        and index_catalog.indexprs is null
+        and index_catalog.indkey[0] = key_attribute.attnum
+        and pg_catalog.pg_get_indexdef(index_catalog.indexrelid)
+          ~ '\(checkout_attempt_id\)'
         and pg_catalog.pg_get_expr(
           index_catalog.indpred,
           index_catalog.indrelid
@@ -251,6 +349,104 @@ initializer_contract as (
       'line_pay_payment_function_owner',
       'public.product_shipping_info',
       'insert,update,delete,truncate,references,trigger'
+    )
+    and (
+      select pg_catalog.count(*) = 2
+      from pg_catalog.pg_class as relation
+      join pg_catalog.pg_namespace as namespace
+        on namespace.oid = relation.relnamespace
+      cross join lateral pg_catalog.aclexplode(relation.relacl) as table_acl
+      where namespace.nspname = 'public'
+        and relation.relname in (
+          'product_order_items',
+          'product_shipping_info'
+        )
+        and table_acl.grantee =
+          pg_catalog.to_regrole('line_pay_payment_function_owner')::oid
+        and table_acl.privilege_type = 'SELECT'
+        and not table_acl.is_grantable
+        and table_acl.grantor = relation.relowner
+    )
+    and not exists (
+      select 1
+      from pg_catalog.pg_class as relation
+      join pg_catalog.pg_namespace as namespace
+        on namespace.oid = relation.relnamespace
+      cross join lateral pg_catalog.aclexplode(relation.relacl) as table_acl
+      where namespace.nspname = 'public'
+        and relation.relname in (
+          'product_order_items',
+          'product_shipping_info'
+        )
+        and (
+          (
+            table_acl.grantee =
+              pg_catalog.to_regrole(
+                'line_pay_payment_function_owner'
+              )::oid
+            and (
+              table_acl.privilege_type <> 'SELECT'
+              or table_acl.is_grantable
+              or table_acl.grantor <> relation.relowner
+            )
+          )
+          or (
+            table_acl.grantor =
+              pg_catalog.to_regrole(
+                'line_pay_payment_function_owner'
+              )::oid
+            and table_acl.grantee <> table_acl.grantor
+          )
+        )
+    )
+    and not pg_catalog.has_table_privilege(
+      'service_role',
+      'public.line_pay_payment_audit_events',
+      'select,insert,update,delete,truncate,references,trigger'
+    )
+    and (
+      select
+        pg_catalog.count(*) = 2
+        and pg_catalog.count(*) filter (
+          where table_acl.grantee =
+              pg_catalog.to_regrole(
+                'line_pay_payment_function_owner'
+              )::oid
+            and table_acl.privilege_type = 'SELECT'
+            and table_acl.grantor = relation.relowner
+            and not table_acl.is_grantable
+        ) = 1
+        and pg_catalog.count(*) filter (
+          where table_acl.grantee =
+              pg_catalog.to_regrole(
+                'line_pay_payment_function_owner'
+              )::oid
+            and table_acl.privilege_type = 'INSERT'
+            and table_acl.grantor = relation.relowner
+            and not table_acl.is_grantable
+        ) = 1
+      from pg_catalog.pg_class as relation
+      join pg_catalog.pg_namespace as namespace
+        on namespace.oid = relation.relnamespace
+      cross join lateral pg_catalog.aclexplode(
+        coalesce(
+          relation.relacl,
+          pg_catalog.acldefault('r', relation.relowner)
+        )
+      ) as table_acl
+      where namespace.nspname = 'public'
+        and relation.relname = 'line_pay_payment_audit_events'
+        and table_acl.grantee <> relation.relowner
+    )
+    and not exists (
+      select 1
+      from pg_catalog.pg_auth_members as membership
+      join pg_catalog.pg_roles as granted_role
+        on granted_role.oid = membership.roleid
+      join pg_catalog.pg_roles as member_role
+        on member_role.oid = membership.member
+      where granted_role.rolname = 'line_pay_payment_function_owner'
+        or member_role.rolname = 'line_pay_payment_function_owner'
     )
     as exact
 ),

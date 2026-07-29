@@ -56,7 +56,7 @@ export const EXPECTED_BASE_MIGRATION_SHA256 =
 export const EXPECTED_FENCE_MIGRATION_SHA256 =
   '2f43979b1f4ff88243296f0a389c146b879652715d40d23bdb7ce1d6785407d7'
 export const EXPECTED_DIAGNOSTIC_SHA256 =
-  '7347578a9b0a73d22e3876a10a77b88a409b9db5cf263b1a01345060ff83181a'
+  '052fb6657f41d042fc124120fd656762a5f4e5298371171514c1b53d988cf218'
 export const EXPECTED_PREFLIGHT_SHA256 =
   '4263e46ba20cf5731da0e1920b302e75cc1a1334d798da9d1c1eb0777fd65e7a'
 export const EXPECTED_POSTFLIGHT_SHA256 =
@@ -103,6 +103,13 @@ const CONTRACT_KEYS = Object.freeze([
   'base_remediation_ready',
   'initializer_exact',
 ])
+const DEPLOY_OUTPUT_MARKERS = Object.freeze({
+  migrationStarted: 'LINE_PAY_DEPLOY_MIGRATION_STARTED',
+  migrationCommitted: 'LINE_PAY_DEPLOY_MIGRATION_COMMITTED',
+  postflightStarted: 'LINE_PAY_DEPLOY_POSTFLIGHT_STARTED',
+  postflightStateEmitted: 'LINE_PAY_DEPLOY_POSTFLIGHT_STATE_EMITTED',
+  postflightCommitted: 'LINE_PAY_DEPLOY_POSTFLIGHT_COMMITTED',
+})
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 
 function fail(code) {
@@ -391,26 +398,23 @@ export function parseAndValidateInitializerDeployOutput(text) {
   ) {
     fail('INITIALIZER_DIAGNOSTIC_OUTPUT_INVALID')
   }
-  const diagnosticLines = text
+  const lines = text
     .split(/\r?\n/u)
     .map((line) => line.trim())
-    .filter((line) =>
-      line.startsWith(
-        '{"application_state":',
-      ) ||
-      line.includes(
-        '"status": "LINE_PAY_CHECKOUT_INITIALIZER_APPLICATION_STATE"',
-      ) ||
-      line.includes(
-        '"status":"LINE_PAY_CHECKOUT_INITIALIZER_APPLICATION_STATE"',
-      ),
-    )
-  if (diagnosticLines.length !== 2) {
+    .filter(Boolean)
+  if (
+    lines.length !== 7 ||
+    lines[1] !== DEPLOY_OUTPUT_MARKERS.migrationStarted ||
+    lines[2] !== DEPLOY_OUTPUT_MARKERS.migrationCommitted ||
+    lines[3] !== DEPLOY_OUTPUT_MARKERS.postflightStarted ||
+    lines[5] !== DEPLOY_OUTPUT_MARKERS.postflightStateEmitted ||
+    lines[6] !== DEPLOY_OUTPUT_MARKERS.postflightCommitted
+  ) {
     fail('INITIALIZER_DIAGNOSTIC_OUTPUT_INVALID')
   }
-  parseAndValidateInitializerPreflightOutput(`${diagnosticLines[0]}\n`)
+  parseAndValidateInitializerPreflightOutput(`${lines[0]}\n`)
   return parseAndValidateInitializerPostflightOutput(
-    `${diagnosticLines[1]}\n`,
+    `${lines[4]}\n`,
   )
 }
 

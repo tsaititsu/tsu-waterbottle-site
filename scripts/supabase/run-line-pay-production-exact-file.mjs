@@ -762,6 +762,8 @@ export function validateFixedDeployExecutionResult(
     try {
       validatedPostflight = contract.parseDeployOutput(
         evidence.auditOutput,
+        evidence,
+        result.stdout,
       )
     } catch {
       fail('OUTPUT_VALIDATION_FAILED_AFTER_BOTH_COMMITS_OBSERVED')

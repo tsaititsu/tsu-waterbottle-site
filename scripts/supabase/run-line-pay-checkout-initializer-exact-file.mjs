@@ -106,7 +106,8 @@ export const INITIALIZER_DATABASE_CONTRACT = Object.freeze({
     }),
   ]),
   parsePreflightOutput: parseAndValidateInitializerPreflightOutput,
-  parseDeployOutput: parseAndValidateInitializerDeployOutput,
+  parseDeployOutput: (_auditOutput, _evidence, rawOutput) =>
+    parseAndValidateInitializerDeployOutput(rawOutput),
   buildDeploySuccessAttestation:
     buildInitializerDeploySuccessAttestation,
 })

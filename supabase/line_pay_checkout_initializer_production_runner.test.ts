@@ -153,6 +153,69 @@ test('diagnostics are bounded, frozen, and secret-minimizing', async () => {
   )
 })
 
+test('initializer deploy output rejects extra lines and transaction reordering', async () => {
+  const validator = await import(pathToFileURL(validatorPath).href)
+  const sharedRunner = await import(
+    pathToFileURL(
+      join(root, 'scripts/supabase/run-line-pay-production-exact-file.mjs'),
+    ).href
+  )
+  const markers = sharedRunner.DEPLOY_ATTESTATION_MARKERS
+  const preflight = JSON.stringify(
+    validator.buildExpectedInitializerFixture('UNAPPLIED'),
+  )
+  const postflight = JSON.stringify(
+    validator.buildExpectedInitializerFixture('FULL'),
+  )
+  const validLines = [
+    preflight,
+    markers.migrationStarted,
+    markers.migrationCommitted,
+    markers.postflightStarted,
+    postflight,
+    markers.postflightStateEmitted,
+    markers.postflightCommitted,
+  ]
+
+  assert.equal(
+    validator.parseAndValidateInitializerDeployOutput(
+      `${validLines.join('\n')}\n`,
+    ).application_state,
+    'FULL',
+  )
+
+  for (const invalidLines of [
+    ['UNAUTHORIZED_EXTRA_ROW', ...validLines],
+    [
+      preflight,
+      postflight,
+      markers.migrationStarted,
+      markers.migrationCommitted,
+      markers.postflightStarted,
+      markers.postflightStateEmitted,
+      markers.postflightCommitted,
+    ],
+    [
+      preflight,
+      markers.migrationStarted,
+      markers.migrationCommitted,
+      markers.postflightStarted,
+      markers.postflightStateEmitted,
+      postflight,
+      markers.postflightCommitted,
+    ],
+    [...validLines, postflight],
+  ]) {
+    assert.throws(
+      () =>
+        validator.parseAndValidateInitializerDeployOutput(
+          `${invalidLines.join('\n')}\n`,
+        ),
+      /INITIALIZER_DIAGNOSTIC_OUTPUT_INVALID/,
+    )
+  }
+})
+
 test('fixed SQL accepts no arbitrary URL, SQL, path, retry, or runtime enablement', async () => {
   const validator = await import(pathToFileURL(validatorPath).href)
   assert.equal(validator.validateSource(root), true)
