@@ -603,7 +603,6 @@ try {
     [
       'columns',
       'constraints',
-      'existing_relation_access',
       'functions',
       'indexes',
       'policies',
@@ -624,7 +623,6 @@ try {
     [
       'columns',
       'constraints',
-      'existing_relation_access',
       'functions',
       'indexes',
       'policies',
@@ -645,7 +643,6 @@ try {
     [
       'columns',
       'constraints',
-      'existing_relation_access',
       'functions',
       'indexes',
       'policies',
@@ -824,6 +821,8 @@ try {
     `
       grant select on public.line_pay_checkout_attempts to anon;
       grant insert on public.payments to authenticated;
+      alter table public.payments owner to service_role;
+      alter table public.product_orders owner to service_role;
     `,
     'recoverable Production PARTIAL fixture',
   )

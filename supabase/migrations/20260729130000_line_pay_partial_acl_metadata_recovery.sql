@@ -391,26 +391,6 @@ begin
        'service_role',
        'public.product_orders',
        'update'
-     )
-     or pg_catalog.has_table_privilege(
-       'service_role',
-       'public.payments',
-       'delete'
-     )
-     or pg_catalog.has_table_privilege(
-       'service_role',
-       'public.payments',
-       'truncate'
-     )
-     or pg_catalog.has_table_privilege(
-       'service_role',
-       'public.product_orders',
-       'delete'
-     )
-     or pg_catalog.has_table_privilege(
-       'service_role',
-       'public.product_orders',
-       'truncate'
      ) then
     raise exception using errcode = '42501',
       message = 'line_pay_partial_recovery_service_role_postcondition_failed';

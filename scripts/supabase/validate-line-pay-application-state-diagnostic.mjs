@@ -34,7 +34,7 @@ export const FENCE_MIGRATION_FILE =
 export const SHARED_RUNNER_FILE =
   'scripts/supabase/run-line-pay-production-diagnostic.mjs'
 export const EXPECTED_DIAGNOSTIC_SHA256 =
-  'dd2e3b1cdb8c20b1aca4fb8f2b601d839813450894a63ce73f0190a6f5739434'
+  '6f0442e832d7137fa9f3ba6e8f8edd12a39c1242bbd1c824346dd9ac56e599fc'
 export const EXPECTED_MIGRATION_SHA256 =
   '8da1fb429aecb1c35b12a245b63907135dbe7c467ef0a5f069afd431d21e94b8'
 export const EXPECTED_FENCE_SHA256 =

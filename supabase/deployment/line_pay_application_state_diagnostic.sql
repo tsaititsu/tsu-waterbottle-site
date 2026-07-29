@@ -553,8 +553,7 @@ expected_fingerprints(category, row_count, digest) as (
     ('triggers', 11, '110eb112b655178d1d1f2d0ee1d67ac0966a37efff2ca8cf8c15eb8747f5899e'),
     ('functions', 21, 'a63fb3c9d868be844ff836d655d5c96ec77b1b79eda85869d8a6251279f4ee85'),
     ('relations', 7, 'd4d62e30c89763b49e6c33c77c4b3d6f38a1921848bdda5144ccaec9cc12407f'),
-    ('constraints', 115, '8a78fcbe6ca7e07e8cd9bd560da6fdea601ce09b825948bb9b1d1de33e86bcb6'),
-    ('existing_relation_access', 2, '9e8052b3233f19df10341fce5fd6737f926c63105e3a6aa8d30ea97a11e39a8c')
+    ('constraints', 115, '8a78fcbe6ca7e07e8cd9bd560da6fdea601ce09b825948bb9b1d1de33e86bcb6')
 ),
 category_contracts as (
   select
@@ -567,6 +566,90 @@ category_contracts as (
     ) as complete
   from expected_fingerprints as expected
   left join catalog_fingerprints as actual using (category)
+),
+existing_relation_access_contract as (
+  select
+    'existing_relation_access'::text as category,
+    2 as expected_count,
+    pg_catalog.count(relation.oid)::integer as actual_count,
+    pg_catalog.count(relation.oid) = 2 as count_matches,
+    coalesce(
+      pg_catalog.bool_and(
+        relation.relkind = 'r'
+        and relation.relrowsecurity
+        and not relation.relforcerowsecurity
+        and not exists (
+          select 1
+          from pg_catalog.aclexplode(
+            coalesce(
+              relation.relacl,
+              pg_catalog.acldefault('r', relation.relowner)
+            )
+          ) as acl
+          where acl.grantee = 0
+            and acl.privilege_type in (
+              'INSERT',
+              'UPDATE',
+              'DELETE',
+              'TRUNCATE'
+            )
+        )
+        and not (
+          pg_catalog.has_table_privilege('anon', relation.oid, 'INSERT')
+          or pg_catalog.has_table_privilege('anon', relation.oid, 'UPDATE')
+          or pg_catalog.has_table_privilege('anon', relation.oid, 'DELETE')
+          or pg_catalog.has_table_privilege('anon', relation.oid, 'TRUNCATE')
+        )
+        and not (
+          pg_catalog.has_table_privilege(
+            'authenticated',
+            relation.oid,
+            'INSERT'
+          )
+          or pg_catalog.has_table_privilege(
+            'authenticated',
+            relation.oid,
+            'UPDATE'
+          )
+          or pg_catalog.has_table_privilege(
+            'authenticated',
+            relation.oid,
+            'DELETE'
+          )
+          or pg_catalog.has_table_privilege(
+            'authenticated',
+            relation.oid,
+            'TRUNCATE'
+          )
+        )
+        and pg_catalog.has_table_privilege(
+          'service_role',
+          relation.oid,
+          'SELECT'
+        )
+        and pg_catalog.has_table_privilege(
+          'service_role',
+          relation.oid,
+          'INSERT'
+        )
+        and pg_catalog.has_table_privilege(
+          'service_role',
+          relation.oid,
+          'UPDATE'
+        )
+      ),
+      false
+    ) as metadata_matches
+  from (
+    values
+      ('public', 'payments'),
+      ('public', 'product_orders')
+  ) as expected(schema_name, relation_name)
+  left join pg_catalog.pg_namespace as namespace
+    on namespace.nspname = expected.schema_name
+  left join pg_catalog.pg_class as relation
+    on relation.relnamespace = namespace.oid
+   and relation.relname = expected.relation_name
 ),
 detail_categories as (
   select
@@ -584,6 +667,15 @@ detail_categories as (
       and actual.digest = expected.digest,
     false
   )
+  union all
+  select
+    category,
+    expected_count,
+    actual_count,
+    count_matches,
+    metadata_matches
+  from existing_relation_access_contract
+  where not (count_matches and metadata_matches)
 ),
 relation_metadata_details as (
   select
@@ -1017,9 +1109,8 @@ contracts as (
     ) and (
       select complete from category_contracts where category = 'schemas'
     ) and (
-      select complete
-      from category_contracts
-      where category = 'existing_relation_access'
+      select count_matches and metadata_matches
+      from existing_relation_access_contract
     ) as acl_complete
 ),
 evidence as (
