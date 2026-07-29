@@ -245,6 +245,20 @@ function assertIncompleteCategories(result, expectedCategories, label) {
   }
 }
 
+function assertDetailIdentityRows(rows, expectedIdentities, label) {
+  assert.deepEqual(
+    rows.map((detail) => detail.identity),
+    expectedIdentities,
+    label,
+  )
+}
+
+function findDetailRow(rows, identity, label) {
+  const row = rows.find((detail) => detail.identity === identity)
+  assert.ok(row, `${label}:${identity}:missing detail row`)
+  return row
+}
+
 function catchMutation(name, callback) {
   assert.throws(callback, undefined, name)
   mutationsCaught += 1
@@ -560,13 +574,24 @@ try {
 
   psql(readFileSync(migrationPath, 'utf8'), 'full LINE Pay fixture')
   createDatabaseTemplate('line_pay_applied_template')
+  const fullWithoutHistory = runApplicationStateScenario(
+    'full without history',
+    'FULL_WITHOUT_HISTORY',
+  )
   assertIncompleteCategories(
-    runApplicationStateScenario(
-      'full without history',
-      'FULL_WITHOUT_HISTORY',
-    ),
+    fullWithoutHistory,
     [],
     'full without history details',
+  )
+  assertDetailIdentityRows(
+    fullWithoutHistory.details.relation_metadata,
+    [],
+    'full without history relation metadata details',
+  )
+  assertDetailIdentityRows(
+    fullWithoutHistory.details.existing_relation_access,
+    [],
+    'full without history existing relation access details',
   )
   runApplicationStateScenario(
     'full with history',
@@ -578,25 +603,94 @@ try {
     `,
     'line_pay_applied_template',
   )
+  const aclMismatch = runApplicationStateScenario(
+    'ACL mismatch',
+    'PARTIAL',
+    'grant select on public.line_pay_checkout_attempts to anon;',
+    'line_pay_applied_template',
+  )
   assertIncompleteCategories(
-    runApplicationStateScenario(
-      'ACL mismatch',
-      'PARTIAL',
-      'grant select on public.line_pay_checkout_attempts to anon;',
-      'line_pay_applied_template',
-    ),
+    aclMismatch,
     ['relations'],
     'ACL mismatch details',
   )
+  assertDetailIdentityRows(
+    aclMismatch.details.existing_relation_access,
+    [],
+    'ACL mismatch existing relation access details',
+  )
+  const checkoutAttemptRelation = findDetailRow(
+    aclMismatch.details.relation_metadata,
+    'public.line_pay_checkout_attempts',
+    'ACL mismatch relation metadata',
+  )
+  assert.equal(
+    checkoutAttemptRelation.explicit_acl_absent,
+    false,
+    'ACL mismatch relation metadata: explicit ACL must be visible as a safe boolean',
+  )
+  assert.equal(
+    checkoutAttemptRelation.owner_is_current_user,
+    true,
+    'ACL mismatch relation metadata: owner must remain intact',
+  )
+  const existingAccessMismatch = runApplicationStateScenario(
+    'existing relation access mismatch',
+    'PARTIAL',
+    'grant insert on public.payments to authenticated;',
+    'line_pay_applied_template',
+  )
   assertIncompleteCategories(
-    runApplicationStateScenario(
-      'existing relation access mismatch',
-      'PARTIAL',
-      'grant insert on public.payments to authenticated;',
-      'line_pay_applied_template',
-    ),
+    existingAccessMismatch,
     ['existing_relation_access'],
     'existing relation access mismatch details',
+  )
+  assertDetailIdentityRows(
+    existingAccessMismatch.details.relation_metadata,
+    [],
+    'existing relation access mismatch relation metadata details',
+  )
+  const paymentsAccess = findDetailRow(
+    existingAccessMismatch.details.existing_relation_access,
+    'public.payments',
+    'existing relation access mismatch',
+  )
+  assert.equal(
+    paymentsAccess.authenticated_write_absent,
+    false,
+    'existing relation access mismatch: authenticated write must be visible as a safe boolean',
+  )
+  const combinedAccessMismatch = runApplicationStateScenario(
+    'combined relation and existing access mismatch',
+    'PARTIAL',
+    `
+      grant select on public.line_pay_checkout_attempts to anon;
+      grant insert on public.payments to authenticated;
+    `,
+    'line_pay_applied_template',
+  )
+  assertIncompleteCategories(
+    combinedAccessMismatch,
+    ['existing_relation_access', 'relations'],
+    'combined relation and existing access mismatch details',
+  )
+  assert.equal(
+    findDetailRow(
+      combinedAccessMismatch.details.relation_metadata,
+      'public.line_pay_checkout_attempts',
+      'combined relation and existing access mismatch',
+    ).explicit_acl_absent,
+    false,
+    'combined relation and existing access mismatch: relation ACL boolean',
+  )
+  assert.equal(
+    findDetailRow(
+      combinedAccessMismatch.details.existing_relation_access,
+      'public.payments',
+      'combined relation and existing access mismatch',
+    ).authenticated_write_absent,
+    false,
+    'combined relation and existing access mismatch: access ACL boolean',
   )
   runApplicationStateScenario(
     'ownership mismatch',
@@ -650,13 +744,13 @@ try {
   )
 
   runStaticMutations()
-  assert.equal(scenariosPassed, 17)
+  assert.equal(scenariosPassed, 18)
   assert.equal(mutationsCaught, 13)
 } finally {
   cleanup()
 }
 
-console.log(`Application state scenarios: ${scenariosPassed}/17 PASS`)
+console.log(`Application state scenarios: ${scenariosPassed}/18 PASS`)
 console.log(`Mutations: ${mutationsCaught}/13 caught`)
 console.log('Uncaught mutations: 0')
 console.log('PostgreSQL: 17 PASS')

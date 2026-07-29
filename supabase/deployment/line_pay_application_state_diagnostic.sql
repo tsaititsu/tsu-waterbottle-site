@@ -585,9 +585,250 @@ detail_categories as (
     false
   )
 ),
-diagnostic_details as (
+relation_metadata_details as (
   select
     coalesce(
+      pg_catalog.jsonb_agg(
+        pg_catalog.jsonb_build_object(
+          'identity', detail.identity,
+          'present', detail.present,
+          'owner_is_current_user',
+            detail.owner_is_current_user,
+          'kind_is_table', detail.kind_is_table,
+          'persistence_is_permanent', detail.persistence_is_permanent,
+          'rls_enabled', detail.rls_enabled,
+          'force_rls_enabled', detail.force_rls_enabled,
+          'replica_identity_default', detail.replica_identity_default,
+          'explicit_acl_absent', detail.explicit_acl_absent,
+          'comment_present', detail.comment_present
+        )
+        order by detail.identity
+      ),
+      '[]'::jsonb
+    ) as relation_metadata
+  from (
+    select
+      expected.schema_name || '.' || expected.relation_name as identity,
+      relation.oid is not null as present,
+      coalesce(
+        owner.rolname = current_user,
+        false
+      ) as owner_is_current_user,
+      coalesce(relation.relkind = 'r', false) as kind_is_table,
+      coalesce(relation.relpersistence = 'p', false)
+        as persistence_is_permanent,
+      coalesce(relation.relrowsecurity, false) as rls_enabled,
+      coalesce(relation.relforcerowsecurity, false)
+        as force_rls_enabled,
+      coalesce(relation.relreplident = 'd', false)
+        as replica_identity_default,
+      coalesce(relation.relacl is null, false) as explicit_acl_absent,
+      coalesce(
+        pg_catalog.obj_description(relation.oid, 'pg_class') is not null,
+        false
+      ) as comment_present
+    from expected_relations as expected
+    left join pg_catalog.pg_namespace as namespace
+      on namespace.nspname = expected.schema_name
+    left join pg_catalog.pg_class as relation
+      on relation.relnamespace = namespace.oid
+     and relation.relname = expected.relation_name
+    left join pg_catalog.pg_roles as owner on owner.oid = relation.relowner
+    where exists (
+      select 1
+      from detail_categories
+      where category in ('relations', 'schemas')
+        and count_matches
+        and not metadata_matches
+    )
+  ) as detail
+),
+existing_relation_access_details as (
+  select
+    coalesce(
+      pg_catalog.jsonb_agg(
+        pg_catalog.jsonb_build_object(
+          'identity', detail.identity,
+          'present', detail.present,
+          'kind_is_table', detail.kind_is_table,
+          'rls_enabled', detail.rls_enabled,
+          'force_rls_enabled', detail.force_rls_enabled,
+          'explicit_acl_present', detail.explicit_acl_present,
+          'public_write_absent', detail.public_write_absent,
+          'anon_write_absent', detail.anon_write_absent,
+          'authenticated_write_absent',
+            detail.authenticated_write_absent,
+          'service_role_write_absent', detail.service_role_write_absent
+        )
+        order by detail.identity
+      ),
+      '[]'::jsonb
+    ) as existing_relation_access
+  from (
+    select
+      expected.schema_name || '.' || expected.relation_name as identity,
+      relation.oid is not null as present,
+      coalesce(relation.relkind = 'r', false) as kind_is_table,
+      coalesce(relation.relrowsecurity, false) as rls_enabled,
+      coalesce(relation.relforcerowsecurity, false)
+        as force_rls_enabled,
+      coalesce(relation.relacl is not null, false) as explicit_acl_present,
+      case
+        when relation.oid is null then false
+        else not exists (
+          select 1
+          from pg_catalog.aclexplode(
+            coalesce(
+              relation.relacl,
+              pg_catalog.acldefault('r', relation.relowner)
+            )
+          ) as acl
+          where acl.grantee = 0
+            and acl.privilege_type in (
+              'INSERT',
+              'UPDATE',
+              'DELETE',
+              'TRUNCATE'
+            )
+        )
+      end as public_write_absent,
+      case
+        when relation.oid is null then false
+        else not (
+          coalesce(
+            pg_catalog.has_table_privilege(
+              'anon',
+              relation.oid,
+              'INSERT'
+            ),
+            false
+          )
+          or coalesce(
+            pg_catalog.has_table_privilege(
+              'anon',
+              relation.oid,
+              'UPDATE'
+            ),
+            false
+          )
+          or coalesce(
+            pg_catalog.has_table_privilege(
+              'anon',
+              relation.oid,
+              'DELETE'
+            ),
+            false
+          )
+          or coalesce(
+            pg_catalog.has_table_privilege(
+              'anon',
+              relation.oid,
+              'TRUNCATE'
+            ),
+            false
+          )
+        )
+      end as anon_write_absent,
+      case
+        when relation.oid is null then false
+        else not (
+          coalesce(
+            pg_catalog.has_table_privilege(
+              'authenticated',
+              relation.oid,
+              'INSERT'
+            ),
+            false
+          )
+          or coalesce(
+            pg_catalog.has_table_privilege(
+              'authenticated',
+              relation.oid,
+              'UPDATE'
+            ),
+            false
+          )
+          or coalesce(
+            pg_catalog.has_table_privilege(
+              'authenticated',
+              relation.oid,
+              'DELETE'
+            ),
+            false
+          )
+          or coalesce(
+            pg_catalog.has_table_privilege(
+              'authenticated',
+              relation.oid,
+              'TRUNCATE'
+            ),
+            false
+          )
+        )
+      end as authenticated_write_absent,
+      case
+        when relation.oid is null then false
+        else not (
+          coalesce(
+            pg_catalog.has_table_privilege(
+              'service_role',
+              relation.oid,
+              'INSERT'
+            ),
+            false
+          )
+          or coalesce(
+            pg_catalog.has_table_privilege(
+              'service_role',
+              relation.oid,
+              'UPDATE'
+            ),
+            false
+          )
+          or coalesce(
+            pg_catalog.has_table_privilege(
+              'service_role',
+              relation.oid,
+              'DELETE'
+            ),
+            false
+          )
+          or coalesce(
+            pg_catalog.has_table_privilege(
+              'service_role',
+              relation.oid,
+              'TRUNCATE'
+            ),
+            false
+          )
+        )
+      end as service_role_write_absent
+    from (
+      values
+        ('public', 'payments'),
+        ('public', 'product_orders')
+    ) as expected(schema_name, relation_name)
+    left join pg_catalog.pg_namespace as namespace
+      on namespace.nspname = expected.schema_name
+    left join pg_catalog.pg_class as relation
+      on relation.relnamespace = namespace.oid
+     and relation.relname = expected.relation_name
+    where exists (
+      select 1
+      from detail_categories
+      where category = 'existing_relation_access'
+        and count_matches
+        and not metadata_matches
+    )
+  ) as detail
+),
+diagnostic_details as (
+  select
+    category_details.incomplete_categories,
+    relation_metadata_details.relation_metadata,
+    existing_relation_access_details.existing_relation_access
+  from (
+    select coalesce(
       pg_catalog.jsonb_agg(
         pg_catalog.jsonb_build_object(
           'category', category,
@@ -600,7 +841,10 @@ diagnostic_details as (
       ),
       '[]'::jsonb
     ) as incomplete_categories
-  from detail_categories
+    from detail_categories
+  ) as category_details
+  cross join relation_metadata_details
+  cross join existing_relation_access_details
 ),
 role_integrity as (
   select
@@ -861,7 +1105,10 @@ select pg_catalog.jsonb_build_object(
     'acl_complete', acl_complete
   ),
   'details', pg_catalog.jsonb_build_object(
-    'incomplete_categories', diagnostic_details.incomplete_categories
+    'incomplete_categories', diagnostic_details.incomplete_categories,
+    'relation_metadata', diagnostic_details.relation_metadata,
+    'existing_relation_access',
+      diagnostic_details.existing_relation_access
   ),
   'application_state', application_state
 ) as audit_result

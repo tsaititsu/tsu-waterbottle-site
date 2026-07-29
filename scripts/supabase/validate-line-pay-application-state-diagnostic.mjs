@@ -34,7 +34,7 @@ export const FENCE_MIGRATION_FILE =
 export const SHARED_RUNNER_FILE =
   'scripts/supabase/run-line-pay-production-diagnostic.mjs'
 export const EXPECTED_DIAGNOSTIC_SHA256 =
-  '4d047aa7a067720ebdf2cc72b7f3eaaa805043c103445df8fd3f6e9f485166eb'
+  'dd2e3b1cdb8c20b1aca4fb8f2b601d839813450894a63ce73f0190a6f5739434'
 export const EXPECTED_MIGRATION_SHA256 =
   '8da1fb429aecb1c35b12a245b63907135dbe7c467ef0a5f069afd431d21e94b8'
 export const EXPECTED_FENCE_SHA256 =
@@ -111,13 +111,41 @@ const CONTRACT_KEYS = Object.freeze([
   'roles_complete',
   'acl_complete',
 ])
-const DETAIL_KEYS = Object.freeze(['incomplete_categories'])
+const DETAIL_KEYS = Object.freeze([
+  'incomplete_categories',
+  'relation_metadata',
+  'existing_relation_access',
+])
 const INCOMPLETE_CATEGORY_KEYS = Object.freeze([
   'category',
   'expected_count',
   'actual_count',
   'count_matches',
   'metadata_matches',
+])
+const RELATION_METADATA_DETAIL_KEYS = Object.freeze([
+  'identity',
+  'present',
+  'owner_is_current_user',
+  'kind_is_table',
+  'persistence_is_permanent',
+  'rls_enabled',
+  'force_rls_enabled',
+  'replica_identity_default',
+  'explicit_acl_absent',
+  'comment_present',
+])
+const EXISTING_RELATION_ACCESS_DETAIL_KEYS = Object.freeze([
+  'identity',
+  'present',
+  'kind_is_table',
+  'rls_enabled',
+  'force_rls_enabled',
+  'explicit_acl_present',
+  'public_write_absent',
+  'anon_write_absent',
+  'authenticated_write_absent',
+  'service_role_write_absent',
 ])
 const DIAGNOSTIC_CATEGORY_SET = new Set([
   'roles',
@@ -132,6 +160,23 @@ const DIAGNOSTIC_CATEGORY_SET = new Set([
   'existing_relation_access',
 ])
 const MAX_INCOMPLETE_CATEGORIES = DIAGNOSTIC_CATEGORY_SET.size
+const RELATION_METADATA_IDENTITIES = Object.freeze([
+  'line_pay_private.line_pay_completion_proofs',
+  'public.app_environment_attestation',
+  'public.line_pay_callback_capabilities',
+  'public.line_pay_callback_events',
+  'public.line_pay_checkout_attempts',
+  'public.line_pay_payment_audit_events',
+  'public.line_pay_request_outbox',
+])
+const EXISTING_RELATION_ACCESS_IDENTITIES = Object.freeze([
+  'public.payments',
+  'public.product_orders',
+])
+const RELATION_METADATA_IDENTITY_SET = new Set(RELATION_METADATA_IDENTITIES)
+const EXISTING_RELATION_ACCESS_IDENTITY_SET = new Set(
+  EXISTING_RELATION_ACCESS_IDENTITIES,
+)
 const REQUIRED_SQL_IDENTITIES = Object.freeze([
   'app_environment_attestation',
   'line_pay_checkout_attempts',
@@ -193,6 +238,31 @@ function assertCount(value) {
   if (!Number.isSafeInteger(value) || value < 0 || value > 10000) {
     fail('APPLICATION_STATE_DIAGNOSTIC_OUTPUT_INVALID')
   }
+}
+
+function assertSafeDetailRows(value, keys, identitySet, maxRows) {
+  if (!Array.isArray(value) || value.length > maxRows) {
+    fail('APPLICATION_STATE_DIAGNOSTIC_OUTPUT_INVALID')
+  }
+  let previousIdentity = ''
+  return value.map((detail) => {
+    assertExactKeys(detail, keys)
+    if (
+      typeof detail.identity !== 'string' ||
+      !identitySet.has(detail.identity) ||
+      detail.identity <= previousIdentity
+    ) {
+      fail('APPLICATION_STATE_DIAGNOSTIC_OUTPUT_INVALID')
+    }
+    previousIdentity = detail.identity
+    const frozenDetail = { identity: detail.identity }
+    for (const key of keys) {
+      if (key === 'identity') continue
+      assertBoolean(detail[key])
+      frozenDetail[key] = detail[key]
+    }
+    return Object.freeze(frozenDetail)
+  })
 }
 
 function readFixedRegularFile(root, relativePath) {
@@ -330,8 +400,22 @@ function assertDiagnosticDetails(value) {
       metadata_matches: categoryDetail.metadata_matches,
     })
   })
+  const relationMetadata = assertSafeDetailRows(
+    value.relation_metadata,
+    RELATION_METADATA_DETAIL_KEYS,
+    RELATION_METADATA_IDENTITY_SET,
+    RELATION_METADATA_IDENTITIES.length,
+  )
+  const existingRelationAccess = assertSafeDetailRows(
+    value.existing_relation_access,
+    EXISTING_RELATION_ACCESS_DETAIL_KEYS,
+    EXISTING_RELATION_ACCESS_IDENTITY_SET,
+    EXISTING_RELATION_ACCESS_IDENTITIES.length,
+  )
   return Object.freeze({
     incomplete_categories: Object.freeze(frozenCategories),
+    relation_metadata: Object.freeze(relationMetadata),
+    existing_relation_access: Object.freeze(existingRelationAccess),
   })
 }
 
@@ -350,7 +434,11 @@ export function assertApplicationStateDiagnosticSql(sql) {
     (sql.match(/actual[.]digest = expected[.]digest/gu) ?? []).length !== 3 ||
     !/'details', pg_catalog[.]jsonb_build_object/u.test(sql) ||
     !/'incomplete_categories'/u.test(sql) ||
+    !/'relation_metadata'/u.test(sql) ||
+    !/'existing_relation_access'/u.test(sql) ||
     !/'metadata_matches'/u.test(sql) ||
+    !/'owner_is_current_user'/u.test(sql) ||
+    !/'public_write_absent'/u.test(sql) ||
     !/then 'HISTORY_ONLY'/u.test(sql) ||
     !/then 'UNAPPLIED'/u.test(sql) ||
     !/then 'PARTIAL'/u.test(sql)

@@ -58,12 +58,93 @@ type DiagnosticDetailCategory = Readonly<{
   metadata_matches: boolean
 }>
 
+type DiagnosticRelationMetadataDetail = Readonly<{
+  identity: string
+  present: boolean
+  owner_is_current_user: boolean
+  kind_is_table: boolean
+  persistence_is_permanent: boolean
+  rls_enabled: boolean
+  force_rls_enabled: boolean
+  replica_identity_default: boolean
+  explicit_acl_absent: boolean
+  comment_present: boolean
+}>
+
+type DiagnosticExistingRelationAccessDetail = Readonly<{
+  identity: string
+  present: boolean
+  kind_is_table: boolean
+  rls_enabled: boolean
+  force_rls_enabled: boolean
+  explicit_acl_present: boolean
+  public_write_absent: boolean
+  anon_write_absent: boolean
+  authenticated_write_absent: boolean
+  service_role_write_absent: boolean
+}>
+
 type DiagnosticDetails = Readonly<{
   incomplete_categories: readonly DiagnosticDetailCategory[]
+  relation_metadata: readonly DiagnosticRelationMetadataDetail[]
+  existing_relation_access: readonly DiagnosticExistingRelationAccessDetail[]
 }>
 
 const emptyDetails: DiagnosticDetails = Object.freeze({
   incomplete_categories: Object.freeze([]),
+  relation_metadata: Object.freeze([]),
+  existing_relation_access: Object.freeze([]),
+})
+
+const relationMetadataDetails = Object.freeze([
+  Object.freeze({
+    identity: 'public.line_pay_checkout_attempts',
+    present: true,
+    owner_is_current_user: true,
+    kind_is_table: true,
+    persistence_is_permanent: true,
+    rls_enabled: true,
+    force_rls_enabled: true,
+    replica_identity_default: true,
+    explicit_acl_absent: false,
+    comment_present: true,
+  }),
+])
+
+const existingRelationAccessDetails = Object.freeze([
+  Object.freeze({
+    identity: 'public.payments',
+    present: true,
+    kind_is_table: true,
+    rls_enabled: true,
+    force_rls_enabled: true,
+    explicit_acl_present: true,
+    public_write_absent: true,
+    anon_write_absent: true,
+    authenticated_write_absent: false,
+    service_role_write_absent: true,
+  }),
+])
+
+const partialRelationAccessDetails: DiagnosticDetails = Object.freeze({
+  incomplete_categories: Object.freeze([
+    Object.freeze({
+      category: 'existing_relation_access',
+      expected_count: 2,
+      actual_count: 2,
+      count_matches: true,
+      metadata_matches: false,
+    }),
+    Object.freeze({
+      category: 'relations',
+      expected_count: 7,
+      actual_count: 7,
+      count_matches: true,
+      metadata_matches: false,
+    }),
+  ]),
+  relation_metadata: relationMetadataDetails,
+  existing_relation_access: existingRelationAccessDetails,
 })
 
 const partialRelationDetails: DiagnosticDetails = Object.freeze({
@@ -76,6 +157,8 @@ const partialRelationDetails: DiagnosticDetails = Object.freeze({
       metadata_matches: false,
     }),
   ]),
+  relation_metadata: relationMetadataDetails,
+  existing_relation_access: Object.freeze([]),
 })
 
 before(async () => {
@@ -174,6 +257,21 @@ test('all six application states are uniquely classified', () => {
             metadata_matches: false,
           },
         ],
+        relation_metadata: [
+          {
+            ...relationMetadataDetails[0],
+            present: false,
+            owner_is_current_user: false,
+            kind_is_table: false,
+            persistence_is_permanent: false,
+            rls_enabled: false,
+            force_rls_enabled: false,
+            replica_identity_default: false,
+            explicit_acl_absent: false,
+            comment_present: false,
+          },
+        ],
+        existing_relation_access: [],
       },
     }),
     resultFor('FULL_WITHOUT_HISTORY', {
@@ -213,6 +311,8 @@ test('output validation is frozen, exact and never accepts sensitive fields', ()
   assert.equal(Object.isFrozen(parsed.contracts), true)
   assert.equal(Object.isFrozen(parsed.details), true)
   assert.equal(Object.isFrozen(parsed.details.incomplete_categories), true)
+  assert.equal(Object.isFrozen(parsed.details.relation_metadata), true)
+  assert.equal(Object.isFrozen(parsed.details.existing_relation_access), true)
   const mutations = [
     { ...resultFor('UNAPPLIED'), extra: true },
     resultFor('PARTIAL'),
@@ -241,6 +341,8 @@ test('output validation is frozen, exact and never accepts sensitive fields', ()
             digest: 'a'.repeat(64),
           },
         ],
+        relation_metadata: [],
+        existing_relation_access: [],
       },
     },
   ]
@@ -273,6 +375,9 @@ test('diagnostic details expose only bounded category mismatches', () => {
       metadata_matches: false,
     },
   ])
+  assert.deepEqual(parsed.details.relation_metadata, relationMetadataDetails)
+  assert.deepEqual(parsed.details.existing_relation_access, [])
+  assert.equal(Object.isFrozen(parsed.details.relation_metadata[0]), true)
 
   const tooManyCategories = Array.from({ length: 11 }, (_, index) => ({
     category: index === 0 ? 'roles' : `invalid_${index}`,
@@ -294,12 +399,16 @@ test('diagnostic details expose only bounded category mismatches', () => {
             metadata_matches: false,
           },
         ],
+        relation_metadata: [],
+        existing_relation_access: [],
       },
     },
     {
       ...resultFor('PARTIAL'),
       details: {
         incomplete_categories: tooManyCategories,
+        relation_metadata: [],
+        existing_relation_access: [],
       },
     },
     {
@@ -311,6 +420,32 @@ test('diagnostic details expose only bounded category mismatches', () => {
             expected_count: 7,
             actual_count: 7,
             count_matches: true,
+          },
+        ],
+        relation_metadata: [],
+        existing_relation_access: [],
+      },
+    },
+    {
+      ...resultFor('PARTIAL', { details: partialRelationAccessDetails }),
+      details: {
+        ...partialRelationAccessDetails,
+        relation_metadata: [
+          {
+            ...relationMetadataDetails[0],
+            identity: 'public.payments',
+          },
+        ],
+      },
+    },
+    {
+      ...resultFor('PARTIAL', { details: partialRelationAccessDetails }),
+      details: {
+        ...partialRelationAccessDetails,
+        existing_relation_access: [
+          {
+            ...existingRelationAccessDetails[0],
+            raw_acl: 'synthetic',
           },
         ],
       },
