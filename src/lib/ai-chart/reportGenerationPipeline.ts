@@ -1,7 +1,12 @@
+import { buildAiChartD1K0P1KnowledgeBundles } from './d1K0Selection'
 import { buildAiChartD1P1StructuralInputs } from './d1P1InputContracts'
+import { buildAiChartD1P1AdapterBridges } from './d1P1AdapterBridge'
+import { buildAiChartD1P1ModelInputs } from './d1P1ModelInputBindings'
+import { buildAiChartD1P1PromptPackages } from './d1P1PromptPackageBuilder'
 import {
   buildAiChartD1ReportWriterRuntimeCommand,
   prepareAiChartD1ReportWriterRuntimeAdapter,
+  summarizeAiChartD1P1AdapterBridgeDescriptors,
   type AiChartD1ReportWriterRuntimeCommand,
 } from './d1ReportWriterRuntimeContracts'
 import {
@@ -26,7 +31,7 @@ export type AiChartD1ReportGenerationPlan = Readonly<{
   targetPalaceIds: readonly string[]
   writerRuntimeCommand: AiChartD1ReportWriterRuntimeCommand
   openAiCallable: false
-  nextStage: 'd1_report_writer_runtime_disabled'
+  nextStage: 'd1_p1_model_execution_required'
 }>
 
 export class AiChartD1ReportWriterRuntimeNotReadyError extends Error {
@@ -49,6 +54,7 @@ function reportScopedId(prefix: string, reportId: string) {
 export function buildAiChartD1ReportGenerationPlan(input: {
   reportId: string
   chartSnapshot: unknown
+  d1K0Catalog: unknown
 }): AiChartD1ReportGenerationPlan {
   const chartId = reportScopedId('chart', input.reportId)
   const runId = reportScopedId('run:d1-report', input.reportId)
@@ -68,6 +74,37 @@ export function buildAiChartD1ReportGenerationPlan(input: {
   const targetPalaceIds = Object.freeze(
     structuralInputs.map((input) => input.targetPalace.palaceId),
   )
+  const knowledgeBundles = buildAiChartD1K0P1KnowledgeBundles(
+    input.d1K0Catalog,
+    structuralInputs,
+    {
+      bundleIds: targetPalaceIds.map(
+        (palaceId) => `${runId}:bundle:${palaceId}`,
+      ),
+    },
+  )
+  const modelInputs = buildAiChartD1P1ModelInputs(
+    input.d1K0Catalog,
+    structuralInputs,
+    knowledgeBundles,
+  )
+  const promptPackages = buildAiChartD1P1PromptPackages(
+    input.d1K0Catalog,
+    structuralInputs,
+    knowledgeBundles,
+    modelInputs,
+  )
+  const p1AdapterBridges = buildAiChartD1P1AdapterBridges(
+    input.d1K0Catalog,
+    structuralInputs,
+    knowledgeBundles,
+    modelInputs,
+    promptPackages,
+  )
+  const p1AdapterBridgeDescriptors =
+    summarizeAiChartD1P1AdapterBridgeDescriptors(
+      p1AdapterBridges.map((bridge) => bridge.descriptor),
+    )
   const writerRuntimeCommand =
     buildAiChartD1ReportWriterRuntimeCommand({
       pipelineVersion:
@@ -75,6 +112,7 @@ export function buildAiChartD1ReportGenerationPlan(input: {
       chartId: n0.chartId,
       sourceSnapshotSha256: n0.sourceSnapshotSha256,
       targetPalaceIds,
+      p1AdapterBridgeDescriptors,
     })
 
   return Object.freeze({
@@ -87,15 +125,23 @@ export function buildAiChartD1ReportGenerationPlan(input: {
     targetPalaceIds,
     writerRuntimeCommand,
     openAiCallable: false,
-    nextStage: 'd1_report_writer_runtime_disabled',
+    nextStage: 'd1_p1_model_execution_required',
   })
 }
 
 export function generateAiChartD1ReportContentFromSnapshot(input: {
   reportId: string
   chartSnapshot: unknown
+  d1K0Catalog?: unknown
 }): string {
-  const plan = buildAiChartD1ReportGenerationPlan(input)
+  if (input.d1K0Catalog === undefined) {
+    throw new AiChartD1ReportWriterRuntimeNotReadyError()
+  }
+  const plan = buildAiChartD1ReportGenerationPlan({
+    reportId: input.reportId,
+    chartSnapshot: input.chartSnapshot,
+    d1K0Catalog: input.d1K0Catalog,
+  })
   prepareAiChartD1ReportWriterRuntimeAdapter(
     plan.writerRuntimeCommand,
   )

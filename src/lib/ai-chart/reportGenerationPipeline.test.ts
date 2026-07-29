@@ -7,18 +7,21 @@ import {
   generateAiChartD1ReportContentFromSnapshot,
 } from './reportGenerationPipeline'
 import { AI_CHART_D1_PALACE_IDENTITIES } from './d1N0Constants'
-import { createAiChartD1FlyingModelInputTestSnapshot } from './d1FlyingModelInputTestSupport'
+import { AI_CHART_D1_P1_MAX_OUTPUT_TOKENS } from './d1P1AdapterBridgeContracts'
+import { completeModelInputSnapshot, getTestCatalog } from './d1P1ModelInputTestSupport'
 import {
-  AI_CHART_D1_REPORT_WRITER_RUNTIME_ADAPTER_NOT_IMPLEMENTED,
+  AI_CHART_D1_REPORT_WRITER_RUNTIME_MODEL_EXECUTION_REQUIRED,
   createAiChartD1ReportWriterRuntimeCommandFingerprint,
   prepareAiChartD1ReportWriterRuntimeAdapter,
 } from './d1ReportWriterRuntimeContracts'
 
 async function main() {
-  const snapshot = createAiChartD1FlyingModelInputTestSnapshot()
+  const snapshot = completeModelInputSnapshot()
+  const d1K0Catalog = await getTestCatalog()
   const plan = buildAiChartD1ReportGenerationPlan({
     reportId: 'report-pipeline-1',
     chartSnapshot: snapshot,
+    d1K0Catalog,
   })
 
   assert.equal(
@@ -28,7 +31,7 @@ async function main() {
   assert.equal(plan.chartId, 'chart:report-pipeline-1')
   assert.equal(plan.p1StructuralInputCount, 12)
   assert.equal(plan.openAiCallable, false)
-  assert.equal(plan.nextStage, 'd1_report_writer_runtime_disabled')
+  assert.equal(plan.nextStage, 'd1_p1_model_execution_required')
   assert.deepEqual(
     plan.targetPalaceIds,
     AI_CHART_D1_PALACE_IDENTITIES.map((identity) => identity.palaceId),
@@ -39,12 +42,28 @@ async function main() {
   )
   assert.equal(
     plan.writerRuntimeCommand.runtimeStatus,
-    'DISABLED_PENDING_IMPLEMENTATION',
+    'D1_P1_ADAPTER_BRIDGES_PREPARED',
   )
   assert.equal(
     plan.writerRuntimeCommand.nextRequiredAction,
-    'IMPLEMENT_D1_REPORT_WRITER_RUNTIME_ADAPTER',
+    'EXECUTE_D1_P1_MODEL_REQUESTS_WITH_EXPLICIT_AUTHORIZATION',
   )
+  assert.equal(plan.writerRuntimeCommand.p1AdapterBridgeDescriptorCount, 12)
+  assert.deepEqual(
+    plan.writerRuntimeCommand.p1AdapterBridgeDescriptors.map(
+      (descriptor) => descriptor.targetPalaceId,
+    ),
+    plan.targetPalaceIds,
+  )
+  for (const descriptor of plan.writerRuntimeCommand.p1AdapterBridgeDescriptors) {
+    assert.equal(descriptor.requestStatus, 'ready')
+    assert.equal(descriptor.runtimeStatus, 'runtime_wiring_required')
+    assert.equal(descriptor.openAiCallable, false)
+    assert.equal(descriptor.maxOutputTokens, AI_CHART_D1_P1_MAX_OUTPUT_TOKENS)
+    assert.match(descriptor.bridgeFingerprint, /^[a-f0-9]{64}$/u)
+    assert.match(descriptor.packageFingerprint, /^[a-f0-9]{64}$/u)
+    assert.match(descriptor.modelInputFingerprint, /^[a-f0-9]{64}$/u)
+  }
   assert.equal(plan.writerRuntimeCommand.productionCallable, false)
   assert.equal(plan.writerRuntimeCommand.fetchAllowed, false)
   assert.equal(plan.writerRuntimeCommand.openAiCallable, false)
@@ -73,21 +92,33 @@ async function main() {
     ),
     true,
   )
+  assert.equal(
+    Object.isFrozen(
+      plan.writerRuntimeCommand.p1AdapterBridgeDescriptors,
+    ),
+    true,
+  )
+  assert.equal(
+    Object.isFrozen(
+      plan.writerRuntimeCommand.p1AdapterBridgeDescriptors[0],
+    ),
+    true,
+  )
   const adapterResult =
     prepareAiChartD1ReportWriterRuntimeAdapter(
       plan.writerRuntimeCommand,
     )
   assert.equal(
     adapterResult.status,
-    'BLOCKED_RUNTIME_ADAPTER_NOT_IMPLEMENTED',
+    'BLOCKED_D1_P1_MODEL_EXECUTION_REQUIRED',
   )
   assert.equal(
     adapterResult.stage,
-    'REPORT_WRITER_RUNTIME_ADAPTER_DECLARED',
+    'D1_P1_ADAPTER_BRIDGES_PREPARED',
   )
   assert.equal(
     adapterResult.error,
-    AI_CHART_D1_REPORT_WRITER_RUNTIME_ADAPTER_NOT_IMPLEMENTED,
+    AI_CHART_D1_REPORT_WRITER_RUNTIME_MODEL_EXECUTION_REQUIRED,
   )
   assert.equal(
     adapterResult.commandFingerprint,
@@ -106,11 +137,22 @@ async function main() {
   assert.equal(adapterResult.customerDeliveryAllowed, false)
   assert.equal(
     adapterResult.reportContentStatus,
-    'NOT_CREATED',
+    'BLOCKED_PENDING_D1_P1_MODEL_OUTPUTS',
+  )
+  assert.equal(adapterResult.p1AdapterBridgeDescriptorCount, 12)
+  assert.deepEqual(
+    adapterResult.p1AdapterBridgeDescriptors.map(
+      (descriptor) => descriptor.targetPalaceId,
+    ),
+    plan.targetPalaceIds,
   )
   assert.equal(Object.isFrozen(adapterResult), true)
   assert.equal(
     Object.isFrozen(adapterResult.targetPalaceIds),
+    true,
+  )
+  assert.equal(
+    Object.isFrozen(adapterResult.p1AdapterBridgeDescriptors),
     true,
   )
   assert.deepEqual(
@@ -138,6 +180,18 @@ async function main() {
     false,
   )
   assert.equal(
+    JSON.stringify(adapterResult).includes('instructions'),
+    false,
+  )
+  assert.equal(
+    JSON.stringify(adapterResult).includes('userInput'),
+    false,
+  )
+  assert.equal(
+    JSON.stringify(adapterResult).includes('schema'),
+    false,
+  )
+  assert.equal(
     JSON.stringify(adapterResult).includes('output_text'),
     false,
   )
@@ -146,6 +200,7 @@ async function main() {
     generateAiChartD1ReportContentFromSnapshot({
       reportId: 'report-pipeline-1',
       chartSnapshot: snapshot,
+      d1K0Catalog,
     })
     assert.fail('expected writer runtime not ready')
   } catch (error) {
@@ -162,6 +217,7 @@ async function main() {
     buildAiChartD1ReportGenerationPlan({
       reportId: '   ',
       chartSnapshot: snapshot,
+      d1K0Catalog,
     }),
   )
 }

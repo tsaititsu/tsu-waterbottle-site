@@ -1435,7 +1435,7 @@ async function run() {
     check('Preview Gate file starts with the exact server-only import', () => {
       assert.equal(gateSource.split('\n')[0], "import 'server-only'")
     })
-    check('Adapter Bridge builder production consumer is only Preview Gate', () => {
+    check('Adapter Bridge builder production consumers are Preview Gate and Report pipeline', () => {
       const consumers = productionFiles
         .filter((path) =>
           readFileSync(path, 'utf8').includes('buildAiChartD1P1AdapterBridges'),
@@ -1444,6 +1444,7 @@ async function run() {
         .filter((path) => !path.endsWith('d1P1AdapterBridge.ts'))
       assert.deepEqual(consumers, [
         'src/lib/ai-chart/d1P1PreviewRequestGate.server.ts',
+        'src/lib/ai-chart/reportGenerationPipeline.ts',
       ])
     })
     check('Preview Gate execute function has zero production consumers', () => {
@@ -1466,7 +1467,9 @@ async function run() {
       check(`${name} imports zero Preview Gate modules`, () => {
         assert.equal(
           productionFiles
-            .filter((path) => matcher.test(path))
+            .filter((path) =>
+              matcher.test(relative(repositoryRoot, path)),
+            )
             .some((path) =>
               readFileSync(path, 'utf8').includes('d1P1PreviewRequestGate'),
             ),
