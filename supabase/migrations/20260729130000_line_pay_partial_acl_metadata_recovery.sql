@@ -143,6 +143,36 @@ declare
 begin
   for v_sql in
     select format(
+      'alter table %I.%I owner to current_user',
+      namespace.nspname,
+      relation.relname
+    )
+    from pg_catalog.pg_class as relation
+    join pg_catalog.pg_namespace as namespace
+      on namespace.oid = relation.relnamespace
+    join pg_catalog.pg_roles as owner_role
+      on owner_role.oid = relation.relowner
+    where namespace.nspname = 'public'
+      and relation.relname in ('payments', 'product_orders')
+      and owner_role.rolname in (
+        'anon',
+        'authenticated',
+        'service_role',
+        'line_pay_payment_executor',
+        'line_pay_payment_function_owner'
+      )
+  loop
+    execute v_sql;
+  end loop;
+end
+$$;
+
+do $$
+declare
+  v_sql text;
+begin
+  for v_sql in
+    select format(
       'revoke all privileges on table %I.%I from public, anon, authenticated, service_role, line_pay_payment_executor, line_pay_payment_function_owner',
       expected.schema_name,
       expected.relation_name

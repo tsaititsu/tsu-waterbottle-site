@@ -868,6 +868,48 @@ try {
   assertNoLinePayMigrationHistory('partial recovery history preservation')
   assertRuntimeWriteBoundary('partial recovery runtime write boundary')
   restoreDatabaseFromTemplate('line_pay_applied_template')
+  psql(
+    `
+      grant select on public.line_pay_checkout_attempts to anon;
+      grant insert on public.payments to authenticated;
+      alter table public.payments owner to authenticated;
+      alter table public.product_orders owner to authenticated;
+    `,
+    'Production PARTIAL owner-derived write fixture',
+  )
+  const ownerDerivedPartial = parseAndValidateDiagnosticOutput(
+    `${psql(diagnosticSql, 'Production PARTIAL owner-derived writes', {
+      readOnly: true,
+    })}\n`,
+  )
+  assert.equal(ownerDerivedPartial.application_state, 'PARTIAL')
+  assertIncompleteCategories(
+    ownerDerivedPartial,
+    ['existing_relation_access', 'relations'],
+    'Production PARTIAL owner-derived write details',
+  )
+  psql(
+    readFileSync(partialRecoveryPath, 'utf8'),
+    'partial ACL metadata recovery for owner-derived writes',
+  )
+  const ownerDerivedRecovered = parseAndValidateDiagnosticOutput(
+    `${psql(diagnosticSql, 'recovered Production owner-derived writes', {
+      readOnly: true,
+    })}\n`,
+  )
+  assert.equal(
+    ownerDerivedRecovered.application_state,
+    'FULL_WITHOUT_HISTORY',
+    `recovered Production owner-derived writes:${JSON.stringify({
+      details: ownerDerivedRecovered.details,
+    })}`,
+  )
+  assertIncompleteCategories(
+    ownerDerivedRecovered,
+    [],
+    'recovered Production owner-derived write details',
+  )
+  restoreDatabaseFromTemplate('line_pay_applied_template')
   runApplicationStateScenario(
     'ownership mismatch',
     'PARTIAL',
