@@ -10,6 +10,7 @@ import {
   AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
 } from './d1P1AdapterBridgeContracts'
 import {
+  AI_CHART_D1_P1_CANDIDATE_COLLECTION_FIELDS,
   createValidAiChartD1P1Result as createValidAiChartD1P1ResultWithServerFacts,
   createAdapterBridgeFixture,
   type AdapterBridgeFixture,
@@ -53,16 +54,6 @@ import {
   type AiChartOpenAiStructuredResult,
 } from './openAiResponses'
 
-const CANDIDATE_FIELDS = [
-  'directCandidates',
-  'oppositeInfluences',
-  'hiddenCombinationInfluences',
-  'trineInfluences',
-  'combinedCandidates',
-  'strengths',
-  'imbalancePossibilities',
-] as const
-
 function createValidAiChartD1P1Result(
   ...args: Parameters<typeof createValidAiChartD1P1ResultWithServerFacts>
 ): Mutable<AiChartD1P1Result> {
@@ -71,7 +62,7 @@ function createValidAiChartD1P1Result(
   result.coverage.majorStarsCovered = []
   result.coverage.minorStarsCovered = []
   result.coverage.noblesCovered = []
-  for (const field of CANDIDATE_FIELDS) {
+  for (const field of AI_CHART_D1_P1_CANDIDATE_COLLECTION_FIELDS) {
     for (const candidate of result[field]) {
       candidate.ruleStatus = 'working_inference'
     }
