@@ -423,9 +423,6 @@ function createSourceBoundP1OutputSchema(
   modelInput: AiChartD1P1ModelInput,
 ): AiChartD1JsonSchema {
   const effectiveMajorStars = effectiveTargetMajorStarNames(modelInput)
-  if (effectiveMajorStars.length === 0) {
-    return AI_CHART_D1_P1_OUTPUT_SCHEMA
-  }
   if (
     hasDuplicates(effectiveMajorStars) ||
     effectiveMajorStars.some(
@@ -442,15 +439,32 @@ function createSourceBoundP1OutputSchema(
   const primaryAxis = schemaRecord(properties.primaryAxis)
   const primaryAxisProperties = schemaRecord(primaryAxis.properties)
   primaryAxisProperties.majorStarCore = createAiChartD1ArraySchema(
-    createAiChartD1StringSchema({
-      enumValues: effectiveMajorStars,
-    }),
+    createAiChartD1StringSchema(
+      effectiveMajorStars.length === 0
+        ? {}
+        : {
+            enumValues: effectiveMajorStars,
+          },
+    ),
     {
-      minimumItems: effectiveMajorStars.length,
-      maximumItems: effectiveMajorStars.length,
+      minimumItems: 0,
+      maximumItems: 0,
     },
   )
   return freezeAiChartD1Value(schema)
+}
+
+function injectServerOwnedMajorStarCore(
+  result: AiChartD1P1Result,
+  modelInput: AiChartD1P1ModelInput,
+): unknown {
+  return {
+    ...result,
+    primaryAxis: {
+      ...result.primaryAxis,
+      majorStarCore: [...effectiveTargetMajorStarNames(modelInput)],
+    },
+  }
 }
 
 function assertPrimaryAxisSourceBinding(
@@ -1161,7 +1175,15 @@ function createAiChartD1P1SourceBoundResultParser(
 ): (value: unknown) => AiChartD1P1Result {
   return (value: unknown) => {
     try {
-      const result = parseAiChartD1P1Result(value)
+      const wireResult = parseAiChartD1P1Result(value)
+      if (wireResult.primaryAxis.majorStarCore.length !== 0) {
+        resultInvalid(
+          AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.PRIMARY_AXIS_MAJOR_STAR_BINDING_MISMATCH,
+        )
+      }
+      const result = parseAiChartD1P1Result(
+        injectServerOwnedMajorStarCore(wireResult, modelInput),
+      )
       assertIdentityAndStatus(result, modelInput)
       assertBorrowedStarBinding(result, modelInput)
       assertPrimaryAxisSourceBinding(result, modelInput)

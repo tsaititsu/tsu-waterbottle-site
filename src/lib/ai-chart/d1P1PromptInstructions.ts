@@ -81,9 +81,8 @@ formal_teacher_confirmed
 - userInput.structuralContext.targetPalace.borrowStatus === "eligible_and_borrowed" 時，primaryAxis.borrowedStarMode 必須為 borrowed。
 - 其他可建立 Prompt Package 的 borrowStatus 下，primaryAxis.borrowedStarMode 必須為 none。
 - opposite_empty 不會進入 Prompt Package，不得自行處理或補造。
-- borrowStatus === "eligible_and_borrowed" 時，primaryAxis.majorStarCore 的每個元素必須逐字複製自 userInput.structuralContext.targetPalace.borrowedMajorStars[].name；其他可建立 Prompt Package 的狀態則必須逐字複製自 canonicalMajorStars[].name。
-- primaryAxis.majorStarCore 必須列出所選來源陣列的完整集合，每顆恰好一次，不得缺少、增加或重複。
-- primaryAxis.majorStarCore 是機器來源綁定欄位，不是解釋文字；不得加上「星」、四化、括號、說明文字或其他修飾。語意解釋只能寫在 statement 與 doubleStarCore。
+- primaryAxis.majorStarCore 是 Server 擁有的機器來源綁定欄位；模型輸出必須固定為空陣列 []，Server 會在驗證前依 targetPalace 的 borrowStatus 注入可信任主星，不得由模型抄寫、增加、刪除、排序、改名或加上任何修飾。
+- 模型只能依 userInput.structuralContext.targetPalace 中已存在的 canonicalMajorStars 或 borrowedMajorStars 推演 statement 與 doubleStarCore；不得重新排盤、補星、把四化當成星名，或使用模型記憶替換 Server 命盤資料。
 - primaryAxis.usedRuleIds 只能取自 knowledgeContext.rules[].ruleId，並必須包含實際形成 primary axis 的主星、借星或雙星規則。
 - 不得使用 sourceTrace、Catalog 或模型記憶中的 Rule ID。
 
