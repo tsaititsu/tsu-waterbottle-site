@@ -130,6 +130,44 @@ export function createValidAiChartD1P1Candidate(
   }
 }
 
+function createTargetSupportingStarCandidates(
+  modelInput: AiChartD1P1ModelInput,
+): Mutable<AiChartD1Candidate>[] {
+  const target = modelInput.structuralContext.targetPalace
+  return target.modeledSupportingStars.map((star, index) => {
+    const trace = modelInput.knowledgeContext.selectionTrace.find(
+      (entry) =>
+        entry.reason === 'supporting_star_present' &&
+        entry.palaceRole === 'target' &&
+        entry.palaceId === target.palaceId &&
+        entry.starName === star.name,
+    )
+    const rule = trace
+      ? modelInput.knowledgeContext.rules.find(
+          (entry) => entry.ruleId === trace.ruleId,
+        )
+      : undefined
+    if (!trace || !rule || rule.kind !== 'supporting_star') {
+      throw new Error('synthetic_fixture_invalid')
+    }
+
+    return {
+      candidateId: `candidate:target-supporting:${index}`,
+      statement: 'synthetic target supporting-star candidate',
+      lifeExamples: ['synthetic supporting-star life example'],
+      scopes: ['personality'],
+      palaceIds: [target.palaceId],
+      starBasis: [star.name],
+      structureBasis: ['本宮', '輔星'],
+      usedRuleIds: [rule.ruleId],
+      ruleStatus: rule.ruleStatus,
+      intensity: 'normal',
+      conflictGroupId: null,
+      d2Boundary: null,
+    }
+  })
+}
+
 export function createValidAiChartD1P1Result(
   modelInput: AiChartD1P1ModelInput,
 ): Mutable<AiChartD1P1Result> {
@@ -221,7 +259,7 @@ export function createValidAiChartD1P1Result(
     oppositeInfluences: [],
     hiddenCombinationInfluences: [],
     trineInfluences: [],
-    combinedCandidates: [],
+    combinedCandidates: createTargetSupportingStarCandidates(modelInput),
     tensions: [],
     strengths: [],
     imbalancePossibilities: [],

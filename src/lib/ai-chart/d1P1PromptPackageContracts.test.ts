@@ -36,9 +36,9 @@ import {
 } from './d1P1PromptPackageTestSupport'
 
 const PREVIOUS_INSTRUCTIONS_SHA256 =
-  '130b4d8023d83045359c8fed1fb794c85359277a745a467fd865c7f840374a92'
-const EXPECTED_INSTRUCTIONS_SHA256 =
   '2c0b22f4413307ca8a03fa8eafdae54b0a2b627d63755801bcd4da9a96da0e53'
+const EXPECTED_INSTRUCTIONS_SHA256 =
+  '3ec69ae331a480f537921e374dfbe599d541418011e3a6d70b7e9b03677614b6'
 const EXPECTED_OUTPUT_SCHEMA_SHA256 =
   'fcd63048ff242fbfd12e195722d3065def0960497efbcdb7162893e271052da1'
 
@@ -444,6 +444,20 @@ async function run() {
     assert.match(
       AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
       /canonicalMajorStars\[\]\.name、borrowedMajorStars\[\]\.name 與 modeledSupportingStars\[\]\.name/u,
+    )
+  })
+  check('instructions reserve minor-star coverage for observed Server derivation', () => {
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /coverage\.minorStarsCovered 同樣是 Server 擁有的機器來源綁定欄位；模型輸出必須固定為空陣列 \[\]/u,
+    )
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /同一個 Candidate 內同時具有 target palaceId、對應 modeledSupportingStars\[\]\.name 與對應 supporting_star Rule ID/u,
+    )
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /status=complete 時，每顆 target modeledSupportingStars 都必須具有這組實際分析證據/u,
     )
   })
   check('instructions keep observation-only stars out of semantic inference', () => {

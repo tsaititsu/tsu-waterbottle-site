@@ -59,6 +59,7 @@ function createValidAiChartD1P1Result(
   const result = createValidAiChartD1P1ResultWithServerFacts(...args)
   result.primaryAxis.majorStarCore = []
   result.coverage.majorStarsCovered = []
+  result.coverage.minorStarsCovered = []
   return result
 }
 
