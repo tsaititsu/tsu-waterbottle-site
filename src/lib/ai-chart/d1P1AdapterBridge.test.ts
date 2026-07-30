@@ -168,6 +168,15 @@ function primaryAxisMajorStarCoreSchema(
   return asSchemaRecord(primaryAxisProperties.majorStarCore)
 }
 
+function coverageMajorStarsSchema(
+  schema: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const properties = asSchemaRecord(schema.properties)
+  const coverage = asSchemaRecord(properties.coverage)
+  const coverageProperties = asSchemaRecord(coverage.properties)
+  return asSchemaRecord(coverageProperties.majorStarsCovered)
+}
+
 function effectiveMajorStarNames(
   modelInput: AdapterBridgeFixture['modelInputs'][number],
 ): readonly string[] {
@@ -212,6 +221,15 @@ function parseResult(
     ) {
       ;(primaryAxis as Record<string, unknown>).majorStarCore = []
     }
+    const coverage = wireResult.coverage
+    if (
+      coverage !== null &&
+      typeof coverage === 'object' &&
+      !Array.isArray(coverage) &&
+      Array.isArray((coverage as Record<string, unknown>).majorStarsCovered)
+    ) {
+      ;(coverage as Record<string, unknown>).majorStarsCovered = []
+    }
   }
   return bridge.request.parseResult(wireResult)
 }
@@ -221,6 +239,29 @@ function parseWireResult(
   result: unknown,
 ) {
   return bridge.request.parseResult(result)
+}
+
+function parseCoverageWireResult(
+  bridge: AiChartD1P1AdapterBridge,
+  result: unknown,
+) {
+  const wireResult = structuredClone(result) as Record<string, unknown>
+  if (
+    wireResult !== null &&
+    typeof wireResult === 'object' &&
+    !Array.isArray(wireResult)
+  ) {
+    const primaryAxis = wireResult.primaryAxis
+    if (
+      primaryAxis !== null &&
+      typeof primaryAxis === 'object' &&
+      !Array.isArray(primaryAxis) &&
+      Array.isArray((primaryAxis as Record<string, unknown>).majorStarCore)
+    ) {
+      ;(primaryAxis as Record<string, unknown>).majorStarCore = []
+    }
+  }
+  return bridge.request.parseResult(wireResult)
 }
 
 function resultWithSingleCandidate(
@@ -428,7 +469,10 @@ async function run() {
     const formal = structuredClone(AI_CHART_D1_P1_OUTPUT_SCHEMA)
     const sourceBoundMajorStarCore = primaryAxisMajorStarCoreSchema(sourceBound)
     const formalMajorStarCore = primaryAxisMajorStarCoreSchema(formal)
+    const sourceBoundCoverageMajorStars = coverageMajorStarsSchema(sourceBound)
+    const formalCoverageMajorStars = coverageMajorStarsSchema(formal)
     Object.assign(sourceBoundMajorStarCore, formalMajorStarCore)
+    Object.assign(sourceBoundCoverageMajorStars, formalCoverageMajorStars)
     assert.deepEqual(sourceBound, formal)
   })
   check('each request Schema reserves primaryAxis majorStarCore for Server injection', () => {
@@ -439,6 +483,16 @@ async function run() {
       assert.deepEqual(items.enum, expectedMajorStars)
       assert.equal(majorStarCore.minItems, 0)
       assert.equal(majorStarCore.maxItems, 0)
+    })
+  })
+  check('each request Schema reserves coverage majorStarsCovered for Server injection', () => {
+    bridges.forEach((entry, index) => {
+      const expectedMajorStars = effectiveMajorStarNames(modelInputs[index])
+      const majorStarsCovered = coverageMajorStarsSchema(entry.request.schema)
+      const items = asSchemaRecord(majorStarsCovered.items)
+      assert.deepEqual(items.enum, expectedMajorStars)
+      assert.equal(majorStarsCovered.minItems, 0)
+      assert.equal(majorStarsCovered.maxItems, 0)
     })
   })
   check('request Schema admits no model-authored primary-axis star value', () => {
@@ -456,10 +510,11 @@ async function run() {
     bridges.forEach((entry, index) => {
       const wireResult = createValidAiChartD1P1Result(modelInputs[index])
       wireResult.primaryAxis.majorStarCore = []
-      assert.deepEqual(
-        entry.request.parseResult(wireResult).primaryAxis.majorStarCore,
-        effectiveMajorStarNames(modelInputs[index]),
-      )
+      wireResult.coverage.majorStarsCovered = []
+      const parsed = entry.request.parseResult(wireResult)
+      const expected = effectiveMajorStarNames(modelInputs[index])
+      assert.deepEqual(parsed.primaryAxis.majorStarCore, expected)
+      assert.deepEqual(parsed.coverage.majorStarsCovered, expected)
     })
   })
   check('request parser is a function', () => {
@@ -896,7 +951,7 @@ async function run() {
       ]
       mutate(value)
       const error = assertResultInvalid(
-        () => parseResult(bridge, value),
+        () => parseCoverageWireResult(bridge, value),
         AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID,
       )
       assertSafeResultInvalid(error, [malformedDuplicateMarker])
@@ -910,7 +965,7 @@ async function run() {
       42,
     ]
     const error = assertResultInvalid(
-      () => parseResult(bridge, value),
+      () => parseCoverageWireResult(bridge, value),
       AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID,
     )
     assertSafeResultInvalid(error, [malformedDuplicateMarker])
@@ -961,7 +1016,7 @@ async function run() {
         value.coverage[firstField].push(firstValue)
         value.coverage[secondField].push(secondValue)
         const error = assertResultInvalid(
-          () => parseResult(coveragePriorityBridge, value),
+          () => parseCoverageWireResult(coveragePriorityBridge, value),
           expectedReasonCode,
         )
         assertSafeResultInvalid(error, [firstValue, secondValue])
@@ -988,7 +1043,7 @@ async function run() {
         value.coverage[field].push(firstValue)
       }
       const error = assertResultInvalid(
-        () => parseResult(coveragePriorityBridge, value),
+        () => parseCoverageWireResult(coveragePriorityBridge, value),
         AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_DUPLICATE,
       )
       assertSafeResultInvalid(error, duplicateValues)
@@ -1127,10 +1182,9 @@ async function run() {
     assert.equal(value.coverage.minorStarsCovered.length > 0, true)
     assert.doesNotThrow(() => parseResult(bridge, value))
   })
-  check('complete coverage is order-insensitive', () => {
+  check('complete model-authored coverage is order-insensitive', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.coverage.directMeaningsConsidered.reverse()
-    value.coverage.majorStarsCovered.reverse()
     value.coverage.minorStarsCovered.reverse()
     value.coverage.mutagensCovered.reverse()
     value.coverage.maleficsCovered.reverse()
@@ -1170,11 +1224,6 @@ async function run() {
     assertSafeResultInvalid(error, [duplicateMeaningId])
   })
   for (const [name, field, reasonCode] of [
-    [
-      'target major stars',
-      'majorStarsCovered',
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
-    ],
     [
       'target supporting stars',
       'minorStarsCovered',
@@ -1304,19 +1353,19 @@ async function run() {
   const otherMajorStar = modelInputs[1].structuralContext.targetPalace
     .canonicalMajorStars[0]
   assert.ok(otherMajorStar)
-  check('another palace major star is rejected from coverage', () => {
+  check('wire coverage rejects another palace model-authored major star', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.coverage.majorStarsCovered = [otherMajorStar.name]
     assertResultInvalid(
-      () => parseResult(bridge, value),
+      () => parseCoverageWireResult(bridge, value),
       AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
     )
   })
-  check('an unseen major star is rejected from coverage', () => {
+  check('wire coverage rejects an unseen model-authored major star', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.coverage.majorStarsCovered = ['紫微']
     assertResultInvalid(
-      () => parseResult(bridge, value),
+      () => parseCoverageWireResult(bridge, value),
       AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
     )
   })
@@ -1626,7 +1675,10 @@ async function run() {
       const value = createValidAiChartD1P1Result(matrixInput)
       mutate(value)
       assertResultInvalid(
-        () => parseResult(matrixBridge, value),
+        () =>
+          name === 'major stars'
+            ? parseCoverageWireResult(matrixBridge, value)
+            : parseResult(matrixBridge, value),
         expectedReasonCode,
       )
     })
@@ -1638,20 +1690,17 @@ async function run() {
     const value = createValidAiChartD1P1Result(coverageInput)
     value.status = status
     const missingMeaning = value.coverage.directMeaningsConsidered.shift()
-    const missingMajor = value.coverage.majorStarsCovered.shift()
     const missingMinor = value.coverage.minorStarsCovered.shift()
     const missingMutagen = value.coverage.mutagensCovered.shift()
     const missingMalefic = value.coverage.maleficsCovered.shift()
     const missingNoble = value.coverage.noblesCovered.shift()
     assert.ok(missingMeaning)
-    assert.ok(missingMajor)
     assert.ok(missingMinor)
     assert.ok(missingMutagen)
     assert.ok(missingMalefic)
     assert.ok(missingNoble)
     value.coverage.omittedItems = [
       { item: missingMeaning, reason: 'target meaning omitted' },
-      { item: missingMajor, reason: 'target major star omitted' },
       {
         item: missingMinor,
         reason: missingMinor === missingNoble
@@ -1759,11 +1808,11 @@ async function run() {
         AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
       )
     })
-    check(`${status} coverage rejects an extra unknown source`, () => {
+    check(`${status} wire coverage rejects a model-authored major star`, () => {
       const value = createSubsetResult(status)
       value.coverage.majorStarsCovered.push('紫微')
       assertResultInvalid(
-        () => parseResult(coverageBridge, value),
+        () => parseCoverageWireResult(coverageBridge, value),
         AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
       )
     })
@@ -1775,13 +1824,6 @@ async function run() {
       coverageInput,
       'directMeaningsConsidered',
       AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_OMISSION_TRACE_MISSING,
-    ],
-    [
-      'major stars',
-      coverageBridge,
-      coverageInput,
-      'majorStarsCovered',
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
     ],
     [
       'minor stars',
@@ -2021,6 +2063,23 @@ async function run() {
       modelInput.structuralContext.targetPalace.canonicalMajorStars.map(
         (star) => star.name,
       ),
+    )
+  })
+  check('coverage injects Server-owned major stars for an empty wire field', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.primaryAxis.majorStarCore = []
+    value.coverage.majorStarsCovered = []
+    assert.deepEqual(
+      bridge.request.parseResult(value).coverage.majorStarsCovered,
+      effectiveMajorStarNames(modelInput),
+    )
+  })
+  check('wire parser rejects an exact model-authored coverage major-star list', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.primaryAxis.majorStarCore = []
+    assertResultInvalid(
+      () => parseWireResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
     )
   })
   check('primaryAxis rejects an extra major star', () => {
@@ -2970,7 +3029,7 @@ async function run() {
     }
 
     visit(sourceFile)
-    assert.equal(callSites.length, 43)
+    assert.equal(callSites.length, 44)
 
     const allowedReasonNames = new Set(
       Object.keys(AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS),
@@ -3047,7 +3106,7 @@ async function run() {
     }
     assert.equal(controlledHelperReasons, 1)
     assert.equal(controlledDuplicateMappingReasons, 1)
-    assert.equal(directFixedReasons, 41)
+    assert.equal(directFixedReasons, 42)
 
     assert.equal(stringCoverageCallSites.length, 3)
     assert.deepEqual(
