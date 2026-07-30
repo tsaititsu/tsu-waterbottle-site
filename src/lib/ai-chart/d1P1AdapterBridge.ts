@@ -518,6 +518,22 @@ function createSourceBoundP1OutputSchema(
       maximumItems: 0,
     },
   )
+  const nobleStarNames = supportingStarNames.filter((starName) =>
+    P1_NOBLE_STAR_NAMES.has(starName),
+  )
+  coverageProperties.noblesCovered = createAiChartD1ArraySchema(
+    createAiChartD1StringSchema(
+      nobleStarNames.length === 0
+        ? {}
+        : {
+            enumValues: nobleStarNames,
+          },
+    ),
+    {
+      minimumItems: 0,
+      maximumItems: 0,
+    },
+  )
   return freezeAiChartD1Value(schema)
 }
 
@@ -557,17 +573,19 @@ function deriveTargetMinorStarCoverage(
     .map((binding) => binding.starName)
 }
 
-function injectServerOwnedMinorStarCoverage(
+function injectServerOwnedSupportingStarCoverage(
   result: AiChartD1P1Result,
   modelInput: AiChartD1P1ModelInput,
 ): unknown {
+  const minorStarsCovered = deriveTargetMinorStarCoverage(result, modelInput)
   return {
     ...result,
     coverage: {
       ...result.coverage,
-      minorStarsCovered: [
-        ...deriveTargetMinorStarCoverage(result, modelInput),
-      ],
+      minorStarsCovered: [...minorStarsCovered],
+      noblesCovered: minorStarsCovered.filter((starName) =>
+        P1_NOBLE_STAR_NAMES.has(starName),
+      ),
     },
   }
 }
@@ -1296,6 +1314,11 @@ function createAiChartD1P1SourceBoundResultParser(
           AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
         )
       }
+      if (wireResult.coverage.noblesCovered.length !== 0) {
+        resultInvalid(
+          AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_NOBLES_MISMATCH,
+        )
+      }
       const resultWithServerMajorStars = parseAiChartD1P1Result(
         injectServerOwnedMajorStarBindings(wireResult, modelInput),
       )
@@ -1304,7 +1327,7 @@ function createAiChartD1P1SourceBoundResultParser(
       assertPrimaryAxisSourceBinding(resultWithServerMajorStars, modelInput)
       assertRulePalaceAndStarBindings(resultWithServerMajorStars, modelInput)
       const result = parseAiChartD1P1Result(
-        injectServerOwnedMinorStarCoverage(
+        injectServerOwnedSupportingStarCoverage(
           resultWithServerMajorStars,
           modelInput,
         ),

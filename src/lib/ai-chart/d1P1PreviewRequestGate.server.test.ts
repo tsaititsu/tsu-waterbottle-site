@@ -60,6 +60,7 @@ function createValidAiChartD1P1Result(
   result.primaryAxis.majorStarCore = []
   result.coverage.majorStarsCovered = []
   result.coverage.minorStarsCovered = []
+  result.coverage.noblesCovered = []
   return result
 }
 

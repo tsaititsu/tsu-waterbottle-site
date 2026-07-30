@@ -36,9 +36,9 @@ import {
 } from './d1P1PromptPackageTestSupport'
 
 const PREVIOUS_INSTRUCTIONS_SHA256 =
-  '2c0b22f4413307ca8a03fa8eafdae54b0a2b627d63755801bcd4da9a96da0e53'
-const EXPECTED_INSTRUCTIONS_SHA256 =
   '3ec69ae331a480f537921e374dfbe599d541418011e3a6d70b7e9b03677614b6'
+const EXPECTED_INSTRUCTIONS_SHA256 =
+  '6cbb531b2cb3f9ba20bd456cc0f7c7128e0fca4d38e9b2063f24192c9534a970'
 const EXPECTED_OUTPUT_SCHEMA_SHA256 =
   'fcd63048ff242fbfd12e195722d3065def0960497efbcdb7162893e271052da1'
 
@@ -458,6 +458,16 @@ async function run() {
     assert.match(
       AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
       /status=complete 時，每顆 target modeledSupportingStars 都必須具有這組實際分析證據/u,
+    )
+  })
+  check('instructions reserve noble coverage for observed Server derivation', () => {
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /coverage\.noblesCovered 也是 Server 擁有的機器來源綁定欄位；模型輸出必須固定為空陣列 \[\]/u,
+    )
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /Server 只會從已具有同一 Candidate 分析證據的 target modeledSupportingStars 中，篩出左輔、右弼、天魁、天鉞/u,
     )
   })
   check('instructions keep observation-only stars out of semantic inference', () => {
