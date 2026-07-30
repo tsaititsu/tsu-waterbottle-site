@@ -453,17 +453,28 @@ function compileDoubleStars(asset: AiChartD1VerifiedCompilationAsset): Readonly<
       kind: 'double_star',
       title: `${item.leftStar}${item.rightStar}固定核心`,
       content,
-      ruleStatus: 'teacher_confirmed',
+      ruleStatus:
+        definition.sourceAuthority === 'lecture_backfill'
+          ? 'lecture_backfill'
+          : 'teacher_confirmed',
       sourceAuthority: definition.sourceAuthority,
       sourceFile: asset.path,
       sourceFileSha256: asset.sha256,
       sourceLocator: markdownLocator(locator),
       appliesTo: [`pair:${pairSlug}`],
-      selectionTags: [`pair:${pairSlug}`, 'double:confirmed-core'],
+      selectionTags: [
+        `pair:${pairSlug}`,
+        definition.sourceAuthority === 'lecture_backfill'
+          ? 'double:lecture-backfill-core'
+          : 'double:confirmed-core',
+      ],
     }))
     return Object.freeze({
       ...item,
-      specificRuleStatus: 'teacher_confirmed' as const,
+      specificRuleStatus:
+        definition.sourceAuthority === 'lecture_backfill'
+          ? 'lecture_backfill' as const
+          : 'teacher_confirmed' as const,
       specificRuleId: ruleId,
       missingReason: null,
     })
@@ -650,6 +661,13 @@ function assertSafeSelectedContent(rules: readonly AiChartD1K0Rule[]): void {
           term === '官非' &&
           rule.ruleId === 'rule:mutagen:tianxiang:ji' &&
           rule.content.includes('具體官非事件留待大限、流年。')
+        ) {
+          return false
+        }
+        if (
+          term === '官非' &&
+          rule.ruleId === 'rule:double:ziwei-tianxiang:core' &&
+          rule.content.includes('不直接斷官非')
         ) {
           return false
         }

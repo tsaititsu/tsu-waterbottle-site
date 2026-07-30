@@ -265,39 +265,66 @@ export const AI_CHART_D1_K0_PALACE_SECTION_LOCATOR = section(
 
 type DoubleRuleDefinition = Readonly<{
   pairKey: string
+  headingPath: readonly string[]
   heading: string
-  label: string
-  sourceAuthority: 'reasoning_teacher_confirmed' | 'reasoning_confirmed'
+  label: string | null
+  sourceAuthority:
+    | 'reasoning_teacher_confirmed'
+    | 'reasoning_confirmed'
+    | 'lecture_backfill'
 }>
 
-export const AI_CHART_D1_K0_DOUBLE_RULE_DEFINITIONS = Object.freeze([
-  ['pair:wuqu-tianfu', '1. 武曲天府（同宮）', '已確認核心', 'reasoning_confirmed'],
-  ['pair:wuqu-tanlang', '2. 武曲貪狼（同宮／對拱）', '同宮核心（老師確認）', 'reasoning_teacher_confirmed'],
-  ['pair:wuqu-qisha', '3. 武曲七殺（同宮）／天府對拱', '同宮核心（老師確認）', 'reasoning_teacher_confirmed'],
-  ['pair:wuqu-pojun', '4. 武曲破軍／天相', '一般人格核心（老師確認）', 'reasoning_teacher_confirmed'],
-  ['pair:wuqu-tianxiang', '5. 武曲天相／破軍', '同宮核心（老師確認）', 'reasoning_teacher_confirmed'],
-  ['pair:tianji-tianliang', '6. 天機天梁（同宮）', '已確認核心', 'reasoning_confirmed'],
-  ['pair:taiyang-tianliang', '8. 太陽天梁（同宮）', '已確認', 'reasoning_confirmed'],
-  ['pair:tiantong-tianliang', '10. 天同天梁（同宮）', '已確認人格', 'reasoning_confirmed'],
-  ['pair:taiyang-taiyin', '14. 太陽太陰（同宮／對拱）', '同宮核心（老師確認）', 'reasoning_teacher_confirmed'],
-  ['pair:lianzhen-qisha', '15. 廉貞七殺／天府', '同宮核心（老師確認）', 'reasoning_teacher_confirmed'],
-  ['pair:lianzhen-tianfu', '16. 廉貞天府／七殺', '同宮可用工作版（老師確認）', 'reasoning_teacher_confirmed'],
-  ['pair:lianzhen-pojun', '17. 廉貞破軍／天相', '同宮核心（老師確認）', 'reasoning_teacher_confirmed'],
-  ['pair:lianzhen-tianxiang', '18. 廉貞天相／破軍', '同宮無煞忌核心（老師確認）', 'reasoning_teacher_confirmed'],
-  ['pair:tianji-taiyin', '27. 天機太陰（同宮）', '已確認核心', 'reasoning_confirmed'],
-].map(([pairKey, heading, label, sourceAuthority]) =>
-  Object.freeze({ pairKey, heading, label, sourceAuthority }),
+type DoubleRuleDefinitionEntry = readonly [
+  pairKey: string,
+  headingPath: readonly string[],
+  heading: string,
+  label: string | null,
+  sourceAuthority: DoubleRuleDefinition['sourceAuthority'],
+]
+
+const AI_CHART_D1_K0_DOUBLE_RULE_DEFINITION_ENTRIES = [
+  ['pair:wuqu-tianfu', ['三、講義已有專屬說明、可直接進入工作版的組合'], '1. 武曲天府（同宮）', '已確認核心', 'reasoning_confirmed'],
+  ['pair:wuqu-tanlang', ['三、講義已有專屬說明、可直接進入工作版的組合'], '2. 武曲貪狼（同宮／對拱）', '同宮核心（老師確認）', 'reasoning_teacher_confirmed'],
+  ['pair:wuqu-qisha', ['三、講義已有專屬說明、可直接進入工作版的組合'], '3. 武曲七殺（同宮）／天府對拱', '同宮核心（老師確認）', 'reasoning_teacher_confirmed'],
+  ['pair:wuqu-pojun', ['三、講義已有專屬說明、可直接進入工作版的組合'], '4. 武曲破軍／天相', '一般人格核心（老師確認）', 'reasoning_teacher_confirmed'],
+  ['pair:wuqu-tianxiang', ['三、講義已有專屬說明、可直接進入工作版的組合'], '5. 武曲天相／破軍', '同宮核心（老師確認）', 'reasoning_teacher_confirmed'],
+  ['pair:tianji-tianliang', ['三、講義已有專屬說明、可直接進入工作版的組合'], '6. 天機天梁（同宮）', '已確認核心', 'reasoning_confirmed'],
+  ['pair:taiyang-tianliang', ['三、講義已有專屬說明、可直接進入工作版的組合'], '8. 太陽天梁（同宮）', '已確認', 'reasoning_confirmed'],
+  ['pair:tiantong-tianliang', ['三、講義已有專屬說明、可直接進入工作版的組合'], '10. 天同天梁（同宮）', '已確認人格', 'reasoning_confirmed'],
+  ['pair:taiyang-taiyin', ['三、講義已有專屬說明、可直接進入工作版的組合'], '14. 太陽太陰（同宮／對拱）', '同宮核心（老師確認）', 'reasoning_teacher_confirmed'],
+  ['pair:lianzhen-qisha', ['三、講義已有專屬說明、可直接進入工作版的組合'], '15. 廉貞七殺／天府', '同宮核心（老師確認）', 'reasoning_teacher_confirmed'],
+  ['pair:lianzhen-tianfu', ['三、講義已有專屬說明、可直接進入工作版的組合'], '16. 廉貞天府／七殺', '同宮可用工作版（老師確認）', 'reasoning_teacher_confirmed'],
+  ['pair:lianzhen-pojun', ['三、講義已有專屬說明、可直接進入工作版的組合'], '17. 廉貞破軍／天相', '同宮核心（老師確認）', 'reasoning_teacher_confirmed'],
+  ['pair:lianzhen-tianxiang', ['三、講義已有專屬說明、可直接進入工作版的組合'], '18. 廉貞天相／破軍', '同宮無煞忌核心（老師確認）', 'reasoning_teacher_confirmed'],
+  ['pair:tianji-taiyin', ['三、講義已有專屬說明、可直接進入工作版的組合'], '27. 天機太陰（同宮）', '已確認核心', 'reasoning_confirmed'],
+  ['pair:ziwei-tianfu', ['四、紫微系五組｜講義＋CTA 回填工作版'], '1. 紫微天府（同宮）', null, 'lecture_backfill'],
+  ['pair:ziwei-qisha', ['四、紫微系五組｜講義＋CTA 回填工作版'], '2. 紫微七殺（同宮）', null, 'lecture_backfill'],
+  ['pair:ziwei-pojun', ['四、紫微系五組｜講義＋CTA 回填工作版'], '3. 紫微破軍（同宮）', null, 'lecture_backfill'],
+  ['pair:ziwei-tianxiang', ['四、紫微系五組｜講義＋CTA 回填工作版'], '4. 紫微天相（同宮）', null, 'lecture_backfill'],
+  ['pair:ziwei-tanlang', ['四、紫微系五組｜講義＋CTA 回填工作版'], '5. 紫微貪狼（同宮／對拱）', null, 'lecture_backfill'],
+] as const satisfies readonly DoubleRuleDefinitionEntry[]
+
+export const AI_CHART_D1_K0_DOUBLE_RULE_DEFINITIONS = Object.freeze(AI_CHART_D1_K0_DOUBLE_RULE_DEFINITION_ENTRIES.map(([pairKey, headingPath, heading, label, sourceAuthority]) =>
+  Object.freeze({
+    pairKey,
+    headingPath: Object.freeze([...headingPath]),
+    heading,
+    label,
+    sourceAuthority,
+  }),
 ) as readonly DoubleRuleDefinition[])
 
 export function createAiChartD1K0DoubleLocator(
   definition: DoubleRuleDefinition,
 ): AiChartD1K0MarkdownLocatorDefinition {
-  return labeled(
-    ['三、講義已有專屬說明、可直接進入工作版的組合'],
-    3,
-    definition.heading,
-    definition.label,
-  )
+  return definition.label === null
+    ? bulletBlock(definition.headingPath, 3, definition.heading)
+    : labeled(
+        definition.headingPath,
+        3,
+        definition.heading,
+        definition.label,
+      )
 }
 
 type SupportingDefinition = Readonly<{
