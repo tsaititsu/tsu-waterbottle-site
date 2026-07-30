@@ -153,6 +153,32 @@ function assertNoFetch(run: () => void): void {
   assert.equal(fetchCount, 0)
 }
 
+function asSchemaRecord(value: unknown): Record<string, unknown> {
+  assert.equal(value !== null && typeof value === 'object', true)
+  assert.equal(Array.isArray(value), false)
+  return value as Record<string, unknown>
+}
+
+function primaryAxisMajorStarCoreSchema(
+  schema: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const properties = asSchemaRecord(schema.properties)
+  const primaryAxis = asSchemaRecord(properties.primaryAxis)
+  const primaryAxisProperties = asSchemaRecord(primaryAxis.properties)
+  return asSchemaRecord(primaryAxisProperties.majorStarCore)
+}
+
+function effectiveMajorStarNames(
+  modelInput: AdapterBridgeFixture['modelInputs'][number],
+): readonly string[] {
+  const target = modelInput.structuralContext.targetPalace
+  return (
+    target.borrowStatus === 'eligible_and_borrowed'
+      ? target.borrowedMajorStars
+      : target.canonicalMajorStars
+  ).map((star) => star.name)
+}
+
 function buildFrom(
   fixture: AdapterBridgeFixture,
   modelInputs: unknown = fixture.modelInputs,
@@ -373,8 +399,35 @@ async function run() {
       AI_CHART_D1_P1_ADAPTER_BRIDGE_DESCRIPTION,
     )
   })
-  check('request uses the formal P1 Output Schema', () => {
-    assert.deepEqual(bridge.request.schema, AI_CHART_D1_P1_OUTPUT_SCHEMA)
+  check('request uses a source-bound specialization of the formal P1 Output Schema', () => {
+    assert.notDeepEqual(bridge.request.schema, AI_CHART_D1_P1_OUTPUT_SCHEMA)
+    const sourceBound = structuredClone(bridge.request.schema)
+    const formal = structuredClone(AI_CHART_D1_P1_OUTPUT_SCHEMA)
+    const sourceBoundMajorStarCore = primaryAxisMajorStarCoreSchema(sourceBound)
+    const formalMajorStarCore = primaryAxisMajorStarCoreSchema(formal)
+    Object.assign(sourceBoundMajorStarCore, formalMajorStarCore)
+    assert.deepEqual(sourceBound, formal)
+  })
+  check('each request Schema binds primaryAxis majorStarCore to its effective target stars', () => {
+    bridges.forEach((entry, index) => {
+      const expectedMajorStars = effectiveMajorStarNames(modelInputs[index])
+      const majorStarCore = primaryAxisMajorStarCoreSchema(entry.request.schema)
+      const items = asSchemaRecord(majorStarCore.items)
+      assert.deepEqual(items.enum, expectedMajorStars)
+      assert.equal(majorStarCore.minItems, expectedMajorStars.length)
+      assert.equal(majorStarCore.maxItems, expectedMajorStars.length)
+    })
+  })
+  check('request Schema rejects decorated primary-axis star names before source-bound parsing', () => {
+    const expectedMajorStars = effectiveMajorStarNames(modelInput)
+    const majorStarCore = primaryAxisMajorStarCoreSchema(bridge.request.schema)
+    const items = asSchemaRecord(majorStarCore.items)
+    const allowed = items.enum
+    assert.ok(Array.isArray(allowed))
+    for (const starName of expectedMajorStars) {
+      assert.equal(allowed.includes(`${starName}星`), false)
+      assert.equal(allowed.includes(`${starName}化權`), false)
+    }
   })
   check('request parser is a function', () => {
     assert.equal(typeof bridge.request.parseResult, 'function')
@@ -554,8 +607,8 @@ async function run() {
   check('Responses format is strict', () => {
     assert.equal(body.text.format.strict, true)
   })
-  check('Responses format uses the formal P1 Schema', () => {
-    assert.deepEqual(body.text.format.schema, AI_CHART_D1_P1_OUTPUT_SCHEMA)
+  check('Responses format uses the source-bound P1 Schema', () => {
+    assert.deepEqual(body.text.format.schema, bridge.request.schema)
   })
   for (const key of [
     'temperature',

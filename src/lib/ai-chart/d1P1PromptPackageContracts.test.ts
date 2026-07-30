@@ -36,9 +36,9 @@ import {
 } from './d1P1PromptPackageTestSupport'
 
 const PREVIOUS_INSTRUCTIONS_SHA256 =
-  '7a636a1aa1aee614bb2408893994e75dd6407e35ace116eb3470d7bc63f4b626'
-const EXPECTED_INSTRUCTIONS_SHA256 =
   '308fecf055f3763db98969831ba6b7e9d7bedd4aa0d9db0296b759aa65488d59'
+const EXPECTED_INSTRUCTIONS_SHA256 =
+  '11e62ed32912064973f0cf9c48a645fd356a72dcbef7ef0ec5953a4a33aecee7'
 const EXPECTED_OUTPUT_SCHEMA_SHA256 =
   'fcd63048ff242fbfd12e195722d3065def0960497efbcdb7162893e271052da1'
 
@@ -340,6 +340,20 @@ async function run() {
     assert.match(
       AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
       /實際形成 primary axis 的主星、借星或雙星規則/u,
+    )
+  })
+  check('instructions bind primaryAxis majorStarCore to exact source names', () => {
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /primaryAxis\.majorStarCore 的每個元素必須逐字複製/u,
+    )
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /不得加上「星」、四化、括號、說明文字或其他修飾/u,
+    )
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /每顆恰好一次，不得缺少、增加或重複/u,
     )
   })
   check('instructions reject sourceTrace and Catalog rule ids', () => {

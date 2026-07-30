@@ -1,7 +1,10 @@
 import {
   assertAiChartD1SafeGraph,
+  createAiChartD1ArraySchema,
+  createAiChartD1StringSchema,
   freezeAiChartD1Value,
   type AiChartD1Candidate,
+  type AiChartD1JsonSchema,
   type AiChartD1RuleStatus,
   type AiChartD1StructureBasis,
 } from './d1CommonContracts'
@@ -403,6 +406,51 @@ function effectiveTargetMajorStarNames(
       ? target.borrowedMajorStars
       : target.canonicalMajorStars
   ).map((star) => star.name)
+}
+
+const P1_MAJOR_STAR_NAME_SET: ReadonlySet<string> = new Set(
+  AI_CHART_D1_MAJOR_STAR_NAMES,
+)
+
+function schemaRecord(value: unknown): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    invalid()
+  }
+  return value as Record<string, unknown>
+}
+
+function createSourceBoundP1OutputSchema(
+  modelInput: AiChartD1P1ModelInput,
+): AiChartD1JsonSchema {
+  const effectiveMajorStars = effectiveTargetMajorStarNames(modelInput)
+  if (effectiveMajorStars.length === 0) {
+    return AI_CHART_D1_P1_OUTPUT_SCHEMA
+  }
+  if (
+    hasDuplicates(effectiveMajorStars) ||
+    effectiveMajorStars.some(
+      (starName) => !P1_MAJOR_STAR_NAME_SET.has(starName),
+    )
+  ) {
+    invalid()
+  }
+
+  const schema = structuredClone(
+    AI_CHART_D1_P1_OUTPUT_SCHEMA,
+  ) as AiChartD1JsonSchema
+  const properties = schemaRecord(schema.properties)
+  const primaryAxis = schemaRecord(properties.primaryAxis)
+  const primaryAxisProperties = schemaRecord(primaryAxis.properties)
+  primaryAxisProperties.majorStarCore = createAiChartD1ArraySchema(
+    createAiChartD1StringSchema({
+      enumValues: effectiveMajorStars,
+    }),
+    {
+      minimumItems: effectiveMajorStars.length,
+      maximumItems: effectiveMajorStars.length,
+    },
+  )
+  return freezeAiChartD1Value(schema)
 }
 
 function assertPrimaryAxisSourceBinding(
@@ -1145,12 +1193,13 @@ function buildOne(
     notReady()
   }
   const descriptor = buildDescriptor(modelInput, promptPackage, timeoutMs)
+  const schema = createSourceBoundP1OutputSchema(modelInput)
   const request = validateAiChartOpenAiStructuredRequest<AiChartD1P1Result>({
     instructions: promptPackage.instructions,
     userInput: promptPackage.userInput,
     schemaName: promptPackage.outputSchemaName,
     description: AI_CHART_D1_P1_ADAPTER_BRIDGE_DESCRIPTION,
-    schema: AI_CHART_D1_P1_OUTPUT_SCHEMA,
+    schema,
     parseResult: createAiChartD1P1SourceBoundResultParser(
       modelInput,
       promptPackage,
@@ -1243,7 +1292,7 @@ function assertFixedBridgeInvariants(
       typeof request.parseResult !== 'function' ||
       !stableAiChartD1P1AdapterBridgeDescriptorEqual(
         request.schema,
-        AI_CHART_D1_P1_OUTPUT_SCHEMA,
+        createSourceBoundP1OutputSchema(modelInput),
       )
     ) {
       invalid()
