@@ -438,7 +438,22 @@ function createSourceBoundP1OutputSchema(
   const properties = schemaRecord(schema.properties)
   const primaryAxis = schemaRecord(properties.primaryAxis)
   const primaryAxisProperties = schemaRecord(primaryAxis.properties)
+  const coverage = schemaRecord(properties.coverage)
+  const coverageProperties = schemaRecord(coverage.properties)
   primaryAxisProperties.majorStarCore = createAiChartD1ArraySchema(
+    createAiChartD1StringSchema(
+      effectiveMajorStars.length === 0
+        ? {}
+        : {
+            enumValues: effectiveMajorStars,
+          },
+    ),
+    {
+      minimumItems: 0,
+      maximumItems: 0,
+    },
+  )
+  coverageProperties.majorStarsCovered = createAiChartD1ArraySchema(
     createAiChartD1StringSchema(
       effectiveMajorStars.length === 0
         ? {}
@@ -454,15 +469,20 @@ function createSourceBoundP1OutputSchema(
   return freezeAiChartD1Value(schema)
 }
 
-function injectServerOwnedMajorStarCore(
+function injectServerOwnedMajorStarBindings(
   result: AiChartD1P1Result,
   modelInput: AiChartD1P1ModelInput,
 ): unknown {
+  const effectiveMajorStars = effectiveTargetMajorStarNames(modelInput)
   return {
     ...result,
     primaryAxis: {
       ...result.primaryAxis,
-      majorStarCore: [...effectiveTargetMajorStarNames(modelInput)],
+      majorStarCore: [...effectiveMajorStars],
+    },
+    coverage: {
+      ...result.coverage,
+      majorStarsCovered: [...effectiveMajorStars],
     },
   }
 }
@@ -1181,8 +1201,13 @@ function createAiChartD1P1SourceBoundResultParser(
           AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.PRIMARY_AXIS_MAJOR_STAR_BINDING_MISMATCH,
         )
       }
+      if (wireResult.coverage.majorStarsCovered.length !== 0) {
+        resultInvalid(
+          AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
+        )
+      }
       const result = parseAiChartD1P1Result(
-        injectServerOwnedMajorStarCore(wireResult, modelInput),
+        injectServerOwnedMajorStarBindings(wireResult, modelInput),
       )
       assertIdentityAndStatus(result, modelInput)
       assertBorrowedStarBinding(result, modelInput)

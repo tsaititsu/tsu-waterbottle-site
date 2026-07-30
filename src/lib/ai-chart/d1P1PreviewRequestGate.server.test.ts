@@ -58,6 +58,7 @@ function createValidAiChartD1P1Result(
 ): Mutable<AiChartD1P1Result> {
   const result = createValidAiChartD1P1ResultWithServerFacts(...args)
   result.primaryAxis.majorStarCore = []
+  result.coverage.majorStarsCovered = []
   return result
 }
 
