@@ -211,6 +211,6 @@ test('source validation locks confirmation, project, and fixed files', () => {
   )
   assert.equal(
     validator.EXPECTED_RECOVERY_MIGRATION_SHA256,
-    '7f429dd8674aa5835f4f934e183ffa39d31bd4d4884cdbba199734390c21bc83',
+    '30c3a4919d30c756469149cbfc3310431b9c049c5ff7b59cdad8e5ce19fe92d4',
   )
 })

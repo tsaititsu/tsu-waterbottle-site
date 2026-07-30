@@ -402,6 +402,45 @@ function readRelationAclSnapshot(label) {
   )
 }
 
+function readRoleMembershipSnapshot(label) {
+  return JSON.parse(
+    psql(
+      `
+        select coalesce(
+          pg_catalog.jsonb_agg(
+            pg_catalog.jsonb_build_object(
+              'granted_role', granted_role.rolname,
+              'member_role', member_role.rolname,
+              'grantor_role', grantor_role.rolname,
+              'admin_option', membership.admin_option,
+              'inherit_option', membership.inherit_option,
+              'set_option', membership.set_option
+            )
+            order by granted_role.rolname, member_role.rolname, grantor_role.rolname
+          ),
+          '[]'::jsonb
+        )::text
+        from pg_catalog.pg_auth_members as membership
+        join pg_catalog.pg_roles as granted_role
+          on granted_role.oid = membership.roleid
+        join pg_catalog.pg_roles as member_role
+          on member_role.oid = membership.member
+        join pg_catalog.pg_roles as grantor_role
+          on grantor_role.oid = membership.grantor
+        where granted_role.rolname in (
+          'line_pay_payment_executor',
+          'line_pay_payment_function_owner'
+        )
+        or member_role.rolname in (
+          'line_pay_payment_executor',
+          'line_pay_payment_function_owner'
+        );
+      `,
+      label,
+    ),
+  )
+}
+
 function assertHostedPartialRecovery(
   label,
   { expectFailure = false } = {},
@@ -418,7 +457,7 @@ function assertHostedPartialRecovery(
           where rolname = '${executor}'
         ) then
           create role ${executor}
-            login inherit nosuperuser createdb createrole replication bypassrls;
+            login inherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
         end if;
       end
       $$;
@@ -476,6 +515,25 @@ function assertHostedPartialRecovery(
     `${psqlAs(executor, diagnosticSql, `${label} hosted recovered`, {
       readOnly: true,
     })}\n`,
+  )
+  const bridgeMembership = readRoleMembershipSnapshot(
+    `${label} hosted role bridge restoration`,
+  ).find(
+    (membership) =>
+      membership.granted_role === 'line_pay_payment_function_owner' &&
+      membership.member_role === executor,
+  )
+  assert.deepEqual(
+    bridgeMembership,
+    {
+      granted_role: 'line_pay_payment_function_owner',
+      member_role: executor,
+      grantor_role: 'postgres',
+      admin_option: true,
+      inherit_option: false,
+      set_option: false,
+    },
+    `${label}:pre-existing role bridge membership must be restored exactly`,
   )
   assert.equal(
     recovered.application_state,
@@ -962,8 +1020,11 @@ try {
     recovered.application_state,
     'FULL_WITHOUT_HISTORY',
     `recovered Production PARTIAL:${JSON.stringify({
+      inventory: recovered.inventory,
+      contracts: recovered.contracts,
       details: recovered.details,
       relationAcl: readRelationAclSnapshot('recovered relation ACL snapshot'),
+      roleMembership: readRoleMembershipSnapshot('recovered role membership snapshot'),
     })}`,
   )
   assertIncompleteCategories(recovered, [], 'recovered details')
