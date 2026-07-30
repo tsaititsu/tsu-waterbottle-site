@@ -186,6 +186,15 @@ function coverageMinorStarsSchema(
   return asSchemaRecord(coverageProperties.minorStarsCovered)
 }
 
+function coverageNoblesSchema(
+  schema: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const properties = asSchemaRecord(schema.properties)
+  const coverage = asSchemaRecord(properties.coverage)
+  const coverageProperties = asSchemaRecord(coverage.properties)
+  return asSchemaRecord(coverageProperties.noblesCovered)
+}
+
 function effectiveMajorStarNames(
   modelInput: AdapterBridgeFixture['modelInputs'][number],
 ): readonly string[] {
@@ -243,6 +252,9 @@ function parseResult(
       if (Array.isArray(coverageRecord.minorStarsCovered)) {
         coverageRecord.minorStarsCovered = []
       }
+      if (Array.isArray(coverageRecord.noblesCovered)) {
+        coverageRecord.noblesCovered = []
+      }
     }
   }
   return bridge.request.parseResult(wireResult)
@@ -285,6 +297,17 @@ function parseMinorCoverageWireResult(
   const wireResult = structuredClone(result) as Mutable<AiChartD1P1Result>
   wireResult.primaryAxis.majorStarCore = []
   wireResult.coverage.majorStarsCovered = []
+  return bridge.request.parseResult(wireResult)
+}
+
+function parseNobleCoverageWireResult(
+  bridge: AiChartD1P1AdapterBridge,
+  result: unknown,
+) {
+  const wireResult = structuredClone(result) as Mutable<AiChartD1P1Result>
+  wireResult.primaryAxis.majorStarCore = []
+  wireResult.coverage.majorStarsCovered = []
+  wireResult.coverage.minorStarsCovered = []
   return bridge.request.parseResult(wireResult)
 }
 
@@ -535,9 +558,12 @@ async function run() {
     const formalCoverageMajorStars = coverageMajorStarsSchema(formal)
     const sourceBoundCoverageMinorStars = coverageMinorStarsSchema(sourceBound)
     const formalCoverageMinorStars = coverageMinorStarsSchema(formal)
+    const sourceBoundCoverageNobles = coverageNoblesSchema(sourceBound)
+    const formalCoverageNobles = coverageNoblesSchema(formal)
     Object.assign(sourceBoundMajorStarCore, formalMajorStarCore)
     Object.assign(sourceBoundCoverageMajorStars, formalCoverageMajorStars)
     Object.assign(sourceBoundCoverageMinorStars, formalCoverageMinorStars)
+    Object.assign(sourceBoundCoverageNobles, formalCoverageNobles)
     assert.deepEqual(sourceBound, formal)
   })
   check('each request Schema reserves primaryAxis majorStarCore for Server injection', () => {
@@ -579,6 +605,25 @@ async function run() {
       assert.equal(minorStarsCovered.maxItems, 0)
     })
   })
+  check('each request Schema reserves coverage noblesCovered for Server derivation', () => {
+    bridges.forEach((entry, index) => {
+      const expectedNobles = modelInputs[
+        index
+      ].structuralContext.targetPalace.modeledSupportingStars
+        .map((star) => star.name)
+        .filter((starName) =>
+          ['左輔', '右弼', '天魁', '天鉞'].includes(starName),
+        )
+      const noblesCovered = coverageNoblesSchema(entry.request.schema)
+      const items = asSchemaRecord(noblesCovered.items)
+      assert.deepEqual(
+        items.enum,
+        expectedNobles.length === 0 ? undefined : expectedNobles,
+      )
+      assert.equal(noblesCovered.minItems, 0)
+      assert.equal(noblesCovered.maxItems, 0)
+    })
+  })
   check('request Schema admits no model-authored primary-axis star value', () => {
     const expectedMajorStars = effectiveMajorStarNames(modelInput)
     const majorStarCore = primaryAxisMajorStarCoreSchema(bridge.request.schema)
@@ -596,18 +641,23 @@ async function run() {
       wireResult.primaryAxis.majorStarCore = []
       wireResult.coverage.majorStarsCovered = []
       wireResult.coverage.minorStarsCovered = []
+      wireResult.coverage.noblesCovered = []
       const parsed = entry.request.parseResult(wireResult)
       const expected = effectiveMajorStarNames(modelInputs[index])
       const expectedSupportingStars =
         modelInputs[index].structuralContext.targetPalace.modeledSupportingStars.map(
           (star) => star.name,
         )
+      const expectedNobles = expectedSupportingStars.filter((starName) =>
+        ['左輔', '右弼', '天魁', '天鉞'].includes(starName),
+      )
       assert.deepEqual(parsed.primaryAxis.majorStarCore, expected)
       assert.deepEqual(parsed.coverage.majorStarsCovered, expected)
       assert.deepEqual(
         parsed.coverage.minorStarsCovered,
         expectedSupportingStars,
       )
+      assert.deepEqual(parsed.coverage.noblesCovered, expectedNobles)
     })
   })
   check('request parser is a function', () => {
@@ -1280,7 +1330,6 @@ async function run() {
     value.coverage.directMeaningsConsidered.reverse()
     value.coverage.mutagensCovered.reverse()
     value.coverage.maleficsCovered.reverse()
-    value.coverage.noblesCovered.reverse()
     assert.doesNotThrow(() => parseResult(bridge, value))
   })
   check('complete Result rejects an empty direct meaning set as missing', () => {
@@ -1640,34 +1689,22 @@ async function run() {
     assert.equal(value.coverage.noblesCovered.length > 0, true)
     assert.doesNotThrow(() => parseResult(nobleBridge, value))
   })
-  check('complete Result rejects empty noble coverage when one exists', () => {
+  check('coverage derives exact noble stars from validated candidate evidence', () => {
     const value = createValidAiChartD1P1Result(nobleInput)
-    assert.equal(value.coverage.noblesCovered.length > 0, true)
     value.coverage.noblesCovered = []
-    assertResultInvalid(
-      () => parseResult(nobleBridge, value),
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_NOBLES_MISMATCH,
+    assert.deepEqual(
+      parseResult(nobleBridge, value).coverage.noblesCovered,
+      nobleInput.structuralContext.targetPalace.modeledSupportingStars
+        .map((star) => star.name)
+        .filter((starName) =>
+          ['左輔', '右弼', '天魁', '天鉞'].includes(starName),
+        ),
     )
   })
-  check('noble coverage rejects a noble absent from the target palace', () => {
+  check('wire parser rejects a model-authored noble coverage value', () => {
     const value = createValidAiChartD1P1Result(nobleInput)
-    const unexpected = ['左輔', '右弼', '天魁', '天鉞'].find(
-      (name) => !value.coverage.noblesCovered.includes(name),
-    )
-    assert.ok(unexpected)
-    value.coverage.noblesCovered = [unexpected]
     assertResultInvalid(
-      () => parseResult(nobleBridge, value),
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_NOBLES_MISMATCH,
-    )
-  })
-  check('noble coverage rejects duplicate entries', () => {
-    const value = createValidAiChartD1P1Result(nobleInput)
-    const noble = value.coverage.noblesCovered[0]
-    assert.ok(noble)
-    value.coverage.noblesCovered = [noble, noble]
-    assertResultInvalid(
-      () => parseResult(nobleBridge, value),
+      () => parseNobleCoverageWireResult(nobleBridge, value),
       AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_NOBLES_MISMATCH,
     )
   })
@@ -1778,6 +1815,8 @@ async function run() {
             ? parseCoverageWireResult(matrixBridge, value)
             : name === 'minor stars'
               ? parseMinorCoverageWireResult(matrixBridge, value)
+              : name === 'nobles'
+                ? parseNobleCoverageWireResult(matrixBridge, value)
             : parseResult(matrixBridge, value),
         expectedReasonCode,
       )
@@ -1793,26 +1832,19 @@ async function run() {
     const missingMinor = value.coverage.minorStarsCovered[0]
     const missingMutagen = value.coverage.mutagensCovered.shift()
     const missingMalefic = value.coverage.maleficsCovered.shift()
-    const missingNoble = value.coverage.noblesCovered.shift()
     assert.ok(missingMeaning)
     assert.ok(missingMinor)
     assert.ok(missingMutagen)
     assert.ok(missingMalefic)
-    assert.ok(missingNoble)
     removeTargetSupportingEvidence(value, coverageInput, missingMinor)
     value.coverage.omittedItems = [
       { item: missingMeaning, reason: 'target meaning omitted' },
       {
         item: missingMinor,
-        reason: missingMinor === missingNoble
-          ? 'target supporting star and target noble omitted'
-          : 'target supporting star omitted',
+        reason: 'target supporting star omitted',
       },
       { item: missingMutagen, reason: 'target natal mutagen omitted' },
       { item: missingMalefic, reason: 'relevant malefic omitted' },
-      ...(missingNoble === missingMinor
-        ? []
-        : [{ item: missingNoble, reason: 'target noble omitted' }]),
     ]
     return value
   }
@@ -1939,13 +1971,6 @@ async function run() {
       coverageInput,
       'maleficsCovered',
       AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MALEFICS_MISMATCH,
-    ],
-    [
-      'nobles',
-      nobleBridge,
-      nobleInput,
-      'noblesCovered',
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_NOBLES_MISMATCH,
     ],
   ] as const
   for (const status of ['partial', 'incomplete'] as const) {
@@ -2187,6 +2212,7 @@ async function run() {
     value.primaryAxis.majorStarCore = []
     value.coverage.majorStarsCovered = []
     value.coverage.minorStarsCovered = []
+    value.coverage.noblesCovered = []
     assert.deepEqual(
       bridge.request.parseResult(value).coverage.majorStarsCovered,
       effectiveMajorStarNames(modelInput),
@@ -3259,7 +3285,7 @@ async function run() {
     }
 
     visit(sourceFile)
-    assert.equal(callSites.length, 45)
+    assert.equal(callSites.length, 46)
 
     const allowedReasonNames = new Set(
       Object.keys(AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS),
@@ -3336,7 +3362,7 @@ async function run() {
     }
     assert.equal(controlledHelperReasons, 1)
     assert.equal(controlledDuplicateMappingReasons, 1)
-    assert.equal(directFixedReasons, 43)
+    assert.equal(directFixedReasons, 44)
 
     assert.equal(stringCoverageCallSites.length, 3)
     assert.deepEqual(

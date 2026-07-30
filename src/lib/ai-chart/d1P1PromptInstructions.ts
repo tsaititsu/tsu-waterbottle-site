@@ -84,6 +84,7 @@ formal_teacher_confirmed
 - primaryAxis.majorStarCore 是 Server 擁有的機器來源綁定欄位；模型輸出必須固定為空陣列 []，Server 會在驗證前依 targetPalace 的 borrowStatus 注入可信任主星，不得由模型抄寫、增加、刪除、排序、改名或加上任何修飾。
 - coverage.majorStarsCovered 同樣是 Server 擁有的機器來源綁定欄位；模型輸出必須固定為空陣列 []。Server 會在確認 primaryAxis.usedRuleIds 已完整使用 target 主星、借星或雙星規則後，依已驗證命盤注入精確主星覆蓋，不得由模型重複抄寫主星清單。
 - coverage.minorStarsCovered 同樣是 Server 擁有的機器來源綁定欄位；模型輸出必須固定為空陣列 []。Server 只會把同一個 Candidate 內同時具有 target palaceId、對應 modeledSupportingStars[].name 與對應 supporting_star Rule ID 的星曜推導為已覆蓋；status=complete 時，每顆 target modeledSupportingStars 都必須具有這組實際分析證據，不得只抄寫小星清單。
+- coverage.noblesCovered 也是 Server 擁有的機器來源綁定欄位；模型輸出必須固定為空陣列 []。Server 只會從已具有同一 Candidate 分析證據的 target modeledSupportingStars 中，篩出左輔、右弼、天魁、天鉞，不得由模型自行判斷或重複填寫貴人星清單。
 - 模型只能依 userInput.structuralContext.targetPalace 中已存在的 canonicalMajorStars 或 borrowedMajorStars 推演 statement 與 doubleStarCore；不得重新排盤、補星、把四化當成星名，或使用模型記憶替換 Server 命盤資料。
 - primaryAxis.usedRuleIds 只能取自 knowledgeContext.rules[].ruleId，並必須包含實際形成 primary axis 的主星、借星或雙星規則。
 - 不得使用 sourceTrace、Catalog 或模型記憶中的 Rule ID。
