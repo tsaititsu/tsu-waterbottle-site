@@ -67,6 +67,15 @@ begin
 end
 $$;
 
+-- The original LINE Pay Migration creates private completion-proof objects
+-- under line_pay_payment_function_owner, then temporarily grants that role to
+-- the hosted Supabase executor so a non-superuser can finish owner-scoped DDL
+-- and ACL work. Production's partial state has the same private owner
+-- boundary, so this recovery must bridge the role only inside this
+-- transaction and remove the bridge before commit.
+grant line_pay_payment_function_owner to current_user
+  with inherit true, set true;
+
 lock table
   public.payments,
   public.product_orders,
@@ -369,6 +378,8 @@ grant select, insert on table line_pay_private.line_pay_completion_proofs
 to line_pay_payment_function_owner;
 grant select on table line_pay_private.line_pay_completion_proofs
 to service_role;
+
+revoke line_pay_payment_function_owner from current_user;
 
 do $$
 begin

@@ -42,7 +42,7 @@ export const WORKFLOW_FILE =
   '.github/workflows/supabase-production-line-pay-partial-acl-recovery.yml'
 
 export const EXPECTED_RECOVERY_MIGRATION_SHA256 =
-  'b1b4cb7fec359bc83fa29bb9083475f8752f3a2db1820f114437fbe1fa6c617c'
+  'e3ae6bbd09ebe08823ae1a4c07f9177b3d98e5b04e1230ff6f0cba526957fbf9'
 export const EXPECTED_BASE_MIGRATION_SHA256 =
   '8da1fb429aecb1c35b12a245b63907135dbe7c467ef0a5f069afd431d21e94b8'
 export const EXPECTED_FENCE_MIGRATION_SHA256 =
@@ -196,6 +196,12 @@ export function assertRecoverySql(sql) {
       stripped,
     ) ||
     !/grant select on table[\s\S]*public[.]payments[\s\S]*public[.]product_orders[\s\S]*public[.]line_pay_checkout_attempts[\s\S]*to line_pay_payment_function_owner/iu.test(
+      stripped,
+    ) ||
+    !/grant line_pay_payment_function_owner to current_user[\s\S]*with inherit true, set true/iu.test(
+      stripped,
+    ) ||
+    !/revoke line_pay_payment_function_owner from current_user/iu.test(
       stripped,
     ) ||
     !/line_pay_partial_recovery_public_write_postcondition_failed/u.test(

@@ -89,6 +89,15 @@ function psql(
   label,
   { readOnly = false, database = 'postgres' } = {},
 ) {
+  return psqlAs('postgres', sql, label, { readOnly, database })
+}
+
+function psqlAs(
+  user,
+  sql,
+  label,
+  { readOnly = false, database = 'postgres', expectFailure = false } = {},
+) {
   const result = spawnSync(
     'docker',
     [
@@ -105,7 +114,7 @@ function psql(
       '--no-align',
       '--tuples-only',
       '-U',
-      'postgres',
+      user,
       '-d',
       database,
     ],
@@ -115,6 +124,12 @@ function psql(
       input: sql,
     },
   )
+  if (expectFailure) {
+    if (result.status === 0) {
+      throw new Error(`${label}:EXPECTED_FAILURE_MISSING`)
+    }
+    return (result.stderr || result.stdout).trim()
+  }
   if (result.status !== 0) {
     throw new Error(`${label}:FAILED\n${result.stderr || result.stdout}`)
   }
@@ -385,6 +400,103 @@ function readRelationAclSnapshot(label) {
       label,
     ),
   )
+}
+
+function assertHostedPartialRecovery(
+  label,
+  { expectFailure = false } = {},
+) {
+  const executor = 'line_pay_partial_recovery_executor_fixture'
+  restoreDatabaseFromTemplate('line_pay_applied_template')
+  psql(
+    `
+      do $$
+      begin
+        if not exists (
+          select 1
+          from pg_catalog.pg_roles
+          where rolname = '${executor}'
+        ) then
+          create role ${executor}
+            login inherit nosuperuser createdb createrole replication bypassrls;
+        end if;
+      end
+      $$;
+
+      grant anon, authenticated, service_role
+        to ${executor} with admin option;
+      grant line_pay_payment_function_owner
+        to ${executor} with admin true, inherit false, set false;
+      grant usage on schema supabase_migrations to ${executor};
+      grant select on table supabase_migrations.schema_migrations
+        to ${executor};
+
+      alter table public.app_environment_attestation owner to ${executor};
+      alter table public.line_pay_checkout_attempts owner to ${executor};
+      alter table public.line_pay_request_outbox owner to ${executor};
+      alter table public.line_pay_callback_capabilities owner to ${executor};
+      alter table public.line_pay_callback_events owner to ${executor};
+      alter table public.line_pay_payment_audit_events owner to ${executor};
+      alter table public.payments owner to ${executor};
+      alter table public.product_orders owner to ${executor};
+
+      grant select on public.line_pay_checkout_attempts to anon;
+      grant insert on public.payments to authenticated;
+    `,
+    `${label} hosted fixture`,
+  )
+  const partial = parseAndValidateDiagnosticOutput(
+    `${psqlAs(executor, diagnosticSql, `${label} hosted partial`, {
+      readOnly: true,
+    })}\n`,
+  )
+  assert.equal(partial.application_state, 'PARTIAL')
+  assertIncompleteCategories(
+    partial,
+    ['existing_relation_access', 'relations'],
+    `${label} hosted partial details`,
+  )
+
+  const recoveryOutput = psqlAs(
+    executor,
+    readFileSync(partialRecoveryPath, 'utf8'),
+    `${label} hosted partial recovery`,
+    { expectFailure },
+  )
+  if (expectFailure) {
+    assert.match(
+      recoveryOutput,
+      /must be owner of table line_pay_completion_proofs|permission denied/u,
+      `${label} hosted partial recovery should fail before role-bridging fix`,
+    )
+    return
+  }
+
+  const recovered = parseAndValidateDiagnosticOutput(
+    `${psqlAs(executor, diagnosticSql, `${label} hosted recovered`, {
+      readOnly: true,
+    })}\n`,
+  )
+  assert.equal(
+    recovered.application_state,
+    'PARTIAL',
+    `${label} hosted recovered:${JSON.stringify({
+      details: recovered.details,
+      relationAcl: readRelationAclSnapshot(`${label} relation ACL snapshot`),
+    })}`,
+  )
+  assertIncompleteCategories(
+    recovered,
+    ['relations'],
+    `${label} hosted recovered details`,
+  )
+  assertDetailIdentityRows(
+    recovered.details.existing_relation_access,
+    [],
+    `${label} hosted recovered existing relation access`,
+  )
+  assertNoLinePayMigrationHistory(`${label} hosted recovery history preservation`)
+  assertRuntimeWriteBoundary(`${label} hosted runtime write boundary`)
 }
 
 function catchMutation(name, callback) {
@@ -909,6 +1021,7 @@ try {
     [],
     'recovered Production owner-derived write details',
   )
+  assertHostedPartialRecovery('hosted partial ACL recovery')
   restoreDatabaseFromTemplate('line_pay_applied_template')
   runApplicationStateScenario(
     'ownership mismatch',
