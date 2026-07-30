@@ -909,21 +909,72 @@ test('deploy result matrix treats missing markers as unknown, never rollback pro
   )
 })
 
+test('PostgreSQL failure diagnostics expose only safe SQLSTATE metadata', async () => {
+  const runner = await import(pathToFileURL(runnerPath).href)
+  const diagnostics = runner.buildPostgresFailureDiagnostics({
+    code: 3,
+    signal: null,
+    stderr: [
+      'psql:/workspace/supabase/migrations/private.sql:12: ERROR:  42P01: line_pay_partial_recovery_missing_relation',
+      'DETAIL: secret-password and raw table payload must not escape',
+      '',
+    ].join('\n'),
+    stdout: '',
+  })
+
+  assert.deepEqual(diagnostics, {
+    sqlstate: '42P01',
+    sqlstate_class: 'undefined_table',
+    message_code: 'line_pay_partial_recovery_missing_relation',
+  })
+  assert.equal(Object.isFrozen(diagnostics), true)
+  const serialized = JSON.stringify(diagnostics)
+  assert.doesNotMatch(
+    serialized,
+    /secret-password|raw table payload|workspace|private[.]sql/u,
+  )
+  assert.equal(
+    runner.buildPostgresFailureDiagnostics({
+      code: 1,
+      signal: null,
+      stderr:
+        'ERROR:  42501: line_pay_partial_recovery_public_write_postcondition_failed',
+      stdout: '',
+    }),
+    undefined,
+  )
+  assert.deepEqual(
+    runner.buildPostgresFailureDiagnostics({
+      code: 3,
+      signal: null,
+      stderr:
+        'ERROR:  unsafe raw message without whitelisted code\nSQL state: 42501',
+      stdout: '',
+    }),
+    {
+      sqlstate: '42501',
+      sqlstate_class: 'insufficient_privilege',
+    },
+  )
+})
+
 test('runner accepts only preflight and locked deploy phases with strict Supabase URLs', async () => {
   const runner = await import(pathToFileURL(runnerPath).href)
   assert.deepEqual(Object.keys(runner.PHASE_FILES).sort(), ['deploy', 'preflight'])
   for (const phase of ['preflight', 'deploy']) {
     assert.equal(runner.validatePhase(phase), phase)
     const args = runner.buildPsqlArgs(phase)
-    assert.deepEqual(args.slice(0, 5), [
+    assert.deepEqual(args.slice(0, 7), [
       '--no-psqlrc',
       '--set=ON_ERROR_STOP=1',
+      '--set=VERBOSITY=verbose',
+      '--set=SHOW_CONTEXT=never',
       '--quiet',
       '--no-align',
       '--tuples-only',
     ])
-    assert.equal(args.length, 6)
-    assert.match(args[5], /^--file=\/workspace\//)
+    assert.equal(args.length, 8)
+    assert.match(args[7], /^--file=\/workspace\//)
   }
   for (const phase of ['', 'sql', '../x', 'migration', 'postflight']) {
     assert.throws(() => runner.validatePhase(phase), /UNSUPPORTED_DATABASE_PHASE/)
@@ -1244,9 +1295,11 @@ test('runner attests deploy commits and classifies failures by the last proven b
 
   const makeSpawn = ({
     phaseExitCode,
+    phaseStderr = 'synthetic failure detail\n',
     phaseStdout,
   }: {
     phaseExitCode: number
+    phaseStderr?: string
     phaseStdout: string
   }) => {
     const calls: Array<{ args: string[]; options: Record<string, unknown> }> = []
@@ -1272,7 +1325,7 @@ test('runner attests deploy commits and classifies failures by the last proven b
           return
         }
         child.stdout.end(phaseStdout)
-        child.stderr.end('synthetic failure detail\n')
+        child.stderr.end(phaseStderr)
         child.emit('close', phaseExitCode, null)
       })
       return child
@@ -1345,14 +1398,43 @@ test('runner attests deploy commits and classifies failures by the last proven b
 
     const migrationFailure = makeSpawn({
       phaseExitCode: 3,
+      phaseStderr: [
+        'psql:/workspace/supabase/migrations/20260729130000_line_pay_partial_acl_metadata_recovery.sql:360: ERROR:  42501: line_pay_partial_recovery_public_write_postcondition_failed',
+        `DETAIL: synthetic secret ${environment.SUPABASE_PRODUCTION_DB_URL}`,
+        '',
+      ].join('\n'),
       phaseStdout: `${markers.migrationStarted}\n`,
     })
-    await assert.rejects(
-      runner.runDatabasePhase('deploy', {
+    const migrationError = await runner
+      .runDatabasePhase('deploy', {
         environment,
         spawnImplementation: migrationFailure.fakeSpawn,
-      }),
-      /MIGRATION_SQL_FAILED_BEFORE_COMMIT/,
+      })
+      .then(
+        () => null,
+        (caught: unknown) => caught,
+      )
+    assert.ok(migrationError instanceof Error)
+    assert.equal(migrationError.message, 'MIGRATION_SQL_FAILED_BEFORE_COMMIT')
+    const migrationFailureOutput = runner.safeFailureOutput(migrationError)
+    assert.deepEqual(JSON.parse(migrationFailureOutput), {
+      status: 'DEPLOYMENT_FAILED',
+      primary_failure_code: 'MIGRATION_SQL_FAILED_BEFORE_COMMIT',
+      migration_started_observed: true,
+      migration_commit_observed: false,
+      postflight_started_observed: false,
+      postflight_state_observed: false,
+      postflight_commit_observed: false,
+      postgres_failure: {
+        sqlstate: '42501',
+        sqlstate_class: 'insufficient_privilege',
+        message_code:
+          'line_pay_partial_recovery_public_write_postcondition_failed',
+      },
+    })
+    assert.doesNotMatch(
+      migrationFailureOutput,
+      /synthetic|postgresql:\/\/|supabase[.]co|workspace|DETAIL/u,
     )
 
     const postflightFailure = makeSpawn({
