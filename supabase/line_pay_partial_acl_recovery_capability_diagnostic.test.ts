@@ -209,4 +209,8 @@ test('source validation locks confirmation, project, and fixed files', () => {
     validator.RECOVERY_MIGRATION_FILE,
     'supabase/migrations/20260729130000_line_pay_partial_acl_metadata_recovery.sql',
   )
+  assert.equal(
+    validator.EXPECTED_RECOVERY_MIGRATION_SHA256,
+    '7f429dd8674aa5835f4f934e183ffa39d31bd4d4884cdbba199734390c21bc83',
+  )
 })

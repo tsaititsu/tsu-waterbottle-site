@@ -68,13 +68,13 @@ end
 $$;
 
 -- The original LINE Pay Migration creates private completion-proof objects
--- under line_pay_payment_function_owner, then temporarily grants that role to
--- the hosted Supabase executor so a non-superuser can finish owner-scoped DDL
--- and ACL work. Production's partial state has the same private owner
--- boundary, so this recovery must bridge the role only inside this
--- transaction and remove the bridge before commit.
+-- under line_pay_payment_function_owner. Production's partial state kept that
+-- private owner boundary, while the hosted Supabase executor has ADMIN on the
+-- owner role but no SET option. The recovery only needs inherited owner
+-- privileges for ACL repair, not role switching or ownership transfer, so keep this
+-- bridge inherit-only and remove it before final postconditions.
 grant line_pay_payment_function_owner to current_user
-  with inherit true, set true;
+  with inherit true, set false;
 
 lock table
   public.payments,
@@ -380,6 +380,25 @@ grant select on table line_pay_private.line_pay_completion_proofs
 to service_role;
 
 revoke line_pay_payment_function_owner from current_user;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_catalog.pg_auth_members as membership
+    join pg_catalog.pg_roles as granted_role
+      on granted_role.oid = membership.roleid
+    join pg_catalog.pg_roles as member_role
+      on member_role.oid = membership.member
+    where granted_role.rolname = 'line_pay_payment_function_owner'
+      and member_role.rolname = current_user
+      and (membership.inherit_option or membership.set_option)
+  ) then
+    raise exception using errcode = '42501',
+      message = 'line_pay_partial_recovery_role_bridge_cleanup_postcondition_failed';
+  end if;
+end
+$$;
 
 do $$
 begin
