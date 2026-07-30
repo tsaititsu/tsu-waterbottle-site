@@ -53,6 +53,16 @@ import {
   type AiChartOpenAiStructuredResult,
 } from './openAiResponses'
 
+const CANDIDATE_FIELDS = [
+  'directCandidates',
+  'oppositeInfluences',
+  'hiddenCombinationInfluences',
+  'trineInfluences',
+  'combinedCandidates',
+  'strengths',
+  'imbalancePossibilities',
+] as const
+
 function createValidAiChartD1P1Result(
   ...args: Parameters<typeof createValidAiChartD1P1ResultWithServerFacts>
 ): Mutable<AiChartD1P1Result> {
@@ -61,6 +71,11 @@ function createValidAiChartD1P1Result(
   result.coverage.majorStarsCovered = []
   result.coverage.minorStarsCovered = []
   result.coverage.noblesCovered = []
+  for (const field of CANDIDATE_FIELDS) {
+    for (const candidate of result[field]) {
+      candidate.ruleStatus = 'working_inference'
+    }
+  }
   return result
 }
 

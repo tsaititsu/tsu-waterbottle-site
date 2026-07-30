@@ -36,9 +36,9 @@ import {
 } from './d1P1PromptPackageTestSupport'
 
 const PREVIOUS_INSTRUCTIONS_SHA256 =
-  '3ec69ae331a480f537921e374dfbe599d541418011e3a6d70b7e9b03677614b6'
-const EXPECTED_INSTRUCTIONS_SHA256 =
   '6cbb531b2cb3f9ba20bd456cc0f7c7128e0fca4d38e9b2063f24192c9534a970'
+const EXPECTED_INSTRUCTIONS_SHA256 =
+  'f9b76e4f1e8a08f0ad1af1107d129b0e20e172110f3d3dd501af9f3ecd66b12d'
 const EXPECTED_OUTPUT_SCHEMA_SHA256 =
   'fcd63048ff242fbfd12e195722d3065def0960497efbcdb7162893e271052da1'
 
@@ -484,6 +484,20 @@ async function run() {
     assert.match(
       AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
       /usedRuleIds 只能使用 knowledgeContext\.rules\[\]\.ruleId/u,
+    )
+  })
+  check('instructions reserve Candidate ruleStatus for Server derivation', () => {
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /每個 Candidate\.ruleStatus 都是 Server 擁有的規則權威欄位；模型輸出必須固定為 working_inference/u,
+    )
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /依該 Candidate 的 usedRuleIds 對照 knowledgeContext\.rules\[\]\.ruleStatus，注入實際使用規則中最弱的可信任權威/u,
+    )
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /不得由模型自行宣告、提升或猜測/u,
     )
   })
   check('instructions bind direct meaning coverage to exact target meaning IDs', () => {
