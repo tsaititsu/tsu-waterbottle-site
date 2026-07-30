@@ -10,6 +10,7 @@ import {
   parseAndValidateInitializerOutput,
   parseAndValidateInitializerPreflightOutput,
 } from '../../scripts/supabase/validate-line-pay-checkout-initializer-production.mjs'
+import { parseAndValidateContractDetailOutput } from '../../scripts/supabase/validate-line-pay-checkout-initializer-contract-detail-diagnostic.mjs'
 import { LINE_PAY_POSTGRES_IMAGE } from './line_pay_postgres_image.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -29,6 +30,8 @@ const baseMigration =
   'supabase/migrations/20260719033404_line_pay_remediation_contracts.sql'
 const diagnosticFile =
   'supabase/deployment/line_pay_checkout_aggregate_initialization_application_state.sql'
+const detailDiagnosticFile =
+  'supabase/deployment/line_pay_checkout_initializer_contract_detail_diagnostic.sql'
 const preflightFile =
   'supabase/deployment/line_pay_checkout_aggregate_initialization_preflight.sql'
 const deployFile =
@@ -272,6 +275,17 @@ try {
   ) {
     throw new Error('BASE_UNAPPLIED_STATE_NOT_OBSERVED')
   }
+  const baseUnappliedDetail = parseAndValidateContractDetailOutput(
+    `${psqlFile(detailDiagnosticFile)}\n`,
+  )
+  if (
+    baseUnappliedDetail.base_remediation_ready ||
+    baseUnappliedDetail.decision.initializer_exact ||
+    baseUnappliedDetail.decision.recovery_required ||
+    baseUnappliedDetail.decision.detail_complete
+  ) {
+    throw new Error('BASE_UNAPPLIED_DETAIL_STATE_NOT_OBSERVED')
+  }
 
   psqlFile(baseMigration)
 
@@ -280,6 +294,16 @@ try {
   )
   if (unapplied.application_state !== 'UNAPPLIED') {
     throw new Error('UNAPPLIED_STATE_NOT_OBSERVED')
+  }
+  const unappliedDetail = parseAndValidateContractDetailOutput(
+    `${psqlFile(detailDiagnosticFile)}\n`,
+  )
+  if (
+    !unappliedDetail.base_remediation_ready ||
+    unappliedDetail.decision.initializer_exact ||
+    !unappliedDetail.decision.recovery_required
+  ) {
+    throw new Error('UNAPPLIED_DETAIL_STATE_NOT_OBSERVED')
   }
   parseAndValidateInitializerPreflightOutput(
     `${psqlFile(preflightFile)}\n`,
@@ -321,6 +345,16 @@ try {
   if (full.application_state !== 'FULL') {
     throw new Error('FULL_STATE_NOT_OBSERVED')
   }
+  const fullDetail = parseAndValidateContractDetailOutput(
+    `${psqlFile(detailDiagnosticFile)}\n`,
+  )
+  if (
+    !fullDetail.base_remediation_ready ||
+    !fullDetail.decision.initializer_exact ||
+    fullDetail.decision.recovery_required
+  ) {
+    throw new Error('FULL_DETAIL_CONTRACT_NOT_OBSERVED')
+  }
   const after = tableSnapshot()
   if (before !== after) throw new Error('HISTORICAL_DATA_CHANGED')
 
@@ -335,6 +369,15 @@ try {
   )
   if (initializerAclMutation.application_state !== 'PARTIAL') {
     throw new Error('INITIALIZER_FUNCTION_ACL_MUTATION_NOT_CAUGHT')
+  }
+  const initializerAclDetail = parseAndValidateContractDetailOutput(
+    `${psqlFile(detailDiagnosticFile)}\n`,
+  )
+  if (
+    initializerAclDetail.initializer_function.execute_acl_exact ||
+    initializerAclDetail.decision.initializer_exact
+  ) {
+    throw new Error('INITIALIZER_FUNCTION_ACL_DETAIL_MISMATCH')
   }
   psqlSql(`
     revoke execute on function
@@ -445,6 +488,15 @@ try {
   if (auditTableAclMutation.application_state !== 'PARTIAL') {
     throw new Error('AUDIT_TABLE_ACL_MUTATION_NOT_CAUGHT')
   }
+  const auditTableAclDetail = parseAndValidateContractDetailOutput(
+    `${psqlFile(detailDiagnosticFile)}\n`,
+  )
+  if (
+    auditTableAclDetail.table_acl_contract.audit_table_acl_exact ||
+    auditTableAclDetail.decision.initializer_exact
+  ) {
+    throw new Error('AUDIT_TABLE_ACL_DETAIL_MISMATCH')
+  }
   psqlSql(`
     revoke select on table public.line_pay_payment_audit_events
     from line_pay_initializer_table_acl_probe;
@@ -462,6 +514,15 @@ try {
   if (functionOwnerMembershipMutation.application_state !== 'PARTIAL') {
     throw new Error('FUNCTION_OWNER_MEMBERSHIP_MUTATION_NOT_CAUGHT')
   }
+  const membershipDetail = parseAndValidateContractDetailOutput(
+    `${psqlFile(detailDiagnosticFile)}\n`,
+  )
+  if (
+    membershipDetail.role_contract.function_owner_membership_absent ||
+    membershipDetail.decision.initializer_exact
+  ) {
+    throw new Error('FUNCTION_OWNER_MEMBERSHIP_DETAIL_MISMATCH')
+  }
   psqlSql(`
     revoke line_pay_initializer_membership_probe
     from line_pay_payment_function_owner;
@@ -477,6 +538,15 @@ try {
   )
   if (initializerOwnerMutation.application_state !== 'PARTIAL') {
     throw new Error('INITIALIZER_FUNCTION_OWNER_MUTATION_NOT_CAUGHT')
+  }
+  const initializerOwnerDetail = parseAndValidateContractDetailOutput(
+    `${psqlFile(detailDiagnosticFile)}\n`,
+  )
+  if (
+    initializerOwnerDetail.initializer_function.owner_exact ||
+    initializerOwnerDetail.decision.initializer_exact
+  ) {
+    throw new Error('INITIALIZER_FUNCTION_OWNER_DETAIL_MISMATCH')
   }
   psqlSql(`
     alter function public.initialize_product_order_line_pay_checkout(jsonb)
@@ -496,6 +566,15 @@ try {
   )
   if (indexMutation.application_state !== 'PARTIAL') {
     throw new Error('INITIALIZER_INDEX_DEFINITION_MUTATION_NOT_CAUGHT')
+  }
+  const indexDetail = parseAndValidateContractDetailOutput(
+    `${psqlFile(detailDiagnosticFile)}\n`,
+  )
+  if (
+    indexDetail.index_contract.exact ||
+    indexDetail.decision.initializer_exact
+  ) {
+    throw new Error('INITIALIZER_INDEX_DETAIL_MISMATCH')
   }
   psqlSql(`
     drop index
@@ -546,12 +625,22 @@ try {
   if (policyMutation.application_state !== 'PARTIAL') {
     throw new Error('POLICY_MUTATION_NOT_CAUGHT')
   }
+  const policyDetail = parseAndValidateContractDetailOutput(
+    `${psqlFile(detailDiagnosticFile)}\n`,
+  )
+  if (
+    policyDetail.policy_contract.items_select_exact ||
+    policyDetail.decision.initializer_exact
+  ) {
+    throw new Error('POLICY_DETAIL_MISMATCH')
+  }
 
   process.stdout.write(
     'line_pay_checkout_initializer_production_contracts: PASS ' +
       '(PostgreSQL 17, UNAPPLIED/PARTIAL/FULL, exact-file deploy, ' +
       'commit attestations, historical row digests preserved, ' +
-      'function owner/ACL, index definition, and policy mutations caught)\n',
+      'contract detail diagnostic, function owner/ACL, index definition, ' +
+      'and policy mutations caught)\n',
   )
 } finally {
   if (started) {

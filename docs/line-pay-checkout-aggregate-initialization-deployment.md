@@ -48,18 +48,33 @@ Policy 意圖如下：
 
 ## 專用 Production 管道
 
-Initializer 不得使用舊的 LINE Pay remediation workflow。兩條專用 workflow
+Initializer 不得使用舊的 LINE Pay remediation workflow。三條專用 workflow
 都是 `workflow_dispatch`、`main`、完整 commit SHA 與
 `supabase-production` Environment gate：
 
 - 唯讀狀態診斷：
   `.github/workflows/supabase-production-line-pay-checkout-initializer-diagnostic.yml`
+- 唯讀契約細節診斷：
+  `.github/workflows/supabase-production-line-pay-checkout-initializer-contract-detail-diagnostic.yml`
 - 單次 exact-file 部署：
   `.github/workflows/supabase-production-line-pay-checkout-initializer.yml`
 
 唯讀診斷固定輸出 `UNAPPLIED`、`PARTIAL` 或 `FULL`，只回傳 catalog 計數、
 布林 contract 與 `checkout_initialized` audit 筆數；不輸出 row、function
 body、Policy expression、連線資訊或 Secret。
+
+當狀態診斷回傳 `PARTIAL` 時，契約細節診斷可在另一次人工授權後執行。它只從
+PostgreSQL catalog 回傳固定結構的布林值與四個小型 inventory 計數，分別標示
+initializer function、private audit function、index、三條 Policy、table ACL
+與 role membership 是否精確符合契約。它仍使用單一 `REPEATABLE READ,
+READ ONLY` transaction 並以 `ROLLBACK` 結束，不讀取商業資料表資料列，也不
+輸出 function body、Policy expression、OID、role 名稱或原始資料。固定確認字串
+為：
+
+`RUN_LINE_PAY_CHECKOUT_INITIALIZER_CONTRACT_DETAIL_DIAGNOSTIC_READ_ONLY_ONCE`
+
+細節診斷只用來選擇下一個另行審查的 fail-forward recovery；它不授權或執行
+Migration／Recovery，也不啟用 LINE Pay Runtime。
 
 部署 workflow 只接受固定 commit、project ref、Migration SHA-256、Backup／PITR
 確認字串與一次性授權字串；不能輸入 SQL、路徑、command 或 Runtime flag。它只
