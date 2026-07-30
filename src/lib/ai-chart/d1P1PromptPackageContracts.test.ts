@@ -36,9 +36,9 @@ import {
 } from './d1P1PromptPackageTestSupport'
 
 const PREVIOUS_INSTRUCTIONS_SHA256 =
-  '308fecf055f3763db98969831ba6b7e9d7bedd4aa0d9db0296b759aa65488d59'
-const EXPECTED_INSTRUCTIONS_SHA256 =
   '130b4d8023d83045359c8fed1fb794c85359277a745a467fd865c7f840374a92'
+const EXPECTED_INSTRUCTIONS_SHA256 =
+  '2c0b22f4413307ca8a03fa8eafdae54b0a2b627d63755801bcd4da9a96da0e53'
 const EXPECTED_OUTPUT_SCHEMA_SHA256 =
   'fcd63048ff242fbfd12e195722d3065def0960497efbcdb7162893e271052da1'
 
@@ -354,6 +354,20 @@ async function run() {
     assert.match(
       AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
       /不得重新排盤、補星、把四化當成星名/u,
+    )
+  })
+  check('instructions reserve coverage majorStarsCovered for Server-owned facts', () => {
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /coverage\.majorStarsCovered 同樣是 Server 擁有的機器來源綁定欄位；模型輸出必須固定為空陣列 \[\]/u,
+    )
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /確認 primaryAxis\.usedRuleIds 已完整使用 target 主星、借星或雙星規則後/u,
+    )
+    assert.match(
+      AI_CHART_D1_P1_PROMPT_INSTRUCTIONS,
+      /不得由模型重複抄寫主星清單/u,
     )
   })
   check('instructions reject sourceTrace and Catalog rule ids', () => {
