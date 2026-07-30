@@ -408,6 +408,42 @@ function effectiveTargetMajorStarNames(
   ).map((star) => star.name)
 }
 
+function targetSupportingStarRuleBindings(
+  modelInput: AiChartD1P1ModelInput,
+): readonly Readonly<{ starName: string; ruleId: string }>[] {
+  const target = modelInput.structuralContext.targetPalace
+  const rulesById = new Map(
+    modelInput.knowledgeContext.rules.map((rule) => [rule.ruleId, rule]),
+  )
+  const bindings = target.modeledSupportingStars.map((star) => {
+    const traces = modelInput.knowledgeContext.selectionTrace.filter(
+      (trace) =>
+        trace.reason === 'supporting_star_present' &&
+        trace.palaceRole === 'target' &&
+        trace.palaceId === target.palaceId &&
+        trace.starName === star.name,
+    )
+    const trace = traces[0]
+    const rule = trace ? rulesById.get(trace.ruleId) : undefined
+    if (
+      traces.length !== 1 ||
+      !trace ||
+      !rule ||
+      rule.kind !== 'supporting_star'
+    ) {
+      invalid()
+    }
+    return Object.freeze({ starName: star.name, ruleId: trace.ruleId })
+  })
+  if (
+    hasDuplicates(bindings.map((binding) => binding.starName)) ||
+    hasDuplicates(bindings.map((binding) => binding.ruleId))
+  ) {
+    invalid()
+  }
+  return Object.freeze(bindings)
+}
+
 const P1_MAJOR_STAR_NAME_SET: ReadonlySet<string> = new Set(
   AI_CHART_D1_MAJOR_STAR_NAMES,
 )
@@ -466,6 +502,22 @@ function createSourceBoundP1OutputSchema(
       maximumItems: 0,
     },
   )
+  const supportingStarNames = targetSupportingStarRuleBindings(modelInput).map(
+    (binding) => binding.starName,
+  )
+  coverageProperties.minorStarsCovered = createAiChartD1ArraySchema(
+    createAiChartD1StringSchema(
+      supportingStarNames.length === 0
+        ? {}
+        : {
+            enumValues: supportingStarNames,
+          },
+    ),
+    {
+      minimumItems: 0,
+      maximumItems: 0,
+    },
+  )
   return freezeAiChartD1Value(schema)
 }
 
@@ -483,6 +535,39 @@ function injectServerOwnedMajorStarBindings(
     coverage: {
       ...result.coverage,
       majorStarsCovered: [...effectiveMajorStars],
+    },
+  }
+}
+
+function deriveTargetMinorStarCoverage(
+  result: AiChartD1P1Result,
+  modelInput: AiChartD1P1ModelInput,
+): readonly string[] {
+  const targetPalaceId = modelInput.structuralContext.targetPalace.palaceId
+  const candidates = allCandidates(result)
+  return targetSupportingStarRuleBindings(modelInput)
+    .filter((binding) =>
+      candidates.some(
+        (candidate) =>
+          candidate.palaceIds.includes(targetPalaceId) &&
+          candidate.starBasis.includes(binding.starName) &&
+          candidate.usedRuleIds.includes(binding.ruleId),
+      ),
+    )
+    .map((binding) => binding.starName)
+}
+
+function injectServerOwnedMinorStarCoverage(
+  result: AiChartD1P1Result,
+  modelInput: AiChartD1P1ModelInput,
+): unknown {
+  return {
+    ...result,
+    coverage: {
+      ...result.coverage,
+      minorStarsCovered: [
+        ...deriveTargetMinorStarCoverage(result, modelInput),
+      ],
     },
   }
 }
@@ -1206,13 +1291,24 @@ function createAiChartD1P1SourceBoundResultParser(
           AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MAJOR_STARS_MISMATCH,
         )
       }
-      const result = parseAiChartD1P1Result(
+      if (wireResult.coverage.minorStarsCovered.length !== 0) {
+        resultInvalid(
+          AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
+        )
+      }
+      const resultWithServerMajorStars = parseAiChartD1P1Result(
         injectServerOwnedMajorStarBindings(wireResult, modelInput),
       )
-      assertIdentityAndStatus(result, modelInput)
-      assertBorrowedStarBinding(result, modelInput)
-      assertPrimaryAxisSourceBinding(result, modelInput)
-      assertRulePalaceAndStarBindings(result, modelInput)
+      assertIdentityAndStatus(resultWithServerMajorStars, modelInput)
+      assertBorrowedStarBinding(resultWithServerMajorStars, modelInput)
+      assertPrimaryAxisSourceBinding(resultWithServerMajorStars, modelInput)
+      assertRulePalaceAndStarBindings(resultWithServerMajorStars, modelInput)
+      const result = parseAiChartD1P1Result(
+        injectServerOwnedMinorStarCoverage(
+          resultWithServerMajorStars,
+          modelInput,
+        ),
+      )
       assertCoverageSourceBinding(result, modelInput)
       assertWarningTraceability(result, modelInput)
       assertMetadataIsolation(result, modelInput, promptPackage)

@@ -177,6 +177,15 @@ function coverageMajorStarsSchema(
   return asSchemaRecord(coverageProperties.majorStarsCovered)
 }
 
+function coverageMinorStarsSchema(
+  schema: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const properties = asSchemaRecord(schema.properties)
+  const coverage = asSchemaRecord(properties.coverage)
+  const coverageProperties = asSchemaRecord(coverage.properties)
+  return asSchemaRecord(coverageProperties.minorStarsCovered)
+}
+
 function effectiveMajorStarNames(
   modelInput: AdapterBridgeFixture['modelInputs'][number],
 ): readonly string[] {
@@ -225,10 +234,15 @@ function parseResult(
     if (
       coverage !== null &&
       typeof coverage === 'object' &&
-      !Array.isArray(coverage) &&
-      Array.isArray((coverage as Record<string, unknown>).majorStarsCovered)
+      !Array.isArray(coverage)
     ) {
-      ;(coverage as Record<string, unknown>).majorStarsCovered = []
+      const coverageRecord = coverage as Record<string, unknown>
+      if (Array.isArray(coverageRecord.majorStarsCovered)) {
+        coverageRecord.majorStarsCovered = []
+      }
+      if (Array.isArray(coverageRecord.minorStarsCovered)) {
+        coverageRecord.minorStarsCovered = []
+      }
     }
   }
   return bridge.request.parseResult(wireResult)
@@ -264,12 +278,56 @@ function parseCoverageWireResult(
   return bridge.request.parseResult(wireResult)
 }
 
+function parseMinorCoverageWireResult(
+  bridge: AiChartD1P1AdapterBridge,
+  result: unknown,
+) {
+  const wireResult = structuredClone(result) as Mutable<AiChartD1P1Result>
+  wireResult.primaryAxis.majorStarCore = []
+  wireResult.coverage.majorStarsCovered = []
+  return bridge.request.parseResult(wireResult)
+}
+
+function targetSupportingRuleId(
+  modelInput: AdapterBridgeFixture['modelInputs'][number],
+  starName: string,
+): string {
+  const trace = modelInput.knowledgeContext.selectionTrace.find(
+    (entry) =>
+      entry.reason === 'supporting_star_present' &&
+      entry.palaceRole === 'target' &&
+      entry.palaceId === modelInput.targetPalaceId &&
+      entry.starName === starName,
+  )
+  assert.ok(trace)
+  return trace.ruleId
+}
+
+function removeTargetSupportingEvidence(
+  value: Mutable<AiChartD1P1Result>,
+  modelInput: AdapterBridgeFixture['modelInputs'][number],
+  starName: string,
+): void {
+  const ruleId = targetSupportingRuleId(modelInput, starName)
+  for (const field of CANDIDATE_FIELDS) {
+    value[field] = value[field].filter(
+      (candidate) =>
+        !(
+          candidate.palaceIds.includes(modelInput.targetPalaceId) &&
+          candidate.starBasis.includes(starName) &&
+          candidate.usedRuleIds.includes(ruleId)
+        ),
+    )
+  }
+}
+
 function resultWithSingleCandidate(
   modelInput: AdapterBridgeFixture['modelInputs'][number],
   field: (typeof CANDIDATE_FIELDS)[number],
 ): Mutable<AiChartD1P1Result> {
   const result = createValidAiChartD1P1Result(modelInput)
   const record = result as unknown as Record<string, unknown>
+  const supportingEvidence = [...result.combinedCandidates]
   CANDIDATE_FIELDS.forEach((candidateField) => {
     record[candidateField] = []
   })
@@ -279,7 +337,11 @@ function resultWithSingleCandidate(
       `candidate:${field}`,
       field,
     ),
+    ...(field === 'combinedCandidates' ? supportingEvidence : []),
   ]
+  if (field !== 'combinedCandidates') {
+    record.combinedCandidates = supportingEvidence
+  }
   return result
 }
 
@@ -471,8 +533,11 @@ async function run() {
     const formalMajorStarCore = primaryAxisMajorStarCoreSchema(formal)
     const sourceBoundCoverageMajorStars = coverageMajorStarsSchema(sourceBound)
     const formalCoverageMajorStars = coverageMajorStarsSchema(formal)
+    const sourceBoundCoverageMinorStars = coverageMinorStarsSchema(sourceBound)
+    const formalCoverageMinorStars = coverageMinorStarsSchema(formal)
     Object.assign(sourceBoundMajorStarCore, formalMajorStarCore)
     Object.assign(sourceBoundCoverageMajorStars, formalCoverageMajorStars)
+    Object.assign(sourceBoundCoverageMinorStars, formalCoverageMinorStars)
     assert.deepEqual(sourceBound, formal)
   })
   check('each request Schema reserves primaryAxis majorStarCore for Server injection', () => {
@@ -495,6 +560,25 @@ async function run() {
       assert.equal(majorStarsCovered.maxItems, 0)
     })
   })
+  check('each request Schema reserves coverage minorStarsCovered for Server derivation', () => {
+    bridges.forEach((entry, index) => {
+      const expectedSupportingStars = modelInputs[
+        index
+      ].structuralContext.targetPalace.modeledSupportingStars.map(
+        (star) => star.name,
+      )
+      const minorStarsCovered = coverageMinorStarsSchema(entry.request.schema)
+      const items = asSchemaRecord(minorStarsCovered.items)
+      assert.deepEqual(
+        items.enum,
+        expectedSupportingStars.length === 0
+          ? undefined
+          : expectedSupportingStars,
+      )
+      assert.equal(minorStarsCovered.minItems, 0)
+      assert.equal(minorStarsCovered.maxItems, 0)
+    })
+  })
   check('request Schema admits no model-authored primary-axis star value', () => {
     const expectedMajorStars = effectiveMajorStarNames(modelInput)
     const majorStarCore = primaryAxisMajorStarCoreSchema(bridge.request.schema)
@@ -511,10 +595,19 @@ async function run() {
       const wireResult = createValidAiChartD1P1Result(modelInputs[index])
       wireResult.primaryAxis.majorStarCore = []
       wireResult.coverage.majorStarsCovered = []
+      wireResult.coverage.minorStarsCovered = []
       const parsed = entry.request.parseResult(wireResult)
       const expected = effectiveMajorStarNames(modelInputs[index])
+      const expectedSupportingStars =
+        modelInputs[index].structuralContext.targetPalace.modeledSupportingStars.map(
+          (star) => star.name,
+        )
       assert.deepEqual(parsed.primaryAxis.majorStarCore, expected)
       assert.deepEqual(parsed.coverage.majorStarsCovered, expected)
+      assert.deepEqual(
+        parsed.coverage.minorStarsCovered,
+        expectedSupportingStars,
+      )
     })
   })
   check('request parser is a function', () => {
@@ -1182,10 +1275,9 @@ async function run() {
     assert.equal(value.coverage.minorStarsCovered.length > 0, true)
     assert.doesNotThrow(() => parseResult(bridge, value))
   })
-  check('complete model-authored coverage is order-insensitive', () => {
+  check('remaining model-authored coverage is order-insensitive', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.coverage.directMeaningsConsidered.reverse()
-    value.coverage.minorStarsCovered.reverse()
     value.coverage.mutagensCovered.reverse()
     value.coverage.maleficsCovered.reverse()
     value.coverage.noblesCovered.reverse()
@@ -1225,11 +1317,6 @@ async function run() {
   })
   for (const [name, field, reasonCode] of [
     [
-      'target supporting stars',
-      'minorStarsCovered',
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
-    ],
-    [
       'target natal mutagens',
       'mutagensCovered',
       AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MUTAGENS_MISMATCH,
@@ -1260,6 +1347,17 @@ async function run() {
       assertResultInvalid(() => parseResult(bridge, value), reasonCode)
     })
   }
+  check('complete Result rejects missing target supporting-star evidence', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const star =
+      modelInput.structuralContext.targetPalace.modeledSupportingStars[0]
+    assert.ok(star)
+    removeTargetSupportingEvidence(value, modelInput, star.name)
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
+    )
+  })
   const oppositeMeaning = modelInput.knowledgeContext.meanings.find(
     (meaning) => meaning.palaceRole === 'opposite',
   )
@@ -1376,7 +1474,7 @@ async function run() {
     const value = createValidAiChartD1P1Result(modelInput)
     value.coverage.minorStarsCovered = [otherSupportingStar.name]
     assertResultInvalid(
-      () => parseResult(bridge, value),
+      () => parseMinorCoverageWireResult(bridge, value),
       AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
     )
   })
@@ -1384,7 +1482,7 @@ async function run() {
     const value = createValidAiChartD1P1Result(modelInput)
     value.coverage.minorStarsCovered = ['天刑']
     assertResultInvalid(
-      () => parseResult(bridge, value),
+      () => parseMinorCoverageWireResult(bridge, value),
       AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
     )
   })
@@ -1678,6 +1776,8 @@ async function run() {
         () =>
           name === 'major stars'
             ? parseCoverageWireResult(matrixBridge, value)
+            : name === 'minor stars'
+              ? parseMinorCoverageWireResult(matrixBridge, value)
             : parseResult(matrixBridge, value),
         expectedReasonCode,
       )
@@ -1690,7 +1790,7 @@ async function run() {
     const value = createValidAiChartD1P1Result(coverageInput)
     value.status = status
     const missingMeaning = value.coverage.directMeaningsConsidered.shift()
-    const missingMinor = value.coverage.minorStarsCovered.shift()
+    const missingMinor = value.coverage.minorStarsCovered[0]
     const missingMutagen = value.coverage.mutagensCovered.shift()
     const missingMalefic = value.coverage.maleficsCovered.shift()
     const missingNoble = value.coverage.noblesCovered.shift()
@@ -1699,6 +1799,7 @@ async function run() {
     assert.ok(missingMutagen)
     assert.ok(missingMalefic)
     assert.ok(missingNoble)
+    removeTargetSupportingEvidence(value, coverageInput, missingMinor)
     value.coverage.omittedItems = [
       { item: missingMeaning, reason: 'target meaning omitted' },
       {
@@ -1826,13 +1927,6 @@ async function run() {
       AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_DIRECT_MEANINGS_OMISSION_TRACE_MISSING,
     ],
     [
-      'minor stars',
-      coverageBridge,
-      coverageInput,
-      'minorStarsCovered',
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
-    ],
-    [
       'mutagens',
       coverageBridge,
       coverageInput,
@@ -1886,6 +1980,29 @@ async function run() {
         assert.equal(parseResult(matrixBridge, value).status, status)
       })
     }
+    check(`${status} minor stars require an exact omission trace`, () => {
+      const value = createValidAiChartD1P1Result(coverageInput)
+      const missingSource = value.coverage.minorStarsCovered[0]
+      assert.ok(missingSource)
+      removeTargetSupportingEvidence(value, coverageInput, missingSource)
+      value.status = status
+      value.coverage.omittedItems = [
+        {
+          item: 'synthetic unrelated omission',
+          reason: 'synthetic unrelated omission',
+        },
+      ]
+      assertResultInvalid(
+        () => parseResult(coverageBridge, value),
+        AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
+      )
+
+      value.coverage.omittedItems.push({
+        item: missingSource,
+        reason: `omitted authenticated source ${missingSource}`,
+      })
+      assert.equal(parseResult(coverageBridge, value).status, status)
+    })
   }
   check('partial coverage cannot omit a source without naming it', () => {
     const value = createValidAiChartD1P1Result(coverageInput)
@@ -2069,9 +2186,122 @@ async function run() {
     const value = createValidAiChartD1P1Result(modelInput)
     value.primaryAxis.majorStarCore = []
     value.coverage.majorStarsCovered = []
+    value.coverage.minorStarsCovered = []
     assert.deepEqual(
       bridge.request.parseResult(value).coverage.majorStarsCovered,
       effectiveMajorStarNames(modelInput),
+    )
+  })
+  check('each request Schema reserves minorStarsCovered for Server derivation', () => {
+    const expectedSupportingStars =
+      modelInput.structuralContext.targetPalace.modeledSupportingStars.map(
+        (star) => star.name,
+      )
+    const schema = coverageMinorStarsSchema(bridge.request.schema)
+    assert.equal(schema.minItems, 0)
+    assert.equal(schema.maxItems, 0)
+    assert.deepEqual(asSchemaRecord(schema.items).enum, expectedSupportingStars)
+  })
+  check('coverage derives exact minor stars from validated candidate evidence', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.coverage.minorStarsCovered = []
+    assert.deepEqual(
+      parseResult(bridge, value).coverage.minorStarsCovered,
+      modelInput.structuralContext.targetPalace.modeledSupportingStars.map(
+        (star) => star.name,
+      ),
+    )
+  })
+  check('wire parser rejects an exact model-authored minor-star list', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    value.primaryAxis.majorStarCore = []
+    value.coverage.majorStarsCovered = []
+    assertResultInvalid(
+      () => parseWireResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
+    )
+  })
+  check('complete coverage requires candidate evidence for every target minor star', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const targetStar =
+      modelInput.structuralContext.targetPalace.modeledSupportingStars[0]
+    const targetTrace = modelInput.knowledgeContext.selectionTrace.find(
+      (trace) =>
+        trace.reason === 'supporting_star_present' &&
+        trace.palaceRole === 'target' &&
+        trace.starName === targetStar.name,
+    )
+    assert.ok(targetTrace)
+    for (const field of CANDIDATE_FIELDS) {
+      value[field] = value[field].filter(
+        (candidate) =>
+          !(
+            candidate.palaceIds.includes(modelInput.targetPalaceId) &&
+            candidate.starBasis.includes(targetStar.name) &&
+            candidate.usedRuleIds.includes(targetTrace.ruleId)
+          ),
+      )
+    }
+    value.coverage.minorStarsCovered = []
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
+    )
+  })
+  const targetSupportingStar =
+    modelInput.structuralContext.targetPalace.modeledSupportingStars[0]
+  assert.ok(targetSupportingStar)
+  const targetSupportingRule = targetSupportingRuleId(
+    modelInput,
+    targetSupportingStar.name,
+  )
+  function targetSupportingEvidenceCandidate(
+    value: Mutable<AiChartD1P1Result>,
+  ) {
+    const candidate = value.combinedCandidates.find(
+      (entry) =>
+        entry.palaceIds.includes(modelInput.targetPalaceId) &&
+        entry.starBasis.includes(targetSupportingStar.name) &&
+        entry.usedRuleIds.includes(targetSupportingRule),
+    )
+    assert.ok(candidate)
+    return candidate
+  }
+  check('minor-star evidence requires the star and Rule in the same Candidate', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const candidate = targetSupportingEvidenceCandidate(value)
+    const replacementRule = modelInput.knowledgeContext.rules.find(
+      (rule) => rule.ruleId !== targetSupportingRule,
+    )
+    assert.ok(replacementRule)
+    candidate.usedRuleIds = [replacementRule.ruleId]
+    candidate.ruleStatus = replacementRule.ruleStatus
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
+    )
+  })
+  check('minor-star evidence requires the target star name in starBasis', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const candidate = targetSupportingEvidenceCandidate(value)
+    const replacementStar =
+      modelInput.structuralContext.targetPalace.canonicalMajorStars[0]
+    assert.ok(replacementStar)
+    candidate.starBasis = [replacementStar.name]
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
+    )
+  })
+  check('minor-star evidence requires target palaceId in the same Candidate', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    const candidate = targetSupportingEvidenceCandidate(value)
+    candidate.palaceIds = [
+      modelInput.structuralContext.oppositePalace.palaceId,
+    ]
+    assertResultInvalid(
+      () => parseResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
     )
   })
   check('wire parser rejects an exact model-authored coverage major-star list', () => {
@@ -3029,7 +3259,7 @@ async function run() {
     }
 
     visit(sourceFile)
-    assert.equal(callSites.length, 44)
+    assert.equal(callSites.length, 45)
 
     const allowedReasonNames = new Set(
       Object.keys(AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS),
@@ -3106,7 +3336,7 @@ async function run() {
     }
     assert.equal(controlledHelperReasons, 1)
     assert.equal(controlledDuplicateMappingReasons, 1)
-    assert.equal(directFixedReasons, 42)
+    assert.equal(directFixedReasons, 43)
 
     assert.equal(stringCoverageCallSites.length, 3)
     assert.deepEqual(
