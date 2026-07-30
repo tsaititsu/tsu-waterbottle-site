@@ -652,7 +652,7 @@ async function run() {
 
   const repositoryRoot = process.cwd()
   const sourceFiles = sourceFilesUnder(join(repositoryRoot, 'src'))
-  check('Adapter Bridge and Report pipeline are the production Prompt Package builder consumers', () => {
+  check('Adapter Bridge, Report pipeline, and Report OpenAI runtime are the production Prompt Package builder consumers', () => {
     const consumers = sourceFiles
       .filter((path) => path.endsWith('.ts') || path.endsWith('.tsx'))
       .filter((path) =>
@@ -670,6 +670,7 @@ async function run() {
       )
     assert.deepEqual(consumers, [
       'src/lib/ai-chart/d1P1AdapterBridge.ts',
+      'src/lib/ai-chart/d1P1ReportOpenAiRuntime.server.ts',
       'src/lib/ai-chart/reportGenerationPipeline.ts',
     ])
   })

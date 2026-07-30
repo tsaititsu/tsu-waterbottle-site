@@ -2923,7 +2923,7 @@ async function run() {
       ]),
     )
   })
-  check('Adapter Bridge production consumers are Preview Gate and Report pipeline', () => {
+  check('Adapter Bridge production consumers are Preview Gate, Report pipeline, and Report OpenAI runtime', () => {
     const consumers = sourceFiles
       .filter((path) => path.endsWith('.ts') || path.endsWith('.tsx'))
       .filter((path) =>
@@ -2940,6 +2940,7 @@ async function run() {
       )
     assert.deepEqual(consumers, [
       'src/lib/ai-chart/d1P1PreviewRequestGate.server.ts',
+      'src/lib/ai-chart/d1P1ReportOpenAiRuntime.server.ts',
       'src/lib/ai-chart/reportGenerationPipeline.ts',
     ])
   })
@@ -2963,7 +2964,7 @@ async function run() {
       'src/lib/ai-chart/d1P1PreviewRequestGate.server.ts',
     ])
   })
-  check('Prompt Package builder production consumers are Bridge and Report pipeline', () => {
+  check('Prompt Package builder production consumers are Bridge, Report pipeline, and Report OpenAI runtime', () => {
     const consumers = sourceFiles
       .filter((path) => path.endsWith('.ts') || path.endsWith('.tsx'))
       .filter((path) =>
@@ -2981,6 +2982,7 @@ async function run() {
       )
     assert.deepEqual(consumers, [
       'src/lib/ai-chart/d1P1AdapterBridge.ts',
+      'src/lib/ai-chart/d1P1ReportOpenAiRuntime.server.ts',
       'src/lib/ai-chart/reportGenerationPipeline.ts',
     ])
   })

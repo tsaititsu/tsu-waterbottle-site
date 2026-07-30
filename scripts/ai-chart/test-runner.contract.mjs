@@ -16,7 +16,7 @@ import {
   validateLocalTsx,
 } from './test-runner.mjs'
 
-const EXPECTED_CURRENT_AI_CHART_TEST_FILE_COUNT = 76
+const EXPECTED_CURRENT_AI_CHART_TEST_FILE_COUNT = 77
 const THIS_FILE = fileURLToPath(import.meta.url)
 const DEFAULT_REPOSITORY_ROOT = resolve(dirname(THIS_FILE), '../..')
 
