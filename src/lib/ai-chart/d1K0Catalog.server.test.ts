@@ -168,6 +168,35 @@ async function run() {
       false,
     )
   })
+  check('Ziwei lecture-backfill double-star work versions are source-bound rules', () => {
+    const ziweiLectureBackfillPairs = [
+      'pair:ziwei-tianfu',
+      'pair:ziwei-qisha',
+      'pair:ziwei-pojun',
+      'pair:ziwei-tianxiang',
+      'pair:ziwei-tanlang',
+    ] as const
+
+    for (const pairKey of ziweiLectureBackfillPairs) {
+      const inventory = first.doubleStarInventory.find(
+        (entry) => entry.pairKey === pairKey,
+      )
+      assert.ok(inventory)
+      assert.equal(inventory.specificRuleStatus, 'lecture_backfill')
+      assert.equal(inventory.missingReason, null)
+      assert.ok(inventory.specificRuleId)
+
+      const rule = first.rules.find(
+        (entry) => entry.ruleId === inventory.specificRuleId,
+      )
+      assert.ok(rule)
+      assert.equal(rule.kind, 'double_star')
+      assert.equal(rule.ruleStatus, 'lecture_backfill')
+      assert.equal(rule.sourceAuthority, 'lecture_backfill')
+      assert.equal(rule.selectionTags.includes('double:lecture-backfill-core'), true)
+      assert.doesNotMatch(rule.content, /待老師補充|尚未完整定稿/u)
+    }
+  })
   check('mutagen inventory preserves every source bullet in all forty sections', () => {
     assert.equal(first.mutagenInventory.length, 40)
     assert.deepEqual(first.coverage.mutagenSpecificCoverage, {
@@ -252,7 +281,8 @@ async function run() {
       first.rules.filter(
         (rule) =>
           rule.ruleId !== 'rule:common:d1-event-boundary' &&
-          rule.ruleId !== 'rule:mutagen:tianxiang:ji',
+          rule.ruleId !== 'rule:mutagen:tianxiang:ji' &&
+          rule.ruleId !== 'rule:double:ziwei-tianxiang:core',
       ),
     )
     assert.doesNotMatch(
@@ -265,6 +295,16 @@ async function run() {
     assert.ok(tianxiangJi)
     assert.equal(
       bullets(tianxiangJi.content).includes('具體官非事件留待大限、流年。'),
+      true,
+    )
+    const ziweiTianxiang = first.rules.find(
+      (rule) => rule.ruleId === 'rule:double:ziwei-tianxiang:core',
+    )
+    assert.ok(ziweiTianxiang)
+    assert.equal(
+      bullets(ziweiTianxiang.content).some((bullet) =>
+        bullet.includes('不直接斷官非'),
+      ),
       true,
     )
   })

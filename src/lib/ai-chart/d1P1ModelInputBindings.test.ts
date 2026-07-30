@@ -739,8 +739,8 @@ async function run() {
   const partialSnapshot = completeModelInputSnapshot()
   const partialPalaces = partialSnapshot.palaces as MutableRecord[]
   partialPalaces[0].majorStars = [
-    { name: '紫微', type: 'major', scope: 'origin' },
-    { name: '七殺', type: 'major', scope: 'origin' },
+    { name: '巨門', type: 'major', scope: 'origin' },
+    { name: '太陽', type: 'major', scope: 'origin' },
   ]
   const partialStructures = createStructuralInputs(partialSnapshot, 'partial-bundle')
   const partialBundles = buildAiChartD1K0P1KnowledgeBundles(

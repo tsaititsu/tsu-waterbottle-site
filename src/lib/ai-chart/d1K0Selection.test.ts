@@ -665,7 +665,7 @@ async function run() {
 
   const partialSnapshot = completeSnapshot()
   const partialPalaces = partialSnapshot.palaces as MutableRecord[]
-  partialPalaces[0].majorStars = [star('紫微', 'major'), star('七殺', 'major')]
+  partialPalaces[0].majorStars = [star('巨門', 'major'), star('太陽', 'major')]
   partialPalaces[1].majorStars = [
     star('廉貞', 'major', '化祿'),
     star('破軍', 'major', '化權'),
