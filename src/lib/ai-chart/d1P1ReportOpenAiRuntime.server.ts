@@ -4,7 +4,10 @@ import { freezeAiChartD1Value } from './d1CommonContracts'
 import { buildAiChartD1K0P1KnowledgeBundles } from './d1K0Selection'
 import { normalizeAiChartD1N0 } from './d1N0'
 import { AI_CHART_D1_PALACE_IDENTITIES } from './d1N0Constants'
-import { buildAiChartD1P1AdapterBridges, type AiChartD1P1AdapterBridge } from './d1P1AdapterBridge'
+import {
+  buildAiChartD1P1ReportOpenAiRuntimeAdapterBridges,
+  type AiChartD1P1AdapterBridge,
+} from './d1P1AdapterBridge'
 import { buildAiChartD1P1ModelInputs } from './d1P1ModelInputBindings'
 import { buildAiChartD1P1StructuralInputs } from './d1P1InputContracts'
 import { buildAiChartD1P1PromptPackages } from './d1P1PromptPackageBuilder'
@@ -267,7 +270,7 @@ function buildRuntimeBinding(
     knowledgeBundles,
     modelInputs,
   )
-  const p1AdapterBridges = buildAiChartD1P1AdapterBridges(
+  const p1AdapterBridges = buildAiChartD1P1ReportOpenAiRuntimeAdapterBridges(
     input.d1K0Catalog,
     structuralInputs,
     knowledgeBundles,

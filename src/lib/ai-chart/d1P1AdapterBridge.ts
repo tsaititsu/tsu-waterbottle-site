@@ -62,6 +62,7 @@ import {
 } from './d1P1F1Contracts'
 import {
   AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+  AI_CHART_D1_P1_REPORT_OPENAI_RUNTIME_TIMEOUT_MS,
   type AiChartD1P1PreviewTimeoutMs,
 } from './d1P1PreviewTimeoutContracts'
 import {
@@ -1397,6 +1398,23 @@ export function buildAiChartD1P1LocalPreviewAdapterBridges(
     modelInputValues,
     promptPackageValues,
     AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+  )
+}
+
+export function buildAiChartD1P1ReportOpenAiRuntimeAdapterBridges(
+  catalogValue: unknown,
+  structuralInputValues: unknown,
+  knowledgeBundleValues: unknown,
+  modelInputValues: unknown,
+  promptPackageValues: unknown,
+): readonly AiChartD1P1AdapterBridge[] {
+  return buildAiChartD1P1AdapterBridgesWithTimeout(
+    catalogValue,
+    structuralInputValues,
+    knowledgeBundleValues,
+    modelInputValues,
+    promptPackageValues,
+    AI_CHART_D1_P1_REPORT_OPENAI_RUNTIME_TIMEOUT_MS,
   )
 }
 
