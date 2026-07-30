@@ -42,7 +42,7 @@ export const WORKFLOW_FILE =
   '.github/workflows/supabase-production-line-pay-partial-acl-recovery.yml'
 
 export const EXPECTED_RECOVERY_MIGRATION_SHA256 =
-  '30c3a4919d30c756469149cbfc3310431b9c049c5ff7b59cdad8e5ce19fe92d4'
+  '5533c63cda1556ca6316354e77e8a421e1a047c66dcd11f5543099e0bb93d5de'
 export const EXPECTED_BASE_MIGRATION_SHA256 =
   '8da1fb429aecb1c35b12a245b63907135dbe7c467ef0a5f069afd431d21e94b8'
 export const EXPECTED_FENCE_MIGRATION_SHA256 =

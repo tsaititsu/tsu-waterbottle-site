@@ -1174,17 +1174,10 @@ rollback;`,
     database,
     executor,
     `
-      create schema if not exists supabase_migrations;
-      create table if not exists supabase_migrations.schema_migrations (
-        version text primary key,
-        statements text[],
-        name text
-      );
-
       grant select on public.line_pay_checkout_attempts to anon;
       grant insert on public.payments to authenticated;
     `,
-    'hosted partial ACL metadata mutation',
+    'hosted partial ACL metadata mutation without migration history',
   )
   const hostedPartialApplicationState = parseAndValidateDiagnosticOutput(
     psqlAs(
@@ -1196,6 +1189,8 @@ rollback;`,
   )
   if (
     hostedPartialApplicationState.application_state !== 'PARTIAL' ||
+    hostedPartialApplicationState.migration_history.table_present !== false ||
+    hostedPartialApplicationState.migration_history.version_present !== false ||
     hostedPartialApplicationState.details.incomplete_categories
       .map((detail) => detail.category)
       .join(',') !== 'existing_relation_access,relations'
@@ -1223,7 +1218,9 @@ rollback;`,
     )
   if (
     hostedRecoveredApplicationState.application_state !==
-      'FULL_WITHOUT_HISTORY'
+      'FULL_WITHOUT_HISTORY' ||
+    hostedRecoveredApplicationState.migration_history.table_present !== false ||
+    hostedRecoveredApplicationState.migration_history.version_present !== false
   ) {
     throw new Error(
       `HOSTED_RECOVERED_APPLICATION_STATE_INVALID:${JSON.stringify(

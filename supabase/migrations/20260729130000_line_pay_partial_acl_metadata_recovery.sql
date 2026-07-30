@@ -17,17 +17,21 @@ set local idle_in_transaction_session_timeout = '30s';
 do $$
 declare
   v_missing_identity text;
+  v_migration_history_version_present boolean := false;
 begin
-  if to_regclass('supabase_migrations.schema_migrations') is null then
-    raise exception using errcode = '42P01',
-      message = 'line_pay_partial_recovery_missing_migration_history_table';
+  if to_regclass('supabase_migrations.schema_migrations') is not null then
+    execute $query$
+      select exists (
+        select 1
+        from supabase_migrations.schema_migrations
+        where version = $1
+      )
+    $query$
+    into v_migration_history_version_present
+    using '20260719033404';
   end if;
 
-  if exists (
-    select 1
-    from supabase_migrations.schema_migrations
-    where version = '20260719033404'
-  ) then
+  if v_migration_history_version_present then
     raise exception using errcode = '23505',
       message = 'line_pay_partial_recovery_migration_history_already_recorded';
   end if;

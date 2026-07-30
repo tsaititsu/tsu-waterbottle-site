@@ -112,7 +112,7 @@ describe('LINE Pay partial ACL metadata recovery', () => {
     )
     assert.equal(
       validator.EXPECTED_RECOVERY_MIGRATION_SHA256,
-      '30c3a4919d30c756469149cbfc3310431b9c049c5ff7b59cdad8e5ce19fe92d4',
+      '5533c63cda1556ca6316354e77e8a421e1a047c66dcd11f5543099e0bb93d5de',
     )
     assert.equal(
       validator.EXPECTED_PREFLIGHT_SHA256,
@@ -127,6 +127,29 @@ describe('LINE Pay partial ACL metadata recovery', () => {
       '6f0442e832d7137fa9f3ba6e8f8edd12a39c1242bbd1c824346dd9ac56e599fc',
     )
     validator.assertRecoverySql(recoverySql)
+  })
+
+  it('accepts absent migration history without creating or recording it', () => {
+    assert.match(
+      recoverySql,
+      /if to_regclass\('supabase_migrations[.]schema_migrations'\) is not null then/u,
+    )
+    assert.match(
+      recoverySql,
+      /execute \$query\$[\s\S]*from supabase_migrations[.]schema_migrations[\s\S]*where version = \$1[\s\S]*using '20260719033404'/u,
+    )
+    assert.doesNotMatch(
+      recoverySql,
+      /line_pay_partial_recovery_missing_migration_history_table/u,
+    )
+    assert.match(
+      recoverySql,
+      /line_pay_partial_recovery_migration_history_already_recorded/u,
+    )
+    assert.doesNotMatch(
+      recoverySql,
+      /\b(?:create\s+(?:schema|table)|insert\s+into|update)\s+supabase_migrations\b/iu,
+    )
   })
 
   it('keeps the recovery workflow behind exact main and environment gates', () => {
