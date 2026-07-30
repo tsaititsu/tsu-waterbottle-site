@@ -10,7 +10,7 @@ import {
   AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
 } from './d1P1AdapterBridgeContracts'
 import {
-  createValidAiChartD1P1Result,
+  createValidAiChartD1P1Result as createValidAiChartD1P1ResultWithServerFacts,
   createAdapterBridgeFixture,
   type AdapterBridgeFixture,
   type Mutable,
@@ -52,6 +52,14 @@ import {
   type AiChartOpenAiStructuredRequest,
   type AiChartOpenAiStructuredResult,
 } from './openAiResponses'
+
+function createValidAiChartD1P1Result(
+  ...args: Parameters<typeof createValidAiChartD1P1ResultWithServerFacts>
+): Mutable<AiChartD1P1Result> {
+  const result = createValidAiChartD1P1ResultWithServerFacts(...args)
+  result.primaryAxis.majorStarCore = []
+  return result
+}
 
 type NodeModuleInternals = {
   _resolveFilename: (

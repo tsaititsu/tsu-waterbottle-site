@@ -153,6 +153,32 @@ function assertNoFetch(run: () => void): void {
   assert.equal(fetchCount, 0)
 }
 
+function asSchemaRecord(value: unknown): Record<string, unknown> {
+  assert.equal(value !== null && typeof value === 'object', true)
+  assert.equal(Array.isArray(value), false)
+  return value as Record<string, unknown>
+}
+
+function primaryAxisMajorStarCoreSchema(
+  schema: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const properties = asSchemaRecord(schema.properties)
+  const primaryAxis = asSchemaRecord(properties.primaryAxis)
+  const primaryAxisProperties = asSchemaRecord(primaryAxis.properties)
+  return asSchemaRecord(primaryAxisProperties.majorStarCore)
+}
+
+function effectiveMajorStarNames(
+  modelInput: AdapterBridgeFixture['modelInputs'][number],
+): readonly string[] {
+  const target = modelInput.structuralContext.targetPalace
+  return (
+    target.borrowStatus === 'eligible_and_borrowed'
+      ? target.borrowedMajorStars
+      : target.canonicalMajorStars
+  ).map((star) => star.name)
+}
+
 function buildFrom(
   fixture: AdapterBridgeFixture,
   modelInputs: unknown = fixture.modelInputs,
@@ -168,6 +194,29 @@ function buildFrom(
 }
 
 function parseResult(
+  bridge: AiChartD1P1AdapterBridge,
+  result: unknown,
+) {
+  const wireResult = structuredClone(result) as Record<string, unknown>
+  if (
+    wireResult !== null &&
+    typeof wireResult === 'object' &&
+    !Array.isArray(wireResult)
+  ) {
+    const primaryAxis = wireResult.primaryAxis
+    if (
+      primaryAxis !== null &&
+      typeof primaryAxis === 'object' &&
+      !Array.isArray(primaryAxis) &&
+      Array.isArray((primaryAxis as Record<string, unknown>).majorStarCore)
+    ) {
+      ;(primaryAxis as Record<string, unknown>).majorStarCore = []
+    }
+  }
+  return bridge.request.parseResult(wireResult)
+}
+
+function parseWireResult(
   bridge: AiChartD1P1AdapterBridge,
   result: unknown,
 ) {
@@ -373,8 +422,45 @@ async function run() {
       AI_CHART_D1_P1_ADAPTER_BRIDGE_DESCRIPTION,
     )
   })
-  check('request uses the formal P1 Output Schema', () => {
-    assert.deepEqual(bridge.request.schema, AI_CHART_D1_P1_OUTPUT_SCHEMA)
+  check('request uses a source-bound specialization of the formal P1 Output Schema', () => {
+    assert.notDeepEqual(bridge.request.schema, AI_CHART_D1_P1_OUTPUT_SCHEMA)
+    const sourceBound = structuredClone(bridge.request.schema)
+    const formal = structuredClone(AI_CHART_D1_P1_OUTPUT_SCHEMA)
+    const sourceBoundMajorStarCore = primaryAxisMajorStarCoreSchema(sourceBound)
+    const formalMajorStarCore = primaryAxisMajorStarCoreSchema(formal)
+    Object.assign(sourceBoundMajorStarCore, formalMajorStarCore)
+    assert.deepEqual(sourceBound, formal)
+  })
+  check('each request Schema reserves primaryAxis majorStarCore for Server injection', () => {
+    bridges.forEach((entry, index) => {
+      const expectedMajorStars = effectiveMajorStarNames(modelInputs[index])
+      const majorStarCore = primaryAxisMajorStarCoreSchema(entry.request.schema)
+      const items = asSchemaRecord(majorStarCore.items)
+      assert.deepEqual(items.enum, expectedMajorStars)
+      assert.equal(majorStarCore.minItems, 0)
+      assert.equal(majorStarCore.maxItems, 0)
+    })
+  })
+  check('request Schema admits no model-authored primary-axis star value', () => {
+    const expectedMajorStars = effectiveMajorStarNames(modelInput)
+    const majorStarCore = primaryAxisMajorStarCoreSchema(bridge.request.schema)
+    const items = asSchemaRecord(majorStarCore.items)
+    const allowed = items.enum
+    assert.ok(Array.isArray(allowed))
+    for (const starName of expectedMajorStars) {
+      assert.equal(allowed.includes(`${starName}星`), false)
+      assert.equal(allowed.includes(`${starName}化權`), false)
+    }
+  })
+  check('request parser injects the exact Server-owned major-star set for all twelve palaces', () => {
+    bridges.forEach((entry, index) => {
+      const wireResult = createValidAiChartD1P1Result(modelInputs[index])
+      wireResult.primaryAxis.majorStarCore = []
+      assert.deepEqual(
+        entry.request.parseResult(wireResult).primaryAxis.majorStarCore,
+        effectiveMajorStarNames(modelInputs[index]),
+      )
+    })
   })
   check('request parser is a function', () => {
     assert.equal(typeof bridge.request.parseResult, 'function')
@@ -554,8 +640,8 @@ async function run() {
   check('Responses format is strict', () => {
     assert.equal(body.text.format.strict, true)
   })
-  check('Responses format uses the formal P1 Schema', () => {
-    assert.deepEqual(body.text.format.schema, AI_CHART_D1_P1_OUTPUT_SCHEMA)
+  check('Responses format uses the source-bound P1 Schema', () => {
+    assert.deepEqual(body.text.format.schema, bridge.request.schema)
   })
   for (const key of [
     'temperature',
@@ -932,7 +1018,10 @@ async function run() {
         return Reflect.ownKeys(target)
       },
     })
-    assert.doesNotThrow(() => parseResult(bridge, sourceBoundProxy))
+    assert.throws(
+      () => parseWireResult(bridge, sourceBoundProxy),
+      AiChartD1P1AdapterBridgeResultInvalidError,
+    )
     assert.equal(formalOwnKeysCount, 2)
     assert.equal(sourceBoundOwnKeysCount, formalOwnKeysCount)
   })
@@ -948,7 +1037,7 @@ async function run() {
       },
     })
     const error = assertResultInvalid(
-      () => parseResult(bridge, value),
+      () => parseWireResult(bridge, value),
       AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID,
     )
     assert.equal(accessorExecuted, false)
@@ -959,7 +1048,7 @@ async function run() {
     const marker = Symbol(malformedDuplicateMarker)
     ;(value as unknown as Record<PropertyKey, unknown>)[marker] = true
     const error = assertResultInvalid(
-      () => parseResult(bridge, value),
+      () => parseWireResult(bridge, value),
       AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.RESULT_SHAPE_INVALID,
     )
     assertSafeResultInvalid(error, [malformedDuplicateMarker])
@@ -1917,37 +2006,46 @@ async function run() {
       ),
     )
   })
-  check('primaryAxis rejects an empty majorStarCore', () => {
+  check('wire parser rejects an exact model-authored majorStarCore', () => {
+    const value = createValidAiChartD1P1Result(modelInput)
+    assertResultInvalid(
+      () => parseWireResult(bridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.PRIMARY_AXIS_MAJOR_STAR_BINDING_MISMATCH,
+    )
+  })
+  check('primaryAxis injects Server-owned major stars for an empty wire field', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.primaryAxis.majorStarCore = []
-    assertResultInvalid(
-      () => parseResult(bridge, value),
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.PRIMARY_AXIS_MAJOR_STAR_BINDING_MISMATCH,
+    assert.deepEqual(
+      parseResult(bridge, value).primaryAxis.majorStarCore,
+      modelInput.structuralContext.targetPalace.canonicalMajorStars.map(
+        (star) => star.name,
+      ),
     )
   })
   check('primaryAxis rejects an extra major star', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.primaryAxis.majorStarCore.push('紫微')
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(() => parseWireResult(bridge, value))
   })
   check('primaryAxis rejects duplicate major stars', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.primaryAxis.majorStarCore.push(value.primaryAxis.majorStarCore[0])
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(() => parseWireResult(bridge, value))
   })
   check('primaryAxis rejects another palace major star', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.primaryAxis.majorStarCore = [
       modelInput.structuralContext.oppositePalace.canonicalMajorStars[0].name,
     ]
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(() => parseWireResult(bridge, value))
   })
   check('primaryAxis rejects a supporting star', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.primaryAxis.majorStarCore = [
       modelInput.structuralContext.targetPalace.modeledSupportingStars[0].name,
     ]
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(() => parseWireResult(bridge, value))
   })
   check('borrowed primaryAxis uses the exact borrowed major stars', () => {
     const value = createValidAiChartD1P1Result(borrowInput)
@@ -1963,14 +2061,14 @@ async function run() {
     value.primaryAxis.majorStarCore = [
       modelInput.structuralContext.targetPalace.canonicalMajorStars[0].name,
     ]
-    assertResultInvalid(() => parseResult(borrowBridge, value))
+    assertResultInvalid(() => parseWireResult(borrowBridge, value))
   })
   check('non-borrowed primaryAxis rejects an opposite borrowed star', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.primaryAxis.majorStarCore = [
       modelInput.structuralContext.oppositePalace.canonicalMajorStars[0].name,
     ]
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(() => parseWireResult(bridge, value))
   })
   check('target primary star Rule completeness passes', () => {
     assert.doesNotThrow(() =>
@@ -2108,12 +2206,15 @@ async function run() {
   check('primaryAxis rejects a missing effective major star', () => {
     const value = createValidAiChartD1P1Result(doubleInput)
     value.primaryAxis.majorStarCore = [value.primaryAxis.majorStarCore[0]]
-    assertResultInvalid(() => parseResult(doubleBridge, value))
+    assertResultInvalid(() => parseWireResult(doubleBridge, value))
   })
-  check('double-star majorStarCore order does not affect source equality', () => {
+  check('wire parser rejects model-controlled double-star ordering', () => {
     const value = createValidAiChartD1P1Result(doubleInput)
     value.primaryAxis.majorStarCore.reverse()
-    assert.doesNotThrow(() => parseResult(doubleBridge, value))
+    assertResultInvalid(
+      () => parseWireResult(doubleBridge, value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.PRIMARY_AXIS_MAJOR_STAR_BINDING_MISMATCH,
+    )
   })
   check('missing authenticated double-star Rule is rejected', () => {
     const value = createValidAiChartD1P1Result(doubleInput)
@@ -2869,7 +2970,7 @@ async function run() {
     }
 
     visit(sourceFile)
-    assert.equal(callSites.length, 42)
+    assert.equal(callSites.length, 43)
 
     const allowedReasonNames = new Set(
       Object.keys(AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS),
@@ -2946,7 +3047,7 @@ async function run() {
     }
     assert.equal(controlledHelperReasons, 1)
     assert.equal(controlledDuplicateMappingReasons, 1)
-    assert.equal(directFixedReasons, 40)
+    assert.equal(directFixedReasons, 41)
 
     assert.equal(stringCoverageCallSites.length, 3)
     assert.deepEqual(
