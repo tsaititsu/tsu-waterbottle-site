@@ -10,6 +10,7 @@ on:
       - ".github/workflows/supabase-production-line-pay-application-state-diagnostic.yml"
       - ".github/workflows/supabase-production-line-pay-checkout-initializer-diagnostic.yml"
       - ".github/workflows/supabase-production-line-pay-checkout-initializer-contract-detail-diagnostic.yml"
+      - ".github/workflows/supabase-production-line-pay-function-owner-membership-diagnostic.yml"
       - ".github/workflows/supabase-production-line-pay-checkout-initializer.yml"
       - ".github/workflows/supabase-production-line-pay-migration.yml"
       - ".github/workflows/supabase-production-line-pay-partial-acl-recovery.yml"
@@ -23,6 +24,7 @@ on:
       - "scripts/supabase/run-line-pay-application-state-diagnostic.mjs"
       - "scripts/supabase/run-line-pay-checkout-initializer-application-state.mjs"
       - "scripts/supabase/run-line-pay-checkout-initializer-contract-detail-diagnostic.mjs"
+      - "scripts/supabase/run-line-pay-function-owner-membership-diagnostic.mjs"
       - "scripts/supabase/run-line-pay-checkout-initializer-exact-file.mjs"
       - "scripts/supabase/run-line-pay-partial-acl-metadata-recovery.mjs"
       - "scripts/supabase/run-line-pay-partial-acl-recovery-capability-diagnostic.mjs"
@@ -32,6 +34,7 @@ on:
       - "scripts/supabase/validate-line-pay-application-state-diagnostic.mjs"
       - "scripts/supabase/validate-line-pay-checkout-initializer-production.mjs"
       - "scripts/supabase/validate-line-pay-checkout-initializer-contract-detail-diagnostic.mjs"
+      - "scripts/supabase/validate-line-pay-function-owner-membership-diagnostic.mjs"
       - "scripts/supabase/validate-line-pay-partial-acl-metadata-recovery.mjs"
       - "scripts/supabase/validate-line-pay-partial-acl-recovery-capability-diagnostic.mjs"
       - "scripts/supabase/validate-line-pay-production-deployment.mjs"
@@ -55,6 +58,7 @@ on:
       - "supabase/deployment/line_pay_checkout_aggregate_initialization_recovery.sql"
       - "supabase/deployment/line_pay_checkout_aggregate_initialization_application_state.sql"
       - "supabase/deployment/line_pay_checkout_initializer_contract_detail_diagnostic.sql"
+      - "supabase/deployment/line_pay_function_owner_membership_diagnostic.sql"
       - "supabase/deployment/line_pay_checkout_aggregate_initialization_preflight.sql"
       - "supabase/deployment/line_pay_checkout_aggregate_initialization_postflight.sql"
       - "supabase/deployment/line_pay_checkout_aggregate_initialization_deploy.sql"
@@ -66,6 +70,7 @@ on:
       - "supabase/line_pay_checkout_initializer_production_runner.test.ts"
       - "supabase/line_pay_checkout_initializer_production_workflow.test.ts"
       - "supabase/line_pay_checkout_initializer_contract_detail_diagnostic.test.ts"
+      - "supabase/line_pay_function_owner_membership_diagnostic.test.ts"
       - "supabase/line_pay_production_diagnostic_runner.test.ts"
       - "supabase/line_pay_production_diagnostic_workflow.test.ts"
       - "supabase/line_pay_application_state_diagnostic_runner.test.ts"
@@ -131,6 +136,7 @@ jobs:
           node --test supabase/line_pay_checkout_initializer_production_runner.test.ts
           node --test supabase/line_pay_checkout_initializer_production_workflow.test.ts
           node --test supabase/line_pay_checkout_initializer_contract_detail_diagnostic.test.ts
+          node --test supabase/line_pay_function_owner_membership_diagnostic.test.ts
           node --test supabase/line_pay_production_diagnostic_workflow.test.ts
           node --test supabase/line_pay_production_diagnostic_runner.test.ts
           node --test supabase/line_pay_application_state_diagnostic_workflow.test.ts

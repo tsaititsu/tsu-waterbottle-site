@@ -11,6 +11,7 @@ import {
   parseAndValidateInitializerPreflightOutput,
 } from '../../scripts/supabase/validate-line-pay-checkout-initializer-production.mjs'
 import { parseAndValidateContractDetailOutput } from '../../scripts/supabase/validate-line-pay-checkout-initializer-contract-detail-diagnostic.mjs'
+import { parseAndValidateMembershipDiagnosticOutput } from '../../scripts/supabase/validate-line-pay-function-owner-membership-diagnostic.mjs'
 import { LINE_PAY_POSTGRES_IMAGE } from './line_pay_postgres_image.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -32,6 +33,8 @@ const diagnosticFile =
   'supabase/deployment/line_pay_checkout_aggregate_initialization_application_state.sql'
 const detailDiagnosticFile =
   'supabase/deployment/line_pay_checkout_initializer_contract_detail_diagnostic.sql'
+const membershipDiagnosticFile =
+  'supabase/deployment/line_pay_function_owner_membership_diagnostic.sql'
 const preflightFile =
   'supabase/deployment/line_pay_checkout_aggregate_initialization_preflight.sql'
 const deployFile =
@@ -286,6 +289,18 @@ try {
   ) {
     throw new Error('BASE_UNAPPLIED_DETAIL_STATE_NOT_OBSERVED')
   }
+  const baseUnappliedMembership =
+    parseAndValidateMembershipDiagnosticOutput(
+      `${psqlFile(membershipDiagnosticFile)}\n`,
+    )
+  if (
+    baseUnappliedMembership.role_present ||
+    baseUnappliedMembership.decision.detail_complete ||
+    baseUnappliedMembership.decision.membership_absent ||
+    baseUnappliedMembership.membership.total_edges !== 0
+  ) {
+    throw new Error('BASE_UNAPPLIED_MEMBERSHIP_STATE_NOT_OBSERVED')
+  }
 
   psqlFile(baseMigration)
 
@@ -355,8 +370,47 @@ try {
   ) {
     throw new Error('FULL_DETAIL_CONTRACT_NOT_OBSERVED')
   }
+  const fullMembership = parseAndValidateMembershipDiagnosticOutput(
+    `${psqlFile(membershipDiagnosticFile)}\n`,
+  )
+  if (
+    !fullMembership.role_present ||
+    !fullMembership.decision.detail_complete ||
+    !fullMembership.decision.membership_absent ||
+    fullMembership.decision.single_current_user_grant_only ||
+    fullMembership.decision.manual_review_required ||
+    fullMembership.membership.total_edges !== 0
+  ) {
+    throw new Error('FULL_MEMBERSHIP_ABSENCE_NOT_OBSERVED')
+  }
   const after = tableSnapshot()
   if (before !== after) throw new Error('HISTORICAL_DATA_CHANGED')
+
+  psqlSql(`
+    grant line_pay_payment_function_owner to current_user
+      with admin true, inherit false, set false;
+  `)
+  const currentUserMembership =
+    parseAndValidateMembershipDiagnosticOutput(
+      `${psqlFile(membershipDiagnosticFile)}\n`,
+    )
+  if (
+    currentUserMembership.membership.total_edges !== 1 ||
+    currentUserMembership.membership.owner_as_granted_role_edges !== 1 ||
+    currentUserMembership.membership.owner_as_member_role_edges !== 0 ||
+    currentUserMembership.membership.granted_to_current_user_edges !== 1 ||
+    currentUserMembership.membership.granted_by_current_user_edges !== 1 ||
+    currentUserMembership.membership.admin_option_edges !== 1 ||
+    currentUserMembership.membership.inherit_option_edges !== 0 ||
+    currentUserMembership.membership.set_option_edges !== 0 ||
+    !currentUserMembership.decision.single_current_user_grant_only ||
+    currentUserMembership.decision.manual_review_required
+  ) {
+    throw new Error('CURRENT_USER_MEMBERSHIP_SHAPE_NOT_OBSERVED')
+  }
+  psqlSql(`
+    revoke line_pay_payment_function_owner from current_user;
+  `)
 
   psqlSql(`
     create role line_pay_initializer_acl_probe nologin;
@@ -523,6 +577,19 @@ try {
   ) {
     throw new Error('FUNCTION_OWNER_MEMBERSHIP_DETAIL_MISMATCH')
   }
+  const reverseMembership = parseAndValidateMembershipDiagnosticOutput(
+    `${psqlFile(membershipDiagnosticFile)}\n`,
+  )
+  if (
+    reverseMembership.membership.total_edges !== 1 ||
+    reverseMembership.membership.owner_as_granted_role_edges !== 0 ||
+    reverseMembership.membership.owner_as_member_role_edges !== 1 ||
+    reverseMembership.membership.owner_member_of_other_edges !== 1 ||
+    reverseMembership.decision.single_current_user_grant_only ||
+    !reverseMembership.decision.manual_review_required
+  ) {
+    throw new Error('REVERSE_MEMBERSHIP_SHAPE_NOT_OBSERVED')
+  }
   psqlSql(`
     revoke line_pay_initializer_membership_probe
     from line_pay_payment_function_owner;
@@ -640,7 +707,7 @@ try {
       '(PostgreSQL 17, UNAPPLIED/PARTIAL/FULL, exact-file deploy, ' +
       'commit attestations, historical row digests preserved, ' +
       'contract detail diagnostic, function owner/ACL, index definition, ' +
-      'and policy mutations caught)\n',
+      'membership shapes, and policy mutations caught)\n',
   )
 } finally {
   if (started) {
