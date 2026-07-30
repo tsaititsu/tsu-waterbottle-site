@@ -10,6 +10,7 @@ import {
 } from './reportGenerationPipeline'
 import { AI_CHART_D1_PALACE_IDENTITIES } from './d1N0Constants'
 import { AI_CHART_D1_P1_MAX_OUTPUT_TOKENS } from './d1P1AdapterBridgeContracts'
+import { AI_CHART_D1_P1_REPORT_OPENAI_RUNTIME_TIMEOUT_MS } from './d1P1PreviewTimeoutContracts'
 import { completeModelInputSnapshot, getTestCatalog } from './d1P1ModelInputTestSupport'
 import {
   AI_CHART_D1_REPORT_WRITER_RUNTIME_MODEL_EXECUTION_REQUIRED,
@@ -75,6 +76,10 @@ async function main() {
     assert.equal(descriptor.requestStatus, 'ready')
     assert.equal(descriptor.runtimeStatus, 'runtime_wiring_required')
     assert.equal(descriptor.openAiCallable, false)
+    assert.equal(
+      descriptor.timeoutMs,
+      AI_CHART_D1_P1_REPORT_OPENAI_RUNTIME_TIMEOUT_MS,
+    )
     assert.equal(descriptor.maxOutputTokens, AI_CHART_D1_P1_MAX_OUTPUT_TOKENS)
     assert.match(descriptor.bridgeFingerprint, /^[a-f0-9]{64}$/u)
     assert.match(descriptor.packageFingerprint, /^[a-f0-9]{64}$/u)
@@ -114,6 +119,15 @@ async function main() {
       (descriptor) => descriptor.targetPalaceId,
     ),
     plan.targetPalaceIds,
+  )
+  assert.deepEqual(
+    plan.p1ReportExecutionPlan.p1AdapterBridgeDescriptors.map(
+      (descriptor) => descriptor.timeoutMs,
+    ),
+    Array.from(
+      { length: 12 },
+      () => AI_CHART_D1_P1_REPORT_OPENAI_RUNTIME_TIMEOUT_MS,
+    ),
   )
   assert.equal(plan.p1ReportExecutionPlan.productionCallable, false)
   assert.equal(plan.p1ReportExecutionPlan.fetchAllowed, false)

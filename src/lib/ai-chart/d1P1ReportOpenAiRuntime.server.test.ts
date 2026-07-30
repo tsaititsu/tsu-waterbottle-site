@@ -4,6 +4,7 @@ import Module, { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { AI_CHART_D1_PALACE_IDENTITIES } from './d1N0Constants'
 import { AI_CHART_D1_P1_MAX_OUTPUT_TOKENS } from './d1P1AdapterBridgeContracts'
+import { AI_CHART_D1_P1_REPORT_OPENAI_RUNTIME_TIMEOUT_MS } from './d1P1PreviewTimeoutContracts'
 import { completeModelInputSnapshot, getTestCatalog } from './d1P1ModelInputTestSupport'
 import { buildAiChartD1ReportGenerationPlan } from './reportGenerationPipeline'
 import {
@@ -164,6 +165,15 @@ async function main() {
     )
     assert.equal(capsule.maxRequests, 12)
     assert.equal(capsule.fetchHardLimit, 12)
+    assert.deepEqual(
+      capsule.p1AdapterBridgeDescriptors.map(
+        (descriptor) => descriptor.timeoutMs,
+      ),
+      Array.from(
+        { length: 12 },
+        () => AI_CHART_D1_P1_REPORT_OPENAI_RUNTIME_TIMEOUT_MS,
+      ),
+    )
     assert.equal(capsule.retryAllowed, false)
     assert.equal(capsule.fallbackAllowed, false)
     assert.equal(capsule.customerDeliveryAllowed, false)
@@ -272,6 +282,10 @@ async function main() {
       request: AiChartOpenAiStructuredRequest<T>,
     ) => {
       requests.push(request as AiChartOpenAiStructuredRequest<unknown>)
+      assert.equal(
+        request.timeoutMs,
+        AI_CHART_D1_P1_REPORT_OPENAI_RUNTIME_TIMEOUT_MS,
+      )
       assert.equal(request.maxOutputTokens, AI_CHART_D1_P1_MAX_OUTPUT_TOKENS)
       assert.equal(request.reasoningEffort, 'medium')
       assert.equal(Object.isFrozen(request), true)

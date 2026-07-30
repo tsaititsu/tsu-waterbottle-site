@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import {
   buildAiChartD1P1AdapterBridges,
   buildAiChartD1P1LocalPreviewAdapterBridges,
+  buildAiChartD1P1ReportOpenAiRuntimeAdapterBridges,
   parseAiChartD1P1AdapterBridgeDescriptor,
 } from './d1P1AdapterBridge'
 import {
@@ -37,6 +38,7 @@ import { AI_CHART_D1_P1_SCHEMA_NAME } from './d1P1F1Contracts'
 import {
   AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
   AI_CHART_D1_P1_PREVIEW_TIMEOUT_VALUES,
+  AI_CHART_D1_P1_REPORT_OPENAI_RUNTIME_TIMEOUT_MS,
 } from './d1P1PreviewTimeoutContracts'
 import {
   AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
@@ -101,6 +103,14 @@ async function run() {
     fixture.modelInputs,
     fixture.promptPackages,
   )[0].descriptor
+  const reportRuntimeDescriptor =
+    buildAiChartD1P1ReportOpenAiRuntimeAdapterBridges(
+      fixture.catalog,
+      fixture.structuralInputs,
+      fixture.bundles,
+      fixture.modelInputs,
+      fixture.promptPackages,
+    )[0].descriptor
   const secondDescriptor = fixture.bridges[1].descriptor
   const schema = AI_CHART_D1_P1_ADAPTER_BRIDGE_INTERNAL_JSON_SCHEMA as Record<
     string,
@@ -408,6 +418,17 @@ async function run() {
       AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
     )
   })
+  check('Report OpenAI Runtime Descriptor uses the explicit 300 second timeout', () => {
+    assert.equal(
+      reportRuntimeDescriptor.timeoutMs,
+      AI_CHART_D1_P1_REPORT_OPENAI_RUNTIME_TIMEOUT_MS,
+    )
+    assert.equal(
+      parseAiChartD1P1AdapterBridgeDescriptorShape(reportRuntimeDescriptor)
+        .timeoutMs,
+      AI_CHART_D1_P1_REPORT_OPENAI_RUNTIME_TIMEOUT_MS,
+    )
+  })
   check('Local Preview timeout changes the Bridge fingerprint', () => {
     assert.notEqual(
       localPreviewDescriptor.bridgeFingerprint,
@@ -417,6 +438,18 @@ async function run() {
     const localPayload = fingerprintPayload(localPreviewDescriptor)
     assert.deepEqual(
       { ...localPayload, timeoutMs: defaultPayload.timeoutMs },
+      defaultPayload,
+    )
+  })
+  check('Report OpenAI Runtime timeout changes the Bridge fingerprint', () => {
+    assert.notEqual(
+      reportRuntimeDescriptor.bridgeFingerprint,
+      descriptor.bridgeFingerprint,
+    )
+    const defaultPayload = fingerprintPayload(descriptor)
+    const reportRuntimePayload = fingerprintPayload(reportRuntimeDescriptor)
+    assert.deepEqual(
+      { ...reportRuntimePayload, timeoutMs: defaultPayload.timeoutMs },
       defaultPayload,
     )
   })

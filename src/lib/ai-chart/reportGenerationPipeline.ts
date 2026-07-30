@@ -1,6 +1,6 @@
 import { buildAiChartD1K0P1KnowledgeBundles } from './d1K0Selection'
 import { buildAiChartD1P1StructuralInputs } from './d1P1InputContracts'
-import { buildAiChartD1P1AdapterBridges } from './d1P1AdapterBridge'
+import { buildAiChartD1P1ReportOpenAiRuntimeAdapterBridges } from './d1P1AdapterBridge'
 import { buildAiChartD1P1ModelInputs } from './d1P1ModelInputBindings'
 import { buildAiChartD1P1PromptPackages } from './d1P1PromptPackageBuilder'
 import {
@@ -99,7 +99,7 @@ export function buildAiChartD1ReportGenerationPlan(input: {
     knowledgeBundles,
     modelInputs,
   )
-  const p1AdapterBridges = buildAiChartD1P1AdapterBridges(
+  const p1AdapterBridges = buildAiChartD1P1ReportOpenAiRuntimeAdapterBridges(
     input.d1K0Catalog,
     structuralInputs,
     knowledgeBundles,

@@ -8,6 +8,7 @@ import {
   buildAiChartD1P1AdapterBridge,
   buildAiChartD1P1AdapterBridges,
   buildAiChartD1P1LocalPreviewAdapterBridges,
+  buildAiChartD1P1ReportOpenAiRuntimeAdapterBridges,
   deriveAiChartD1P1CandidateRuleStatus,
   parseAiChartD1P1AdapterBridgeDescriptor,
   type AiChartD1P1AdapterBridge,
@@ -63,7 +64,10 @@ import {
   parseAiChartD1P1Result,
   type AiChartD1P1Result,
 } from './d1P1F1Contracts'
-import { AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS } from './d1P1PreviewTimeoutContracts'
+import {
+  AI_CHART_D1_P1_LOCAL_PREVIEW_TIMEOUT_MS,
+  AI_CHART_D1_P1_REPORT_OPENAI_RUNTIME_TIMEOUT_MS,
+} from './d1P1PreviewTimeoutContracts'
 import {
   AI_CHART_OPENAI_DEFAULT_MAX_OUTPUT_TOKENS,
   AI_CHART_OPENAI_DEFAULT_REASONING_EFFORT,
@@ -224,6 +228,14 @@ async function run() {
     fixture.modelInputs,
     fixture.promptPackages,
   )
+  const reportRuntimeBridges =
+    buildAiChartD1P1ReportOpenAiRuntimeAdapterBridges(
+      fixture.catalog,
+      fixture.structuralInputs,
+      fixture.bundles,
+      fixture.modelInputs,
+      fixture.promptPackages,
+    )
   const bridge = bridges[0]
   const modelInput = modelInputs[0]
 
@@ -390,11 +402,50 @@ async function run() {
       assert.equal(localPreviewBridge.descriptor.openAiCallable, false)
     }
   })
+  check('Report OpenAI Runtime Bridges bind 300 seconds to Descriptor and request', () => {
+    assert.equal(reportRuntimeBridges.length, 12)
+    for (const reportRuntimeBridge of reportRuntimeBridges) {
+      assert.equal(
+        reportRuntimeBridge.descriptor.timeoutMs,
+        AI_CHART_D1_P1_REPORT_OPENAI_RUNTIME_TIMEOUT_MS,
+      )
+      assert.equal(
+        reportRuntimeBridge.request.timeoutMs,
+        AI_CHART_D1_P1_REPORT_OPENAI_RUNTIME_TIMEOUT_MS,
+      )
+      assert.equal(reportRuntimeBridge.descriptor.openAiCallable, false)
+    }
+  })
   check('Local Preview timeout changes every Bridge fingerprint', () => {
     bridges.forEach((entry, index) => {
       assert.notEqual(
         localPreviewBridges[index].descriptor.bridgeFingerprint,
         entry.descriptor.bridgeFingerprint,
+      )
+    })
+  })
+  check('Report OpenAI Runtime timeout changes every Bridge fingerprint without changing model policy', () => {
+    bridges.forEach((entry, index) => {
+      const reportRuntimeBridge = reportRuntimeBridges[index]
+      assert.notEqual(
+        reportRuntimeBridge.descriptor.bridgeFingerprint,
+        entry.descriptor.bridgeFingerprint,
+      )
+      assert.equal(
+        reportRuntimeBridge.request.reasoningEffort,
+        entry.request.reasoningEffort,
+      )
+      assert.equal(
+        reportRuntimeBridge.request.maxOutputTokens,
+        entry.request.maxOutputTokens,
+      )
+      assert.equal(
+        reportRuntimeBridge.request.schemaName,
+        entry.request.schemaName,
+      )
+      assert.equal(
+        reportRuntimeBridge.request.description,
+        entry.request.description,
       )
     })
   })
@@ -2923,7 +2974,7 @@ async function run() {
       ]),
     )
   })
-  check('Adapter Bridge production consumers are Preview Gate, Report pipeline, and Report OpenAI runtime', () => {
+  check('default Adapter Bridge production consumer is only Preview Gate', () => {
     const consumers = sourceFiles
       .filter((path) => path.endsWith('.ts') || path.endsWith('.tsx'))
       .filter((path) =>
@@ -2940,6 +2991,25 @@ async function run() {
       )
     assert.deepEqual(consumers, [
       'src/lib/ai-chart/d1P1PreviewRequestGate.server.ts',
+    ])
+  })
+  check('Report OpenAI Runtime Bridge builder production consumers are only the Report pipeline and runtime', () => {
+    const consumers = sourceFiles
+      .filter((path) => path.endsWith('.ts') || path.endsWith('.tsx'))
+      .filter((path) =>
+        readFileSync(path, 'utf8').includes(
+          'buildAiChartD1P1ReportOpenAiRuntimeAdapterBridges',
+        ),
+      )
+      .map((path) => relative(repositoryRoot, path))
+      .filter(
+        (path) =>
+          !path.endsWith('d1P1AdapterBridge.ts') &&
+          !path.endsWith('d1P1AdapterBridge.test.ts') &&
+          !path.endsWith('d1P1AdapterBridgeContracts.test.ts') &&
+          !path.endsWith('d1P1PreviewRequestGate.server.test.ts'),
+      )
+    assert.deepEqual(consumers, [
       'src/lib/ai-chart/d1P1ReportOpenAiRuntime.server.ts',
       'src/lib/ai-chart/reportGenerationPipeline.ts',
     ])

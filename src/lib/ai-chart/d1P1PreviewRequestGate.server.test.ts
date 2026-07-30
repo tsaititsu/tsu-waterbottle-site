@@ -1438,7 +1438,7 @@ async function run() {
     check('Preview Gate file starts with the exact server-only import', () => {
       assert.equal(gateSource.split('\n')[0], "import 'server-only'")
     })
-    check('Adapter Bridge builder production consumers are Preview Gate, Report pipeline, and Report OpenAI runtime', () => {
+    check('default Adapter Bridge builder production consumer is only Preview Gate', () => {
       const consumers = productionFiles
         .filter((path) =>
           readFileSync(path, 'utf8').includes('buildAiChartD1P1AdapterBridges'),
@@ -1447,6 +1447,18 @@ async function run() {
         .filter((path) => !path.endsWith('d1P1AdapterBridge.ts'))
       assert.deepEqual(consumers, [
         'src/lib/ai-chart/d1P1PreviewRequestGate.server.ts',
+      ])
+    })
+    check('Report OpenAI Runtime Bridge builder production consumers are only Report pipeline and Report runtime', () => {
+      const consumers = productionFiles
+        .filter((path) =>
+          readFileSync(path, 'utf8').includes(
+            'buildAiChartD1P1ReportOpenAiRuntimeAdapterBridges',
+          ),
+        )
+        .map((path) => relative(repositoryRoot, path))
+        .filter((path) => !path.endsWith('d1P1AdapterBridge.ts'))
+      assert.deepEqual(consumers, [
         'src/lib/ai-chart/d1P1ReportOpenAiRuntime.server.ts',
         'src/lib/ai-chart/reportGenerationPipeline.ts',
       ])
