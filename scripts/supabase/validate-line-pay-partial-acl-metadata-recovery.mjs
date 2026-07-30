@@ -42,7 +42,7 @@ export const WORKFLOW_FILE =
   '.github/workflows/supabase-production-line-pay-partial-acl-recovery.yml'
 
 export const EXPECTED_RECOVERY_MIGRATION_SHA256 =
-  '7f429dd8674aa5835f4f934e183ffa39d31bd4d4884cdbba199734390c21bc83'
+  '30c3a4919d30c756469149cbfc3310431b9c049c5ff7b59cdad8e5ce19fe92d4'
 export const EXPECTED_BASE_MIGRATION_SHA256 =
   '8da1fb429aecb1c35b12a245b63907135dbe7c467ef0a5f069afd431d21e94b8'
 export const EXPECTED_FENCE_MIGRATION_SHA256 =
@@ -189,7 +189,10 @@ export function assertRecoverySql(sql) {
     !/lock table[\s\S]*public[.]payments[\s\S]*public[.]product_orders[\s\S]*in access exclusive mode/iu.test(
       stripped,
     ) ||
-    !/revoke all on schema line_pay_private[\s\S]*from public, anon, authenticated, service_role, line_pay_payment_executor/iu.test(
+    /\b(?:grant|revoke)\s+all\s+on\s+schema\s+line_pay_private\b/iu.test(
+      stripped,
+    ) ||
+    /\b(?:grant|revoke)[\s\S]*on table line_pay_private[.]line_pay_completion_proofs/iu.test(
       stripped,
     ) ||
     !/grant select, insert, update on table[\s\S]*public[.]payments[\s\S]*public[.]product_orders[\s\S]*to service_role/iu.test(
@@ -199,14 +202,12 @@ export function assertRecoverySql(sql) {
       stripped,
     ) ||
     /\bset\s+role\b/iu.test(stripped) ||
-    /grant line_pay_payment_function_owner to current_user[\s\S]*with inherit true, set true/iu.test(
-      stripped,
+    /line_pay_partial_recovery_role_bridge_before/iu.test(stripped) ||
+    /grant\s+line_pay_payment_function_owner\s+to\s+(?:current_user|%I)/iu.test(
+      sql,
     ) ||
-    !/grant line_pay_payment_function_owner to current_user[\s\S]*with inherit true, set false/iu.test(
-      stripped,
-    ) ||
-    !/revoke line_pay_payment_function_owner from current_user/iu.test(
-      stripped,
+    /revoke\s+line_pay_payment_function_owner\s+from\s+(?:current_user|%I)/iu.test(
+      sql,
     ) ||
     !/line_pay_partial_recovery_role_bridge_cleanup_postcondition_failed/u.test(
       sql,

@@ -67,14 +67,13 @@ begin
 end
 $$;
 
--- The original LINE Pay Migration creates private completion-proof objects
--- under line_pay_payment_function_owner. Production's partial state kept that
--- private owner boundary, while the hosted Supabase executor has ADMIN on the
--- owner role but no SET option. The recovery only needs inherited owner
--- privileges for ACL repair, not role switching or ownership transfer, so keep this
--- bridge inherit-only and remove it before final postconditions.
-grant line_pay_payment_function_owner to current_user
-  with inherit true, set false;
+-- Production's reviewed PARTIAL state already kept the private completion-proof
+-- owner boundary under line_pay_payment_function_owner. The remaining
+-- recoverable drift is public relation ACL metadata plus the active
+-- payments/product_orders write boundary. Do not grant, revoke, or rewrite the
+-- executor's function-owner role membership here; hosted Supabase role
+-- memberships are part of the protected deployment channel, not application
+-- schema metadata.
 
 lock table
   public.payments,
@@ -84,8 +83,7 @@ lock table
   public.line_pay_request_outbox,
   public.line_pay_callback_capabilities,
   public.line_pay_callback_events,
-  public.line_pay_payment_audit_events,
-  line_pay_private.line_pay_completion_proofs
+  public.line_pay_payment_audit_events
 in access exclusive mode;
 
 create temporary table line_pay_partial_recovery_expected_acl (
@@ -139,11 +137,6 @@ insert into line_pay_partial_recovery_expected_acl (
     'public',
     'line_pay_payment_audit_events',
     array['line_pay_payment_function_owner']::text[]
-  ),
-  (
-    'line_pay_private',
-    'line_pay_completion_proofs',
-    array['service_role', 'line_pay_payment_function_owner']::text[]
   );
 
 do $$
@@ -281,14 +274,7 @@ begin
 end
 $$;
 
-revoke all on schema line_pay_private
-from public, anon, authenticated, service_role, line_pay_payment_executor;
-revoke all on schema line_pay_private from line_pay_payment_function_owner;
-grant all privileges on schema line_pay_private
-to line_pay_payment_function_owner;
-grant usage on schema line_pay_private to service_role;
-
-grant usage on schema public, line_pay_private
+grant usage on schema public
 to line_pay_payment_function_owner;
 grant usage on schema public to line_pay_payment_executor;
 
@@ -373,13 +359,6 @@ on table public.line_pay_callback_events to line_pay_payment_function_owner;
 
 grant insert on table public.line_pay_payment_audit_events
 to line_pay_payment_function_owner;
-
-grant select, insert on table line_pay_private.line_pay_completion_proofs
-to line_pay_payment_function_owner;
-grant select on table line_pay_private.line_pay_completion_proofs
-to service_role;
-
-revoke line_pay_payment_function_owner from current_user;
 
 do $$
 begin
