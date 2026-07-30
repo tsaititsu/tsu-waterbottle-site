@@ -112,7 +112,7 @@ describe('LINE Pay partial ACL metadata recovery', () => {
     )
     assert.equal(
       validator.EXPECTED_RECOVERY_MIGRATION_SHA256,
-      'e3ae6bbd09ebe08823ae1a4c07f9177b3d98e5b04e1230ff6f0cba526957fbf9',
+      '7f429dd8674aa5835f4f934e183ffa39d31bd4d4884cdbba199734390c21bc83',
     )
     assert.equal(
       validator.EXPECTED_PREFLIGHT_SHA256,
@@ -188,6 +188,46 @@ describe('LINE Pay partial ACL metadata recovery', () => {
         < recoverySql.indexOf(
           'line_pay_partial_recovery_public_write_postcondition_failed',
         ),
+    )
+  })
+
+  it('uses an inherit-only role bridge and cleans it before postconditions', () => {
+    assert.match(
+      recoverySql,
+      /grant\s+line_pay_payment_function_owner\s+to\s+current_user\s+with\s+inherit\s+true,\s*set\s+false;/iu,
+    )
+    assert.doesNotMatch(recoverySql, /\bset\s+role\b/iu)
+    assert.doesNotMatch(
+      recoverySql,
+      /grant\s+line_pay_payment_function_owner\s+to\s+current_user\s+with\s+inherit\s+true,\s*set\s+true/iu,
+    )
+    assert.match(
+      recoverySql,
+      /line_pay_partial_recovery_role_bridge_cleanup_postcondition_failed/u,
+    )
+    assert.ok(
+      recoverySql.indexOf(
+        'revoke line_pay_payment_function_owner from current_user',
+      )
+        < recoverySql.indexOf(
+          'line_pay_partial_recovery_role_bridge_cleanup_postcondition_failed',
+        ),
+    )
+    assert.throws(() =>
+      validator.assertRecoverySql(
+        recoverySql.replace(
+          'with inherit true, set false;',
+          'with inherit true, set true;',
+        ),
+      ),
+    )
+    assert.throws(() =>
+      validator.assertRecoverySql(
+        recoverySql.replace(
+          'line_pay_partial_recovery_role_bridge_cleanup_postcondition_failed',
+          'line_pay_partial_recovery_role_bridge_cleanup_check_removed',
+        ),
+      ),
     )
   })
 

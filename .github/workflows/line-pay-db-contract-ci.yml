@@ -12,6 +12,7 @@ on:
       - ".github/workflows/supabase-production-line-pay-checkout-initializer.yml"
       - ".github/workflows/supabase-production-line-pay-migration.yml"
       - ".github/workflows/supabase-production-line-pay-partial-acl-recovery.yml"
+      - ".github/workflows/supabase-production-line-pay-partial-acl-recovery-capability-diagnostic.yml"
       - "package.json"
       - "package-lock.json"
       - "scripts/supabase/run-bank-transfer-production-forensic.mjs"
@@ -22,12 +23,14 @@ on:
       - "scripts/supabase/run-line-pay-checkout-initializer-application-state.mjs"
       - "scripts/supabase/run-line-pay-checkout-initializer-exact-file.mjs"
       - "scripts/supabase/run-line-pay-partial-acl-metadata-recovery.mjs"
+      - "scripts/supabase/run-line-pay-partial-acl-recovery-capability-diagnostic.mjs"
       - "scripts/supabase/validate-bank-transfer-production-forensic.mjs"
       - "scripts/supabase/validate-bank-transfer-production-baseline-capture.mjs"
       - "scripts/supabase/validate-line-pay-production-diagnostic.mjs"
       - "scripts/supabase/validate-line-pay-application-state-diagnostic.mjs"
       - "scripts/supabase/validate-line-pay-checkout-initializer-production.mjs"
       - "scripts/supabase/validate-line-pay-partial-acl-metadata-recovery.mjs"
+      - "scripts/supabase/validate-line-pay-partial-acl-recovery-capability-diagnostic.mjs"
       - "scripts/supabase/validate-line-pay-production-deployment.mjs"
       - "src/lib/supabase/linePayDatabaseContracts.ts"
       - "src/lib/supabase/linePayDatabaseContracts.test.ts"
@@ -63,6 +66,7 @@ on:
       - "supabase/line_pay_application_state_diagnostic_runner.test.ts"
       - "supabase/line_pay_application_state_diagnostic_workflow.test.ts"
       - "supabase/line_pay_partial_acl_metadata_recovery.test.ts"
+      - "supabase/line_pay_partial_acl_recovery_capability_diagnostic.test.ts"
       - "supabase/line_pay_production_deployment_workflow.test.ts"
       - "supabase/line_pay_production_exact_file_runner.test.ts"
       - "supabase/migrations/*_retire_bank_transfer_submissions_writes.sql"
@@ -126,6 +130,7 @@ jobs:
           node --test supabase/line_pay_application_state_diagnostic_workflow.test.ts
           node --test supabase/line_pay_application_state_diagnostic_runner.test.ts
           node --test supabase/line_pay_partial_acl_metadata_recovery.test.ts
+          node --test supabase/line_pay_partial_acl_recovery_capability_diagnostic.test.ts
           node --test supabase/line_pay_production_exact_file_runner.test.ts
           node --test supabase/line_pay_production_deployment_workflow.test.ts
           node --test src/lib/supabase/linePayDatabaseContracts.test.ts
