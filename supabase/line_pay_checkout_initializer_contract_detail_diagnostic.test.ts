@@ -328,6 +328,15 @@ test('runner delegates exactly one read-only diagnostic session', () => {
   )
 })
 
+test('runner application name fits the PostgreSQL 63-byte limit', () => {
+  const runner = readFileSync(runnerPath, 'utf8')
+  const applicationName = runner.match(
+    /applicationName:\s*\n\s*'([^']+)'/u,
+  )?.[1]
+  assert.ok(applicationName)
+  assert.ok(Buffer.byteLength(applicationName, 'utf8') <= 63)
+})
+
 test('source validation locks confirmation, project, and immutable migrations', () => {
   assert.equal(
     validator.EXPECTED_CONFIRMATION,

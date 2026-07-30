@@ -21,7 +21,7 @@ export function runCheckoutInitializerContractDetailDiagnostic(
     ...options,
     diagnosticFile: DIAGNOSTIC_FILE,
     applicationName:
-      'line-pay-checkout-initializer-contract-detail-read-only-diagnostic',
+      'line-pay-checkout-initializer-detail-read-only-diagnostic',
     credentialPrefix: 'line-pay-initializer-detail-',
     validateDiagnosticFile: readAndValidateDiagnosticFile,
     parseDiagnosticOutput: parseAndValidateContractDetailOutput,
