@@ -88,6 +88,9 @@ const DEPLOY_ATTESTATION_MARKER_ORDER = Object.freeze([
 const DEPLOYMENT_FAILURE_ATTESTATION = Symbol(
   'deploymentFailureAttestation',
 )
+const POSTGRES_FAILURE_DIAGNOSTICS = Symbol(
+  'postgresFailureDiagnostics',
+)
 
 export const DEPLOYMENT_RECORDING_POLICY =
   'GITHUB_ATTESTED_EXACT_FILE'
@@ -95,6 +98,36 @@ export const DEPLOYMENT_RECORDING_POLICY =
 export const CONNECTION_MODES = Object.freeze({
   direct: 'direct',
   supavisorSession: 'supavisor_session',
+})
+
+const SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/u
+const SQLSTATE_MESSAGE_PATTERN =
+  /\b(?:ERROR|FATAL|PANIC):\s+([0-9A-Z]{5})(?::|\b)/u
+const SQLSTATE_LINE_PATTERN = /\bSQL state:\s*([0-9A-Z]{5})\b/iu
+const SAFE_POSTGRES_MESSAGE_CODE_PATTERN =
+  /\bline_pay_[a-z0-9_]{1,120}\b/u
+const SQLSTATE_CLASS_NAMES = Object.freeze({
+  '22': 'data_exception',
+  '23': 'integrity_constraint_violation',
+  '25': 'invalid_transaction_state',
+  '28': 'invalid_authorization_specification',
+  '2D': 'invalid_transaction_termination',
+  '40': 'transaction_rollback',
+  '42': 'syntax_or_access_rule_violation',
+  '53': 'insufficient_resources',
+  '55': 'object_not_in_prerequisite_state',
+  '57': 'operator_intervention',
+  P0: 'plpgsql_error',
+})
+const SQLSTATE_NAMES = Object.freeze({
+  '23505': 'unique_violation',
+  '42501': 'insufficient_privilege',
+  '42601': 'syntax_error',
+  '42704': 'undefined_object',
+  '42P01': 'undefined_table',
+  '55P03': 'lock_not_available',
+  '57014': 'query_canceled',
+  P0001: 'raise_exception',
 })
 
 const SAFE_FAILURE_CODES = new Set([
@@ -160,6 +193,7 @@ export function buildDeploymentFailureAttestation(
   primaryFailureCode,
   evidence = emptyDeployEvidence(),
   cleanupFailureCode,
+  postgresFailureDiagnostics,
 ) {
   if (!SAFE_FAILURE_CODES.has(primaryFailureCode)) {
     primaryFailureCode = 'DATABASE_OUTPUT_INVALID'
@@ -187,6 +221,9 @@ export function buildDeploymentFailureAttestation(
   if (cleanupFailureCode) {
     attestation.cleanup_failure_code = cleanupFailureCode
   }
+  if (postgresFailureDiagnostics) {
+    attestation.postgres_failure = postgresFailureDiagnostics
+  }
   return freezeAttestation(attestation)
 }
 
@@ -196,11 +233,16 @@ function createDeploymentFailure(
   cleanupFailureCode,
 ) {
   const primaryFailureCode = safeFailureCode(primaryFailure)
+  const postgresFailureDiagnostics =
+    primaryFailure instanceof Error
+      ? primaryFailure[POSTGRES_FAILURE_DIAGNOSTICS]
+      : undefined
   const error = new Error(primaryFailureCode)
   error.attestation = buildDeploymentFailureAttestation(
     primaryFailureCode,
     evidence,
     cleanupFailureCode,
+    postgresFailureDiagnostics,
   )
   error[DEPLOYMENT_FAILURE_ATTESTATION] = error.attestation
   return error
@@ -376,6 +418,8 @@ export function buildPsqlArgs(phase, phaseFiles = PHASE_FILES) {
   return [
     '--no-psqlrc',
     '--set=ON_ERROR_STOP=1',
+    '--set=VERBOSITY=verbose',
+    '--set=SHOW_CONTEXT=never',
     '--quiet',
     '--no-align',
     '--tuples-only',
@@ -712,6 +756,47 @@ function isProvenPsqlSqlFailureBeforeCommit(result) {
   return result.code === 3 && result.signal === null
 }
 
+function sqlstateClassName(sqlstate) {
+  if (!SQLSTATE_PATTERN.test(sqlstate)) return 'unknown'
+  return (
+    SQLSTATE_NAMES[sqlstate] ??
+    SQLSTATE_CLASS_NAMES[sqlstate.slice(0, 2)] ??
+    'unknown'
+  )
+}
+
+export function buildPostgresFailureDiagnostics(result) {
+  if (!result || typeof result !== 'object') return undefined
+  if (result.code !== 3 || result.signal !== null) return undefined
+  const stderr = typeof result.stderr === 'string' ? result.stderr : ''
+  const sqlstate =
+    SQLSTATE_MESSAGE_PATTERN.exec(stderr)?.[1] ??
+    SQLSTATE_LINE_PATTERN.exec(stderr)?.[1]
+  const messageCode =
+    SAFE_POSTGRES_MESSAGE_CODE_PATTERN.exec(stderr)?.[0]
+  if (!sqlstate && !messageCode) return undefined
+  const diagnostics = {}
+  if (sqlstate && SQLSTATE_PATTERN.test(sqlstate)) {
+    diagnostics.sqlstate = sqlstate
+    diagnostics.sqlstate_class = sqlstateClassName(sqlstate)
+  }
+  if (messageCode) {
+    diagnostics.message_code = messageCode
+  }
+  return freezeAttestation(diagnostics)
+}
+
+function failWithPostgresDiagnostics(code, result) {
+  const error = new Error(code)
+  const postgresFailureDiagnostics =
+    buildPostgresFailureDiagnostics(result)
+  if (postgresFailureDiagnostics) {
+    error[POSTGRES_FAILURE_DIAGNOSTICS] =
+      postgresFailureDiagnostics
+  }
+  throw error
+}
+
 function interruptedDeployFailureCode(evidence) {
   if (
     evidence.migration_commit_observed &&
@@ -778,8 +863,9 @@ export function validateFixedDeployExecutionResult(
       fail('MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_NOT_OBSERVED')
     }
     if (isProvenPsqlSqlFailureBeforeCommit(result)) {
-      fail(
+      failWithPostgresDiagnostics(
         'MIGRATION_COMMIT_OBSERVED_POSTFLIGHT_SQL_FAILED_BEFORE_COMMIT',
+        result,
       )
     }
     fail(
@@ -788,7 +874,10 @@ export function validateFixedDeployExecutionResult(
   }
   if (evidence.migration_started_observed) {
     if (isProvenPsqlSqlFailureBeforeCommit(result)) {
-      fail('MIGRATION_SQL_FAILED_BEFORE_COMMIT')
+      failWithPostgresDiagnostics(
+        'MIGRATION_SQL_FAILED_BEFORE_COMMIT',
+        result,
+      )
     }
     fail('MIGRATION_COMMIT_STATE_UNKNOWN')
   }
@@ -796,7 +885,10 @@ export function validateFixedDeployExecutionResult(
     isProvenPsqlSqlFailureBeforeCommit(result) &&
     evidence.markerSequenceValid
   ) {
-    fail('DEPLOY_FAILED_BEFORE_MIGRATION_START')
+    failWithPostgresDiagnostics(
+      'DEPLOY_FAILED_BEFORE_MIGRATION_START',
+      result,
+    )
   }
   fail('MIGRATION_COMMIT_STATE_UNKNOWN')
 }
