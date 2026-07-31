@@ -120,6 +120,25 @@ function psqlFile(path, expectFailure = false) {
   return result.stdout.trim()
 }
 
+function psqlMembershipDiagnosticAsHostedDeployer() {
+  const result = spawnSync(
+    'docker',
+    [
+      ...psqlArgs(),
+      '--command=set role line_pay_hosted_deployer_probe;',
+      `--file=/workspace/${membershipDiagnosticFile}`,
+    ],
+    {
+      cwd: root,
+      encoding: 'utf8',
+    },
+  )
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout)
+  }
+  return result.stdout.trim()
+}
+
 function waitForPostgres() {
   let consecutiveReadyChecks = 0
   for (let attempt = 0; attempt < 120; attempt += 1) {
@@ -265,6 +284,44 @@ try {
   waitForPostgres()
 
   psqlFile('supabase/tests/line_pay_local_postgres_bootstrap.sql')
+  psqlSql(`
+    create role line_pay_hosted_deployer_probe
+      createrole noinherit nologin;
+    set role line_pay_hosted_deployer_probe;
+    create role line_pay_payment_function_owner nologin;
+  `)
+  const bootstrapSuperuserMembership =
+    parseAndValidateMembershipDiagnosticOutput(
+      `${psqlMembershipDiagnosticAsHostedDeployer()}\n`,
+    )
+  if (
+    bootstrapSuperuserMembership.membership.total_edges !== 1 ||
+    bootstrapSuperuserMembership.membership.owner_as_granted_role_edges !==
+      1 ||
+    bootstrapSuperuserMembership.membership.owner_as_member_role_edges !==
+      0 ||
+    bootstrapSuperuserMembership.membership.granted_to_current_user_edges !==
+      1 ||
+    bootstrapSuperuserMembership.membership.granted_by_current_user_edges !==
+      0 ||
+    bootstrapSuperuserMembership.membership.granted_by_superuser_edges !==
+      1 ||
+    bootstrapSuperuserMembership.membership.granted_by_other_edges !== 0 ||
+    bootstrapSuperuserMembership.membership.admin_option_edges !== 1 ||
+    bootstrapSuperuserMembership.membership.inherit_option_edges !== 0 ||
+    bootstrapSuperuserMembership.membership.set_option_edges !== 0 ||
+    bootstrapSuperuserMembership.decision.single_current_user_grant_only ||
+    !bootstrapSuperuserMembership.decision
+      .single_bootstrap_superuser_admin_only ||
+    bootstrapSuperuserMembership.decision.manual_review_required
+  ) {
+    throw new Error('BOOTSTRAP_SUPERUSER_MEMBERSHIP_SHAPE_NOT_OBSERVED')
+  }
+  psqlSql(`
+    drop role line_pay_payment_function_owner;
+    drop role line_pay_hosted_deployer_probe;
+  `)
+
   for (const file of baselineFiles) psqlFile(file)
 
   const baseUnapplied = parseAndValidateInitializerOutput(
@@ -707,7 +764,8 @@ try {
       '(PostgreSQL 17, UNAPPLIED/PARTIAL/FULL, exact-file deploy, ' +
       'commit attestations, historical row digests preserved, ' +
       'contract detail diagnostic, function owner/ACL, index definition, ' +
-      'membership shapes, and policy mutations caught)\n',
+      'current-user and bootstrap-superuser membership shapes, ' +
+      'and policy mutations caught)\n',
   )
 } finally {
   if (started) {

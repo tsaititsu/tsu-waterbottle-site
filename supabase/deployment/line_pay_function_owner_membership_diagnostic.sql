@@ -71,6 +71,12 @@ membership_edges as (
         then 'current_user'
       when membership.grantor = role_identity.owner_oid
         then 'owner'
+      when exists (
+        select 1
+        from pg_catalog.pg_roles as grantor_role
+        where grantor_role.oid = membership.grantor
+          and grantor_role.rolsuper
+      ) then 'superuser'
       else 'other'
     end as grantor_category
   from pg_catalog.pg_auth_members as membership
@@ -129,6 +135,9 @@ membership_counts as (
       where grantor_category = 'owner'
     )::integer as granted_by_owner_edges,
     pg_catalog.count(*) filter (
+      where grantor_category = 'superuser'
+    )::integer as granted_by_superuser_edges,
+    pg_catalog.count(*) filter (
       where grantor_category = 'other'
     )::integer as granted_by_other_edges,
     pg_catalog.count(*) filter (
@@ -158,11 +167,28 @@ decision as (
       and membership_counts.granted_to_other_edges = 0
       and membership_counts.granted_by_current_user_edges = 1
       and membership_counts.granted_by_owner_edges = 0
+      and membership_counts.granted_by_superuser_edges = 0
       and membership_counts.granted_by_other_edges = 0
       and membership_counts.admin_option_edges = 1
       and membership_counts.inherit_option_edges = 0
       and membership_counts.set_option_edges = 0
-      as single_current_user_grant_only
+      as single_current_user_grant_only,
+    role_identity.owner_oid is not null
+      and membership_counts.total_edges = 1
+      and membership_counts.owner_as_granted_role_edges = 1
+      and membership_counts.owner_as_member_role_edges = 0
+      and membership_counts.granted_to_current_user_edges = 1
+      and membership_counts.granted_to_executor_edges = 0
+      and membership_counts.granted_to_runtime_role_edges = 0
+      and membership_counts.granted_to_other_edges = 0
+      and membership_counts.granted_by_current_user_edges = 0
+      and membership_counts.granted_by_owner_edges = 0
+      and membership_counts.granted_by_superuser_edges = 1
+      and membership_counts.granted_by_other_edges = 0
+      and membership_counts.admin_option_edges = 1
+      and membership_counts.inherit_option_edges = 0
+      and membership_counts.set_option_edges = 0
+      as single_bootstrap_superuser_admin_only
   from role_identity
   cross join membership_counts
 )
@@ -179,10 +205,13 @@ select pg_catalog.jsonb_build_object(
     'membership_absent', decision.membership_absent,
     'single_current_user_grant_only',
       decision.single_current_user_grant_only,
+    'single_bootstrap_superuser_admin_only',
+      decision.single_bootstrap_superuser_admin_only,
     'manual_review_required',
       decision.detail_complete
       and not decision.membership_absent
       and not decision.single_current_user_grant_only
+      and not decision.single_bootstrap_superuser_admin_only
   )
 )::text
 from role_identity
