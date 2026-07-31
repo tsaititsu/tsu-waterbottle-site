@@ -278,6 +278,7 @@ async function main() {
           AI_CHART_D1_P1_REPORT_OPENAI_RUNTIME_CONFIRMATION,
       })
     const requests: AiChartOpenAiStructuredRequest<unknown>[] = []
+    const settlements: string[] = []
     const requester = createRequester(async <T>(
       request: AiChartOpenAiStructuredRequest<T>,
     ) => {
@@ -327,10 +328,17 @@ async function main() {
       await executeAiChartD1P1ReportOpenAiRuntime(
         capsule,
         authorization,
-        { requestStructuredResponse: requester },
+        {
+          requestStructuredResponse: requester,
+          onPalaceSettled: async (settlement) => {
+            settlements.push(settlement.targetPalaceId)
+            assert.equal(settlement.status, 'SUCCEEDED')
+          },
+        },
       )
 
     assert.equal(requests.length, 12)
+    assert.deepEqual(settlements, capsule.targetPalaceIds)
     assert.equal(ledger.status, 'SUCCEEDED')
     assert.equal(ledger.attemptedRequests, 12)
     assert.equal(ledger.executedRequests, 12)
@@ -368,7 +376,7 @@ async function main() {
     assertRequesterWasNotCalled(secondRunCalls)
   })
 
-  await check('runtime fail-stops on the first OpenAI error and preserves only sanitized diagnostics', async () => {
+  await check('runtime continues after one OpenAI error and preserves only sanitized diagnostics', async () => {
     const { capsule } = await createRuntimeFixture(
       'report-openai-runtime-failure',
     )
@@ -379,22 +387,28 @@ async function main() {
           AI_CHART_D1_P1_REPORT_OPENAI_RUNTIME_CONFIRMATION,
       })
     let calls = 0
-    const requester = createRequester(async () => {
+    const requester = createRequester(async <T>() => {
       calls += 1
-      throw new AiChartOpenAiError(
-        AI_CHART_OPENAI_REQUEST_FAILED,
-        true,
-        undefined,
-        Object.freeze({
-          failureKind: 'NETWORK_ERROR',
-          httpStatus: null,
-          requestId: null,
-          clientRequestId: 'client-request-safe-id',
-          responseErrorType: null,
-          responseErrorCode: null,
-          responseErrorParam: null,
-        }),
-      )
+      if (calls === 1) {
+        throw new AiChartOpenAiError(
+          AI_CHART_OPENAI_REQUEST_FAILED,
+          true,
+          undefined,
+          Object.freeze({
+            failureKind: 'NETWORK_ERROR',
+            httpStatus: null,
+            requestId: null,
+            clientRequestId: 'client-request-safe-id',
+            responseErrorType: null,
+            responseErrorCode: null,
+            responseErrorParam: null,
+          }),
+        )
+      }
+      return Object.freeze({
+        data: Object.freeze({ safeSequenceNumber: calls }) as T,
+        usage: null,
+      })
     })
 
     const ledger: AiChartD1P1ReportExecutionLedger =
@@ -404,12 +418,12 @@ async function main() {
         { requestStructuredResponse: requester },
       )
 
-    assert.equal(calls, 1)
+    assert.equal(calls, 12)
     assert.equal(ledger.status, 'FAILED')
-    assert.equal(ledger.attemptedRequests, 1)
-    assert.equal(ledger.executedRequests, 0)
-    assert.equal(ledger.fetchCount, 1)
-    assert.equal(ledger.openAiRequests, 1)
+    assert.equal(ledger.attemptedRequests, 12)
+    assert.equal(ledger.executedRequests, 11)
+    assert.equal(ledger.fetchCount, 12)
+    assert.equal(ledger.openAiRequests, 12)
     assert.equal(ledger.currentPalaceId, capsule.targetPalaceIds[0])
     assert.equal(
       ledger.palaceExecutions[0].errorCode,
@@ -431,7 +445,7 @@ async function main() {
     assert.equal(
       ledger.palaceExecutions
         .slice(1)
-        .every((entry) => entry.status === 'PENDING'),
+        .every((entry) => entry.status === 'SUCCEEDED'),
       true,
     )
     const serialized = JSON.stringify(ledger)
