@@ -541,17 +541,72 @@ table_acl_contract as (
       'select,insert,update,delete,truncate,references,trigger'
     ) as service_role_audit_access_absent
 ),
+function_owner_identity as (
+  select
+    pg_catalog.to_regrole(
+      'line_pay_payment_function_owner'
+    )::oid as owner_oid,
+    (
+      select role.oid
+      from pg_catalog.pg_roles as role
+      where role.rolname = current_user
+    ) as current_user_oid
+),
+function_owner_membership as (
+  select
+    pg_catalog.count(*)::integer as total_edges,
+    pg_catalog.count(*) filter (
+      where membership.roleid = function_owner_identity.owner_oid
+        and membership.member =
+          function_owner_identity.current_user_oid
+        and membership.grantor =
+          function_owner_identity.current_user_oid
+        and membership.admin_option
+        and not membership.inherit_option
+        and not membership.set_option
+    )::integer as current_user_admin_only_edges,
+    pg_catalog.count(*) filter (
+      where membership.roleid = function_owner_identity.owner_oid
+        and membership.member =
+          function_owner_identity.current_user_oid
+        and membership.grantor <>
+          function_owner_identity.current_user_oid
+        and exists (
+          select 1
+          from pg_catalog.pg_roles as grantor_role
+          where grantor_role.oid = membership.grantor
+            and grantor_role.rolsuper
+        )
+        and membership.admin_option
+        and not membership.inherit_option
+        and not membership.set_option
+    )::integer as bootstrap_superuser_admin_only_edges
+  from pg_catalog.pg_auth_members as membership
+  cross join function_owner_identity
+  where membership.roleid = function_owner_identity.owner_oid
+    or membership.member = function_owner_identity.owner_oid
+),
 role_contract as (
-  select not exists (
-    select 1
-    from pg_catalog.pg_auth_members as membership
-    join pg_catalog.pg_roles as granted_role
-      on granted_role.oid = membership.roleid
-    join pg_catalog.pg_roles as member_role
-      on member_role.oid = membership.member
-    where granted_role.rolname = 'line_pay_payment_function_owner'
-      or member_role.rolname = 'line_pay_payment_function_owner'
-  ) as function_owner_membership_absent
+  select
+    function_owner_membership.total_edges = 0
+      as function_owner_membership_absent,
+    function_owner_membership.total_edges = 1
+      and function_owner_membership.current_user_admin_only_edges = 1
+      as single_current_user_admin_only,
+    function_owner_membership.total_edges = 1
+      and function_owner_membership
+        .bootstrap_superuser_admin_only_edges = 1
+      as single_bootstrap_superuser_admin_only,
+    function_owner_membership.total_edges = 0
+      or (
+        function_owner_membership.total_edges = 1
+        and (
+          function_owner_membership.current_user_admin_only_edges = 1
+          or function_owner_membership
+            .bootstrap_superuser_admin_only_edges = 1
+        )
+      ) as function_owner_membership_safe
+  from function_owner_membership
 ),
 contract as (
   select
@@ -583,7 +638,7 @@ contract as (
     and table_acl_contract.no_role_issued_acl
     and table_acl_contract.audit_table_acl_exact
     and table_acl_contract.service_role_audit_access_absent
-    and role_contract.function_owner_membership_absent
+    and role_contract.function_owner_membership_safe
       as initializer_exact
   from inventory,
     initializer_function,
@@ -672,7 +727,10 @@ select pg_catalog.jsonb_build_object(
     'service_role_audit_access_absent', false
   ),
   'role_contract', pg_catalog.jsonb_build_object(
-    'function_owner_membership_absent', false
+    'function_owner_membership_absent', false,
+    'single_current_user_admin_only', false,
+    'single_bootstrap_superuser_admin_only', false,
+    'function_owner_membership_safe', false
   ),
   'decision', pg_catalog.jsonb_build_object(
     'initializer_exact', false,

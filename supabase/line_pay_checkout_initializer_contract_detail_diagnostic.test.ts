@@ -72,6 +72,9 @@ function detailFixture(overrides: Record<string, any> = {}) {
     },
     role_contract: {
       function_owner_membership_absent: true,
+      single_current_user_admin_only: false,
+      single_bootstrap_superuser_admin_only: false,
+      function_owner_membership_safe: true,
     },
     decision: {
       initializer_exact: true,
@@ -221,6 +224,9 @@ test('parser marks detail incomplete when base remediation is not ready', () => 
         },
         role_contract: {
           function_owner_membership_absent: false,
+          single_current_user_admin_only: false,
+          single_bootstrap_superuser_admin_only: false,
+          function_owner_membership_safe: false,
         },
         decision: {
           initializer_exact: false,
@@ -243,6 +249,66 @@ test('parser marks detail incomplete when base remediation is not ready', () => 
           decision: {
             ...parsed.decision,
             detail_complete: true,
+          },
+        }),
+      ),
+    /INITIALIZER_DETAIL_DIAGNOSTIC_OUTPUT_INVALID/,
+  )
+})
+
+test('parser accepts one safe PostgreSQL 17 bootstrap-superuser membership', () => {
+  const parsed = validator.parseAndValidateContractDetailOutput(
+    JSON.stringify(
+      detailFixture({
+        role_contract: {
+          function_owner_membership_absent: false,
+          single_current_user_admin_only: false,
+          single_bootstrap_superuser_admin_only: true,
+          function_owner_membership_safe: true,
+        },
+      }),
+    ),
+  )
+
+  assert.equal(
+    parsed.role_contract.single_bootstrap_superuser_admin_only,
+    true,
+  )
+  assert.equal(parsed.role_contract.function_owner_membership_safe, true)
+  assert.equal(parsed.decision.initializer_exact, true)
+  assert.equal(parsed.decision.recovery_required, false)
+})
+
+test('parser rejects inconsistent or unsafe function-owner memberships', () => {
+  const unsafeMembership = detailFixture({
+    role_contract: {
+      function_owner_membership_absent: false,
+      single_current_user_admin_only: false,
+      single_bootstrap_superuser_admin_only: false,
+      function_owner_membership_safe: false,
+    },
+    decision: {
+      initializer_exact: false,
+      recovery_required: true,
+      detail_complete: true,
+    },
+  })
+  const parsed = validator.parseAndValidateContractDetailOutput(
+    JSON.stringify(unsafeMembership),
+  )
+  assert.equal(parsed.decision.initializer_exact, false)
+  assert.equal(parsed.decision.recovery_required, true)
+
+  assert.throws(
+    () =>
+      validator.parseAndValidateContractDetailOutput(
+        JSON.stringify({
+          ...detailFixture(),
+          role_contract: {
+            function_owner_membership_absent: true,
+            single_current_user_admin_only: false,
+            single_bootstrap_superuser_admin_only: true,
+            function_owner_membership_safe: true,
           },
         }),
       ),

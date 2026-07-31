@@ -465,6 +465,25 @@ try {
   ) {
     throw new Error('CURRENT_USER_MEMBERSHIP_SHAPE_NOT_OBSERVED')
   }
+  const currentUserMembershipState = parseAndValidateInitializerOutput(
+    `${psqlFile(diagnosticFile)}\n`,
+  )
+  const currentUserMembershipDetail =
+    parseAndValidateContractDetailOutput(
+      `${psqlFile(detailDiagnosticFile)}\n`,
+    )
+  if (
+    currentUserMembershipState.application_state !== 'FULL' ||
+    !currentUserMembershipState.contracts.initializer_exact ||
+    !currentUserMembershipDetail.role_contract
+      .single_current_user_admin_only ||
+    !currentUserMembershipDetail.role_contract
+      .function_owner_membership_safe ||
+    !currentUserMembershipDetail.decision.initializer_exact ||
+    currentUserMembershipDetail.decision.recovery_required
+  ) {
+    throw new Error('SAFE_CURRENT_USER_MEMBERSHIP_NOT_ACCEPTED')
+  }
   psqlSql(`
     revoke line_pay_payment_function_owner from current_user;
   `)

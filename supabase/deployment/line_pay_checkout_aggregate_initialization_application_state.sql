@@ -131,6 +131,64 @@ base_contract as (
     and pg_catalog.to_regrole('service_role') is not null
     as ready
 ),
+function_owner_identity as (
+  select
+    pg_catalog.to_regrole(
+      'line_pay_payment_function_owner'
+    )::oid as owner_oid,
+    (
+      select role.oid
+      from pg_catalog.pg_roles as role
+      where role.rolname = current_user
+    ) as current_user_oid
+),
+function_owner_membership as (
+  select
+    pg_catalog.count(*)::integer as total_edges,
+    pg_catalog.count(*) filter (
+      where membership.roleid = function_owner_identity.owner_oid
+        and membership.member =
+          function_owner_identity.current_user_oid
+        and membership.grantor =
+          function_owner_identity.current_user_oid
+        and membership.admin_option
+        and not membership.inherit_option
+        and not membership.set_option
+    )::integer as current_user_admin_only_edges,
+    pg_catalog.count(*) filter (
+      where membership.roleid = function_owner_identity.owner_oid
+        and membership.member =
+          function_owner_identity.current_user_oid
+        and membership.grantor <>
+          function_owner_identity.current_user_oid
+        and exists (
+          select 1
+          from pg_catalog.pg_roles as grantor_role
+          where grantor_role.oid = membership.grantor
+            and grantor_role.rolsuper
+        )
+        and membership.admin_option
+        and not membership.inherit_option
+        and not membership.set_option
+    )::integer as bootstrap_superuser_admin_only_edges
+  from pg_catalog.pg_auth_members as membership
+  cross join function_owner_identity
+  where membership.roleid = function_owner_identity.owner_oid
+    or membership.member = function_owner_identity.owner_oid
+),
+function_owner_role_contract as (
+  select
+    function_owner_membership.total_edges = 0
+    or (
+      function_owner_membership.total_edges = 1
+      and (
+        function_owner_membership.current_user_admin_only_edges = 1
+        or function_owner_membership
+          .bootstrap_superuser_admin_only_edges = 1
+      )
+    ) as membership_safe
+  from function_owner_membership
+),
 initializer_contract as (
   select
     (
@@ -475,15 +533,9 @@ initializer_contract as (
         and relation.relname = 'line_pay_payment_audit_events'
         and table_acl.grantee <> relation.relowner
     )
-    and not exists (
-      select 1
-      from pg_catalog.pg_auth_members as membership
-      join pg_catalog.pg_roles as granted_role
-        on granted_role.oid = membership.roleid
-      join pg_catalog.pg_roles as member_role
-        on member_role.oid = membership.member
-      where granted_role.rolname = 'line_pay_payment_function_owner'
-        or member_role.rolname = 'line_pay_payment_function_owner'
+    and (
+      select function_owner_role_contract.membership_safe
+      from function_owner_role_contract
     )
     as exact
 ),
