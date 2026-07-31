@@ -1,11 +1,26 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { test } from 'node:test'
 import {
   LINE_PAY_SANDBOX_E2E_CONFIRMATION,
   handleLinePaySandboxE2eStart,
   type LinePaySandboxE2eStartEnvironment,
 } from './handler'
+
+const tests: Array<{
+  name: string
+  run: () => void | Promise<void>
+}> = []
+
+function test(name: string, run: () => void | Promise<void>) {
+  tests.push({ name, run })
+}
+
+async function runTests() {
+  for (const testCase of tests) {
+    await testCase.run()
+    console.log(`✓ ${testCase.name}`)
+  }
+}
 
 const enabledEnv: LinePaySandboxE2eStartEnvironment = {
   VERCEL_ENV: 'preview',
@@ -312,4 +327,9 @@ test('route is POST-only, admin-protected, and uses the unified Gateway transpor
   assert.doesNotMatch(source, /export async function GET/)
   assert.doesNotMatch(source, /LINE_PAY_GATEWAY_PROXY_TOKEN/)
   assert.doesNotMatch(source, /console\.(?:log|error)/)
+})
+
+runTests().catch((error) => {
+  console.error(error)
+  process.exitCode = 1
 })

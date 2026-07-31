@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
 import type {
   LinePayRequestDatabase,
   LinePayRequestReplayResult,
@@ -8,6 +7,22 @@ import {
   LinePayProductOrderRequestExecutionError,
   executeInitializedProductOrderLinePayRequest,
 } from './productOrderRequestExecution'
+
+const tests: Array<{
+  name: string
+  run: () => void | Promise<void>
+}> = []
+
+function test(name: string, run: () => void | Promise<void>) {
+  tests.push({ name, run })
+}
+
+async function runTests() {
+  for (const testCase of tests) {
+    await testCase.run()
+    console.log(`✓ ${testCase.name}`)
+  }
+}
 
 const attemptId = '61000000-0000-4000-8000-000000000001'
 const paymentId = '71000000-0000-4000-8000-000000000001'
@@ -299,4 +314,9 @@ test('database failure after upstream success attempts fail-closed unknown marki
   )
 
   assert.deepEqual(calls, ['claim', 'recordSuccess', 'markUnknown'])
+})
+
+runTests().catch((error) => {
+  console.error(error)
+  process.exitCode = 1
 })
