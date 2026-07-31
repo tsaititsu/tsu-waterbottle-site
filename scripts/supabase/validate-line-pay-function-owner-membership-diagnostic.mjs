@@ -44,7 +44,7 @@ export const BASE_MIGRATION_FILE =
   'supabase/migrations/20260719033404_line_pay_remediation_contracts.sql'
 
 export const EXPECTED_DIAGNOSTIC_SHA256 =
-  '5b069f739f5284c331177732bb571562dcf413098fbf277269791c61a591eeb5'
+  'ff0240e54f45d61e521caa64a3cc24b0adc8d3aced28e235e25ef60ec009724b'
 export const EXPECTED_INITIALIZER_MIGRATION_SHA256 =
   '2e2ef2cce41431e0dc638033c998b7b616cbdc2b3baefdcb59fbb68ba2adf551'
 export const EXPECTED_BASE_MIGRATION_SHA256 =
@@ -99,6 +99,7 @@ const MEMBERSHIP_KEYS = Object.freeze([
   'owner_member_of_other_edges',
   'granted_by_current_user_edges',
   'granted_by_owner_edges',
+  'granted_by_superuser_edges',
   'granted_by_other_edges',
   'admin_option_edges',
   'inherit_option_edges',
@@ -108,6 +109,7 @@ const DECISION_KEYS = Object.freeze([
   'detail_complete',
   'membership_absent',
   'single_current_user_grant_only',
+  'single_bootstrap_superuser_admin_only',
   'manual_review_required',
 ])
 
@@ -262,12 +264,16 @@ export function assertMembershipDiagnosticSql(sql) {
     'membership.admin_option',
     'membership.inherit_option',
     'membership.set_option',
+    'pg_catalog.pg_roles as grantor_role',
+    'grantor_role.rolsuper',
     'as total_edges',
     'as granted_to_current_user_edges',
     'as granted_to_other_edges',
     'as owner_member_of_other_edges',
+    'as granted_by_superuser_edges',
     'as granted_by_other_edges',
     "'single_current_user_grant_only',",
+    "'single_bootstrap_superuser_admin_only',",
     "'manual_review_required',",
   ])
   if (
@@ -370,6 +376,7 @@ export function parseAndValidateMembershipDiagnosticOutput(text) {
   const grantorSum = sumCounts(membership, [
     'granted_by_current_user_edges',
     'granted_by_owner_edges',
+    'granted_by_superuser_edges',
     'granted_by_other_edges',
   ])
   const optionsBounded = [
@@ -390,6 +397,23 @@ export function parseAndValidateMembershipDiagnosticOutput(text) {
     membership.granted_to_other_edges === 0 &&
     membership.granted_by_current_user_edges === 1 &&
     membership.granted_by_owner_edges === 0 &&
+    membership.granted_by_superuser_edges === 0 &&
+    membership.granted_by_other_edges === 0 &&
+    membership.admin_option_edges === 1 &&
+    membership.inherit_option_edges === 0 &&
+    membership.set_option_edges === 0
+  const singleBootstrapSuperuserAdminOnly =
+    value.role_present &&
+    membership.total_edges === 1 &&
+    membership.owner_as_granted_role_edges === 1 &&
+    membership.owner_as_member_role_edges === 0 &&
+    membership.granted_to_current_user_edges === 1 &&
+    membership.granted_to_executor_edges === 0 &&
+    membership.granted_to_runtime_role_edges === 0 &&
+    membership.granted_to_other_edges === 0 &&
+    membership.granted_by_current_user_edges === 0 &&
+    membership.granted_by_owner_edges === 0 &&
+    membership.granted_by_superuser_edges === 1 &&
     membership.granted_by_other_edges === 0 &&
     membership.admin_option_edges === 1 &&
     membership.inherit_option_edges === 0 &&
@@ -397,7 +421,8 @@ export function parseAndValidateMembershipDiagnosticOutput(text) {
   const manualReviewRequired =
     value.role_present &&
     membership.total_edges > 0 &&
-    !singleCurrentUserGrantOnly
+    !singleCurrentUserGrantOnly &&
+    !singleBootstrapSuperuserAdminOnly
 
   if (
     directionSum !== membership.total_edges ||
@@ -409,6 +434,8 @@ export function parseAndValidateMembershipDiagnosticOutput(text) {
     decision.membership_absent !== membershipAbsent ||
     decision.single_current_user_grant_only !==
       singleCurrentUserGrantOnly ||
+    decision.single_bootstrap_superuser_admin_only !==
+      singleBootstrapSuperuserAdminOnly ||
     decision.manual_review_required !== manualReviewRequired ||
     (!value.role_present && membership.total_edges !== 0)
   ) {

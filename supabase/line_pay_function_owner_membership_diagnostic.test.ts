@@ -44,6 +44,7 @@ function membershipFixture(overrides: Record<string, any> = {}) {
       owner_member_of_other_edges: 0,
       granted_by_current_user_edges: 1,
       granted_by_owner_edges: 0,
+      granted_by_superuser_edges: 0,
       granted_by_other_edges: 0,
       admin_option_edges: 1,
       inherit_option_edges: 0,
@@ -53,6 +54,7 @@ function membershipFixture(overrides: Record<string, any> = {}) {
       detail_complete: true,
       membership_absent: false,
       single_current_user_grant_only: true,
+      single_bootstrap_superuser_admin_only: false,
       manual_review_required: false,
     },
     ...overrides,
@@ -103,18 +105,28 @@ test('static mutations cannot weaken membership probes or expose raw identities'
     sql.replaceAll('membership.inherit_option', 'false'),
     sql.replaceAll('membership.set_option', 'false'),
     sql.replaceAll('membership.grantor', 'membership.member'),
+    sql.replaceAll('grantor_role.rolsuper', 'false'),
     sql.replace(
       'as granted_to_other_edges',
       'as role_name',
     ),
   ]
-  assert.equal(mutations.length, 8)
+  assert.equal(mutations.length, 9)
   for (const mutation of mutations) {
     assert.throws(
       () => validator.assertMembershipDiagnosticSql(mutation),
       /MEMBERSHIP_DIAGNOSTIC_SQL_INVALID/,
     )
   }
+})
+
+test('diagnostic SQL classifies a grantor superuser without returning role identity', () => {
+  const sql = readFileSync(diagnosticPath, 'utf8')
+  assert.match(sql, /pg_catalog[.]pg_roles as grantor_role/u)
+  assert.match(sql, /grantor_role[.]rolsuper/u)
+  assert.match(sql, /as granted_by_superuser_edges/u)
+  assert.match(sql, /'single_bootstrap_superuser_admin_only',/u)
+  assert.doesNotMatch(sql, /grantor_role[.]rolname/u)
 })
 
 test('parser accepts a bounded single-current-user membership and freezes it', () => {
@@ -136,6 +148,35 @@ test('parser accepts a bounded single-current-user membership and freezes it', (
   assert.ok(Object.isFrozen(parsed.decision))
 })
 
+test('parser classifies one bootstrap-superuser ADMIN-only membership without exposing identity', () => {
+  const base = membershipFixture()
+  const parsed = validator.parseAndValidateMembershipDiagnosticOutput(
+    JSON.stringify({
+      ...base,
+      membership: {
+        ...base.membership,
+        granted_by_current_user_edges: 0,
+        granted_by_superuser_edges: 1,
+      },
+      decision: {
+        ...base.decision,
+        single_current_user_grant_only: false,
+        single_bootstrap_superuser_admin_only: true,
+      },
+    }),
+  )
+  assert.equal(parsed.membership.total_edges, 1)
+  assert.equal(parsed.membership.granted_by_superuser_edges, 1)
+  assert.equal(
+    parsed.decision.single_bootstrap_superuser_admin_only,
+    true,
+  )
+  assert.equal(parsed.decision.manual_review_required, false)
+  assert.ok(Object.isFrozen(parsed))
+  assert.ok(Object.isFrozen(parsed.membership))
+  assert.ok(Object.isFrozen(parsed.decision))
+})
+
 test('parser accepts absent membership only when every category is zero', () => {
   const zeroMembership = Object.fromEntries(
     Object.keys(membershipFixture().membership).map((key) => [key, 0]),
@@ -148,6 +189,7 @@ test('parser accepts absent membership only when every category is zero', () => 
           detail_complete: true,
           membership_absent: true,
           single_current_user_grant_only: false,
+          single_bootstrap_superuser_admin_only: false,
           manual_review_required: false,
         },
       }),
@@ -176,6 +218,7 @@ test('parser marks reverse or unknown memberships for manual review', () => {
           detail_complete: true,
           membership_absent: false,
           single_current_user_grant_only: false,
+          single_bootstrap_superuser_admin_only: false,
           manual_review_required: true,
         },
       }),
