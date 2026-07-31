@@ -1,0 +1,257 @@
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { NextResponse } from 'next/server'
+import {
+  buildLinePayRequestPayload,
+  getLinePayServerConfig,
+  stringifyLinePayJsonBody,
+  type LinePayServerEnv,
+} from '../../../../../../lib/linePay'
+import type { InitializeProductOrderLinePayCheckoutResult } from '../../../../../../lib/supabase/linePayCheckoutInitialization'
+import type {
+  ExecuteInitializedProductOrderLinePayRequestInput,
+  ExecuteInitializedProductOrderLinePayRequestResult,
+} from '../../../../../../lib/linePay/productOrderRequestExecution'
+
+export const LINE_PAY_SANDBOX_E2E_CONFIRMATION =
+  'RUN_LINE_PAY_SANDBOX_E2E_NT50_ONCE'
+export const LINE_PAY_SANDBOX_E2E_AMOUNT_TWD = 50
+
+export type LinePaySandboxE2eStartEnvironment = LinePayServerEnv & {
+  VERCEL_ENV?: string
+  VERCEL_GIT_COMMIT_SHA?: string
+  LINE_PAY_TRANSPORT?: string
+  LINE_PAY_SANDBOX_E2E_ENABLED?: string
+}
+
+type AuthorizedSandboxE2eContext = {
+  userId: string
+  client: unknown
+}
+
+type InitializeSandboxE2e = (
+  input: {
+    client: unknown
+    userId: string
+    environment: 'sandbox'
+    amountTwd: 50
+    orderNo: string
+    merchantOrderNo: string
+    idempotencyKey: string
+    requestBodySha256: string
+    confirmTokenHash: string
+    cancelTokenHash: string
+    capabilityExpiresAt: string
+  },
+) => Promise<InitializeProductOrderLinePayCheckoutResult>
+
+type ExecuteSandboxE2e = (
+  input: Omit<
+    ExecuteInitializedProductOrderLinePayRequestInput,
+    'database' | 'requestPayment'
+  > & {
+    client: unknown
+    channelId: string
+    channelSecret: string
+    transportEnv: LinePaySandboxE2eStartEnvironment
+  },
+) => Promise<ExecuteInitializedProductOrderLinePayRequestResult>
+
+type StartBody = {
+  confirmation?: unknown
+}
+
+function sha256(value: string) {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function hiddenResponse() {
+  return NextResponse.json(
+    { ok: false, error: 'not_found' },
+    { status: 404, headers: { 'Cache-Control': 'no-store' } },
+  )
+}
+
+function errorResponse(error: string, status: number) {
+  return NextResponse.json(
+    { ok: false, error },
+    { status, headers: { 'Cache-Control': 'no-store' } },
+  )
+}
+
+export function isLinePaySandboxE2eRouteEnabled(
+  env: LinePaySandboxE2eStartEnvironment,
+) {
+  return (
+    env.VERCEL_ENV?.trim().toLowerCase() === 'preview'
+    && env.NEXT_PUBLIC_ENABLE_LINE_PAY?.trim().toLowerCase() === 'true'
+    && env.LINE_PAY_ENV?.trim().toLowerCase() === 'sandbox'
+    && env.LINE_PAY_TRANSPORT?.trim().toLowerCase() === 'gateway'
+    && env.LINE_PAY_SANDBOX_E2E_ENABLED?.trim().toLowerCase() === 'true'
+    && /^[0-9a-f]{40}$/i.test(env.VERCEL_GIT_COMMIT_SHA?.trim() ?? '')
+  )
+}
+
+function callbackUrl(baseUrl: string | URL, merchantOrderNo: string, token: string) {
+  const url = new URL(baseUrl)
+  url.searchParams.set('orderId', merchantOrderNo)
+  url.searchParams.set('capability', token)
+  return url.toString()
+}
+
+function internalCallbackBase(configuredUrl: string, pathname: string) {
+  const url = new URL(configuredUrl)
+  url.pathname = pathname
+  url.search = ''
+  url.hash = ''
+  return url
+}
+
+function sandboxPaymentUrl(value: string) {
+  const url = new URL(value)
+  if (
+    url.protocol !== 'https:'
+    || url.hostname !== 'sandbox-web-pay.line.me'
+    || url.port !== ''
+    || url.username !== ''
+    || url.password !== ''
+  ) {
+    throw new Error('invalid_line_pay_sandbox_payment_url')
+  }
+  return url.toString()
+}
+
+export async function handleLinePaySandboxE2eStart(input: {
+  request: Request
+  env: LinePaySandboxE2eStartEnvironment
+  authorize: (
+    request: Request,
+  ) => Promise<AuthorizedSandboxE2eContext | null>
+  initialize: InitializeSandboxE2e
+  execute: ExecuteSandboxE2e
+  now?: () => Date
+  createUuid?: () => string
+  createToken?: () => string
+}) {
+  if (!isLinePaySandboxE2eRouteEnabled(input.env)) return hiddenResponse()
+
+  const body = (await input.request.json().catch(() => null)) as StartBody | null
+  if (body?.confirmation !== LINE_PAY_SANDBOX_E2E_CONFIRMATION) {
+    return errorResponse('invalid_confirmation', 400)
+  }
+
+  let authorization: AuthorizedSandboxE2eContext | null = null
+  try {
+    authorization = await input.authorize(input.request)
+  } catch {
+    authorization = null
+  }
+  if (!authorization) return hiddenResponse()
+
+  const now = input.now?.() ?? new Date()
+  const createUuid = input.createUuid ?? randomUUID
+  const createToken =
+    input.createToken ?? (() => randomBytes(32).toString('base64url'))
+  const commitSha = input.env.VERCEL_GIT_COMMIT_SHA!.trim().toLowerCase()
+  const runKey = sha256(`line-pay-sandbox-e2e:${commitSha}`).slice(0, 32)
+  const orderNo = `LPE2E-${runKey}`
+  const merchantOrderNo = `LP_E2E_${runKey}`
+  const idempotencyKey = `line-pay-sandbox-e2e:${commitSha}`
+  const claimId = createUuid()
+  const requestId = `line-pay-sandbox-e2e:${createUuid()}`
+  const confirmToken = createToken()
+  const cancelToken = createToken()
+  const capabilityExpiresAt = new Date(
+    now.getTime() + 30 * 60 * 1000,
+  ).toISOString()
+
+  try {
+    const config = getLinePayServerConfig(input.env)
+    if (!config.enabled || config.environment !== 'sandbox') {
+      return hiddenResponse()
+    }
+
+    const payloadInput = {
+      orderId: merchantOrderNo,
+      amount: LINE_PAY_SANDBOX_E2E_AMOUNT_TWD,
+      currency: 'TWD' as const,
+      products: [
+        {
+          name: 'LINE Pay Sandbox E2E 測試',
+          quantity: 1,
+          price: LINE_PAY_SANDBOX_E2E_AMOUNT_TWD,
+        },
+      ],
+      confirmUrl: callbackUrl(
+        new URL(
+          internalCallbackBase(
+            config.confirmUrl,
+            '/api/internal/line-pay/sandbox-e2e/confirm',
+          ),
+        ),
+        merchantOrderNo,
+        confirmToken,
+      ),
+      cancelUrl: callbackUrl(
+        new URL(
+          internalCallbackBase(
+            config.cancelUrl,
+            '/api/internal/line-pay/sandbox-e2e/cancel',
+          ),
+        ),
+        merchantOrderNo,
+        cancelToken,
+      ),
+    }
+    const requestBodySha256 = sha256(
+      stringifyLinePayJsonBody(buildLinePayRequestPayload(payloadInput)),
+    )
+    const initialized = await input.initialize({
+      client: authorization.client,
+      userId: authorization.userId,
+      environment: 'sandbox',
+      amountTwd: LINE_PAY_SANDBOX_E2E_AMOUNT_TWD,
+      orderNo,
+      merchantOrderNo,
+      idempotencyKey,
+      requestBodySha256,
+      confirmTokenHash: sha256(confirmToken),
+      cancelTokenHash: sha256(cancelToken),
+      capabilityExpiresAt,
+    })
+    const result = await input.execute({
+      client: authorization.client,
+      environment: 'sandbox',
+      attemptId: initialized.attempt_id,
+      paymentId: initialized.payment_id,
+      productOrderId: initialized.product_order_id,
+      idempotencyKey,
+      requestBodySha256,
+      merchantOrderNo,
+      claimId,
+      claimExpiresAt: new Date(now.getTime() + 2 * 60 * 1000).toISOString(),
+      requestId,
+      payloadInput,
+      channelId: config.channelId,
+      channelSecret: config.channelSecret,
+      transportEnv: input.env,
+    })
+
+    if (result.status !== 'payment_url_ready') {
+      return errorResponse('line_pay_sandbox_e2e_not_ready', 409)
+    }
+    const paymentUrl = sandboxPaymentUrl(result.paymentUrlWeb)
+
+    return NextResponse.json(
+      {
+        ok: true,
+        environment: 'sandbox',
+        amountTwd: LINE_PAY_SANDBOX_E2E_AMOUNT_TWD,
+        currency: 'TWD',
+        paymentUrl,
+      },
+      { headers: { 'Cache-Control': 'no-store' } },
+    )
+  } catch {
+    return errorResponse('line_pay_sandbox_e2e_start_failed', 502)
+  }
+}
