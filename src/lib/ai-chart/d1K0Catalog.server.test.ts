@@ -92,6 +92,62 @@ function bullets(content: string): readonly string[] {
   return value.bullets as string[]
 }
 
+const EXPECTED_PALACE_MEANINGS = Object.freeze({
+  'palace:ming': ['個性', '價值觀', '能力', '人生方向'],
+  'palace:siblings': ['母親', '同性別兄弟姊妹', '新認識的朋友'],
+  'palace:spouse': ['感情態度與對待方式', '喜歡的對象類型'],
+  'palace:children': [
+    '對子女的教養方式',
+    '與寵物的互動方式',
+    '吃與玩樂',
+    '旅遊方式',
+  ],
+  'palace:wealth': [
+    '對錢的看法',
+    '理財方式',
+    '賺錢的方式',
+    '實際用錢與花錢方式',
+  ],
+  'palace:health': [
+    '健康',
+    '身體的使用方式',
+    '遺傳或較弱、需要保養的身體面向',
+  ],
+  'palace:travel': ['在外人際關係', '內心想法', '外界對命主的看法'],
+  'palace:friends': [
+    '異性別兄弟姊妹',
+    '一般同事',
+    '朋友',
+    '團隊中的相處過程、對待關係與價值觀',
+  ],
+  'palace:career': [
+    '工作態度與做事方式',
+    '工作方向與選擇',
+    '工作中的價值觀與生活重心',
+  ],
+  'palace:property': [
+    '居住環境',
+    '家人相處方式',
+    '存錢方式與財庫',
+    '家世背景',
+    '住家附近的環境',
+  ],
+  'palace:fortune': [
+    '精神享受',
+    '社會價值觀',
+    '福分',
+    '運氣',
+    '潛意識',
+    '品味',
+    '意志力與精神耐力',
+  ],
+  'palace:parents': [
+    '父親的特質與相處關係',
+    '對長輩與權威人物的看法',
+    '命主面對長輩、主管階層或政府機關的態度',
+  ],
+} as const)
+
 async function run() {
   const first = await compileAiChartD1K0Catalog()
   const second = await compileAiChartD1K0Catalog()
@@ -112,6 +168,46 @@ async function run() {
       new Set(first.palaceMeanings.map((entry) => entry.meaningId)).size,
       first.palaceMeanings.length,
     )
+  })
+  check('palace meanings use only the teacher-confirmed canonical facets', () => {
+    assert.equal(first.palaceMeanings.length, 45)
+    for (const [palaceId, expectedMeanings] of Object.entries(
+      EXPECTED_PALACE_MEANINGS,
+    )) {
+      assert.deepEqual(
+        first.palaceMeanings
+          .filter((meaning) => meaning.palaceId === palaceId)
+          .map((meaning) => meaning.text),
+        expectedMeanings,
+      )
+    }
+  })
+  check('trine and hidden-combination rules preserve one causal formula', () => {
+    const trine = first.rules.find(
+      (rule) => rule.ruleId === 'rule:structure:trine',
+    )
+    const hiddenCombination = first.rules.find(
+      (rule) => rule.ruleId === 'rule:structure:hidden-combination',
+    )
+    assert.ok(trine)
+    assert.ok(hiddenCombination)
+    assert.match(
+      trine.content,
+      /來源宮位代表的生活領域.*該宮星曜.*如何影響本宮/s,
+    )
+    assert.match(
+      trine.content,
+      /不得只列出.*某宮有某星.*不得將三方星曜說成本宮主星/s,
+    )
+    assert.match(
+      hiddenCombination.content,
+      /暗合宮位代表的人事領域.*該宮星曜.*背後如何影響本宮/s,
+    )
+    assert.match(
+      hiddenCombination.content,
+      /爸爸、長輩、權威人物或早期家庭經驗/s,
+    )
+    assert.match(hiddenCombination.content, /不會成為本宮主星/s)
   })
   check('fourteen canonical stars contain only approved fields', () => {
     const rules = first.rules.filter((rule) => rule.kind === 'single_star')

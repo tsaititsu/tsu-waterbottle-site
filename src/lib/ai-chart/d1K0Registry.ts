@@ -48,7 +48,7 @@ export const AI_CHART_D1_K0_SOURCE_SHA256 = Object.freeze({
   [AI_CHART_D1_K0_SOURCE_FILES.stars]:
     'e95df53e854aec966f0c3df4ec9239b09a3070104f99183c7261267ce09c6a3f',
   [AI_CHART_D1_K0_SOURCE_FILES.palaces]:
-    '987ad55e32bdc7e51e9a220c2a18f2446b385c9a0b4c4b199086ad4d46932598',
+    'e266b325da753952a03e5c29070342f3f11ee5407b1f0fdc5d4fcde860748b2c',
   [AI_CHART_D1_K0_SOURCE_FILES.mutagens]:
     '5c67e03928e76f2da0a87c2f104aa65e17b2e183e1e0d1674af3119cc9f0b67a',
   [AI_CHART_D1_K0_SOURCE_FILES.doubles]:
@@ -56,7 +56,7 @@ export const AI_CHART_D1_K0_SOURCE_SHA256 = Object.freeze({
   [AI_CHART_D1_K0_SOURCE_FILES.scanning]:
     '6b549caefc3066138d3083617ecf8a823a9a1c02d3792e534882402d90246135',
   [AI_CHART_D1_K0_SOURCE_FILES.relationships]:
-    '00a02ec0884a8555a10f1f16b554edcf2562acbdfd09fed9c8eee0515a8a34a0',
+    'a7a7fc196d5b5e63bb89285e017e3b3f6e54c6a4ba4dfd5214fc79d9d522b8b4',
   [AI_CHART_D1_K0_SOURCE_FILES.emptyPalaces]:
     'a2859483a99243d0e0fdcd0382d28e5ae9febfee7beffffcafae12a21e5f6eae',
   [AI_CHART_D1_K0_SOURCE_FILES.supporting]:
@@ -226,35 +226,35 @@ function labeledBulletBlock(
 }
 
 export const AI_CHART_D1_K0_PALACE_MEANING_DEFINITIONS = Object.freeze([
-  ['palace:ming', '命宮', '命宮：個性、價值觀、能力、長相、遷移宮的內心、影響 12 宮', ['個性', '價值觀', '能力', '長相', '遷移宮的內心', '影響 12 宮']],
-  ['palace:siblings', '兄弟宮', '兄弟宮：媽媽、同性別兄弟姐妹、新認識的朋友', ['媽媽', '同性別兄弟姐妹', '新認識的朋友']],
-  ['palace:spouse', '夫妻宮', '夫妻宮：感情的態度／對待方式、喜歡怎樣的人、工作在外的狀況', ['感情的態度／對待方式', '喜歡怎樣的人', '工作在外的狀況']],
-  ['palace:children', '子女宮', '子女宮：對子女／寵物的教養方式、性生活、吃喝享樂的方式、所有物、家的外面、財庫', ['對子女／寵物的教養方式', '性生活', '吃喝享樂的方式', '所有物', '家的外面', '財庫']],
-  ['palace:wealth', '財帛宮', '財帛宮：對錢的看法、理財方式、賺錢的方式、用錢的方式', ['對錢的看法', '理財方式', '賺錢的方式', '用錢的方式']],
-  ['palace:health', '疾厄宮', '疾厄宮：長相、健康、身體的使用方式', ['長相', '健康', '身體的使用方式']],
-  ['palace:travel', '遷移宮', '遷移宮：在外人際關係、內心想法、外界對我的看法', ['在外人際關係', '內心想法', '外界對我的看法']],
-  ['palace:friends', '僕役宮', '僕役宮：異性別兄弟姐妹、同事、朋友、平輩關係', ['異性別兄弟姐妹', '同事', '朋友', '平輩關係']],
-  ['palace:career', '官祿宮', '官祿宮：工作態度／方向／同事相處方式、感情對象類型、生活重心、感情內心', ['工作態度／方向／同事相處方式', '感情對象類型', '生活重心', '感情內心']],
-  ['palace:property', '田宅宮', '田宅宮：居住環境、家人相處方式、財庫、家世背景、風水', ['居住環境', '家人相處方式', '財庫', '家世背景', '風水']],
-  ['palace:fortune', '福德宮', '福德宮：靈魂、來財方式、老年生活、社會價值觀、花錢方式、潛意識、福份、運氣', ['靈魂', '來財方式', '老年生活', '社會價值觀', '花錢方式', '潛意識', '福份', '運氣']],
-  ['palace:parents', '父母宮', '父母宮：父親、身體遺傳、身體的使用方式', ['父親', '身體遺傳', '身體的使用方式']],
+  ['palace:ming', '命宮', '命宮：個性、價值觀、能力、人生方向', ['個性', '價值觀', '能力', '人生方向']],
+  ['palace:siblings', '兄弟宮', '兄弟宮：母親、同性別兄弟姊妹、新認識的朋友', ['母親', '同性別兄弟姊妹', '新認識的朋友']],
+  ['palace:spouse', '夫妻宮', '夫妻宮：感情態度與對待方式、喜歡的對象類型', ['感情態度與對待方式', '喜歡的對象類型']],
+  ['palace:children', '子女宮', '子女宮：對子女的教養方式、與寵物的互動方式、吃與玩樂、旅遊方式', ['對子女的教養方式', '與寵物的互動方式', '吃與玩樂', '旅遊方式']],
+  ['palace:wealth', '財帛宮', '財帛宮：對錢的看法、理財方式、賺錢的方式、實際用錢與花錢方式', ['對錢的看法', '理財方式', '賺錢的方式', '實際用錢與花錢方式']],
+  ['palace:health', '疾厄宮', '疾厄宮：健康、身體的使用方式、遺傳或較弱、需要保養的身體面向', ['健康', '身體的使用方式', '遺傳或較弱、需要保養的身體面向']],
+  ['palace:travel', '遷移宮', '遷移宮：在外人際關係、內心想法、外界對命主的看法', ['在外人際關係', '內心想法', '外界對命主的看法']],
+  ['palace:friends', '僕役宮', '僕役宮：異性別兄弟姊妹、一般同事、朋友、團隊中的相處過程、對待關係與價值觀', ['異性別兄弟姊妹', '一般同事', '朋友', '團隊中的相處過程、對待關係與價值觀']],
+  ['palace:career', '官祿宮', '官祿宮：工作態度與做事方式、工作方向與選擇、工作中的價值觀與生活重心', ['工作態度與做事方式', '工作方向與選擇', '工作中的價值觀與生活重心']],
+  ['palace:property', '田宅宮', '田宅宮：居住環境、家人相處方式、存錢方式與財庫、家世背景、住家附近的環境', ['居住環境', '家人相處方式', '存錢方式與財庫', '家世背景', '住家附近的環境']],
+  ['palace:fortune', '福德宮', '福德宮：精神享受、社會價值觀、福分、運氣、潛意識、品味、意志力與精神耐力', ['精神享受', '社會價值觀', '福分', '運氣', '潛意識', '品味', '意志力與精神耐力']],
+  ['palace:parents', '父母宮', '父母宮：父親的特質與相處關係、對長輩與權威人物的看法、命主面對長輩、主管階層或政府機關的態度', ['父親的特質與相處關係', '對長輩與權威人物的看法', '命主面對長輩、主管階層或政府機關的態度']],
 ] as const satisfies readonly (readonly [AiChartD1PalaceId, string, string, readonly string[]])[])
 
 export const AI_CHART_D1_K0_MEANING_SLUGS: Readonly<
   Record<string, string>
 > = Object.freeze({
-  個性: 'personality', 價值觀: 'values', 能力: 'ability', 長相: 'appearance', 遷移宮的內心: 'travel-inner-state', '影響 12 宮': 'twelve-palace-influence',
-  父親: 'father', 身體遺傳: 'physical-inheritance', 身體的使用方式: 'body-use-pattern',
-  靈魂: 'inner-spirit', 來財方式: 'wealth-arrival', 老年生活: 'later-life', 社會價值觀: 'social-values', 花錢方式: 'spending-style', 潛意識: 'subconscious', 福份: 'fortune-capacity', 運氣: 'luck',
-  居住環境: 'living-environment', 家人相處方式: 'family-interaction', 財庫: 'wealth-storage', 家世背景: 'family-background', 風水: 'fengshui-domain',
-  '工作態度／方向／同事相處方式': 'work-attitude-direction-colleagues', 感情對象類型: 'partner-type', 生活重心: 'life-focus', 感情內心: 'relationship-inner-state',
-  異性別兄弟姐妹: 'opposite-gender-siblings', 同事: 'colleagues', 朋友: 'friends', 平輩關係: 'peer-relations',
-  在外人際關係: 'external-relations', 內心想法: 'inner-thoughts', 外界對我的看法: 'public-perception',
-  健康: 'health-domain',
-  對錢的看法: 'money-view', 理財方式: 'financial-management', 賺錢的方式: 'earning-style', 用錢的方式: 'money-use',
-  '對子女／寵物的教養方式': 'children-pets-parenting', 性生活: 'sexual-life-domain', 吃喝享樂的方式: 'enjoyment-style', 所有物: 'possessions', 家的外面: 'outside-home',
-  '感情的態度／對待方式': 'relationship-attitude', 喜歡怎樣的人: 'preferred-partner', 工作在外的狀況: 'work-external-state',
-  媽媽: 'mother', 同性別兄弟姐妹: 'same-gender-siblings', 新認識的朋友: 'new-friends',
+  個性: 'personality', 價值觀: 'values', 能力: 'ability', 人生方向: 'life-direction',
+  母親: 'mother', 同性別兄弟姊妹: 'same-gender-siblings', 新認識的朋友: 'new-friends',
+  感情態度與對待方式: 'relationship-attitude', 喜歡的對象類型: 'preferred-partner-type',
+  對子女的教養方式: 'child-parenting', 與寵物的互動方式: 'pet-interaction', 吃與玩樂: 'food-and-leisure', 旅遊方式: 'travel-style',
+  對錢的看法: 'money-view', 理財方式: 'financial-management', 賺錢的方式: 'earning-style', 實際用錢與花錢方式: 'money-use-and-spending',
+  健康: 'health-domain', 身體的使用方式: 'body-use-pattern', '遺傳或較弱、需要保養的身體面向': 'inherited-or-vulnerable-health',
+  在外人際關係: 'external-relations', 內心想法: 'inner-thoughts', 外界對命主的看法: 'public-perception',
+  異性別兄弟姊妹: 'opposite-gender-siblings', 一般同事: 'colleagues', 朋友: 'friends', '團隊中的相處過程、對待關係與價值觀': 'team-interaction-values',
+  工作態度與做事方式: 'work-attitude-and-method', 工作方向與選擇: 'work-direction-and-choice', 工作中的價值觀與生活重心: 'work-values-and-life-focus',
+  居住環境: 'living-environment', 家人相處方式: 'family-interaction', 存錢方式與財庫: 'savings-and-wealth-storage', 家世背景: 'family-background', 住家附近的環境: 'nearby-home-environment',
+  精神享受: 'spiritual-enjoyment', 社會價值觀: 'social-values', 福分: 'fortune-capacity', 運氣: 'luck', 潛意識: 'subconscious', 品味: 'taste', 意志力與精神耐力: 'willpower-and-mental-endurance',
+  父親的特質與相處關係: 'father-character-and-relationship', 對長輩與權威人物的看法: 'elders-and-authority-view', '命主面對長輩、主管階層或政府機關的態度': 'authority-facing-attitude',
 })
 
 export const AI_CHART_D1_K0_PALACE_SECTION_LOCATOR = section(

@@ -878,7 +878,7 @@ export function validateAiChartD1K0CatalogSemantics(
         const rule = rulesById.get(`rule:palace:${palaceSlug}:meanings`)
         return !rule || rule.kind !== 'palace_meaning'
       }) ||
-      catalog.palaceMeanings.length !== 52 ||
+      catalog.palaceMeanings.length !== expectedMeanings.length ||
       !stableEqual(
         catalog.palaceMeanings.map(
           ({ meaningId, palaceId, text, order }) => ({

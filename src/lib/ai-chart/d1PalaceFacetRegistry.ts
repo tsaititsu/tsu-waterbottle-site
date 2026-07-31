@@ -13,7 +13,6 @@ const FACETS_BY_PALACE = {
     'life.thinking_behavior',
     'life.capability_tendency',
     'life.strengths_blindspots',
-    'life.appearance_optional',
   ],
   'palace:siblings': [
     'siblings.mother',
@@ -34,7 +33,6 @@ const FACETS_BY_PALACE = {
     'pleasure.eating',
     'pleasure.play',
     'pleasure.travel',
-    'possessions.owned_items',
   ],
   'palace:wealth': [
     'money.view',
@@ -48,7 +46,6 @@ const FACETS_BY_PALACE = {
     'body.use_consumption',
     'body.inherited_tendency',
     'body.stress_response',
-    'body.appearance_optional',
   ],
   'palace:travel': [
     'outside.presentation',
@@ -131,7 +128,7 @@ const FACET_IDS_BY_PALACE: ReadonlyMap<
 
 if (
   AI_CHART_D1_PALACE_FACET_REGISTRY.length !== 12 ||
-  AI_CHART_D1_PALACE_FACET_IDS.length !== 63 ||
+  AI_CHART_D1_PALACE_FACET_IDS.length !== 60 ||
   new Set(AI_CHART_D1_PALACE_FACET_IDS).size !==
     AI_CHART_D1_PALACE_FACET_IDS.length
 ) {
