@@ -52,7 +52,7 @@ export const AI_CHART_D1_K0_SOURCE_SHA256 = Object.freeze({
   [AI_CHART_D1_K0_SOURCE_FILES.mutagens]:
     '5c67e03928e76f2da0a87c2f104aa65e17b2e183e1e0d1674af3119cc9f0b67a',
   [AI_CHART_D1_K0_SOURCE_FILES.doubles]:
-    '9127acd261dd1c879a374cd0d45432dbfe8b65050494e5d99adfa505a87955c4',
+    '134612bf5a35497128e8402a4a540456a6a9bf827aea5869dd81a4c63ca6db47',
   [AI_CHART_D1_K0_SOURCE_FILES.scanning]:
     '6b549caefc3066138d3083617ecf8a823a9a1c02d3792e534882402d90246135',
   [AI_CHART_D1_K0_SOURCE_FILES.relationships]:
@@ -268,6 +268,7 @@ type DoubleRuleDefinition = Readonly<{
   headingPath: readonly string[]
   heading: string
   label: string | null
+  includeLabeledBulletBlock: boolean
   sourceAuthority:
     | 'reasoning_teacher_confirmed'
     | 'reasoning_confirmed'
@@ -280,6 +281,7 @@ type DoubleRuleDefinitionEntry = readonly [
   heading: string,
   label: string | null,
   sourceAuthority: DoubleRuleDefinition['sourceAuthority'],
+  includeLabeledBulletBlock?: boolean,
 ]
 
 const AI_CHART_D1_K0_DOUBLE_RULE_DEFINITION_ENTRIES = [
@@ -296,6 +298,7 @@ const AI_CHART_D1_K0_DOUBLE_RULE_DEFINITION_ENTRIES = [
   ['pair:lianzhen-tianfu', ['三、講義已有專屬說明、可直接進入工作版的組合'], '16. 廉貞天府／七殺', '同宮可用工作版（老師確認）', 'reasoning_teacher_confirmed'],
   ['pair:lianzhen-pojun', ['三、講義已有專屬說明、可直接進入工作版的組合'], '17. 廉貞破軍／天相', '同宮核心（老師確認）', 'reasoning_teacher_confirmed'],
   ['pair:lianzhen-tianxiang', ['三、講義已有專屬說明、可直接進入工作版的組合'], '18. 廉貞天相／破軍', '同宮無煞忌核心（老師確認）', 'reasoning_teacher_confirmed'],
+  ['pair:lianzhen-tanlang', ['三、講義已有專屬說明、可直接進入工作版的組合'], '19. 廉貞貪狼（同宮）', '同宮固定核心（老師確認）', 'reasoning_teacher_confirmed', true],
   ['pair:tianji-taiyin', ['三、講義已有專屬說明、可直接進入工作版的組合'], '27. 天機太陰（同宮）', '已確認核心', 'reasoning_confirmed'],
   ['pair:ziwei-tianfu', ['四、紫微系五組｜講義＋CTA 回填工作版'], '1. 紫微天府（同宮）', null, 'lecture_backfill'],
   ['pair:ziwei-qisha', ['四、紫微系五組｜講義＋CTA 回填工作版'], '2. 紫微七殺（同宮）', null, 'lecture_backfill'],
@@ -304,12 +307,13 @@ const AI_CHART_D1_K0_DOUBLE_RULE_DEFINITION_ENTRIES = [
   ['pair:ziwei-tanlang', ['四、紫微系五組｜講義＋CTA 回填工作版'], '5. 紫微貪狼（同宮／對拱）', null, 'lecture_backfill'],
 ] as const satisfies readonly DoubleRuleDefinitionEntry[]
 
-export const AI_CHART_D1_K0_DOUBLE_RULE_DEFINITIONS = Object.freeze(AI_CHART_D1_K0_DOUBLE_RULE_DEFINITION_ENTRIES.map(([pairKey, headingPath, heading, label, sourceAuthority]) =>
+export const AI_CHART_D1_K0_DOUBLE_RULE_DEFINITIONS = Object.freeze(AI_CHART_D1_K0_DOUBLE_RULE_DEFINITION_ENTRIES.map(([pairKey, headingPath, heading, label, sourceAuthority, includeLabeledBulletBlock = false]) =>
   Object.freeze({
     pairKey,
     headingPath: Object.freeze([...headingPath]),
     heading,
     label,
+    includeLabeledBulletBlock,
     sourceAuthority,
   }),
 ) as readonly DoubleRuleDefinition[])
@@ -319,6 +323,13 @@ export function createAiChartD1K0DoubleLocator(
 ): AiChartD1K0MarkdownLocatorDefinition {
   return definition.label === null
     ? bulletBlock(definition.headingPath, 3, definition.heading)
+    : definition.includeLabeledBulletBlock
+      ? labeledBulletBlock(
+          definition.headingPath,
+          3,
+          definition.heading,
+          definition.label,
+        )
     : labeled(
         definition.headingPath,
         3,

@@ -740,6 +740,76 @@ async function run() {
     )
   })
 
+  const lianzhenTanlangSnapshot = completeSnapshot()
+  const lianzhenTanlangPalaces =
+    lianzhenTanlangSnapshot.palaces as MutableRecord[]
+  lianzhenTanlangPalaces[7].majorStars = [
+    star('廉貞', 'major'),
+    star('貪狼', 'major'),
+  ]
+  const lianzhenTanlangInputs = createInputs(
+    lianzhenTanlangSnapshot,
+    'lianzhen-tanlang',
+  )
+  const lianzhenTanlangBundles = buildAiChartD1K0P1KnowledgeBundles(
+    catalog,
+    lianzhenTanlangInputs,
+    { bundleIds: bundleIds('lianzhen-tanlang') },
+  )
+  const lianzhenTanlangExpectedRoles = lianzhenTanlangInputs.map((input) => {
+    const views = [
+      ['target', input.targetPalace],
+      ['opposite', input.oppositePalace],
+      ['hidden_combination', input.hiddenCombinationPalace],
+      ...input.otherTrinePalaces.map(
+        (palace, index) =>
+          [index === 0 ? 'trine_1' : 'trine_2', palace] as const,
+      ),
+    ] as const
+    return views.find(([, palace]) => palace.palaceId === 'palace:friends')?.[0] ?? null
+  })
+  check('Lianzhen Tanlang keeps all twelve K0/P1 bundles ready', () => {
+    assert.equal(
+      lianzhenTanlangBundles.every(
+        (bundle) =>
+          bundle.knowledgeStatus === 'ready' &&
+          bundle.missingRequirements.length === 0,
+      ),
+      true,
+    )
+  })
+  check('Lianzhen Tanlang selects one fixed rule through every visible palace role', () => {
+    assert.equal(
+      lianzhenTanlangExpectedRoles.filter((role) => role !== null).length,
+      5,
+    )
+    assert.deepEqual(
+      new Set(lianzhenTanlangExpectedRoles.filter((role) => role !== null)),
+      new Set([
+        'target',
+        'opposite',
+        'hidden_combination',
+        'trine_1',
+        'trine_2',
+      ]),
+    )
+    lianzhenTanlangBundles.forEach((bundle, index) => {
+      const traces = bundle.selectionTrace.filter(
+        (trace) =>
+          trace.ruleId === 'rule:double:lianzhen-tanlang:core' &&
+          trace.reason === 'double_star_present',
+      )
+      const expectedRole = lianzhenTanlangExpectedRoles[index]
+      if (expectedRole === null) {
+        assert.deepEqual(traces, [])
+        return
+      }
+      assert.equal(traces.length, 1)
+      assert.equal(traces[0].palaceId, 'palace:friends')
+      assert.equal(traces[0].palaceRole, expectedRole)
+    })
+  })
+
   const missingMutagenCatalog = withoutMutagenSpecificRule(
     catalog,
     '廉貞',

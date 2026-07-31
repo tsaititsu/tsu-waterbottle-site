@@ -168,6 +168,32 @@ async function run() {
       false,
     )
   })
+  check('Lianzhen Tanlang uses the teacher-confirmed abundant-romance core', () => {
+    const inventory = first.doubleStarInventory.find(
+      (entry) => entry.pairKey === 'pair:lianzhen-tanlang',
+    )
+    assert.ok(inventory)
+    assert.equal(inventory.specificRuleStatus, 'teacher_confirmed')
+    assert.equal(inventory.missingReason, null)
+    assert.equal(inventory.specificRuleId, 'rule:double:lianzhen-tanlang:core')
+
+    const rule = first.rules.find(
+      (entry) => entry.ruleId === inventory.specificRuleId,
+    )
+    assert.ok(rule)
+    assert.equal(rule.kind, 'double_star')
+    assert.equal(rule.sourceAuthority, 'reasoning_teacher_confirmed')
+    assert.deepEqual(bullets(rule.content), [
+      '桃花很旺。容易吸引別人注意，異性緣、感情機會與被追求的機會通常較多。',
+      '前星廉貞為主：會觀察場合、在意界線與原則，也會先判斷對方是否符合自己的選擇標準。',
+      '後星貪狼為輔：以魅力、好奇心、話題、熱情、興趣與社交接觸，把廉貞的選擇與吸引力表現出來。',
+      '桃花旺代表吸引力與機會較多，不等於一定花心、出軌或同時發展多段關係。',
+      '沒有煞忌時的一般低強度失衡：可能太在意是否被喜歡、不易拒絕邀約，或容易被新鮮感分散注意力。',
+      '只有實際煞忌成立時，才延伸為界線失衡、高風險或打破世俗規則的可能性。',
+      '在人際對待宮位，前星可描述宮位人物，後星可描述命主的回應；仍須保留廉貞貪狼完整組合互動。',
+      '本命先解價值觀與傾向；具體事件留待大限、流年。',
+    ])
+  })
   check('Ziwei lecture-backfill double-star work versions are source-bound rules', () => {
     const ziweiLectureBackfillPairs = [
       'pair:ziwei-tianfu',
