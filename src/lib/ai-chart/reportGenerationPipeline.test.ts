@@ -418,6 +418,20 @@ async function main() {
   )
   assert.equal(persistenceFailureExecutorCalls, 1)
 
+  let runtimeIntegrityFailureExecutorCalls = 0
+  await assert.rejects(
+    () =>
+      runAiChartD1P1ReportExecutionRuntime(
+        plan.p1ReportExecutionPlan,
+        async () => {
+          runtimeIntegrityFailureExecutorCalls += 1
+          throw new Error('runtime_bridge_integrity_failed')
+        },
+      ),
+    { message: 'runtime_bridge_integrity_failed' },
+  )
+  assert.equal(runtimeIntegrityFailureExecutorCalls, 1)
+
   let forgedPlanExecutorCalls = 0
   const forgedThirteenPalacePlan = Object.freeze({
     ...plan.p1ReportExecutionPlan,

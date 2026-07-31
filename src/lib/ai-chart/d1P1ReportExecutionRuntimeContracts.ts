@@ -573,29 +573,10 @@ function createSuccessEntry(
 
 function createFailureEntry(
   entry: AiChartD1P1ReportExecutionPalaceLedgerEntry,
-  error: unknown,
+  error: AiChartOpenAiError,
 ): AiChartD1P1ReportExecutionPalaceLedgerEntry {
-  if (error instanceof AiChartOpenAiError) {
-    const errorCode = normalizeOpenAiErrorCode(error.code)
-    const responseDiagnostic = normalizeResponseDiagnostic(error.diagnostic)
-    return freezeAiChartD1Value({
-      ...entry,
-      status: 'FAILED' as const,
-      attemptedRequests: 1 as const,
-      executedRequests: 0 as const,
-      fetchCount: 1 as const,
-      openAiRequests: 1 as const,
-      errorCode,
-      retryable:
-        errorCode === error.code ? error.retryable : false,
-      responseDiagnostic,
-      transportDiagnostic: normalizeTransportDiagnostic(
-        error.transportDiagnostic,
-      ),
-      usage: responseDiagnostic?.usage ?? null,
-    })
-  }
-
+  const errorCode = normalizeOpenAiErrorCode(error.code)
+  const responseDiagnostic = normalizeResponseDiagnostic(error.diagnostic)
   return freezeAiChartD1Value({
     ...entry,
     status: 'FAILED' as const,
@@ -603,11 +584,14 @@ function createFailureEntry(
     executedRequests: 0 as const,
     fetchCount: 1 as const,
     openAiRequests: 1 as const,
-    errorCode:
-      error instanceof Error
-        ? AI_CHART_OPENAI_RESPONSE_INVALID
-        : AI_CHART_OPENAI_REQUEST_FAILED,
-    retryable: false,
+    errorCode,
+    retryable:
+      errorCode === error.code ? error.retryable : false,
+    responseDiagnostic,
+    transportDiagnostic: normalizeTransportDiagnostic(
+      error.transportDiagnostic,
+    ),
+    usage: responseDiagnostic?.usage ?? null,
   })
 }
 
@@ -682,6 +666,9 @@ export async function runAiChartD1P1ReportExecutionRuntime(
     try {
       result = await executor(descriptor, index)
     } catch (error) {
+      if (!(error instanceof AiChartOpenAiError)) {
+        throw error
+      }
       const entry = createFailureEntry(
         palaceExecutions[index],
         error,
