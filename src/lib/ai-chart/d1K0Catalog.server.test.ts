@@ -152,6 +152,18 @@ async function run() {
   const first = await compileAiChartD1K0Catalog()
   const second = await compileAiChartD1K0Catalog()
 
+  await asyncCheck('teacher-confirmed Tianxiang health mapping excludes neck', async () => {
+    const source = await readFile(
+      join(
+        process.cwd(),
+        'content/ai-chart/d1-v1/knowledge/core/C_十二宮分面與身宮疾厄田宅.md',
+      ),
+      'utf8',
+    )
+    assert.match(source, /天相（腎、內分泌、淋巴、循環）/u)
+    assert.doesNotMatch(source, /天相（[^）]*頸部[^）]*）/u)
+  })
+
   check('catalog version and manifest lock', () => {
     assert.equal(first.contractVersion, AI_CHART_D1_K0_CATALOG_VERSION)
     assert.equal(first.sourceManifestSha256, AI_CHART_D1_LOCKED_MANIFEST_SHA256)
@@ -208,6 +220,26 @@ async function run() {
       /爸爸、長輩、權威人物或早期家庭經驗/s,
     )
     assert.match(hiddenCombination.content, /不會成為本宮主星/s)
+  })
+  check('opposite rule combines star meanings without moving palace facets', () => {
+    const opposite = first.rules.find(
+      (rule) => rule.ruleId === 'rule:structure:opposite',
+    )
+    assert.ok(opposite)
+    assert.match(opposite.content, /本宮與對宮的主星含義可以合併推演/u)
+    assert.match(opposite.content, /客戶文字以本宮分面為主，不必寫出對宮宮名/u)
+    assert.match(opposite.content, /不得把對宮原本的宮位分面搬入本宮/u)
+    assert.match(opposite.content, /太陽與太陰對拱.*變動與調整/su)
+  })
+  check('eligible borrowed stars are not counted again as opposite evidence', () => {
+    const emptyBorrow = first.rules.find(
+      (rule) => rule.ruleId === 'rule:structure:empty-palace-borrow',
+    )
+    assert.ok(emptyBorrow)
+    assert.match(
+      emptyBorrow.content,
+      /同一組借入主星不得再當成獨立的對宮證據重複解讀/u,
+    )
   })
   check('fourteen canonical stars contain only approved fields', () => {
     const rules = first.rules.filter((rule) => rule.kind === 'single_star')

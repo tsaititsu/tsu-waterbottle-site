@@ -82,7 +82,7 @@
     {
       "path": "content/ai-chart/d1-v1/knowledge/reasoning/12_D1_對宮暗合三方四正.md",
       "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/紫微斗數_AI推理引擎_工作區 /12_D1_對宮暗合三方四正.md",
-      "sha256": "a7a7fc196d5b5e63bb89285e017e3b3f6e54c6a4ba4dfd5214fc79d9d522b8b4",
+      "sha256": "48dee35de1c5c03ecff13d4dd1f8967ab29cbaa4e08f91ccf35104f3667554de",
       "classification": "reasoning_knowledge",
       "status": "reasoning_source_candidate",
       "runtimeEligible": true,
@@ -91,7 +91,7 @@
     {
       "path": "content/ai-chart/d1-v1/knowledge/reasoning/13_D1_空宮借星與身宮.md",
       "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/紫微斗數_AI推理引擎_工作區 /13_D1_空宮借星與身宮.md",
-      "sha256": "a2859483a99243d0e0fdcd0382d28e5ae9febfee7beffffcafae12a21e5f6eae",
+      "sha256": "96e00006ff45f0d7f0dc7cbd36958c5af31630904f4e5f8b174f759c03974696",
       "classification": "reasoning_knowledge",
       "status": "reasoning_source_candidate",
       "runtimeEligible": true,
@@ -190,7 +190,7 @@
     {
       "path": "content/ai-chart/d1-v1/knowledge/core/C_十二宮分面與身宮疾厄田宅.md",
       "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/知識庫_v1.0/C_十二宮分面與身宮疾厄田宅.md",
-      "sha256": "e266b325da753952a03e5c29070342f3f11ee5407b1f0fdc5d4fcde860748b2c",
+      "sha256": "f5f5c21061479c876a2a2fc08e74419faf7daa9c80b539f6382b2df3413ea771",
       "classification": "current_knowledge_source",
       "status": "current_source_candidate",
       "runtimeEligible": true,
