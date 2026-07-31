@@ -44,7 +44,7 @@ export const BASE_MIGRATION_FILE =
   'supabase/migrations/20260719033404_line_pay_remediation_contracts.sql'
 
 export const EXPECTED_DIAGNOSTIC_SHA256 =
-  'a49a092a6353571428ecd75ff414baeb0fd9d4a8d58513fa5a853aa75cb780d3'
+  '0df463b9b8e8c92526f823399e1205e0d7d0d7499c8a4e8d2b89e94d73b394f0'
 export const EXPECTED_INITIALIZER_MIGRATION_SHA256 =
   '2e2ef2cce41431e0dc638033c998b7b616cbdc2b3baefdcb59fbb68ba2adf551'
 export const EXPECTED_BASE_MIGRATION_SHA256 =
@@ -123,6 +123,9 @@ const TABLE_ACL_KEYS = Object.freeze([
 ])
 const ROLE_KEYS = Object.freeze([
   'function_owner_membership_absent',
+  'single_current_user_admin_only',
+  'single_bootstrap_superuser_admin_only',
+  'function_owner_membership_safe',
 ])
 const DECISION_KEYS = Object.freeze([
   'initializer_exact',
@@ -292,6 +295,9 @@ export function assertContractDetailDiagnosticSql(sql) {
     "'policy_contract',",
     "'table_acl_contract',",
     "'role_contract',",
+    "'single_current_user_admin_only',",
+    "'single_bootstrap_superuser_admin_only',",
+    "'function_owner_membership_safe',",
     "'decision',",
   ])
   if (
@@ -394,6 +400,17 @@ export function parseAndValidateContractDetailOutput(text) {
     ROLE_KEYS,
   )
   const decision = assertBooleanObject(value.decision, DECISION_KEYS)
+  const membershipClassCount = [
+    roleContract.function_owner_membership_absent,
+    roleContract.single_current_user_admin_only,
+    roleContract.single_bootstrap_superuser_admin_only,
+  ].filter(Boolean).length
+  const membershipSafe = membershipClassCount === 1
+  if (
+    roleContract.function_owner_membership_safe !== membershipSafe
+  ) {
+    fail('INITIALIZER_DETAIL_DIAGNOSTIC_OUTPUT_INVALID')
+  }
   const inventoryExact =
     inventory.functions_present === 2 &&
     inventory.indexes_present === 1 &&
@@ -408,8 +425,7 @@ export function parseAndValidateContractDetailOutput(text) {
       indexContract,
       policyContract,
       tableAclContract,
-      roleContract,
-    )
+    ) && membershipSafe
   if (
     decision.initializer_exact !== initializerExact ||
     decision.recovery_required !==

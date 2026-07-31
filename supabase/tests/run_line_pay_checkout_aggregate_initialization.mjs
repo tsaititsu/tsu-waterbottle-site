@@ -27,6 +27,14 @@ const initializationRecovery = join(
   root,
   'supabase/deployment/line_pay_checkout_aggregate_initialization_recovery.sql',
 )
+const initializationApplicationState = join(
+  root,
+  'supabase/deployment/line_pay_checkout_aggregate_initialization_application_state.sql',
+)
+const initializationContractDetail = join(
+  root,
+  'supabase/deployment/line_pay_checkout_initializer_contract_detail_diagnostic.sql',
+)
 const baselineFiles = [
   'supabase/schema.sql',
   'supabase/bank_transfer_submissions_patch.sql',
@@ -1163,6 +1171,37 @@ function testHostedNonSuperuserUpgrade() {
   if (Object.values(hostedState).some((value) => value !== true)) {
     throw new Error(
       `hosted non-superuser upgrade postcondition failed: ${JSON.stringify(hostedState)}`,
+    )
+  }
+  const hostedApplicationState = JSON.parse(
+    psqlFileAsInContainer(
+      hostedContainerName,
+      database,
+      executor,
+      initializationApplicationState,
+      'hosted initializer application state',
+    ),
+  )
+  const hostedContractDetail = JSON.parse(
+    psqlFileAsInContainer(
+      hostedContainerName,
+      database,
+      executor,
+      initializationContractDetail,
+      'hosted initializer contract detail',
+    ),
+  )
+  if (
+    hostedApplicationState.application_state !== 'FULL' ||
+    !hostedApplicationState.contracts.initializer_exact ||
+    !hostedContractDetail.role_contract
+      .single_bootstrap_superuser_admin_only ||
+    !hostedContractDetail.role_contract.function_owner_membership_safe ||
+    !hostedContractDetail.decision.initializer_exact ||
+    hostedContractDetail.decision.recovery_required
+  ) {
+    throw new Error(
+      'hosted bootstrap-superuser membership was not accepted safely',
     )
   }
 }
