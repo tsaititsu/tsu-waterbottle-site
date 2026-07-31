@@ -261,7 +261,53 @@ test('missing admin authorization is hidden as 404 and never writes', async () =
   assert.deepEqual(deps.calls, [])
 })
 
-test('initializer or request failure returns only a stable redacted error', async () => {
+test('config failure returns only its stable redacted stage', async () => {
+  const secret = enabledEnv.LINE_PAY_CHANNEL_SECRET ?? ''
+  const deps = successDependencies()
+  const response = await handleLinePaySandboxE2eStart({
+    request: createRequest(),
+    env: {
+      ...enabledEnv,
+      LINE_PAY_CHANNEL_SECRET: ` ${secret} `,
+      LINE_PAY_CONFIRM_URL: 'not-a-url',
+    },
+    ...deps,
+  })
+  const body = JSON.stringify(await json(response))
+
+  assert.equal(response.status, 502)
+  assert.deepEqual(JSON.parse(body), {
+    ok: false,
+    error: 'line_pay_sandbox_e2e_config_failed',
+  })
+  assert.equal(body.includes(secret), false)
+  assert.deepEqual(deps.calls, ['authorize'])
+})
+
+test('initializer failure returns only its stable redacted stage', async () => {
+  const secret = enabledEnv.LINE_PAY_CHANNEL_SECRET ?? ''
+  const deps = successDependencies()
+  const response = await handleLinePaySandboxE2eStart({
+    request: createRequest(),
+    env: enabledEnv,
+    ...deps,
+    initialize: async () => {
+      throw new Error(`database detail ${secret}`)
+    },
+  })
+  const body = JSON.stringify(await json(response))
+
+  assert.equal(response.status, 502)
+  assert.deepEqual(JSON.parse(body), {
+    ok: false,
+    error: 'line_pay_sandbox_e2e_initialization_failed',
+  })
+  assert.equal(body.includes(secret), false)
+  assert.equal(body.includes('database'), false)
+  assert.deepEqual(deps.calls, ['authorize'])
+})
+
+test('request execution failure returns only its stable redacted stage', async () => {
   const secret = enabledEnv.LINE_PAY_CHANNEL_SECRET ?? ''
   const deps = successDependencies()
   const response = await handleLinePaySandboxE2eStart({
@@ -277,10 +323,11 @@ test('initializer or request failure returns only a stable redacted error', asyn
   assert.equal(response.status, 502)
   assert.deepEqual(JSON.parse(body), {
     ok: false,
-    error: 'line_pay_sandbox_e2e_start_failed',
+    error: 'line_pay_sandbox_e2e_execution_failed',
   })
   assert.equal(body.includes(secret), false)
   assert.equal(body.includes('html'), false)
+  assert.deepEqual(deps.calls, ['authorize', 'initialize'])
 })
 
 test('non-LINE Sandbox payment URL is rejected without returning the URL', async () => {
@@ -307,7 +354,7 @@ test('non-LINE Sandbox payment URL is rejected without returning the URL', async
   assert.equal(body.includes(unsafeUrl), false)
   assert.deepEqual(JSON.parse(body), {
     ok: false,
-    error: 'line_pay_sandbox_e2e_start_failed',
+    error: 'line_pay_sandbox_e2e_payment_url_failed',
   })
 })
 

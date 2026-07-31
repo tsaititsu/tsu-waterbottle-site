@@ -164,48 +164,55 @@ export async function handleLinePaySandboxE2eStart(input: {
     now.getTime() + 30 * 60 * 1000,
   ).toISOString()
 
+  let config: ReturnType<typeof getLinePayServerConfig>
   try {
-    const config = getLinePayServerConfig(input.env)
-    if (!config.enabled || config.environment !== 'sandbox') {
-      return hiddenResponse()
-    }
+    config = getLinePayServerConfig(input.env)
+  } catch {
+    return errorResponse('line_pay_sandbox_e2e_config_failed', 502)
+  }
+  if (!config.enabled || config.environment !== 'sandbox') {
+    return hiddenResponse()
+  }
 
-    const payloadInput = {
-      orderId: merchantOrderNo,
-      amount: LINE_PAY_SANDBOX_E2E_AMOUNT_TWD,
-      currency: 'TWD' as const,
-      products: [
-        {
-          name: 'LINE Pay Sandbox E2E 測試',
-          quantity: 1,
-          price: LINE_PAY_SANDBOX_E2E_AMOUNT_TWD,
-        },
-      ],
-      confirmUrl: callbackUrl(
-        new URL(
-          internalCallbackBase(
-            config.confirmUrl,
-            '/api/internal/line-pay/sandbox-e2e/confirm',
-          ),
+  const payloadInput = {
+    orderId: merchantOrderNo,
+    amount: LINE_PAY_SANDBOX_E2E_AMOUNT_TWD,
+    currency: 'TWD' as const,
+    products: [
+      {
+        name: 'LINE Pay Sandbox E2E 測試',
+        quantity: 1,
+        price: LINE_PAY_SANDBOX_E2E_AMOUNT_TWD,
+      },
+    ],
+    confirmUrl: callbackUrl(
+      new URL(
+        internalCallbackBase(
+          config.confirmUrl,
+          '/api/internal/line-pay/sandbox-e2e/confirm',
         ),
-        merchantOrderNo,
-        confirmToken,
       ),
-      cancelUrl: callbackUrl(
-        new URL(
-          internalCallbackBase(
-            config.cancelUrl,
-            '/api/internal/line-pay/sandbox-e2e/cancel',
-          ),
+      merchantOrderNo,
+      confirmToken,
+    ),
+    cancelUrl: callbackUrl(
+      new URL(
+        internalCallbackBase(
+          config.cancelUrl,
+          '/api/internal/line-pay/sandbox-e2e/cancel',
         ),
-        merchantOrderNo,
-        cancelToken,
       ),
-    }
-    const requestBodySha256 = sha256(
-      stringifyLinePayJsonBody(buildLinePayRequestPayload(payloadInput)),
-    )
-    const initialized = await input.initialize({
+      merchantOrderNo,
+      cancelToken,
+    ),
+  }
+  const requestBodySha256 = sha256(
+    stringifyLinePayJsonBody(buildLinePayRequestPayload(payloadInput)),
+  )
+
+  let initialized: InitializeProductOrderLinePayCheckoutResult
+  try {
+    initialized = await input.initialize({
       client: authorization.client,
       userId: authorization.userId,
       environment: 'sandbox',
@@ -218,7 +225,13 @@ export async function handleLinePaySandboxE2eStart(input: {
       cancelTokenHash: sha256(cancelToken),
       capabilityExpiresAt,
     })
-    const result = await input.execute({
+  } catch {
+    return errorResponse('line_pay_sandbox_e2e_initialization_failed', 502)
+  }
+
+  let result: ExecuteInitializedProductOrderLinePayRequestResult
+  try {
+    result = await input.execute({
       client: authorization.client,
       environment: 'sandbox',
       attemptId: initialized.attempt_id,
@@ -235,12 +248,16 @@ export async function handleLinePaySandboxE2eStart(input: {
       channelSecret: config.channelSecret,
       transportEnv: input.env,
     })
+  } catch {
+    return errorResponse('line_pay_sandbox_e2e_execution_failed', 502)
+  }
 
-    if (result.status !== 'payment_url_ready') {
-      return errorResponse('line_pay_sandbox_e2e_not_ready', 409)
-    }
+  if (result.status !== 'payment_url_ready') {
+    return errorResponse('line_pay_sandbox_e2e_not_ready', 409)
+  }
+
+  try {
     const paymentUrl = sandboxPaymentUrl(result.paymentUrlWeb)
-
     return NextResponse.json(
       {
         ok: true,
@@ -252,6 +269,6 @@ export async function handleLinePaySandboxE2eStart(input: {
       { headers: { 'Cache-Control': 'no-store' } },
     )
   } catch {
-    return errorResponse('line_pay_sandbox_e2e_start_failed', 502)
+    return errorResponse('line_pay_sandbox_e2e_payment_url_failed', 502)
   }
 }
