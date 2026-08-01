@@ -227,9 +227,20 @@ async function run() {
     )
     assert.ok(opposite)
     assert.match(opposite.content, /本宮與對宮的主星含義可以合併推演/u)
-    assert.match(opposite.content, /客戶文字以本宮分面為主，不必寫出對宮宮名/u)
+    assert.match(opposite.content, /客戶文字不得寫出對宮宮名/u)
     assert.match(opposite.content, /不得把對宮原本的宮位分面搬入本宮/u)
-    assert.match(opposite.content, /太陽與太陰對拱.*變動與調整/su)
+    assert.match(
+      opposite.content,
+      /只有三方與暗合.*交代來源宮位及其生活領域/su,
+    )
+    assert.match(
+      opposite.content,
+      /對宮星曜含義.*重新綁定到本宮分面/su,
+    )
+    assert.match(
+      opposite.content,
+      /太陽與太陰對拱.*兩側.*變動與調整/su,
+    )
   })
   check('eligible borrowed stars are not counted again as opposite evidence', () => {
     const emptyBorrow = first.rules.find(

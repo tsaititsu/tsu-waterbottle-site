@@ -82,7 +82,7 @@
     {
       "path": "content/ai-chart/d1-v1/knowledge/reasoning/12_D1_對宮暗合三方四正.md",
       "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/紫微斗數_AI推理引擎_工作區 /12_D1_對宮暗合三方四正.md",
-      "sha256": "48dee35de1c5c03ecff13d4dd1f8967ab29cbaa4e08f91ccf35104f3667554de",
+      "sha256": "df7e3a539b14358cd85c17510ebc450f14ca60412532c6759fd1f179b5d35b6f",
       "classification": "reasoning_knowledge",
       "status": "reasoning_source_candidate",
       "runtimeEligible": true,
