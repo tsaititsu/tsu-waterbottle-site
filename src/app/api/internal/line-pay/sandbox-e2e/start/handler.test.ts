@@ -5,6 +5,7 @@ import {
   handleLinePaySandboxE2eStart,
   type LinePaySandboxE2eStartEnvironment,
 } from './handler'
+import { LinePaySandboxE2eInitializationError } from '../../../../../../lib/supabase/linePaySandboxE2eInitialization'
 
 const tests: Array<{
   name: string
@@ -301,6 +302,33 @@ test('initializer failure returns only its stable redacted stage', async () => {
   assert.deepEqual(JSON.parse(body), {
     ok: false,
     error: 'line_pay_sandbox_e2e_initialization_failed',
+  })
+  assert.equal(body.includes(secret), false)
+  assert.equal(body.includes('database'), false)
+  assert.deepEqual(deps.calls, ['authorize'])
+})
+
+test('initializer returns an allowlisted diagnostic reason without database detail', async () => {
+  const secret = enabledEnv.LINE_PAY_CHANNEL_SECRET ?? ''
+  const deps = successDependencies()
+  const response = await handleLinePaySandboxE2eStart({
+    request: createRequest(),
+    env: enabledEnv,
+    ...deps,
+    initialize: async () => {
+      throw new LinePaySandboxE2eInitializationError(
+        'rpc_failed',
+        'rpc_check_violation',
+      )
+    },
+  })
+  const body = JSON.stringify(await json(response))
+
+  assert.equal(response.status, 502)
+  assert.deepEqual(JSON.parse(body), {
+    ok: false,
+    error: 'line_pay_sandbox_e2e_initialization_failed',
+    initializationReason: 'rpc_check_violation',
   })
   assert.equal(body.includes(secret), false)
   assert.equal(body.includes('database'), false)

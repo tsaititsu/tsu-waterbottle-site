@@ -159,3 +159,61 @@ test('RPC and response contract errors are redacted', async () => {
       && !JSON.stringify(error).includes(secret),
   )
 })
+
+test('RPC failures expose only fixed diagnostic reasons', async () => {
+  const secret = 'sensitive-database-detail'
+  const cases = [
+    {
+      error: {
+        code: '42501',
+        message: `permission denied ${secret}`,
+        details: secret,
+      },
+      reason: 'rpc_insufficient_privilege',
+    },
+    {
+      error: {
+        code: '23503',
+        message: `foreign key detail ${secret}`,
+        details: secret,
+      },
+      reason: 'rpc_foreign_key_violation',
+    },
+    {
+      error: {
+        code: '23514',
+        message: `check detail ${secret}`,
+        details: secret,
+      },
+      reason: 'rpc_check_violation',
+    },
+    {
+      error: {
+        code: '22023',
+        message: 'line_pay_initialization_invalid_input',
+        details: secret,
+      },
+      reason: 'database_invalid_input',
+    },
+    {
+      error: {
+        code: 'P0001',
+        message: `unreviewed application detail ${secret}`,
+        details: secret,
+      },
+      reason: 'rpc_application_exception',
+    },
+  ] as const
+
+  for (const testCase of cases) {
+    const rpc = createClient({ data: null, error: testCase.error })
+    await assert.rejects(
+      () => initializeLinePaySandboxE2eCheckout(createInput(rpc.client)),
+      (error: unknown) =>
+        error instanceof LinePaySandboxE2eInitializationError
+        && error.code === 'rpc_failed'
+        && error.reason === testCase.reason
+        && !JSON.stringify(error).includes(secret),
+    )
+  }
+})

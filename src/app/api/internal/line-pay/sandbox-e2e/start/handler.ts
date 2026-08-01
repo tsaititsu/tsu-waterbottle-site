@@ -7,6 +7,7 @@ import {
   type LinePayServerEnv,
 } from '../../../../../../lib/linePay'
 import type { InitializeProductOrderLinePayCheckoutResult } from '../../../../../../lib/supabase/linePayCheckoutInitialization'
+import { LinePaySandboxE2eInitializationError } from '../../../../../../lib/supabase/linePaySandboxE2eInitialization'
 import type {
   ExecuteInitializedProductOrderLinePayRequestInput,
   ExecuteInitializedProductOrderLinePayRequestResult,
@@ -225,7 +226,17 @@ export async function handleLinePaySandboxE2eStart(input: {
       cancelTokenHash: sha256(cancelToken),
       capabilityExpiresAt,
     })
-  } catch {
+  } catch (error) {
+    if (error instanceof LinePaySandboxE2eInitializationError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'line_pay_sandbox_e2e_initialization_failed',
+          initializationReason: error.reason,
+        },
+        { status: 502, headers: { 'Cache-Control': 'no-store' } },
+      )
+    }
     return errorResponse('line_pay_sandbox_e2e_initialization_failed', 502)
   }
 

@@ -9,13 +9,32 @@ export type LinePaySandboxE2eInitializationErrorCode =
   | 'rpc_failed'
   | 'contract_mismatch'
 
+export type LinePaySandboxE2eInitializationReason =
+  | LinePaySandboxE2eInitializationErrorCode
+  | 'database_invalid_input'
+  | 'database_items_total_mismatch'
+  | 'database_idempotency_conflict'
+  | 'database_order_link_failed'
+  | 'database_audit_binding_invalid'
+  | 'rpc_insufficient_privilege'
+  | 'rpc_foreign_key_violation'
+  | 'rpc_unique_violation'
+  | 'rpc_check_violation'
+  | 'rpc_contract_missing'
+  | 'rpc_application_exception'
+
 export class LinePaySandboxE2eInitializationError extends Error {
   readonly code: LinePaySandboxE2eInitializationErrorCode
+  readonly reason: LinePaySandboxE2eInitializationReason
 
-  constructor(code: LinePaySandboxE2eInitializationErrorCode) {
+  constructor(
+    code: LinePaySandboxE2eInitializationErrorCode,
+    reason: LinePaySandboxE2eInitializationReason = code,
+  ) {
     super('line_pay_sandbox_e2e_initialization_error')
     this.name = 'LinePaySandboxE2eInitializationError'
     this.code = code
+    this.reason = reason
   }
 }
 
@@ -63,12 +82,56 @@ const REQUEST_STATES = new Set<LinePayCheckoutInitializationRequestState>([
   'canceled',
 ])
 
-function fail(code: LinePaySandboxE2eInitializationErrorCode): never {
-  throw new LinePaySandboxE2eInitializationError(code)
+function fail(
+  code: LinePaySandboxE2eInitializationErrorCode,
+  reason: LinePaySandboxE2eInitializationReason = code,
+): never {
+  throw new LinePaySandboxE2eInitializationError(code, reason)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function safeRpcFailureReason(
+  value: unknown,
+): LinePaySandboxE2eInitializationReason {
+  if (!isRecord(value)) return 'rpc_failed'
+
+  const message = typeof value.message === 'string' ? value.message : ''
+  const knownMessages = {
+    line_pay_initialization_invalid_input: 'database_invalid_input',
+    line_pay_initialization_items_total_mismatch:
+      'database_items_total_mismatch',
+    line_pay_initialization_idempotency_conflict:
+      'database_idempotency_conflict',
+    line_pay_initialization_order_link_failed: 'database_order_link_failed',
+    line_pay_initialization_audit_binding_invalid:
+      'database_audit_binding_invalid',
+  } as const
+  if (message in knownMessages) {
+    return knownMessages[message as keyof typeof knownMessages]
+  }
+
+  switch (value.code) {
+    case '42501':
+      return 'rpc_insufficient_privilege'
+    case '23503':
+      return 'rpc_foreign_key_violation'
+    case '23505':
+      return 'rpc_unique_violation'
+    case '23514':
+      return 'rpc_check_violation'
+    case '22023':
+      return 'database_invalid_input'
+    case '42883':
+    case '42P01':
+      return 'rpc_contract_missing'
+    case 'P0001':
+      return 'rpc_application_exception'
+    default:
+      return 'rpc_failed'
+  }
 }
 
 function validText(value: unknown, maxLength: number, pattern?: RegExp) {
@@ -214,6 +277,6 @@ export async function initializeLinePaySandboxE2eCheckout(
     fail('rpc_failed')
   }
 
-  if (response.error) fail('rpc_failed')
+  if (response.error) fail('rpc_failed', safeRpcFailureReason(response.error))
   return parseResult(response.data, input.merchantOrderNo)
 }
