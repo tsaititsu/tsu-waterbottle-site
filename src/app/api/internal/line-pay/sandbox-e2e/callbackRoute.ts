@@ -15,6 +15,9 @@ import {
   resolveLinePayCancelCartRedirectStatus,
   resolveLinePayConfirmCartRedirectStatus,
 } from '../../../product-orders/line-pay/redirect'
+import type {
+  LinePayCapabilityCallbackDiagnosticStage,
+} from '../../../product-orders/line-pay/capabilityHandler'
 import {
   LINE_PAY_SANDBOX_E2E_CAPABILITY_COOKIE_OPTIONS,
   linePaySandboxE2eCapabilityCookieName,
@@ -55,6 +58,7 @@ export async function executeLinePaySandboxE2eCallbackRoute(
   if (!isLinePaySandboxE2eRouteEnabled(process.env)) return hiddenResponse()
 
   const client = requireCapabilityClient(getSupabaseAdmin())
+  let diagnosticStage: LinePayCapabilityCallbackDiagnosticStage | null = null
   const response = await handleLinePaySandboxE2eCapabilityCallback({
     purpose,
     request,
@@ -69,11 +73,18 @@ export async function executeLinePaySandboxE2eCallbackRoute(
         fetchFn: fetch,
         transportEnv: process.env,
       }),
+    onDiagnosticStage: (stage) => {
+      diagnosticStage = stage
+    },
   })
 
   console.info(
     '[line-pay-sandbox-e2e-callback]',
-    await buildLinePaySandboxE2eCallbackDiagnostic(purpose, response),
+    await buildLinePaySandboxE2eCallbackDiagnostic(
+      purpose,
+      response,
+      diagnosticStage,
+    ),
   )
 
   const redirect = await redirectLinePayHandlerResponseToCart({

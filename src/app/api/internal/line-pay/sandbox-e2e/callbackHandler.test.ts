@@ -250,12 +250,14 @@ test('callback diagnostic logs only allowlisted stage metadata', async () => {
       },
       { status: 502 },
     ),
+    'capability_claim_failed',
   )
 
   assert.deepEqual(diagnostic, {
     purpose: 'confirm',
     httpStatus: 502,
     outcome: 'unknown_failure',
+    stage: 'capability_claim_failed',
   })
   assert.equal(Object.isFrozen(diagnostic), true)
   assert.equal(JSON.stringify(diagnostic).includes(secret), false)
@@ -268,6 +270,18 @@ test('callback diagnostic logs only allowlisted stage metadata', async () => {
     ),
   )
   assert.equal(allowlisted.outcome, 'invalid_line_pay_callback')
+  assert.equal(allowlisted.stage, 'not_observed')
+
+  const untrustedStage = await buildLinePaySandboxE2eCallbackDiagnostic(
+    'confirm',
+    Response.json(
+      { ok: false, error: 'invalid_line_pay_callback' },
+      { status: 400 },
+    ),
+    secret as never,
+  )
+  assert.equal(untrustedStage.stage, 'not_observed')
+  assert.equal(JSON.stringify(untrustedStage).includes(secret), false)
 })
 
 runTests().catch((error) => {

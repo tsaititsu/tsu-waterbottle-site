@@ -237,6 +237,125 @@ test('missing capability or mismatched transaction fails before database mutatio
   }
 })
 
+test('invalid callback inputs report fixed diagnostic stages without exposing values', async () => {
+  const cases = [
+    {
+      params: { transactionId, capability: token },
+      expectedStage: 'callback_order_id_invalid',
+    },
+    {
+      params: { orderId: merchantOrderNo, transactionId },
+      expectedStage: 'callback_capability_invalid',
+    },
+    {
+      params: { orderId: merchantOrderNo, capability: token },
+      expectedStage: 'callback_transaction_id_invalid',
+    },
+  ] as const
+
+  for (const { params, expectedStage } of cases) {
+    const observedStages: string[] = []
+    const { calls, database } = createDatabase()
+    const response = await handleProductOrderLinePayCapabilityCallback({
+      purpose: 'confirm',
+      request: request('confirm', params),
+      env,
+      readContext: async () => context,
+      database,
+      confirmPayment: async () => {
+        throw new Error('must_not_call_provider')
+      },
+      onDiagnosticStage: (stage) => observedStages.push(stage),
+    })
+
+    assert.equal(response.status, 400)
+    assert.deepEqual(observedStages, [expectedStage])
+    assert.deepEqual(calls, [])
+    assert.equal(JSON.stringify(observedStages).includes(transactionId), false)
+    assert.equal(
+      JSON.stringify(observedStages).includes(merchantOrderNo),
+      false,
+    )
+  }
+})
+
+test('context mismatch and capability claim failure report distinct safe stages', async () => {
+  const mismatchStages: string[] = []
+  const mismatchDatabase = createDatabase()
+  const mismatchResponse = await handleProductOrderLinePayCapabilityCallback({
+    purpose: 'confirm',
+    request: request('confirm', {
+      orderId: merchantOrderNo,
+      transactionId,
+      capability: token,
+    }),
+    env,
+    readContext: async () => ({ ...context, transactionId: 'different' }),
+    database: mismatchDatabase.database,
+    confirmPayment: async () => {
+      throw new Error('must_not_call_provider')
+    },
+    onDiagnosticStage: (stage) => mismatchStages.push(stage),
+  })
+
+  assert.equal(mismatchResponse.status, 400)
+  assert.deepEqual(mismatchStages, ['callback_context_mismatch'])
+  assert.deepEqual(mismatchDatabase.calls, [])
+
+  const claimStages: string[] = []
+  const claimDatabase = createDatabase()
+  const claimResponse = await handleProductOrderLinePayCapabilityCallback({
+    purpose: 'confirm',
+    request: request('confirm', {
+      orderId: merchantOrderNo,
+      transactionId,
+      capability: token,
+    }),
+    env,
+    readContext: async () => context,
+    database: {
+      ...claimDatabase.database,
+      claimCapability: async () => {
+        throw new Error('database detail must stay private')
+      },
+    },
+    confirmPayment: async () => {
+      throw new Error('must_not_call_provider')
+    },
+    onDiagnosticStage: (stage) => claimStages.push(stage),
+  })
+
+  assert.equal(claimResponse.status, 400)
+  assert.deepEqual(claimStages, ['capability_claim_failed'])
+  assert.equal(JSON.stringify(claimStages).includes('database detail'), false)
+})
+
+test('diagnostic observer failure cannot change callback behavior', async () => {
+  const { database } = createDatabase()
+  const response = await handleProductOrderLinePayCapabilityCallback({
+    purpose: 'confirm',
+    request: request('confirm', {
+      orderId: merchantOrderNo,
+      transactionId,
+    }),
+    env,
+    readContext: async () => context,
+    database,
+    confirmPayment: async () => {
+      throw new Error('must_not_call_provider')
+    },
+    onDiagnosticStage: () => {
+      throw new Error('diagnostic observer failure')
+    },
+  })
+
+  assert.equal(response.status, 400)
+  assert.deepEqual(await json(response), {
+    ok: false,
+    error: 'invalid_line_pay_callback',
+  })
+})
+
 test('disabled runtime fails closed before context lookup', async () => {
   let reads = 0
   const { database } = createDatabase()

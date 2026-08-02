@@ -109,6 +109,13 @@ type ConfirmPayment = (input: {
   payloadInput: { amount: number; currency: 'TWD' }
 }) => Promise<ParsedLinePayConfirmResponse>
 
+export type LinePayCapabilityCallbackDiagnosticStage =
+  | 'callback_order_id_invalid'
+  | 'callback_capability_invalid'
+  | 'callback_transaction_id_invalid'
+  | 'callback_context_mismatch'
+  | 'capability_claim_failed'
+
 function sha256(value: string) {
   return createHash('sha256').update(value).digest('hex')
 }
@@ -126,6 +133,19 @@ function safeParam(url: URL, name: string, maxLength: number) {
     return null
   }
   return value
+}
+
+function reportDiagnosticStage(
+  observer:
+    | ((stage: LinePayCapabilityCallbackDiagnosticStage) => void)
+    | undefined,
+  stage: LinePayCapabilityCallbackDiagnosticStage,
+) {
+  try {
+    observer?.(stage)
+  } catch {
+    // Preview diagnostics must never alter payment callback behavior.
+  }
 }
 
 function successPayload(
@@ -173,6 +193,7 @@ export async function handleProductOrderLinePayCapabilityCallback(input: {
   confirmPayment: ConfirmPayment
   now?: () => Date
   createUuid?: () => string
+  onDiagnosticStage?: (stage: LinePayCapabilityCallbackDiagnosticStage) => void
 }) {
   let config
   try {
@@ -191,11 +212,19 @@ export async function handleProductOrderLinePayCapabilityCallback(input: {
     input.purpose === 'confirm'
       ? safeParam(url, 'transactionId', 128)
       : null
-  if (
-    !merchantOrderNo
-    || !capabilityToken
-    || (input.purpose === 'confirm' && !callbackTransactionId)
-  ) {
+  if (!merchantOrderNo) {
+    reportDiagnosticStage(input.onDiagnosticStage, 'callback_order_id_invalid')
+    return response({ ok: false, error: 'invalid_line_pay_callback' }, 400)
+  }
+  if (!capabilityToken) {
+    reportDiagnosticStage(input.onDiagnosticStage, 'callback_capability_invalid')
+    return response({ ok: false, error: 'invalid_line_pay_callback' }, 400)
+  }
+  if (input.purpose === 'confirm' && !callbackTransactionId) {
+    reportDiagnosticStage(
+      input.onDiagnosticStage,
+      'callback_transaction_id_invalid',
+    )
     return response({ ok: false, error: 'invalid_line_pay_callback' }, 400)
   }
 
@@ -217,6 +246,7 @@ export async function handleProductOrderLinePayCapabilityCallback(input: {
     || (input.purpose === 'confirm'
       && callbackTransactionId !== context.transactionId)
   ) {
+    reportDiagnosticStage(input.onDiagnosticStage, 'callback_context_mismatch')
     return response({ ok: false, error: 'invalid_line_pay_callback' }, 400)
   }
 
@@ -239,6 +269,7 @@ export async function handleProductOrderLinePayCapabilityCallback(input: {
       claimExpiresAt: new Date(now.getTime() + 2 * 60 * 1000).toISOString(),
     })
   } catch {
+    reportDiagnosticStage(input.onDiagnosticStage, 'capability_claim_failed')
     return response({ ok: false, error: 'invalid_line_pay_callback' }, 400)
   }
 

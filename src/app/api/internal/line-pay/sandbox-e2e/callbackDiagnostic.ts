@@ -1,3 +1,7 @@
+import type {
+  LinePayCapabilityCallbackDiagnosticStage,
+} from '../../../product-orders/line-pay/capabilityHandler'
+
 const SAFE_CALLBACK_ERRORS = new Set([
   'invalid_line_pay_callback',
   'line_pay_callback_consumed',
@@ -11,6 +15,14 @@ const SAFE_CALLBACK_ERRORS = new Set([
   'line_pay_disabled',
 ])
 
+const SAFE_CALLBACK_STAGES = new Set<LinePayCapabilityCallbackDiagnosticStage>([
+  'callback_order_id_invalid',
+  'callback_capability_invalid',
+  'callback_transaction_id_invalid',
+  'callback_context_mismatch',
+  'capability_claim_failed',
+])
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -18,6 +30,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export async function buildLinePaySandboxE2eCallbackDiagnostic(
   purpose: 'confirm' | 'cancel',
   response: Response,
+  observedStage?: LinePayCapabilityCallbackDiagnosticStage | null,
 ) {
   let payload: unknown = null
   try {
@@ -41,5 +54,9 @@ export async function buildLinePaySandboxE2eCallbackDiagnostic(
     purpose,
     httpStatus: response.status,
     outcome,
+    stage:
+      observedStage && SAFE_CALLBACK_STAGES.has(observedStage)
+        ? observedStage
+        : 'not_observed',
   })
 }
