@@ -1123,7 +1123,7 @@ export function validateAiChartD1K0CatalogSemantics(
     assertCoverageCount(
       catalog.coverage.structureRuleCoverage,
       AI_CHART_D1_K0_STRUCTURE_RULE_DEFINITIONS.length,
-      15,
+      AI_CHART_D1_K0_STRUCTURE_RULE_DEFINITIONS.length + 1,
     )
 
     const expectedWarnings = [

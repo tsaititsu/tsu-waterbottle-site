@@ -242,6 +242,53 @@ async function run() {
       /太陽與太陰對拱.*兩側.*變動與調整/su,
     )
   })
+  check('relationship integration is direct one-hop and never inherits a source palace relationship', () => {
+    const integration = first.rules.find(
+      (rule) => rule.ruleId === 'rule:structure:integration-order',
+    )
+    assert.ok(integration)
+    assert.match(integration.content, /只使用目標宮位直接對應的本宮、對宮、兩個三方宮與暗合宮/u)
+    assert.match(
+      integration.content,
+      /不得再沿著來源宮位自己的對宮、三方或暗合繼續取星/u,
+    )
+    assert.match(integration.content, /第二層關係不得傳回目標宮位/u)
+  })
+  check('lecture-backed health card scans four palaces and writes only in the health palace', () => {
+    const health = first.rules.find(
+      (rule) => rule.ruleId === 'rule:health:body-weakness',
+    )
+    assert.ok(health)
+    assert.equal(health.kind, 'common')
+    assert.equal(health.ruleStatus, 'lecture_backfill')
+    assert.equal(health.sourceAuthority, 'lecture_backfill')
+    assert.match(health.content, /只掃描命宮、遷移宮、疾厄宮、父母宮/u)
+    assert.match(health.content, /四宮內實際存在的每一顆主星/u)
+    assert.match(health.content, /只在疾厄宮的客戶分析中統一說明/u)
+    assert.match(health.content, /命宮、遷移宮與父母宮不得各自輸出身體弱項/u)
+    assert.match(health.content, /不是疾病診斷/u)
+
+    const expectedMappings = [
+      '紫微：脾胃、消化系統',
+      '天機：肝、四肢、筋脈、神經反應',
+      '太陽：心臟、心血管、血液循環、眼睛',
+      '武曲：肺、呼吸系統、骨骼、骨架',
+      '天同：腎、牙齒、耳朵、代謝',
+      '廉貞：血液系統、心血管',
+      '天府：腸胃、消化系統、便秘、代謝',
+      '太陰：腎、眼睛；女性另看婦科、子宮、生殖系統',
+      '貪狼：肝、筋脈',
+      '巨門：腎、支氣管、口腔、牙齒',
+      '天相：腎、內分泌、淋巴、循環系統',
+      '天梁：脊椎、脾胃',
+      '七殺：肺、骨頭、頭部、皮膚',
+      '破軍：腎、泌尿系統；女性另看婦科、生殖系統',
+    ]
+    for (const mapping of expectedMappings) {
+      assert.match(health.content, new RegExp(mapping, 'u'))
+    }
+    assert.doesNotMatch(health.content, /天相[^\n]*頸部/u)
+  })
   check('eligible borrowed stars are not counted again as opposite evidence', () => {
     const emptyBorrow = first.rules.find(
       (rule) => rule.ruleId === 'rule:structure:empty-palace-borrow',
@@ -417,8 +464,8 @@ async function run() {
     assert.ok(rule)
     assert.deepEqual(contentObject(rule.content), AI_CHART_D1_K0_EVENT_BOUNDARY)
     assert.deepEqual(first.coverage.structureRuleCoverage, {
-      covered: 14,
-      total: 15,
+      covered: 15,
+      total: 16,
     })
     assert.equal(
       first.rules.some(

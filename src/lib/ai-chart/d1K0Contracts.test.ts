@@ -319,7 +319,7 @@ async function run() {
   check('false structure 15/15 with recomputed fingerprint is rejected', () => {
     expectCatalogInvalid(
       mutateCatalog(catalog, (value) => {
-        value.coverage.structureRuleCoverage.covered = 15
+        value.coverage.structureRuleCoverage.total = 15
       }),
     )
   })

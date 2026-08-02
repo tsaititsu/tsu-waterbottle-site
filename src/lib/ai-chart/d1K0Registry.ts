@@ -46,9 +46,9 @@ export const AI_CHART_D1_K0_SOURCE_WHITELIST = Object.freeze(
 
 export const AI_CHART_D1_K0_SOURCE_SHA256 = Object.freeze({
   [AI_CHART_D1_K0_SOURCE_FILES.stars]:
-    'e95df53e854aec966f0c3df4ec9239b09a3070104f99183c7261267ce09c6a3f',
+    'a7febeaafca60375c24bbb69ec97d6bc436707beaa6625d0fb7f62452636891e',
   [AI_CHART_D1_K0_SOURCE_FILES.palaces]:
-    'f5f5c21061479c876a2a2fc08e74419faf7daa9c80b539f6382b2df3413ea771',
+    '21d0da84e1bb9ba8ed087bffd6b52216de6fa71697d4788f6fe4b5beddeb5ac0',
   [AI_CHART_D1_K0_SOURCE_FILES.mutagens]:
     '5c67e03928e76f2da0a87c2f104aa65e17b2e183e1e0d1674af3119cc9f0b67a',
   [AI_CHART_D1_K0_SOURCE_FILES.doubles]:
@@ -56,7 +56,7 @@ export const AI_CHART_D1_K0_SOURCE_SHA256 = Object.freeze({
   [AI_CHART_D1_K0_SOURCE_FILES.scanning]:
     '6b549caefc3066138d3083617ecf8a823a9a1c02d3792e534882402d90246135',
   [AI_CHART_D1_K0_SOURCE_FILES.relationships]:
-    'df7e3a539b14358cd85c17510ebc450f14ca60412532c6759fd1f179b5d35b6f',
+    '4db7d35e822b5d4906814c8c9a4efaba201f21b30fca0b3a3db4ddcd322d60f1',
   [AI_CHART_D1_K0_SOURCE_FILES.emptyPalaces]:
     '96e00006ff45f0d7f0dc7cbd36958c5af31630904f4e5f8b174f759c03974696',
   [AI_CHART_D1_K0_SOURCE_FILES.supporting]:
@@ -530,6 +530,7 @@ export const AI_CHART_D1_K0_STRUCTURE_RULE_DEFINITIONS = Object.freeze([
   ['rule:common:malefic-preserve-all', 'common', '多顆煞星反應全部保留', AI_CHART_D1_K0_SOURCE_FILES.scanning, section([], 2, '五、多顆煞星同時存在'), 'common:malefic-preserve-all'],
   ['rule:common:natal-scan-completeness', 'common', '本命結構掃描範圍', AI_CHART_D1_K0_SOURCE_FILES.scanning, section([], 2, '三、掃描順序'), 'common:natal-scan-completeness'],
   ['rule:common:d1-event-boundary', 'd2_boundary', 'D1 本命與事件邊界', AI_CHART_D1_K0_SOURCE_FILES.scanning, section([], 2, '六、本命與事件邊界'), 'common:d1-event-boundary'],
+  ['rule:health:body-weakness', 'common', '疾厄宮身體弱項講義回填卡', AI_CHART_D1_K0_SOURCE_FILES.palaces, section(['三、疾厄宮對應（進階）'], 3, '四宮掃描與十四主星身體弱項固定卡'), 'health:body-weakness'],
   ['rule:structure:opposite', 'relationship', '對宮', AI_CHART_D1_K0_SOURCE_FILES.relationships, section([], 2, '二、對宮'), 'relationship:opposite'],
   ['rule:structure:hidden-combination', 'relationship', '暗合', AI_CHART_D1_K0_SOURCE_FILES.relationships, section([], 2, '四、暗合'), 'relationship:hidden-combination'],
   ['rule:structure:trine', 'relationship', '三方四正', AI_CHART_D1_K0_SOURCE_FILES.relationships, section([], 2, '五、三方四正'), 'relationship:trine'],

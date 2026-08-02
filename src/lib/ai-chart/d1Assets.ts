@@ -7,7 +7,7 @@ export const AI_CHART_D1_MANIFEST_PATH =
   'content/ai-chart/d1-v1/manifest.json' as const
 export const AI_CHART_D1_EXPECTED_FILE_COUNT = 23 as const
 export const AI_CHART_D1_LOCKED_MANIFEST_SHA256 =
-  '4f65e1d2489c845b89982600ce431f8a542503013253e2b9cea685d9d3934108' as const
+  '1781c04b939dc71be8882b993f5eb456def3fd3f8332ccb3e0af825af3a0d733' as const
 
 export const AI_CHART_D1_MANIFEST_INVALID = 'ai_chart_d1_manifest_invalid' as const
 export const AI_CHART_D1_ASSET_INTEGRITY_FAILED =

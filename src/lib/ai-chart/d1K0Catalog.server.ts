@@ -635,10 +635,15 @@ function compileStructure(
       }
       content = JSON.stringify({ allowed, prohibited })
     }
+    const isLectureBackfill =
+      definition.ruleId === 'rule:health:body-weakness'
     return createRule({
       ruleId: definition.ruleId, kind: definition.kind, title: definition.title,
       content,
-      ruleStatus: 'teacher_confirmed', sourceAuthority: 'reasoning_confirmed',
+      ruleStatus: isLectureBackfill ? 'lecture_backfill' : 'teacher_confirmed',
+      sourceAuthority: isLectureBackfill
+        ? 'lecture_backfill'
+        : 'reasoning_confirmed',
       sourceFile: asset.path, sourceFileSha256: asset.sha256,
       sourceLocator: markdownLocator(definition.locator),
       appliesTo: [definition.selectionTag], selectionTags: [definition.selectionTag],
@@ -721,7 +726,7 @@ async function compileCatalog(
     supportingStarCoverage: Object.freeze({ covered: supporting.length, total: 11 }),
     structureRuleCoverage: Object.freeze({
       covered: structure.length,
-      total: 15,
+      total: 16,
     }),
   })
   if (
