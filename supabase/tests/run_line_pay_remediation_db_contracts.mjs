@@ -86,6 +86,25 @@ function psqlFile(database, relativePath) {
   psql(database, readFileSync(absolutePath, 'utf8'), relativePath)
 }
 
+function psqlFileExpectFailure(database, relativePath, expectedMarker, label) {
+  const absolutePath = relativePath.startsWith('/') ? relativePath : join(root, relativePath)
+  const result = spawnSync(
+    'docker',
+    ['exec', '-i', containerName, 'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', database],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      input: readFileSync(absolutePath, 'utf8'),
+    },
+  )
+  const combinedOutput = `${result.stdout}\n${result.stderr}`
+  assertNoFakeMarker(combinedOutput, label)
+
+  if (result.status === 0 || !combinedOutput.includes(expectedMarker)) {
+    throw new Error(`${label} did not fail closed with ${expectedMarker}`)
+  }
+}
+
 function psqlExpectDenied(database, sql, label) {
   const result = spawnSync(
     'docker',
@@ -368,6 +387,13 @@ async function main() {
 
   psql('postgres', 'create database line_pay_clean;', 'create clean database')
   psql('postgres', 'create database line_pay_upgrade;', 'create upgrade database')
+  if (atomicFinalizationMigration) {
+    psql(
+      'postgres',
+      'create database line_pay_atomic_acl_drift;',
+      'create atomic ACL drift database',
+    )
+  }
 
   prepareBaseline('line_pay_clean')
   psqlFile('line_pay_clean', migration)
@@ -386,6 +412,40 @@ async function main() {
       'postgres',
       'create role authenticator noinherit nologin;',
       'create local authenticator role',
+    )
+    prepareBaseline('line_pay_atomic_acl_drift')
+    psqlFile('line_pay_atomic_acl_drift', migration)
+    psql(
+      'line_pay_atomic_acl_drift',
+      'grant select on public.payments to line_pay_payment_executor;',
+      'seed atomic executor relation ACL drift',
+    )
+    psqlFileExpectFailure(
+      'line_pay_atomic_acl_drift',
+      atomicFinalizationMigration,
+      'line_pay_atomic_finalize_executor_relation_acl_postcondition_failed',
+      'atomic executor relation ACL drift',
+    )
+    psql(
+      'line_pay_atomic_acl_drift',
+      `do $$
+       begin
+         if to_regprocedure(
+              'public.finalize_product_order_line_pay_confirmation(text,uuid,uuid,uuid,text,text,integer,text,uuid,uuid,uuid,text,text)'
+            ) is not null
+            or not pg_catalog.has_table_privilege(
+              'line_pay_payment_executor', 'public.payments', 'select'
+            )
+            or not pg_catalog.has_function_privilege(
+              'line_pay_payment_executor',
+              'public.record_product_order_line_pay_confirmation_evidence(text,uuid,uuid,text,text,text)',
+              'execute'
+            ) then
+           raise exception 'atomic_executor_acl_drift_rollback_failed';
+         end if;
+       end
+       $$;`,
+      'atomic executor ACL drift rollback assertion',
     )
     psqlFile('line_pay_clean', atomicFinalizationMigration)
     psqlFile(

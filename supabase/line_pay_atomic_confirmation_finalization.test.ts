@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 const migration = readFileSync(
@@ -16,6 +16,10 @@ const runtime = readFileSync(
 const executor = readFileSync(
   new URL('../src/lib/supabase/linePayExecutor.ts', import.meta.url),
   'utf8',
+)
+const deploymentDocumentUrl = new URL(
+  '../docs/line-pay-atomic-confirmation-finalization-deployment.md',
+  import.meta.url,
 )
 
 test('adds one atomic confirmation finalize RPC without rewriting the base migration', () => {
@@ -81,6 +85,20 @@ test('only the dedicated executor can call the wrapper', () => {
   assert.match(migration, /line_pay_atomic_finalize_acl_postcondition_failed/i)
   assert.match(migration, /line_pay_atomic_finalize_membership_postcondition_failed/i)
   assert.match(migration, /line_pay_atomic_finalize_executor_privilege_postcondition_failed/i)
+  assert.match(
+    migration,
+    /line_pay_atomic_finalize_role_membership_allowlist_postcondition_failed/i,
+  )
+  assert.match(
+    migration,
+    /line_pay_atomic_finalize_executor_relation_acl_postcondition_failed/i,
+  )
+  assert.match(
+    migration,
+    /line_pay_atomic_finalize_executor_rpc_allowlist_postcondition_failed/i,
+  )
+  assert.match(migration, /pg_catalog\.aclexplode\(relation\.relacl\)/i)
+  assert.match(migration, /pg_catalog\.aclexplode\(attribute\.attacl\)/i)
 })
 
 test('the application adapter exposes no split evidence or completion call', () => {
@@ -106,4 +124,22 @@ test('executor client is server-only and rejects broad or unsigned credentials',
   assert.match(executor, /claims\.exp\s*<=\s*Math\.floor\(Date\.now\(\)\s*\/\s*1000\)/)
   assert.match(executor, /const\s+JWT_ALGORITHMS\s*=\s*new\s+Set\(\['ES256',\s*'HS256',\s*'RS256'\]\)/)
   assert.doesNotMatch(executor, /console\.|logger\.|SUPABASE_SERVICE_ROLE_KEY/)
+})
+
+test('documents impact, backup, deployment order, compatibility, and fail-forward recovery', () => {
+  assert.equal(existsSync(deploymentDocumentUrl), true)
+  const deployment = readFileSync(deploymentDocumentUrl, 'utf8')
+  for (const requiredBoundary of [
+    'Backup／PITR',
+    'restore point',
+    'fail-forward',
+    'Runtime disabled',
+    '20260719033404_line_pay_remediation_contracts.sql',
+    '20260728053215_line_pay_checkout_aggregate_initialization.sql',
+    '20260802160000_line_pay_atomic_confirmation_finalization.sql',
+    'SUPABASE_LINE_PAY_EXECUTOR_JWT',
+    '舊版 callback',
+  ]) {
+    assert.match(deployment, new RegExp(requiredBoundary))
+  }
 })

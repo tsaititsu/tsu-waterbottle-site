@@ -189,6 +189,13 @@ select line_pay_atomic_test.seed_confirmation(
   'atomic-transaction-rollback-1'
 );
 
+-- Keep the evidence writer's own contract valid, but make the later payment
+-- completion state invalid. This proves the wrapper rolls back evidence that
+-- was actually written before complete_* rejects the aggregate.
+update public.product_orders
+set order_status = 'payment_failed'
+where id = '50000000-0000-4000-8000-000000000018';
+
 set role service_role;
 do $$
 begin
@@ -267,7 +274,7 @@ begin
       '60000000-0000-4000-8000-000000000018',
       'LP-ATOMIC-ROLLBACK-1',
       'atomic-transaction-rollback-1',
-      301,
+      300,
       'TWD',
       '90000000-0000-4000-8000-000000000018',
       '91000000-0000-4000-8000-000000000018',
@@ -277,7 +284,7 @@ begin
     );
     raise exception 'atomic_finalize_invalid_amount_was_accepted';
   exception
-    when check_violation then null;
+    when sqlstate '55000' then null;
   end;
 end
 $$;
@@ -297,6 +304,11 @@ begin
     from public.line_pay_payment_audit_events
     where payment_id = '70000000-0000-4000-8000-000000000018'
       and event_type in ('confirmation_evidence_recorded', 'confirmation_completed')
+  ) or not exists (
+    select 1
+    from public.product_orders
+    where id = '50000000-0000-4000-8000-000000000018'
+      and order_status = 'payment_failed'
   ) then
     raise exception 'atomic_finalize_rollback_postcondition_failed';
   end if;
@@ -355,6 +367,27 @@ begin
   if v_result.result_code <> 'already_completed' then
     raise exception 'atomic_finalize_idempotency_result_invalid';
   end if;
+
+  begin
+    perform public.finalize_product_order_line_pay_confirmation(
+      'sandbox',
+      '70000000-0000-4000-8000-000000000019',
+      '50000000-0000-4000-8000-000000000019',
+      '60000000-0000-4000-8000-000000000019',
+      'LP-ATOMIC-SUCCESS-1',
+      'atomic-transaction-success-1',
+      300,
+      'TWD',
+      '90000000-0000-4000-8000-000000000019',
+      '91000000-0000-4000-8000-000000000019',
+      'a0000000-0000-4000-8000-000000000040',
+      repeat('f', 64),
+      'atomic-conflicting-evidence-retry-1'
+    );
+    raise exception 'atomic_finalize_conflicting_evidence_was_accepted';
+  exception
+    when check_violation then null;
+  end;
 end
 $$;
 reset role;
@@ -380,6 +413,7 @@ begin
       and attempt.request_state = 'paid'
       and capability.consumed_at is not null
       and callback_event.state = 'completed'
+      and callback_event.provider_result_sha256 = repeat('d', 64)
   ) then
     raise exception 'atomic_finalize_completion_proof_missing';
   end if;
@@ -396,6 +430,20 @@ begin
       and event_type = 'confirmation_completed'
   ) <> 1 then
     raise exception 'atomic_finalize_audit_idempotency_failed';
+  end if;
+
+  if (
+    select pg_catalog.count(*)
+    from line_pay_private.line_pay_completion_proofs
+    where payment_id = '70000000-0000-4000-8000-000000000019'
+      and provider_result_sha256 = repeat('d', 64)
+  ) <> 1 or exists (
+    select 1
+    from public.line_pay_payment_audit_events
+    where payment_id = '70000000-0000-4000-8000-000000000019'
+      and evidence ->> 'evidence_sha256' = repeat('f', 64)
+  ) then
+    raise exception 'atomic_finalize_conflicting_evidence_mutated_state';
   end if;
 end
 $$;

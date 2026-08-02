@@ -384,6 +384,177 @@ begin
       message = 'line_pay_atomic_finalize_core_rpc_postcondition_failed';
   end if;
 
+  if exists (
+    select 1
+    from pg_catalog.pg_roles as role
+    where role.rolname in (
+      'line_pay_payment_executor',
+      'line_pay_payment_function_owner'
+    )
+      and (
+        role.rolcanlogin
+        or role.rolinherit
+        or role.rolsuper
+        or role.rolcreatedb
+        or role.rolcreaterole
+        or role.rolreplication
+        or role.rolbypassrls
+        or role.rolconnlimit <> -1
+        or role.rolconfig is not null
+        or role.rolvaliduntil is not null
+      )
+  ) then
+    raise exception using
+      errcode = '42501',
+      message = 'line_pay_atomic_finalize_role_attribute_postcondition_failed';
+  end if;
+
+  -- Keep the role graph exact. Hosted Supabase may retain one ADMIN-only,
+  -- non-SET bootstrap membership from a superuser grantor for each dedicated
+  -- role. The only new runtime edge is authenticator -> executor with SET.
+  if exists (
+    select 1
+    from pg_catalog.pg_auth_members as membership
+    join pg_catalog.pg_roles as granted_role
+      on granted_role.oid = membership.roleid
+    join pg_catalog.pg_roles as member_role
+      on member_role.oid = membership.member
+    join pg_catalog.pg_roles as grantor_role
+      on grantor_role.oid = membership.grantor
+    where (
+      granted_role.rolname in (
+        'line_pay_payment_executor',
+        'line_pay_payment_function_owner'
+      )
+      or member_role.rolname in (
+        'line_pay_payment_executor',
+        'line_pay_payment_function_owner'
+      )
+    )
+      and not (
+        granted_role.rolname = 'line_pay_payment_executor'
+        and member_role.rolname = 'authenticator'
+        and grantor_role.rolname = current_user
+        and not membership.admin_option
+        and not membership.inherit_option
+        and membership.set_option
+      )
+      and not (
+        granted_role.rolname in (
+          'line_pay_payment_executor',
+          'line_pay_payment_function_owner'
+        )
+        and member_role.rolname = current_user
+        and grantor_role.rolsuper
+        and membership.admin_option
+        and not membership.inherit_option
+        and not membership.set_option
+      )
+  ) or (
+    select pg_catalog.count(*)
+    from pg_catalog.pg_auth_members as membership
+    join pg_catalog.pg_roles as granted_role
+      on granted_role.oid = membership.roleid
+    join pg_catalog.pg_roles as member_role
+      on member_role.oid = membership.member
+    join pg_catalog.pg_roles as grantor_role
+      on grantor_role.oid = membership.grantor
+    where granted_role.rolname = 'line_pay_payment_executor'
+      and member_role.rolname = 'authenticator'
+      and grantor_role.rolname = current_user
+      and not membership.admin_option
+      and not membership.inherit_option
+      and membership.set_option
+  ) <> 1 or coalesce((
+    select case
+      when role.rolsuper then bootstrap_membership.membership_count <> 0
+      else bootstrap_membership.membership_count <> 2
+    end
+    from pg_catalog.pg_roles as role
+    cross join lateral (
+      select pg_catalog.count(*)::integer as membership_count
+      from pg_catalog.pg_auth_members as membership
+      join pg_catalog.pg_roles as granted_role
+        on granted_role.oid = membership.roleid
+      join pg_catalog.pg_roles as member_role
+        on member_role.oid = membership.member
+      join pg_catalog.pg_roles as grantor_role
+        on grantor_role.oid = membership.grantor
+      where granted_role.rolname in (
+          'line_pay_payment_executor',
+          'line_pay_payment_function_owner'
+        )
+        and member_role.rolname = current_user
+        and grantor_role.rolsuper
+        and membership.admin_option
+        and not membership.inherit_option
+        and not membership.set_option
+    ) as bootstrap_membership
+    where role.rolname = current_user
+  ), true) then
+    raise exception using
+      errcode = '42501',
+      message = 'line_pay_atomic_finalize_role_membership_allowlist_postcondition_failed';
+  end if;
+
+  if exists (
+    select 1
+    from pg_catalog.pg_class as relation
+    join pg_catalog.pg_roles as owner
+      on owner.oid = relation.relowner
+    where owner.rolname = 'line_pay_payment_executor'
+  ) or exists (
+    select 1
+    from pg_catalog.pg_class as relation
+    cross join lateral pg_catalog.aclexplode(relation.relacl) as acl
+    join pg_catalog.pg_roles as grantee
+      on grantee.oid = acl.grantee
+    where grantee.rolname = 'line_pay_payment_executor'
+  ) or exists (
+    select 1
+    from pg_catalog.pg_attribute as attribute
+    cross join lateral pg_catalog.aclexplode(attribute.attacl) as acl
+    join pg_catalog.pg_roles as grantee
+      on grantee.oid = acl.grantee
+    where grantee.rolname = 'line_pay_payment_executor'
+  ) then
+    raise exception using
+      errcode = '42501',
+      message = 'line_pay_atomic_finalize_executor_relation_acl_postcondition_failed';
+  end if;
+
+  if (
+    select pg_catalog.count(*)
+    from pg_catalog.pg_proc as procedure
+    join pg_catalog.pg_namespace as namespace
+      on namespace.oid = procedure.pronamespace
+    join pg_catalog.pg_roles as owner
+      on owner.oid = procedure.proowner
+    where owner.rolname = 'line_pay_payment_function_owner'
+      and pg_catalog.has_function_privilege(
+        'line_pay_payment_executor', procedure.oid, 'execute'
+      )
+  ) <> 1 or not exists (
+    select 1
+    from pg_catalog.pg_proc as procedure
+    join pg_catalog.pg_namespace as namespace
+      on namespace.oid = procedure.pronamespace
+    join pg_catalog.pg_roles as owner
+      on owner.oid = procedure.proowner
+    where namespace.nspname = 'public'
+      and procedure.proname = 'finalize_product_order_line_pay_confirmation'
+      and pg_catalog.oidvectortypes(procedure.proargtypes) =
+        'text, uuid, uuid, uuid, text, text, integer, text, uuid, uuid, uuid, text, text'
+      and owner.rolname = 'line_pay_payment_function_owner'
+      and pg_catalog.has_function_privilege(
+        'line_pay_payment_executor', procedure.oid, 'execute'
+      )
+  ) then
+    raise exception using
+      errcode = '42501',
+      message = 'line_pay_atomic_finalize_executor_rpc_allowlist_postcondition_failed';
+  end if;
+
   if (
     select pg_catalog.count(*)
     from pg_catalog.pg_auth_members as membership
@@ -436,6 +607,9 @@ begin
      )
      or pg_catalog.has_schema_privilege(
        'line_pay_payment_executor', 'line_pay_private', 'usage'
+     )
+     or not pg_catalog.has_schema_privilege(
+       'line_pay_payment_executor', 'public', 'usage'
      ) then
     raise exception using
       errcode = '42501',
