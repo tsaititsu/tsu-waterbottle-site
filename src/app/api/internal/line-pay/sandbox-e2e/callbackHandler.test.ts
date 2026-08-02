@@ -52,8 +52,7 @@ function database(): ProductOrderLinePayCapabilityDatabase {
       callbackEventId: ids.callbackEventId,
     }),
     claimConfirmation: async () => ({ resultCode: 'claimed' }),
-    recordConfirmationEvidence: async () => ({ resultCode: 'recorded' }),
-    completeConfirmation: async () => ({
+    finalizeConfirmation: async () => ({
       resultCode: 'completed',
       transactionId,
     }),

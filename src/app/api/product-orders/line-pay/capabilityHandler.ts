@@ -47,15 +47,7 @@ export type ProductOrderLinePayCapabilityDatabase = {
   }) => Promise<{
     resultCode: 'claimed' | 'already_claimed' | 'already_paid'
   }>
-  recordConfirmationEvidence: (input: {
-    environment: 'sandbox' | 'production'
-    callbackEventId: string
-    callbackClaimId: string
-    providerResultSha256: string
-    safeResultCode: '0000'
-    requestId: string
-  }) => Promise<{ resultCode: 'recorded' | 'already_recorded' }>
-  completeConfirmation: (input: {
+  finalizeConfirmation: (input: {
     environment: 'sandbox' | 'production'
     paymentId: string
     productOrderId: string
@@ -69,10 +61,6 @@ export type ProductOrderLinePayCapabilityDatabase = {
     callbackClaimId: string
     confirmResultSha256: string
     requestId: string
-    auditEvidence: {
-      result_code: 'verified'
-      evidence_sha256: string
-    }
   }) => Promise<{
     resultCode: 'completed' | 'already_completed'
     transactionId: string
@@ -385,15 +373,7 @@ export async function handleProductOrderLinePayCapabilityCallback(input: {
     }),
   )
   try {
-    await input.database.recordConfirmationEvidence({
-      environment: context.environment,
-      callbackEventId: capability.callbackEventId,
-      callbackClaimId: claimId,
-      providerResultSha256: confirmResultSha256,
-      safeResultCode: '0000',
-      requestId,
-    })
-    const completed = await input.database.completeConfirmation({
+    const completed = await input.database.finalizeConfirmation({
       environment: context.environment,
       paymentId: context.paymentId,
       productOrderId: context.productOrderId,
@@ -407,10 +387,6 @@ export async function handleProductOrderLinePayCapabilityCallback(input: {
       callbackClaimId: claimId,
       confirmResultSha256,
       requestId,
-      auditEvidence: {
-        result_code: 'verified',
-        evidence_sha256: confirmResultSha256,
-      },
     })
     if (completed.transactionId !== context.transactionId) {
       throw new Error('line_pay_confirmation_transaction_mismatch')

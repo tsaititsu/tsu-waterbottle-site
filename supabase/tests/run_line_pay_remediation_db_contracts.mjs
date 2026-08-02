@@ -20,6 +20,9 @@ const fakeMarkers = [
 const migration = process.env.LINE_PAY_MIGRATION_UNDER_TEST
   ? resolve(process.env.LINE_PAY_MIGRATION_UNDER_TEST)
   : join(root, 'supabase/migrations/20260719033404_line_pay_remediation_contracts.sql')
+const atomicFinalizationMigration = process.env.LINE_PAY_ATOMIC_FINALIZATION_MIGRATION_UNDER_TEST
+  ? resolve(process.env.LINE_PAY_ATOMIC_FINALIZATION_MIGRATION_UNDER_TEST)
+  : null
 const baselineFiles = [
   'supabase/schema.sql',
   'supabase/bank_transfer_submissions_patch.sql',
@@ -374,16 +377,30 @@ async function main() {
   psqlFile('line_pay_clean', 'supabase/tests/line_pay_second_remediation_invariants.sql')
   await testConcurrentClaim('line_pay_clean')
   testRoleAccess('line_pay_clean')
-
   prepareBaseline('line_pay_upgrade')
   psqlFile('line_pay_upgrade', 'supabase/tests/line_pay_upgrade_fixture.sql')
   psqlFile('line_pay_upgrade', migration)
   psqlFile('line_pay_upgrade', 'supabase/tests/line_pay_upgrade_assertions.sql')
+  if (atomicFinalizationMigration) {
+    psql(
+      'postgres',
+      'create role authenticator noinherit nologin;',
+      'create local authenticator role',
+    )
+    psqlFile('line_pay_clean', atomicFinalizationMigration)
+    psqlFile(
+      'line_pay_clean',
+      'supabase/tests/line_pay_atomic_confirmation_finalization.sql',
+    )
+    psqlFile('line_pay_upgrade', atomicFinalizationMigration)
+  }
 
   const postgresLogs = runDocker(['logs', containerName])
   assertNoFakeMarker(postgresLogs, 'PostgreSQL logs')
 
-  process.stdout.write('line_pay_remediation_db_contracts: PASS (clean, upgrade, RPC, concurrency, rollback, RLS)\n')
+  process.stdout.write(
+    `line_pay_remediation_db_contracts: PASS (clean, upgrade, RPC, concurrency, rollback, RLS${atomicFinalizationMigration ? ', atomic-finalization' : ''})\n`,
+  )
 }
 
 try {

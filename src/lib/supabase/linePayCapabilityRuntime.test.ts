@@ -91,7 +91,7 @@ test('reads one exact LINE Pay capability payment context without raw payload', 
 })
 
 test('maps the capability callback sequence to exact RPC names and arguments', async () => {
-  const rpc = createRpcClient([
+  const serviceRoleRpc = createRpcClient([
     {
       result_code: 'claimed',
       capability_id: capabilityId,
@@ -108,17 +108,6 @@ test('maps the capability callback sequence to exact RPC names and arguments', a
       request_state: 'confirmation_processing',
     },
     {
-      result_code: 'recorded',
-      callback_event_id: callbackEventId,
-      provider_result_sha256: 'd'.repeat(64),
-    },
-    {
-      result_code: 'completed',
-      payment_id: paymentId,
-      product_order_id: productOrderId,
-      transaction_id: transactionId,
-    },
-    {
       result_code: 'canceled',
       payment_id: paymentId,
       product_order_id: productOrderId,
@@ -131,7 +120,18 @@ test('maps the capability callback sequence to exact RPC names and arguments', a
       request_state: 'reconciliation_required',
     },
   ])
-  const database = createProductOrderLinePayCapabilityDatabase(rpc.client)
+  const executorRpc = createRpcClient([
+    {
+      result_code: 'completed',
+      payment_id: paymentId,
+      product_order_id: productOrderId,
+      transaction_id: transactionId,
+    },
+  ])
+  const database = createProductOrderLinePayCapabilityDatabase(
+    serviceRoleRpc.client,
+    executorRpc.client,
+  )
 
   await database.claimCapability({
     tokenHash: 'a'.repeat(64),
@@ -154,15 +154,7 @@ test('maps the capability callback sequence to exact RPC names and arguments', a
     transactionId,
     requestId: 'line-pay-callback:request-1',
   })
-  await database.recordConfirmationEvidence({
-    environment: 'sandbox',
-    callbackEventId,
-    callbackClaimId: claimId,
-    providerResultSha256: 'd'.repeat(64),
-    safeResultCode: '0000',
-    requestId: 'line-pay-callback:request-1',
-  })
-  await database.completeConfirmation({
+  await database.finalizeConfirmation({
     environment: 'sandbox',
     paymentId,
     productOrderId,
@@ -176,10 +168,6 @@ test('maps the capability callback sequence to exact RPC names and arguments', a
     callbackClaimId: claimId,
     confirmResultSha256: 'd'.repeat(64),
     requestId: 'line-pay-callback:request-1',
-    auditEvidence: {
-      result_code: 'verified',
-      evidence_sha256: 'd'.repeat(64),
-    },
   })
   await database.cancelPayment({
     environment: 'sandbox',
@@ -201,15 +189,17 @@ test('maps the capability callback sequence to exact RPC names and arguments', a
     reasonCode: 'confirmation_completion_failed',
   })
 
-  assert.deepEqual(rpc.calls.map(({ functionName }) => functionName), [
+  assert.deepEqual(serviceRoleRpc.calls.map(({ functionName }) => functionName), [
     'claim_line_pay_callback_capability',
     'claim_product_order_line_pay_confirmation',
-    'record_product_order_line_pay_confirmation_evidence',
-    'complete_product_order_line_pay_confirmation',
     'cancel_product_order_line_pay_payment',
     'mark_product_order_line_pay_reconciliation',
   ])
-  assert.deepEqual(rpc.calls[0]?.args, {
+  assert.deepEqual(
+    executorRpc.calls.map(({ functionName }) => functionName),
+    ['finalize_product_order_line_pay_confirmation'],
+  )
+  assert.deepEqual(serviceRoleRpc.calls[0]?.args, {
     p_token_hash: 'a'.repeat(64),
     p_environment: 'sandbox',
     p_purpose: 'confirm',
@@ -219,11 +209,15 @@ test('maps the capability callback sequence to exact RPC names and arguments', a
     p_claim_id: claimId,
     p_claim_expires_at: '2026-07-31T12:02:00.000Z',
   })
-  assert.deepEqual(rpc.calls[3]?.args.p_audit_evidence, {
-    result_code: 'verified',
-    evidence_sha256: 'd'.repeat(64),
-  })
-  assert.equal(rpc.calls[3]?.args.p_paid_at, null)
+  assert.equal(
+    executorRpc.calls[0]?.args.p_confirm_result_sha256,
+    'd'.repeat(64),
+  )
+  assert.equal(
+    'p_audit_evidence' in (executorRpc.calls[0]?.args ?? {}),
+    false,
+  )
+  assert.equal('p_paid_at' in (executorRpc.calls[0]?.args ?? {}), false)
 })
 
 test('RPC failure and unexpected result shape fail closed without details', async () => {
@@ -237,7 +231,10 @@ test('RPC failure and unexpected result shape fail closed without details', asyn
   }
   await assert.rejects(
     () =>
-      createProductOrderLinePayCapabilityDatabase(errorClient).claimCapability({
+      createProductOrderLinePayCapabilityDatabase(
+        errorClient,
+        errorClient,
+      ).claimCapability({
         tokenHash: 'a'.repeat(64),
         environment: 'sandbox',
         purpose: 'confirm',
@@ -251,5 +248,33 @@ test('RPC failure and unexpected result shape fail closed without details', asyn
       error instanceof Error
       && error.message === 'line_pay_capability_database_error'
       && !JSON.stringify(error).includes(secret),
+  )
+})
+
+test('confirmation fails closed without a dedicated executor client', async () => {
+  const serviceRoleClient = {
+    rpc() {
+      throw new Error('service_role_must_not_finalize')
+    },
+  }
+  const database = createProductOrderLinePayCapabilityDatabase(serviceRoleClient)
+
+  await assert.rejects(
+    () => database.finalizeConfirmation({
+      environment: 'sandbox',
+      paymentId,
+      productOrderId,
+      attemptId,
+      merchantOrderNo: 'LP-ORDER-1',
+      transactionId: '92233720368547758081234567890',
+      amountTwd: 300,
+      currency: 'TWD',
+      capabilityId,
+      callbackEventId,
+      callbackClaimId: claimId,
+      confirmResultSha256: 'd'.repeat(64),
+      requestId: 'line-pay-callback:request-1',
+    }),
+    /line_pay_capability_database_error/,
   )
 })

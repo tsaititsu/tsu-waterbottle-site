@@ -4,6 +4,7 @@ import {
   createLinePayNonce,
 } from '@/lib/linePay'
 import { getSupabaseAdmin } from '@/lib/supabase/admin'
+import { createLinePayExecutorClient } from '@/lib/supabase/linePayExecutor'
 import {
   createProductOrderLinePayCapabilityDatabase,
   readProductOrderLinePayCapabilityContext,
@@ -44,6 +45,20 @@ function requireCapabilityClient(value: unknown): CapabilityClient {
   return value as CapabilityClient
 }
 
+function requireCapabilityRpcClient(
+  value: unknown,
+): ProductOrderLinePayCapabilityRpcClient {
+  if (
+    typeof value !== 'object'
+    || value === null
+    || !('rpc' in value)
+    || typeof value.rpc !== 'function'
+  ) {
+    throw new Error('line_pay_sandbox_e2e_executor_client_invalid')
+  }
+  return value as ProductOrderLinePayCapabilityRpcClient
+}
+
 function hiddenResponse() {
   return NextResponse.json(
     { ok: false, error: 'not_found' },
@@ -58,6 +73,9 @@ export async function executeLinePaySandboxE2eCallbackRoute(
   if (!isLinePaySandboxE2eRouteEnabled(process.env)) return hiddenResponse()
 
   const client = requireCapabilityClient(getSupabaseAdmin())
+  const executorClient = purpose === 'confirm'
+    ? requireCapabilityRpcClient(createLinePayExecutorClient(process.env))
+    : undefined
   let diagnosticStage: LinePayCapabilityCallbackDiagnosticStage | null = null
   const response = await handleLinePaySandboxE2eCapabilityCallback({
     purpose,
@@ -65,7 +83,10 @@ export async function executeLinePaySandboxE2eCallbackRoute(
     env: process.env,
     readContext: (merchantOrderNo) =>
       readProductOrderLinePayCapabilityContext(merchantOrderNo, client),
-    database: createProductOrderLinePayCapabilityDatabase(client),
+    database: createProductOrderLinePayCapabilityDatabase(
+      client,
+      executorClient,
+    ),
     confirmPayment: (input) =>
       confirmLinePayPayment({
         ...input,

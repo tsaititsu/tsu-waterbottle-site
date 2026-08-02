@@ -72,12 +72,8 @@ function createDatabase() {
       calls.push({ operation: 'claimConfirmation', input })
       return { resultCode: 'claimed' }
     },
-    async recordConfirmationEvidence(input) {
-      calls.push({ operation: 'recordConfirmationEvidence', input })
-      return { resultCode: 'recorded' }
-    },
-    async completeConfirmation(input) {
-      calls.push({ operation: 'completeConfirmation', input })
+    async finalizeConfirmation(input) {
+      calls.push({ operation: 'finalizeConfirmation', input })
       return { resultCode: 'completed', transactionId }
     },
     async cancelPayment(input) {
@@ -126,17 +122,14 @@ test('confirm uses capability, provider evidence, and atomic completion in order
   assert.deepEqual(calls.map(({ operation }) => operation), [
     'claimCapability',
     'claimConfirmation',
-    'recordConfirmationEvidence',
-    'completeConfirmation',
+    'finalizeConfirmation',
   ])
   const claim = calls[0]?.input ?? {}
   assert.match(String(claim.tokenHash), /^[0-9a-f]{64}$/)
   assert.equal(JSON.stringify(calls).includes(token), false)
-  const completion = calls[3]?.input ?? {}
-  assert.deepEqual(completion.auditEvidence, {
-    result_code: 'verified',
-    evidence_sha256: completion.confirmResultSha256,
-  })
+  const completion = calls[2]?.input ?? {}
+  assert.match(String(completion.confirmResultSha256), /^[0-9a-f]{64}$/)
+  assert.equal('auditEvidence' in completion, false)
   assert.deepEqual(await json(response), {
     ok: true,
     confirmed: true,

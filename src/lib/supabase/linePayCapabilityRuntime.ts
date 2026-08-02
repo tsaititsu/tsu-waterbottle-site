@@ -127,7 +127,8 @@ export async function readProductOrderLinePayCapabilityContext(
 }
 
 export function createProductOrderLinePayCapabilityDatabase(
-  client: ProductOrderLinePayCapabilityRpcClient,
+  serviceRoleClient: ProductOrderLinePayCapabilityRpcClient,
+  executorClient?: ProductOrderLinePayCapabilityRpcClient,
 ) {
   return Object.freeze({
     async claimCapability(input: {
@@ -141,7 +142,7 @@ export function createProductOrderLinePayCapabilityDatabase(
       claimExpiresAt: string
     }) {
       const row = exactRecord(
-        await rpc(client, 'claim_line_pay_callback_capability', {
+        await rpc(serviceRoleClient, 'claim_line_pay_callback_capability', {
           p_token_hash: input.tokenHash,
           p_environment: input.environment,
           p_purpose: input.purpose,
@@ -197,7 +198,7 @@ export function createProductOrderLinePayCapabilityDatabase(
       requestId: string
     }) {
       const row = exactRecord(
-        await rpc(client, 'claim_product_order_line_pay_confirmation', {
+        await rpc(serviceRoleClient, 'claim_product_order_line_pay_confirmation', {
           p_environment: input.environment,
           p_payment_id: input.paymentId,
           p_product_order_id: input.productOrderId,
@@ -219,42 +220,7 @@ export function createProductOrderLinePayCapabilityDatabase(
       }
     },
 
-    async recordConfirmationEvidence(input: {
-      environment: 'sandbox' | 'production'
-      callbackEventId: string
-      callbackClaimId: string
-      providerResultSha256: string
-      safeResultCode: '0000'
-      requestId: string
-    }) {
-      const row = exactRecord(
-        await rpc(
-          client,
-          'record_product_order_line_pay_confirmation_evidence',
-          {
-            p_environment: input.environment,
-            p_callback_event_id: input.callbackEventId,
-            p_callback_claim_id: input.callbackClaimId,
-            p_provider_result_sha256: input.providerResultSha256,
-            p_safe_result_code: input.safeResultCode,
-            p_request_id: input.requestId,
-          },
-        ),
-        ['result_code', 'callback_event_id', 'provider_result_sha256'],
-      )
-      const resultCode = string(row.result_code)
-      if (!['recorded', 'already_recorded'].includes(resultCode)) databaseError()
-      if (
-        uuid(row.callback_event_id) !== input.callbackEventId
-        || string(row.provider_result_sha256, SHA256_PATTERN)
-          !== input.providerResultSha256
-      ) databaseError()
-      return Object.freeze({ resultCode }) as {
-        resultCode: 'recorded' | 'already_recorded'
-      }
-    },
-
-    async completeConfirmation(input: {
+    async finalizeConfirmation(input: {
       environment: 'sandbox' | 'production'
       paymentId: string
       productOrderId: string
@@ -268,10 +234,10 @@ export function createProductOrderLinePayCapabilityDatabase(
       callbackClaimId: string
       confirmResultSha256: string
       requestId: string
-      auditEvidence: { result_code: 'verified'; evidence_sha256: string }
     }) {
+      if (!executorClient) databaseError()
       const row = exactRecord(
-        await rpc(client, 'complete_product_order_line_pay_confirmation', {
+        await rpc(executorClient, 'finalize_product_order_line_pay_confirmation', {
           p_environment: input.environment,
           p_payment_id: input.paymentId,
           p_product_order_id: input.productOrderId,
@@ -283,10 +249,11 @@ export function createProductOrderLinePayCapabilityDatabase(
           p_capability_id: input.capabilityId,
           p_callback_event_id: input.callbackEventId,
           p_callback_claim_id: input.callbackClaimId,
-          p_confirm_result_sha256: input.confirmResultSha256,
+          p_confirm_result_sha256: string(
+            input.confirmResultSha256,
+            SHA256_PATTERN,
+          ),
           p_request_id: input.requestId,
-          p_audit_evidence: input.auditEvidence,
-          p_paid_at: null,
         }),
         ['result_code', 'payment_id', 'product_order_id', 'transaction_id'],
       )
@@ -313,7 +280,7 @@ export function createProductOrderLinePayCapabilityDatabase(
       reasonCode: 'payment_canceled' | 'cancel_after_paid'
     }) {
       const row = exactRecord(
-        await rpc(client, 'cancel_product_order_line_pay_payment', {
+        await rpc(serviceRoleClient, 'cancel_product_order_line_pay_payment', {
           p_environment: input.environment,
           p_payment_id: input.paymentId,
           p_product_order_id: input.productOrderId,
@@ -348,7 +315,7 @@ export function createProductOrderLinePayCapabilityDatabase(
       requestId: string
     }) {
       const row = exactRecord(
-        await rpc(client, 'mark_product_order_line_pay_reconciliation', {
+        await rpc(serviceRoleClient, 'mark_product_order_line_pay_reconciliation', {
           p_environment: input.environment,
           p_payment_id: input.paymentId,
           p_product_order_id: input.productOrderId,
