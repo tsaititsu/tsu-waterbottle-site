@@ -253,6 +253,18 @@ async function run() {
       /不得再沿著來源宮位自己的對宮、三方或暗合繼續取星/u,
     )
     assert.match(integration.content, /第二層關係不得傳回目標宮位/u)
+    assert.match(
+      integration.content,
+      /來源宮位的生活領域只能從該宮已提供的正式分面中選取/u,
+    )
+    assert.match(
+      integration.content,
+      /不得用星曜特質、推導結果或通用詞彙替來源分面改名或新增分面/u,
+    )
+    assert.match(
+      integration.content,
+      /無法建立.*正式分面.*星曜運作.*對本宮影響.*省略這條關係/su,
+    )
   })
   check('lecture-backed health card scans four palaces and writes only in the health palace', () => {
     const health = first.rules.find(
