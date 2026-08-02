@@ -80,6 +80,12 @@ export const AI_CHART_D1_K0_PALACE_ROLES = Object.freeze([
   'trine_1',
   'trine_2',
 ] as const)
+const AI_CHART_D1_K0_MEANING_PALACE_ROLES = Object.freeze([
+  'target',
+  'hidden_combination',
+  'trine_1',
+  'trine_2',
+] as const)
 export const AI_CHART_D1_K0_SELECTION_REASONS = Object.freeze([
   'required_common_rule',
   'palace_meaning',
@@ -215,7 +221,7 @@ export type AiChartD1K0Catalog = Readonly<{
 }>
 
 export type AiChartD1K0SelectedMeaning = Readonly<{
-  palaceRole: AiChartD1K0PalaceRole
+  palaceRole: (typeof AI_CHART_D1_K0_MEANING_PALACE_ROLES)[number]
   palaceId: AiChartD1PalaceId
   meaningId: string
   text: string
@@ -878,7 +884,7 @@ export function validateAiChartD1K0CatalogSemantics(
         const rule = rulesById.get(`rule:palace:${palaceSlug}:meanings`)
         return !rule || rule.kind !== 'palace_meaning'
       }) ||
-      catalog.palaceMeanings.length !== 52 ||
+      catalog.palaceMeanings.length !== expectedMeanings.length ||
       !stableEqual(
         catalog.palaceMeanings.map(
           ({ meaningId, palaceId, text, order }) => ({
@@ -1123,7 +1129,7 @@ export function validateAiChartD1K0CatalogSemantics(
     assertCoverageCount(
       catalog.coverage.structureRuleCoverage,
       AI_CHART_D1_K0_STRUCTURE_RULE_DEFINITIONS.length,
-      15,
+      AI_CHART_D1_K0_STRUCTURE_RULE_DEFINITIONS.length + 1,
     )
 
     const expectedWarnings = [
@@ -1338,7 +1344,10 @@ function parseSelectedMeaning(
   const contentSha256 = parseSha(record.contentSha256, invalid)
   if (hashAiChartD1K0Content(text) !== contentSha256) invalid()
   return Object.freeze({
-    palaceRole: parseAiChartD1Enum(record.palaceRole, AI_CHART_D1_K0_PALACE_ROLES),
+    palaceRole: parseAiChartD1Enum(
+      record.palaceRole,
+      AI_CHART_D1_K0_MEANING_PALACE_ROLES,
+    ),
     palaceId: parsePalaceId(record.palaceId, invalid),
     meaningId: parseAiChartD1Id(record.meaningId),
     text,
@@ -1494,7 +1503,7 @@ export function validateAiChartD1K0P1BundleSemantics(
       bundleInvalid()
     }
     const expectedSelectedMeanings: AiChartD1K0SelectedMeaning[] = []
-    for (const role of AI_CHART_D1_K0_PALACE_ROLES) {
+    for (const role of AI_CHART_D1_K0_MEANING_PALACE_ROLES) {
       const roleMeanings = bundle.selectedMeanings.filter(
         (meaning) => meaning.palaceRole === role,
       )
@@ -1919,7 +1928,10 @@ const mutagenInventorySchema = strictObject({
   },
 })
 const selectedMeaningSchema = strictObject({
-  palaceRole: { type: 'string', enum: [...AI_CHART_D1_K0_PALACE_ROLES] },
+  palaceRole: {
+    type: 'string',
+    enum: [...AI_CHART_D1_K0_MEANING_PALACE_ROLES],
+  },
   palaceId: palaceIdSchema,
   meaningId: idSchema,
   text: shortTextSchema,

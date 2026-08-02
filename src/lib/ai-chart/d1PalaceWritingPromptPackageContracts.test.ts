@@ -156,6 +156,7 @@ function buildStructuralResults(
       relationKind: 'TRINE_QUADRANT',
       visibility: 'EXPLICIT',
       sourcePalaceId: 'palace:wealth',
+      sourceFacetId: 'money.view',
       sourceFactRefs: [
         `relation:${palaceResult.targetPalaceId}:trine`,
         `rule:${palaceResult.targetPalaceId}:trine`,
