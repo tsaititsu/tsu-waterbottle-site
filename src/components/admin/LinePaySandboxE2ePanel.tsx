@@ -1,0 +1,110 @@
+'use client'
+
+import { useRef, useState } from 'react'
+import { getAuthAccessToken } from '@/lib/mockAuth'
+import {
+  createLinePaySandboxE2eAdminController,
+  type LinePaySandboxE2eAdminController,
+  type LinePaySandboxE2eAdminSnapshot,
+} from '@/lib/linePay/sandboxE2eAdminClient'
+
+const CONFIRMATION_ID = 'line-pay-sandbox-e2e-confirmation'
+
+function snapshotMessage(snapshot: LinePaySandboxE2eAdminSnapshot | null) {
+  if (!snapshot) return '尚未啟動測試。'
+  if (snapshot.state === 'starting') {
+    return '正在建立一次性 Sandbox 測試訂單，請勿關閉或重複操作。'
+  }
+  if (snapshot.state === 'redirecting') {
+    return '正在前往 LINE Pay Sandbox，付款核准由管理員本人操作。'
+  }
+  if (snapshot.error === 'admin_session_unavailable') {
+    return '管理員登入 Session 無法使用，尚未送出 Sandbox 測試。請重新登入後重新載入頁面。'
+  }
+  if (snapshot.error === 'invalid_sandbox_payment_url') {
+    return '付款網址未通過 Sandbox 安全驗證，已停止導向且不會重試。'
+  }
+  if (snapshot.error === 'sandbox_response_invalid') {
+    return 'Sandbox 回應格式不符合安全契約，已停止且不會重試。'
+  }
+  return 'Sandbox 測試未完成；為避免重複付款，本頁不會自動重試。'
+}
+
+export default function LinePaySandboxE2ePanel() {
+  const [confirmed, setConfirmed] = useState(false)
+  const [snapshot, setSnapshot] = useState<LinePaySandboxE2eAdminSnapshot | null>(null)
+  const controllerRef = useRef<LinePaySandboxE2eAdminController | null>(null)
+
+  if (controllerRef.current == null) {
+    controllerRef.current = createLinePaySandboxE2eAdminController(
+      {
+        getAccessToken: getAuthAccessToken,
+        fetchStart: (input, init) => fetch(input, { ...init, cache: 'no-store' }),
+        navigate: (url) => window.location.assign(url),
+      },
+      setSnapshot,
+    )
+  }
+
+  const locked = snapshot !== null
+
+  return (
+    <section
+      aria-labelledby="line-pay-sandbox-e2e-title"
+      className="rounded-2xl border border-[#d9b85f] bg-[#fffaf0] p-5 shadow-soft md:p-6"
+      data-line-pay-sandbox-e2e-panel
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold tracking-[0.14em] text-[#7d5a00]">Preview 專用</p>
+          <h2
+            className="mt-2 font-serifTC text-2xl font-semibold text-deepPurple"
+            id="line-pay-sandbox-e2e-title"
+          >
+            LINE Pay Sandbox E2E
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm leading-7 text-textMuted">
+            建立一筆 NT$50 測試訂單，只使用 Sandbox Supabase、固定出口 Gateway 與 LINE Pay Sandbox。
+            此工具不會接觸正式資料，也不會啟用 Production LINE Pay。
+          </p>
+        </div>
+        <span className="rounded-full border border-[#d9b85f] bg-white px-3 py-1 text-xs font-semibold text-[#7d5a00]">
+          Sandbox only
+        </span>
+      </div>
+
+      <label className="mt-5 flex items-start gap-3 rounded-xl border border-[#ead9a6] bg-white p-4 text-sm leading-6 text-textDark" htmlFor={CONFIRMATION_ID}>
+        <input
+          checked={confirmed}
+          className="mt-1 size-4 accent-[#7d5a00]"
+          disabled={locked}
+          id={CONFIRMATION_ID}
+          onChange={(event) => setConfirmed(event.target.checked)}
+          type="checkbox"
+        />
+        <span>我確認這是一次 NT$50 LINE Pay Sandbox 測試，付款核准畫面由我本人操作。</span>
+      </label>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          className="focus-ring rounded-lg bg-[#7d5a00] px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={!confirmed || locked}
+          onClick={() => {
+            if (!confirmed || locked) return
+            void controllerRef.current?.start()
+          }}
+        >
+          {snapshot?.state === 'starting'
+            ? '正在建立 Sandbox 測試...'
+            : snapshot?.state === 'redirecting'
+              ? '正在前往 LINE Pay Sandbox...'
+              : '執行一次 NT$50 Sandbox 測試'}
+        </button>
+        <p aria-live="polite" className="text-sm leading-6 text-textMuted" role="status">
+          {snapshotMessage(snapshot)}
+        </p>
+      </div>
+    </section>
+  )
+}
