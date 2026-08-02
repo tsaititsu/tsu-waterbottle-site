@@ -92,7 +92,9 @@ function bundleFixture(catalog: AiChartD1K0Catalog): AiChartD1K0P1Bundle {
       return rule
     })
     .sort(compareAiChartD1K0Rules)
-  const selectedMeanings = AI_CHART_D1_K0_PALACE_ROLES.flatMap(
+  const selectedMeanings = AI_CHART_D1_K0_PALACE_ROLES.filter(
+    (palaceRole) => palaceRole !== 'opposite',
+  ).flatMap(
     (palaceRole, index) => {
       const palaceId = AI_CHART_D1_PALACE_IDENTITIES[index].palaceId
       return catalog.palaceMeanings
@@ -528,6 +530,23 @@ async function run() {
     )
     expectBundleInvalid(value, catalog)
   })
+  check('opposite palace meanings are rejected', () => {
+    const value = structuredClone(bundle) as Mutable<ReturnType<typeof bundleFixture>>
+    const oppositeMeaning = catalog.palaceMeanings.find(
+      (meaning) => meaning.palaceId === AI_CHART_D1_PALACE_IDENTITIES[1].palaceId,
+    )
+    assert.ok(oppositeMeaning)
+    const injectedOppositeMeaning = {
+      palaceRole: 'opposite',
+      palaceId: oppositeMeaning.palaceId,
+      meaningId: oppositeMeaning.meaningId,
+      text: oppositeMeaning.text,
+      contentSha256: oppositeMeaning.contentSha256,
+      order: oppositeMeaning.order,
+    } as unknown as (typeof value.selectedMeanings)[number]
+    value.selectedMeanings.splice(1, 0, injectedOppositeMeaning)
+    expectBundleInvalid(value, catalog)
+  })
   check('one role mixing two palace ids is rejected', () => {
     const value = structuredClone(bundle) as Mutable<ReturnType<typeof bundleFixture>>
     const targetEnd = value.selectedMeanings.findIndex(
@@ -624,6 +643,21 @@ async function run() {
     assertStrictObjectSchema(AI_CHART_D1_K0_P1_BUNDLE_INTERNAL_JSON_SCHEMA)
     assert.equal(containsUniqueItems(AI_CHART_D1_K0_CATALOG_INTERNAL_JSON_SCHEMA), false)
     assert.equal(containsUniqueItems(AI_CHART_D1_K0_P1_BUNDLE_INTERNAL_JSON_SCHEMA), false)
+  })
+  check('selected meaning schema excludes the opposite palace role', () => {
+    const schema = AI_CHART_D1_K0_P1_BUNDLE_INTERNAL_JSON_SCHEMA as {
+      properties: {
+        selectedMeanings: {
+          items: {
+            properties: { palaceRole: { enum: readonly string[] } }
+          }
+        }
+      }
+    }
+    assert.deepEqual(
+      schema.properties.selectedMeanings.items.properties.palaceRole.enum,
+      ['target', 'hidden_combination', 'trine_1', 'trine_2'],
+    )
   })
   check('schemas remain internal and contain no OpenAI response format', () => {
     const schemaKeys = allSchemaKeys([

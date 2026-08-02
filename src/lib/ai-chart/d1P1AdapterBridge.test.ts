@@ -1407,10 +1407,18 @@ async function run() {
       AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.COVERAGE_MINOR_STARS_MISMATCH,
     )
   })
-  const oppositeMeaning = modelInput.knowledgeContext.meanings.find(
-    (meaning) => meaning.palaceRole === 'opposite',
+  const oppositeMeaning = fixture.catalog.palaceMeanings.find(
+    (meaning) =>
+      meaning.palaceId ===
+      modelInput.structuralContext.oppositePalace.palaceId,
   )
   assert.ok(oppositeMeaning)
+  assert.equal(
+    modelInput.knowledgeContext.meanings.some(
+      (meaning) => meaning.meaningId === oppositeMeaning.meaningId,
+    ),
+    false,
+  )
   const unexpectedMeaningId = 'meaning:invented'
   check('invented meaningId is rejected from direct coverage', () => {
     const value = createValidAiChartD1P1Result(modelInput)

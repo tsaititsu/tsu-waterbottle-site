@@ -67,6 +67,13 @@ export const AI_CHART_D1_P1_MODEL_INPUT_INVALID =
 export const AI_CHART_D1_P1_MODEL_INPUT_NOT_READY =
   'ai_chart_d1_p1_model_input_not_ready' as const
 
+const AI_CHART_D1_P1_MEANING_PALACE_ROLES = Object.freeze(
+  AI_CHART_D1_K0_PALACE_ROLES.filter(
+    (role): role is AiChartD1K0SelectedMeaning['palaceRole'] =>
+      role !== 'opposite',
+  ),
+)
+
 export type AiChartD1P1ModelRule = Readonly<{
   ruleId: string
   kind: AiChartD1K0RuleKind
@@ -427,7 +434,10 @@ function parseSelectedMeaning(value: unknown): AiChartD1K0SelectedMeaning {
   const palaceId = parseAiChartD1Id(record.palaceId)
   if (!PALACE_ID_PATTERN.test(palaceId)) invalid()
   return Object.freeze({
-    palaceRole: parseAiChartD1Enum(record.palaceRole, AI_CHART_D1_K0_PALACE_ROLES),
+    palaceRole: parseAiChartD1Enum(
+      record.palaceRole,
+      AI_CHART_D1_P1_MEANING_PALACE_ROLES,
+    ),
     palaceId: palaceId as AiChartD1PalaceId,
     meaningId: parseAiChartD1Id(record.meaningId),
     text: parseAiChartD1Text(record.text, AI_CHART_D1_MAX_SHORT_TEXT_LENGTH),
@@ -631,7 +641,7 @@ const MODEL_RULE_SCHEMA = createAiChartD1StrictObjectSchema({
 })
 const SELECTED_MEANING_SCHEMA = createAiChartD1StrictObjectSchema({
   palaceRole: createAiChartD1StringSchema({
-    enumValues: AI_CHART_D1_K0_PALACE_ROLES,
+    enumValues: AI_CHART_D1_P1_MEANING_PALACE_ROLES,
   }),
   palaceId: PALACE_ID_SCHEMA,
   meaningId: ID_SCHEMA,

@@ -270,41 +270,43 @@ function buildOneBundle(
 
   for (const view of viewsFor(input)) {
     const palaceSlug = view.palace.palaceId.slice('palace:'.length)
-    if (!addRule(`rule:palace:${palaceSlug}:meanings`, {
-      reason: 'palace_meaning', role: view.role,
-      palaceId: view.palace.palaceId, placementId: null,
-      starName: null, mutagenType: null,
-      structuralReference: `p1:view:${view.role}`,
-    })) {
-      addMissing({
-        requirementId: `missing:${view.role}:palace-meaning:${palaceSlug}`,
-        kind: 'palace_meaning', role: view.role,
-        palaceId: view.palace.palaceId, starName: null,
-        mutagenType: null, pairKey: null,
-        reasonCode: 'missing_palace_meaning',
-      })
-    }
-    const palaceMeanings = catalog.palaceMeanings.filter(
-      (meaning) => meaning.palaceId === view.palace.palaceId,
-    )
-    if (palaceMeanings.length === 0) {
-      addMissing({
-        requirementId: `missing:${view.role}:meaning-items:${palaceSlug}`,
-        kind: 'palace_meaning', role: view.role,
-        palaceId: view.palace.palaceId, starName: null,
-        mutagenType: null, pairKey: null,
-        reasonCode: 'missing_palace_meaning',
-      })
-    }
-    for (const meaning of palaceMeanings) {
-      meanings.push(Object.freeze({
-        palaceRole: view.role,
-        palaceId: meaning.palaceId,
-        meaningId: meaning.meaningId,
-        text: meaning.text,
-        contentSha256: meaning.contentSha256,
-        order: meaning.order,
-      }))
+    if (view.role !== 'opposite') {
+      if (!addRule(`rule:palace:${palaceSlug}:meanings`, {
+        reason: 'palace_meaning', role: view.role,
+        palaceId: view.palace.palaceId, placementId: null,
+        starName: null, mutagenType: null,
+        structuralReference: `p1:view:${view.role}`,
+      })) {
+        addMissing({
+          requirementId: `missing:${view.role}:palace-meaning:${palaceSlug}`,
+          kind: 'palace_meaning', role: view.role,
+          palaceId: view.palace.palaceId, starName: null,
+          mutagenType: null, pairKey: null,
+          reasonCode: 'missing_palace_meaning',
+        })
+      }
+      const palaceMeanings = catalog.palaceMeanings.filter(
+        (meaning) => meaning.palaceId === view.palace.palaceId,
+      )
+      if (palaceMeanings.length === 0) {
+        addMissing({
+          requirementId: `missing:${view.role}:meaning-items:${palaceSlug}`,
+          kind: 'palace_meaning', role: view.role,
+          palaceId: view.palace.palaceId, starName: null,
+          mutagenType: null, pairKey: null,
+          reasonCode: 'missing_palace_meaning',
+        })
+      }
+      for (const meaning of palaceMeanings) {
+        meanings.push(Object.freeze({
+          palaceRole: view.role,
+          palaceId: meaning.palaceId,
+          meaningId: meaning.meaningId,
+          text: meaning.text,
+          contentSha256: meaning.contentSha256,
+          order: meaning.order,
+        }))
+      }
     }
 
     for (const star of view.palace.canonicalMajorStars) {

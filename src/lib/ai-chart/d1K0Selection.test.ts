@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import Module, { createRequire } from 'node:module'
 import { normalizeAiChartD1N0 } from './d1N0'
 import {
-  AI_CHART_D1_K0_PALACE_ROLES,
   compareAiChartD1K0Rules,
   createAiChartD1K0CatalogFingerprint,
   parseAiChartD1K0Catalog,
@@ -373,11 +372,47 @@ async function run() {
       true,
     )
   })
-  check('five palace roles receive meanings in fixed order', () => {
-    for (const bundle of bundles) {
+  check('opposite life facets are excluded while target, hidden, and trine meanings remain exact', () => {
+    bundles.forEach((bundle, index) => {
       const roles = [...new Set(bundle.selectedMeanings.map((entry) => entry.palaceRole))]
-      assert.deepEqual(roles, AI_CHART_D1_K0_PALACE_ROLES)
-    }
+      assert.deepEqual(roles, [
+        'target',
+        'hidden_combination',
+        'trine_1',
+        'trine_2',
+      ])
+      assert.equal(
+        new Set<string>(
+          bundle.selectedMeanings.map((meaning) => meaning.palaceRole),
+        ).has('opposite'),
+        false,
+      )
+      assert.equal(
+        bundle.selectedRules.some(
+          (rule) =>
+            rule.ruleId ===
+            `rule:palace:${inputs[index].oppositePalace.palaceId.slice('palace:'.length)}:meanings`,
+        ),
+        false,
+      )
+
+      const expectedMeaningPalaces = [
+        ['target', inputs[index].targetPalace.palaceId],
+        ['hidden_combination', inputs[index].hiddenCombinationPalace.palaceId],
+        ['trine_1', inputs[index].otherTrinePalaces[0].palaceId],
+        ['trine_2', inputs[index].otherTrinePalaces[1].palaceId],
+      ] as const
+      for (const [role, palaceId] of expectedMeaningPalaces) {
+        assert.deepEqual(
+          bundle.selectedMeanings
+            .filter((meaning) => meaning.palaceRole === role)
+            .map((meaning) => meaning.meaningId),
+          catalog.palaceMeanings
+            .filter((meaning) => meaning.palaceId === palaceId)
+            .map((meaning) => meaning.meaningId),
+        )
+      }
+    })
   })
   check('only stars visible in five palace views are selected', () => {
     bundles.forEach((bundle, index) => {
