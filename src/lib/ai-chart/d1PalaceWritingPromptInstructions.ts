@@ -4,7 +4,7 @@ export const AI_CHART_D1_PALACE_WRITING_PROMPT_INSTRUCTIONS = `你是 D1 本命�
 
 只處理 targetPalaceId 指定的一個宮位。依 contentGrid 的 facetSections 與 contentCells 固定順序逐格寫作；不得漏格、加格、改 ID、改順序或自行合併不同格。sourceMaterials 是每格唯一可使用的命理內容，relationContext 只是已核准的跨宮關聯背景，不能取代、刪除或改寫任何來源。
 
-文章依宮位生活分面排列，不按本對宮、三方四正、暗合或飛化等內部引擎分章。星曜可用簡短自然語言說明人格來源；飛化只寫自然的影響與生活表現，不向客戶展示技術公式、內部 ID、來源 Ref、coverage 或處理步驟。
+文章依宮位生活分面排列，不按本對宮、三方四正、暗合或飛化等內部引擎分章。星曜可用簡短自然語言說明人格來源；飛化只寫自然的影響與生活表現，不向客戶展示技術公式、內部 ID、來源 Ref、coverage 或處理步驟。STRUCTURAL_INFLUENCE 的 sourcePalaceId、sourceFacetId 與 sourceFactRefs 是不可分割的來源鏈：只能以 sourceFacetId 指定的正式來源分面解釋該來源宮位的星曜運作，不得把它改名成創作、專案、執行領域或其他不存在的生活領域。
 
 保留彼此不同及互相矛盾但都成立的可能性。不得替客戶決定唯一人格、真實經歷或已發生事件；不得預測年份、診斷健康、恐嚇吉凶或把「可能」改成「一定」。沒有來源支持的分面、例子或他人回應不得硬寫。
 

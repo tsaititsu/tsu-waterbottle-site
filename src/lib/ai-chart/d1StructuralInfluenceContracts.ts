@@ -62,6 +62,7 @@ export const AI_CHART_D1_STRUCTURAL_INFLUENCE_VALIDATION_REASONS =
     'IDENTITY_OR_AXIS_MISMATCH',
     'STRUCTURAL_RELATION_UNVERIFIED',
     'VISIBILITY_MISMATCH',
+    'SOURCE_FACET_INVALID',
     'TARGET_FACET_INVALID',
     'TARGET_CLAIM_REFERENCE_INVALID',
     'SOURCE_FACT_REFERENCE_INVALID',
@@ -91,6 +92,7 @@ export type AiChartD1StructuralInfluence = Readonly<{
   relationKind: AiChartD1StructuralRelationKind
   visibility: AiChartD1StructuralInfluenceVisibility
   sourcePalaceId: AiChartD1PalaceId
+  sourceFacetId: AiChartD1PalaceFacetId
   sourceFactRefs: readonly string[]
   targetPalaceId: AiChartD1PalaceId
   targetFacetId: AiChartD1PalaceFacetId
@@ -145,6 +147,7 @@ const INFLUENCE_FIELDS = Object.freeze([
   'relationKind',
   'visibility',
   'sourcePalaceId',
+  'sourceFacetId',
   'sourceFactRefs',
   'targetPalaceId',
   'targetFacetId',
@@ -208,6 +211,19 @@ function parseInfluence(
   rootTargetPalaceId: AiChartD1PalaceId,
 ): AiChartD1StructuralInfluence {
   const record = requireAiChartD1ExactObject(value, INFLUENCE_FIELDS)
+  const sourcePalaceId = parsePalaceId(record.sourcePalaceId)
+  let sourceFacetId: AiChartD1PalaceFacetId
+  try {
+    sourceFacetId = parseAiChartD1Enum(
+      record.sourceFacetId,
+      AI_CHART_D1_PALACE_FACET_IDS,
+    )
+  } catch {
+    invalid('SOURCE_FACET_INVALID')
+  }
+  if (!isAiChartD1PalaceFacetAllowed(sourcePalaceId, sourceFacetId)) {
+    invalid('SOURCE_FACET_INVALID')
+  }
   const targetPalaceId = parsePalaceId(record.targetPalaceId)
   const targetFacetId = parseAiChartD1Enum(
     record.targetFacetId,
@@ -237,7 +253,8 @@ function parseInfluence(
     influenceId: parseAiChartD1Id(record.influenceId),
     relationKind,
     visibility,
-    sourcePalaceId: parsePalaceId(record.sourcePalaceId),
+    sourcePalaceId,
+    sourceFacetId,
     sourceFactRefs: parseIdArray(record.sourceFactRefs, 2),
     targetPalaceId,
     targetFacetId,
@@ -658,6 +675,7 @@ const INFLUENCE_SCHEMA = createAiChartD1StrictObjectSchema({
     enumValues: AI_CHART_D1_STRUCTURAL_INFLUENCE_VISIBILITIES,
   }),
   sourcePalaceId: PALACE_ID_SCHEMA,
+  sourceFacetId: FACET_ID_SCHEMA,
   sourceFactRefs: createAiChartD1ArraySchema(ID_SCHEMA, {
     minimumItems: 2,
     maximumItems: AI_CHART_D1_MAX_LIST_ITEMS,
