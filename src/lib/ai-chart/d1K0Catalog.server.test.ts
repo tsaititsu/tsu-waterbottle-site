@@ -129,7 +129,6 @@ const EXPECTED_PALACE_MEANINGS = Object.freeze({
     '居住環境',
     '家人相處方式',
     '存錢方式與財庫',
-    '家世背景',
     '住家附近的環境',
   ],
   'palace:fortune': [
@@ -182,7 +181,7 @@ async function run() {
     )
   })
   check('palace meanings use only the teacher-confirmed canonical facets', () => {
-    assert.equal(first.palaceMeanings.length, 45)
+    assert.equal(first.palaceMeanings.length, 44)
     for (const [palaceId, expectedMeanings] of Object.entries(
       EXPECTED_PALACE_MEANINGS,
     )) {

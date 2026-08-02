@@ -48,7 +48,7 @@ export const AI_CHART_D1_K0_SOURCE_SHA256 = Object.freeze({
   [AI_CHART_D1_K0_SOURCE_FILES.stars]:
     'a7febeaafca60375c24bbb69ec97d6bc436707beaa6625d0fb7f62452636891e',
   [AI_CHART_D1_K0_SOURCE_FILES.palaces]:
-    '21d0da84e1bb9ba8ed087bffd6b52216de6fa71697d4788f6fe4b5beddeb5ac0',
+    '89ffcd47a05ad7b894b75ea0ece6ff8ea098d8a4ea5a00409a22c38fb3edd0ef',
   [AI_CHART_D1_K0_SOURCE_FILES.mutagens]:
     '5c67e03928e76f2da0a87c2f104aa65e17b2e183e1e0d1674af3119cc9f0b67a',
   [AI_CHART_D1_K0_SOURCE_FILES.doubles]:
@@ -235,7 +235,7 @@ export const AI_CHART_D1_K0_PALACE_MEANING_DEFINITIONS = Object.freeze([
   ['palace:travel', '遷移宮', '遷移宮：在外人際關係、內心想法、外界對命主的看法', ['在外人際關係', '內心想法', '外界對命主的看法']],
   ['palace:friends', '僕役宮', '僕役宮：異性別兄弟姊妹、一般同事、朋友、團隊中的相處過程、對待關係與價值觀', ['異性別兄弟姊妹', '一般同事', '朋友', '團隊中的相處過程、對待關係與價值觀']],
   ['palace:career', '官祿宮', '官祿宮：工作態度與做事方式、工作方向與選擇、工作中的價值觀與生活重心', ['工作態度與做事方式', '工作方向與選擇', '工作中的價值觀與生活重心']],
-  ['palace:property', '田宅宮', '田宅宮：居住環境、家人相處方式、存錢方式與財庫、家世背景、住家附近的環境', ['居住環境', '家人相處方式', '存錢方式與財庫', '家世背景', '住家附近的環境']],
+  ['palace:property', '田宅宮', '田宅宮：居住環境、家人相處方式、存錢方式與財庫、住家附近的環境', ['居住環境', '家人相處方式', '存錢方式與財庫', '住家附近的環境']],
   ['palace:fortune', '福德宮', '福德宮：精神享受、社會價值觀、福分、運氣、潛意識、品味、意志力與精神耐力', ['精神享受', '社會價值觀', '福分', '運氣', '潛意識', '品味', '意志力與精神耐力']],
   ['palace:parents', '父母宮', '父母宮：父親的特質與相處關係、對長輩與權威人物的看法、命主面對長輩、主管階層或政府機關的態度', ['父親的特質與相處關係', '對長輩與權威人物的看法', '命主面對長輩、主管階層或政府機關的態度']],
 ] as const satisfies readonly (readonly [AiChartD1PalaceId, string, string, readonly string[]])[])
@@ -252,7 +252,7 @@ export const AI_CHART_D1_K0_MEANING_SLUGS: Readonly<
   在外人際關係: 'external-relations', 內心想法: 'inner-thoughts', 外界對命主的看法: 'public-perception',
   異性別兄弟姊妹: 'opposite-gender-siblings', 一般同事: 'colleagues', 朋友: 'friends', '團隊中的相處過程、對待關係與價值觀': 'team-interaction-values',
   工作態度與做事方式: 'work-attitude-and-method', 工作方向與選擇: 'work-direction-and-choice', 工作中的價值觀與生活重心: 'work-values-and-life-focus',
-  居住環境: 'living-environment', 家人相處方式: 'family-interaction', 存錢方式與財庫: 'savings-and-wealth-storage', 家世背景: 'family-background', 住家附近的環境: 'nearby-home-environment',
+  居住環境: 'living-environment', 家人相處方式: 'family-interaction', 存錢方式與財庫: 'savings-and-wealth-storage', 住家附近的環境: 'nearby-home-environment',
   精神享受: 'spiritual-enjoyment', 社會價值觀: 'social-values', 福分: 'fortune-capacity', 運氣: 'luck', 潛意識: 'subconscious', 品味: 'taste', 意志力與精神耐力: 'willpower-and-mental-endurance',
   父親的特質與相處關係: 'father-character-and-relationship', 對長輩與權威人物的看法: 'elders-and-authority-view', '命主面對長輩、主管階層或政府機關的態度': 'authority-facing-attitude',
 })

@@ -46,7 +46,7 @@
     {
       "path": "content/ai-chart/d1-v1/knowledge/reasoning/06_D1_飛化推理模組.md",
       "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/紫微斗數_AI推理引擎_工作區 /06_D1_飛化推理模組.md",
-      "sha256": "af5714687ec1bb55ace472b9af986c4eaf99c8cd5bd348b093c06ea18b517c20",
+      "sha256": "94eb1468ca3556d6b70ab4fbfda38f968bd2e09cfcf3ad7262ea7cb65033db30",
       "classification": "reasoning_knowledge",
       "status": "reasoning_source_candidate",
       "runtimeEligible": true,
@@ -190,7 +190,7 @@
     {
       "path": "content/ai-chart/d1-v1/knowledge/core/C_十二宮分面與身宮疾厄田宅.md",
       "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/知識庫_v1.0/C_十二宮分面與身宮疾厄田宅.md",
-      "sha256": "21d0da84e1bb9ba8ed087bffd6b52216de6fa71697d4788f6fe4b5beddeb5ac0",
+      "sha256": "89ffcd47a05ad7b894b75ea0ece6ff8ea098d8a4ea5a00409a22c38fb3edd0ef",
       "classification": "current_knowledge_source",
       "status": "current_source_candidate",
       "runtimeEligible": true,

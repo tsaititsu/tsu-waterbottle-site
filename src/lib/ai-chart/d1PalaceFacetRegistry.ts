@@ -70,7 +70,6 @@ const FACETS_BY_PALACE = {
     'home.living_environment',
     'home.nearby_environment',
     'home.family_interaction',
-    'home.family_background',
     'reserve.saving_method',
     'reserve.accumulation_retention',
   ],
@@ -128,7 +127,7 @@ const FACET_IDS_BY_PALACE: ReadonlyMap<
 
 if (
   AI_CHART_D1_PALACE_FACET_REGISTRY.length !== 12 ||
-  AI_CHART_D1_PALACE_FACET_IDS.length !== 60 ||
+  AI_CHART_D1_PALACE_FACET_IDS.length !== 59 ||
   new Set(AI_CHART_D1_PALACE_FACET_IDS).size !==
     AI_CHART_D1_PALACE_FACET_IDS.length
 ) {

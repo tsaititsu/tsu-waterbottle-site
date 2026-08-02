@@ -335,13 +335,14 @@ check('palace facet Registry v1 is versioned and covers twelve palaces', () => {
   )
 })
 
-check('the approved Registry has exactly 60 unique canonical facet IDs', () => {
-  assert.equal(AI_CHART_D1_PALACE_FACET_IDS.length, 60)
-  assert.equal(new Set(AI_CHART_D1_PALACE_FACET_IDS).size, 60)
+check('the approved Registry has exactly 59 unique canonical facet IDs', () => {
+  assert.equal(AI_CHART_D1_PALACE_FACET_IDS.length, 59)
+  assert.equal(new Set(AI_CHART_D1_PALACE_FACET_IDS).size, 59)
   for (const retiredFacetId of [
     'life.appearance_optional',
     'possessions.owned_items',
     'body.appearance_optional',
+    'home.family_background',
   ]) {
     assert.ok(!AI_CHART_D1_PALACE_FACET_IDS.includes(retiredFacetId as never))
   }
@@ -365,6 +366,13 @@ check('confirmed palace boundaries are represented by exact facet ownership', ()
       'reserve.saving_method',
     ),
     true,
+  )
+  assert.equal(
+    isAiChartD1PalaceFacetAllowed(
+      'palace:property',
+      'home.family_background',
+    ),
+    false,
   )
   assert.equal(
     isAiChartD1PalaceFacetAllowed('palace:friends', 'social.coworkers'),
