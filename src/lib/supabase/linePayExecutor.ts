@@ -56,6 +56,7 @@ function requireExecutorJwt(value: string | undefined) {
   }
   const header = decodeJwtPart(parts[0]!)
   const claims = decodeJwtPart(parts[1]!)
+  const nowSeconds = Math.floor(Date.now() / 1000)
   if (
     typeof header.alg !== 'string'
     || !JWT_ALGORITHMS.has(header.alg)
@@ -63,7 +64,7 @@ function requireExecutorJwt(value: string | undefined) {
     || claims.role !== 'line_pay_payment_executor'
     || typeof claims.exp !== 'number'
     || !Number.isSafeInteger(claims.exp)
-    || claims.exp <= Math.floor(Date.now() / 1000)
+    || claims.exp <= nowSeconds
   ) {
     invalidConfig()
   }

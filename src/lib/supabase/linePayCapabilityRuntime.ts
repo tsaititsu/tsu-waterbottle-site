@@ -18,6 +18,22 @@ export type ProductOrderLinePayCapabilityContextClient = {
   }
 }
 
+export type ProductOrderLinePayFinalizeConfirmationInput = {
+  environment: 'sandbox' | 'production'
+  paymentId: string
+  productOrderId: string
+  attemptId: string
+  merchantOrderNo: string
+  transactionId: string
+  amountTwd: number
+  currency: 'TWD'
+  capabilityId: string
+  callbackEventId: string
+  callbackClaimId: string
+  confirmResultSha256: string
+  requestId: string
+}
+
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const SHA256_PATTERN = /^[0-9a-f]{64}$/
@@ -220,21 +236,9 @@ export function createProductOrderLinePayCapabilityDatabase(
       }
     },
 
-    async finalizeConfirmation(input: {
-      environment: 'sandbox' | 'production'
-      paymentId: string
-      productOrderId: string
-      attemptId: string
-      merchantOrderNo: string
-      transactionId: string
-      amountTwd: number
-      currency: 'TWD'
-      capabilityId: string
-      callbackEventId: string
-      callbackClaimId: string
-      confirmResultSha256: string
-      requestId: string
-    }) {
+    async finalizeConfirmation(
+      input: ProductOrderLinePayFinalizeConfirmationInput,
+    ) {
       if (!executorClient) databaseError()
       const row = exactRecord(
         await rpc(executorClient, 'finalize_product_order_line_pay_confirmation', {

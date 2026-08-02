@@ -13,6 +13,13 @@ const runtime = readFileSync(
   new URL('../src/lib/supabase/linePayCapabilityRuntime.ts', import.meta.url),
   'utf8',
 )
+const handler = readFileSync(
+  new URL(
+    '../src/app/api/product-orders/line-pay/capabilityHandler.ts',
+    import.meta.url,
+  ),
+  'utf8',
+)
 const executor = readFileSync(
   new URL('../src/lib/supabase/linePayExecutor.ts', import.meta.url),
   'utf8',
@@ -121,9 +128,29 @@ test('executor client is server-only and rejects broad or unsigned credentials',
   assert.equal(executor.split('\n')[0], "import 'server-only'")
   assert.match(executor, /claims\.role\s*!==\s*'line_pay_payment_executor'/)
   assert.match(executor, /claims\.aud\s*!==\s*'authenticated'/)
-  assert.match(executor, /claims\.exp\s*<=\s*Math\.floor\(Date\.now\(\)\s*\/\s*1000\)/)
+  assert.match(executor, /const\s+nowSeconds\s*=\s*Math\.floor\(Date\.now\(\)\s*\/\s*1000\)/)
+  assert.match(executor, /claims\.exp\s*<=\s*nowSeconds/)
   assert.match(executor, /const\s+JWT_ALGORITHMS\s*=\s*new\s+Set\(\['ES256',\s*'HS256',\s*'RS256'\]\)/)
   assert.doesNotMatch(executor, /console\.|logger\.|SUPABASE_SERVICE_ROLE_KEY/)
+})
+
+test('shares one finalize confirmation input type across handler and runtime', () => {
+  assert.match(
+    runtime,
+    /export\s+type\s+ProductOrderLinePayFinalizeConfirmationInput\s*=\s*\{/,
+  )
+  assert.match(
+    handler,
+    /import\s+type\s+\{\s*ProductOrderLinePayFinalizeConfirmationInput\s*\}\s+from\s+'\.\.\/\.\.\/\.\.\/\.\.\/lib\/supabase\/linePayCapabilityRuntime'/,
+  )
+  assert.match(
+    handler,
+    /finalizeConfirmation:\s*\(input:\s*ProductOrderLinePayFinalizeConfirmationInput\)/,
+  )
+  assert.match(
+    runtime,
+    /async\s+finalizeConfirmation\(\s*input:\s*ProductOrderLinePayFinalizeConfirmationInput,?\s*\)/,
+  )
 })
 
 test('documents impact, backup, deployment order, compatibility, and fail-forward recovery', () => {
@@ -138,8 +165,23 @@ test('documents impact, backup, deployment order, compatibility, and fail-forwar
     '20260728053215_line_pay_checkout_aggregate_initialization.sql',
     '20260802160000_line_pay_atomic_confirmation_finalization.sql',
     'SUPABASE_LINE_PAY_EXECUTOR_JWT',
+    '最小權限',
+    '輪替',
     '舊版 callback',
   ]) {
     assert.match(deployment, new RegExp(requiredBoundary))
   }
+
+  const deploymentOrder = deployment.slice(
+    deployment.indexOf('## 固定部署順序'),
+    deployment.indexOf('## 舊程式相容性'),
+  )
+  const callbackDeployment = deploymentOrder.indexOf(
+    '部署包含新 callback adapter',
+  )
+  const atomicMigration = deploymentOrder.indexOf(
+    '20260802160000_line_pay_atomic_confirmation_finalization.sql',
+  )
+  assert.ok(callbackDeployment >= 0)
+  assert.ok(atomicMigration > callbackDeployment)
 })

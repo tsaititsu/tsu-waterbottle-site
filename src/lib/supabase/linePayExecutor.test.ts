@@ -54,11 +54,12 @@ function base64url(value: unknown) {
 }
 
 function executorJwt(overrides: Record<string, unknown> = {}) {
+  const nowSeconds = Math.floor(Date.now() / 1000)
   return [
     base64url({ alg: 'HS256', typ: 'JWT' }),
     base64url({
       aud: 'authenticated',
-      exp: 4_102_444_800,
+      exp: nowSeconds + 300,
       role: 'line_pay_payment_executor',
       ...overrides,
     }),
@@ -110,7 +111,7 @@ test('rejects absent, expired, service-role, and unsigned executor credentials',
     executorJwt({ role: 'service_role' }),
     `${base64url({ alg: 'none', typ: 'JWT' })}.${base64url({
       aud: 'authenticated',
-      exp: 4_102_444_800,
+      exp: Math.floor(Date.now() / 1000) + 300,
       role: 'line_pay_payment_executor',
     })}.`,
   ]

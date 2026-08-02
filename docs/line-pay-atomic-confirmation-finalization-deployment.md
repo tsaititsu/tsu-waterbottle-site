@@ -28,10 +28,12 @@ Migration 不修改商業資料 rows，不啟用 Runtime，也不改寫既有 Mi
 
 1. `20260719033404_line_pay_remediation_contracts.sql`
 2. `20260728053215_line_pay_checkout_aggregate_initialization.sql`
-3. `20260802160000_line_pay_atomic_confirmation_finalization.sql`
-4. 部署包含新 callback adapter 的 exact commit，但保持 Runtime disabled。
+3. 部署包含新 callback adapter 的 exact commit，但保持 Runtime disabled。
+4. `20260802160000_line_pay_atomic_confirmation_finalization.sql`
 5. 透過受控秘密通道設定 server-only `SUPABASE_LINE_PAY_EXECUTOR_JWT`，不得讀取
-   或顯示真值。
+   或顯示真值。此 credential 只能代表最小權限的
+   `line_pay_payment_executor`，不得改用 `service_role`；輪替必須透過受控秘密通道
+   更新並重新部署，無有效 credential 時 callback 必須 fail closed。
 6. 執行唯讀 catalog／ACL／callback readiness postflight。
 7. 另行取得 Runtime 啟用與付款測試授權。
 

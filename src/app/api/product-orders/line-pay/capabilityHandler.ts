@@ -5,6 +5,7 @@ import {
   type LinePayServerEnv,
 } from '../../../../lib/linePay'
 import type { ParsedLinePayConfirmResponse } from '../../../../lib/linePay/responseParser'
+import type { ProductOrderLinePayFinalizeConfirmationInput } from '../../../../lib/supabase/linePayCapabilityRuntime'
 
 export type ProductOrderLinePayCapabilityPaymentContext = {
   paymentId: string
@@ -47,21 +48,7 @@ export type ProductOrderLinePayCapabilityDatabase = {
   }) => Promise<{
     resultCode: 'claimed' | 'already_claimed' | 'already_paid'
   }>
-  finalizeConfirmation: (input: {
-    environment: 'sandbox' | 'production'
-    paymentId: string
-    productOrderId: string
-    attemptId: string
-    merchantOrderNo: string
-    transactionId: string
-    amountTwd: number
-    currency: 'TWD'
-    capabilityId: string
-    callbackEventId: string
-    callbackClaimId: string
-    confirmResultSha256: string
-    requestId: string
-  }) => Promise<{
+  finalizeConfirmation: (input: ProductOrderLinePayFinalizeConfirmationInput) => Promise<{
     resultCode: 'completed' | 'already_completed'
     transactionId: string
   }>
