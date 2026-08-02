@@ -24,6 +24,8 @@ export const LINE_PAY_SANDBOX_E2E_AMOUNT_TWD = 50
 export type LinePaySandboxE2eStartEnvironment = LinePayServerEnv & {
   VERCEL_ENV?: string
   VERCEL_GIT_COMMIT_SHA?: string
+  VERCEL_URL?: string
+  VERCEL_BRANCH_URL?: string
   LINE_PAY_TRANSPORT?: string
   LINE_PAY_SANDBOX_E2E_ENABLED?: string
 }
@@ -96,8 +98,43 @@ export function isLinePaySandboxE2eRouteEnabled(
   )
 }
 
-function internalCallbackBase(configuredUrl: string, pathname: string) {
-  const url = new URL(configuredUrl)
+function trustedVercelSystemHostname(value: string | undefined) {
+  const hostname = value?.trim().toLowerCase() ?? ''
+  if (
+    !hostname
+    || hostname.includes('/')
+    || hostname.includes('\\')
+    || hostname.includes('@')
+    || hostname.includes(':')
+  ) {
+    return null
+  }
+
+  const url = new URL(`https://${hostname}`)
+  return url.hostname === hostname && url.pathname === '/' ? hostname : null
+}
+
+function internalCallbackBase(
+  request: Request,
+  env: LinePaySandboxE2eStartEnvironment,
+  pathname: string,
+) {
+  const url = new URL(request.url)
+  const trustedHostnames = new Set(
+    [env.VERCEL_URL, env.VERCEL_BRANCH_URL]
+      .map(trustedVercelSystemHostname)
+      .filter((value): value is string => value !== null),
+  )
+  if (
+    url.protocol !== 'https:'
+    || url.port !== ''
+    || url.username !== ''
+    || url.password !== ''
+    || !trustedHostnames.has(url.hostname.toLowerCase())
+  ) {
+    throw new Error('line_pay_sandbox_e2e_callback_origin_invalid')
+  }
+
   url.pathname = pathname
   url.search = ''
   url.hash = ''
@@ -135,6 +172,23 @@ export async function handleLinePaySandboxE2eStart(input: {
   const body = (await input.request.json().catch(() => null)) as StartBody | null
   if (body?.confirmation !== LINE_PAY_SANDBOX_E2E_CONFIRMATION) {
     return errorResponse('invalid_confirmation', 400)
+  }
+
+  let confirmUrl: string
+  let cancelUrl: string
+  try {
+    confirmUrl = internalCallbackBase(
+      input.request,
+      input.env,
+      '/api/internal/line-pay/sandbox-e2e/confirm',
+    ).toString()
+    cancelUrl = internalCallbackBase(
+      input.request,
+      input.env,
+      '/api/internal/line-pay/sandbox-e2e/cancel',
+    ).toString()
+  } catch {
+    return hiddenResponse()
   }
 
   let authorization: AuthorizedSandboxE2eContext | null = null
@@ -185,17 +239,11 @@ export async function handleLinePaySandboxE2eStart(input: {
       },
     ],
     // LINE Pay constructs the callback query itself with orderId and
-    // transactionId. Keep the registered callback URL free of custom query
-    // parameters; the browser returns the one-time capability in an HttpOnly
-    // SameSite cookie instead.
-    confirmUrl: internalCallbackBase(
-      config.confirmUrl,
-      '/api/internal/line-pay/sandbox-e2e/confirm',
-    ).toString(),
-    cancelUrl: internalCallbackBase(
-      config.cancelUrl,
-      '/api/internal/line-pay/sandbox-e2e/cancel',
-    ).toString(),
+    // transactionId. Keep the callback on the same trusted Vercel host that
+    // set the host-only capability cookie, and keep it free of custom query
+    // parameters.
+    confirmUrl,
+    cancelUrl,
   }
   const requestBodySha256 = sha256(
     stringifyLinePayJsonBody(buildLinePayRequestPayload(payloadInput)),

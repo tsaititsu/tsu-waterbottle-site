@@ -30,6 +30,8 @@ async function runTests() {
 const enabledEnv: LinePaySandboxE2eStartEnvironment = {
   VERCEL_ENV: 'preview',
   VERCEL_GIT_COMMIT_SHA: '5d2b264410656d59d5145e57b47709a9a7e95a3c',
+  VERCEL_URL: 'preview.example.com',
+  VERCEL_BRANCH_URL: 'preview.example.com',
   NEXT_PUBLIC_ENABLE_LINE_PAY: 'true',
   LINE_PAY_ENV: 'sandbox',
   LINE_PAY_TRANSPORT: 'gateway',
@@ -181,17 +183,21 @@ test('Preview sandbox admin confirmation initializes NT$50 and returns one payme
   )
 })
 
-test('callback origins come from trusted server config, never request Host', async () => {
+test('exact Preview callback stays on the request origin when it is a trusted Vercel system URL', async () => {
   const deps = successDependencies()
+  const exactDeploymentHost = 'site-a1b2c3-team.vercel.app'
+  const branchAliasHost = 'site-git-sandbox-team.vercel.app'
   await handleLinePaySandboxE2eStart({
     request: createRequest(
       { confirmation: LINE_PAY_SANDBOX_E2E_CONFIRMATION },
-      'https://attacker.example/api/internal/line-pay/sandbox-e2e/start',
+      `https://${exactDeploymentHost}/api/internal/line-pay/sandbox-e2e/start`,
     ),
     env: {
       ...enabledEnv,
-      LINE_PAY_CONFIRM_URL: `${enabledEnv.LINE_PAY_CONFIRM_URL}?untrusted=query#fragment`,
-      LINE_PAY_CANCEL_URL: `${enabledEnv.LINE_PAY_CANCEL_URL}?untrusted=query#fragment`,
+      VERCEL_URL: exactDeploymentHost,
+      VERCEL_BRANCH_URL: branchAliasHost,
+      LINE_PAY_CONFIRM_URL: `https://${branchAliasHost}/api/product-orders/line-pay/confirm`,
+      LINE_PAY_CANCEL_URL: `https://${branchAliasHost}/api/product-orders/line-pay/cancel`,
     },
     ...deps,
   })
@@ -202,12 +208,59 @@ test('callback origins come from trusted server config, never request Host', asy
     confirmUrl: string
     cancelUrl: string
   }
-  assert.equal(new URL(payloadInput.confirmUrl).hostname, 'preview.example.com')
-  assert.equal(new URL(payloadInput.cancelUrl).hostname, 'preview.example.com')
+  assert.equal(new URL(payloadInput.confirmUrl).hostname, exactDeploymentHost)
+  assert.equal(new URL(payloadInput.cancelUrl).hostname, exactDeploymentHost)
   assert.equal(new URL(payloadInput.confirmUrl).search, '')
   assert.equal(new URL(payloadInput.cancelUrl).search, '')
   assert.equal(new URL(payloadInput.confirmUrl).hash, '')
   assert.equal(new URL(payloadInput.cancelUrl).hash, '')
+})
+
+test('branch Preview callback stays on the branch origin when it is a trusted Vercel system URL', async () => {
+  const deps = successDependencies()
+  const exactDeploymentHost = 'site-a1b2c3-team.vercel.app'
+  const branchAliasHost = 'site-git-sandbox-team.vercel.app'
+  await handleLinePaySandboxE2eStart({
+    request: createRequest(
+      { confirmation: LINE_PAY_SANDBOX_E2E_CONFIRMATION },
+      `https://${branchAliasHost}/api/internal/line-pay/sandbox-e2e/start`,
+    ),
+    env: {
+      ...enabledEnv,
+      VERCEL_URL: exactDeploymentHost,
+      VERCEL_BRANCH_URL: branchAliasHost,
+    },
+    ...deps,
+  })
+
+  const execution = deps.executions[0]
+  assert.ok(execution)
+  const payloadInput = execution.payloadInput as {
+    confirmUrl: string
+    cancelUrl: string
+  }
+  assert.equal(new URL(payloadInput.confirmUrl).hostname, branchAliasHost)
+  assert.equal(new URL(payloadInput.cancelUrl).hostname, branchAliasHost)
+})
+
+test('untrusted callback origin is hidden before authorization or writes', async () => {
+  const deps = successDependencies()
+  const response = await handleLinePaySandboxE2eStart({
+    request: createRequest(
+      { confirmation: LINE_PAY_SANDBOX_E2E_CONFIRMATION },
+      'https://attacker.example/api/internal/line-pay/sandbox-e2e/start',
+    ),
+    env: {
+      ...enabledEnv,
+      VERCEL_URL: 'site-a1b2c3-team.vercel.app',
+      VERCEL_BRANCH_URL: 'site-git-sandbox-team.vercel.app',
+    },
+    ...deps,
+  })
+
+  assert.equal(response.status, 404)
+  assert.deepEqual(await json(response), { ok: false, error: 'not_found' })
+  assert.deepEqual(deps.calls, [])
 })
 
 for (const [name, env] of [
