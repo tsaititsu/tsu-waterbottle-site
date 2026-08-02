@@ -12,6 +12,10 @@ import type {
   ExecuteInitializedProductOrderLinePayRequestInput,
   ExecuteInitializedProductOrderLinePayRequestResult,
 } from '../../../../../../lib/linePay/productOrderRequestExecution'
+import {
+  LINE_PAY_SANDBOX_E2E_CAPABILITY_COOKIE_OPTIONS,
+  linePaySandboxE2eCapabilityCookieName,
+} from '../capabilityToken'
 
 export const LINE_PAY_SANDBOX_E2E_CONFIRMATION =
   'RUN_LINE_PAY_SANDBOX_E2E_NT50_ONCE'
@@ -92,13 +96,6 @@ export function isLinePaySandboxE2eRouteEnabled(
   )
 }
 
-function callbackUrl(baseUrl: string | URL, merchantOrderNo: string, token: string) {
-  const url = new URL(baseUrl)
-  url.searchParams.set('orderId', merchantOrderNo)
-  url.searchParams.set('capability', token)
-  return url.toString()
-}
-
 function internalCallbackBase(configuredUrl: string, pathname: string) {
   const url = new URL(configuredUrl)
   url.pathname = pathname
@@ -159,8 +156,6 @@ export async function handleLinePaySandboxE2eStart(input: {
   const idempotencyKey = `line-pay-sandbox-e2e:${commitSha}`
   const claimId = createUuid()
   const requestId = `line-pay-sandbox-e2e:${createUuid()}`
-  const confirmToken = createToken()
-  const cancelToken = createToken()
   const capabilityExpiresAt = new Date(
     now.getTime() + 30 * 60 * 1000,
   ).toISOString()
@@ -175,6 +170,9 @@ export async function handleLinePaySandboxE2eStart(input: {
     return hiddenResponse()
   }
 
+  const confirmToken = createToken()
+  const cancelToken = createToken()
+
   const payloadInput = {
     orderId: merchantOrderNo,
     amount: LINE_PAY_SANDBOX_E2E_AMOUNT_TWD,
@@ -186,26 +184,18 @@ export async function handleLinePaySandboxE2eStart(input: {
         price: LINE_PAY_SANDBOX_E2E_AMOUNT_TWD,
       },
     ],
-    confirmUrl: callbackUrl(
-      new URL(
-        internalCallbackBase(
-          config.confirmUrl,
-          '/api/internal/line-pay/sandbox-e2e/confirm',
-        ),
-      ),
-      merchantOrderNo,
-      confirmToken,
-    ),
-    cancelUrl: callbackUrl(
-      new URL(
-        internalCallbackBase(
-          config.cancelUrl,
-          '/api/internal/line-pay/sandbox-e2e/cancel',
-        ),
-      ),
-      merchantOrderNo,
-      cancelToken,
-    ),
+    // LINE Pay constructs the callback query itself with orderId and
+    // transactionId. Keep the registered callback URL free of custom query
+    // parameters; the browser returns the one-time capability in an HttpOnly
+    // SameSite cookie instead.
+    confirmUrl: internalCallbackBase(
+      config.confirmUrl,
+      '/api/internal/line-pay/sandbox-e2e/confirm',
+    ).toString(),
+    cancelUrl: internalCallbackBase(
+      config.cancelUrl,
+      '/api/internal/line-pay/sandbox-e2e/cancel',
+    ).toString(),
   }
   const requestBodySha256 = sha256(
     stringifyLinePayJsonBody(buildLinePayRequestPayload(payloadInput)),
@@ -269,7 +259,7 @@ export async function handleLinePaySandboxE2eStart(input: {
 
   try {
     const paymentUrl = sandboxPaymentUrl(result.paymentUrlWeb)
-    return NextResponse.json(
+    const response = NextResponse.json(
       {
         ok: true,
         environment: 'sandbox',
@@ -279,6 +269,17 @@ export async function handleLinePaySandboxE2eStart(input: {
       },
       { headers: { 'Cache-Control': 'no-store' } },
     )
+    response.cookies.set(
+      linePaySandboxE2eCapabilityCookieName('confirm'),
+      confirmToken,
+      LINE_PAY_SANDBOX_E2E_CAPABILITY_COOKIE_OPTIONS,
+    )
+    response.cookies.set(
+      linePaySandboxE2eCapabilityCookieName('cancel'),
+      cancelToken,
+      LINE_PAY_SANDBOX_E2E_CAPABILITY_COOKIE_OPTIONS,
+    )
+    return response
   } catch {
     return errorResponse('line_pay_sandbox_e2e_payment_url_failed', 502)
   }

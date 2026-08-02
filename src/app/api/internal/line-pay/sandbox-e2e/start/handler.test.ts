@@ -6,6 +6,10 @@ import {
   type LinePaySandboxE2eStartEnvironment,
 } from './handler'
 import { LinePaySandboxE2eInitializationError } from '../../../../../../lib/supabase/linePaySandboxE2eInitialization'
+import {
+  LINE_PAY_SANDBOX_E2E_CAPABILITY_COOKIE_OPTIONS,
+  linePaySandboxE2eCapabilityCookieName,
+} from '../capabilityToken'
 
 const tests: Array<{
   name: string
@@ -103,8 +107,8 @@ function successDependencies() {
         cancelUrl: string
       }
       assert.equal(payloadInput.amount, 50)
-      assert.match(payloadInput.confirmUrl, /capability=/)
-      assert.match(payloadInput.cancelUrl, /capability=/)
+      assert.equal(new URL(payloadInput.confirmUrl).search, '')
+      assert.equal(new URL(payloadInput.cancelUrl).search, '')
       assert.equal(
         new URL(payloadInput.confirmUrl).pathname,
         '/api/internal/line-pay/sandbox-e2e/confirm',
@@ -135,8 +139,8 @@ function successDependencies() {
       return () => values.shift() ?? 'a1000000-0000-4000-8000-000000000004'
     })(),
     createToken: (() => {
-      const values = ['confirm-capability-token', 'cancel-capability-token']
-      return () => values.shift() ?? 'unexpected-token'
+      const values = ['a'.repeat(43), 'b'.repeat(43)]
+      return () => values.shift() ?? 'c'.repeat(43)
     })(),
   }
 }
@@ -160,6 +164,21 @@ test('Preview sandbox admin confirmation initializes NT$50 and returns one payme
     paymentUrl: 'https://sandbox-web-pay.line.me/payment',
   })
   assert.equal(response.headers.get('cache-control'), 'no-store')
+  const setCookie = response.headers.get('set-cookie') ?? ''
+  for (const purpose of ['confirm', 'cancel'] as const) {
+    assert.match(
+      setCookie,
+      new RegExp(`${linePaySandboxE2eCapabilityCookieName(purpose)}=[A-Za-z0-9_-]{43}`),
+    )
+  }
+  assert.match(setCookie, /HttpOnly/i)
+  assert.match(setCookie, /Secure/i)
+  assert.match(setCookie, /SameSite=Lax/i)
+  assert.equal(setCookie.includes('sandbox-channel-secret'), false)
+  assert.equal(
+    Object.isFrozen(LINE_PAY_SANDBOX_E2E_CAPABILITY_COOKIE_OPTIONS),
+    true,
+  )
 })
 
 test('callback origins come from trusted server config, never request Host', async () => {
@@ -169,7 +188,11 @@ test('callback origins come from trusted server config, never request Host', asy
       { confirmation: LINE_PAY_SANDBOX_E2E_CONFIRMATION },
       'https://attacker.example/api/internal/line-pay/sandbox-e2e/start',
     ),
-    env: enabledEnv,
+    env: {
+      ...enabledEnv,
+      LINE_PAY_CONFIRM_URL: `${enabledEnv.LINE_PAY_CONFIRM_URL}?untrusted=query#fragment`,
+      LINE_PAY_CANCEL_URL: `${enabledEnv.LINE_PAY_CANCEL_URL}?untrusted=query#fragment`,
+    },
     ...deps,
   })
 
@@ -181,6 +204,10 @@ test('callback origins come from trusted server config, never request Host', asy
   }
   assert.equal(new URL(payloadInput.confirmUrl).hostname, 'preview.example.com')
   assert.equal(new URL(payloadInput.cancelUrl).hostname, 'preview.example.com')
+  assert.equal(new URL(payloadInput.confirmUrl).search, '')
+  assert.equal(new URL(payloadInput.cancelUrl).search, '')
+  assert.equal(new URL(payloadInput.confirmUrl).hash, '')
+  assert.equal(new URL(payloadInput.cancelUrl).hash, '')
 })
 
 for (const [name, env] of [

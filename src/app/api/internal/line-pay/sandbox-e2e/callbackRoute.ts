@@ -15,6 +15,11 @@ import {
   resolveLinePayCancelCartRedirectStatus,
   resolveLinePayConfirmCartRedirectStatus,
 } from '../../../product-orders/line-pay/redirect'
+import {
+  LINE_PAY_SANDBOX_E2E_CAPABILITY_COOKIE_OPTIONS,
+  linePaySandboxE2eCapabilityCookieName,
+} from './capabilityToken'
+import { buildLinePaySandboxE2eCallbackDiagnostic } from './callbackDiagnostic'
 import { handleLinePaySandboxE2eCapabilityCallback } from './callbackHandler'
 import { isLinePaySandboxE2eRouteEnabled } from './start/handler'
 
@@ -66,7 +71,12 @@ export async function executeLinePaySandboxE2eCallbackRoute(
       }),
   })
 
-  return redirectLinePayHandlerResponseToCart({
+  console.info(
+    '[line-pay-sandbox-e2e-callback]',
+    await buildLinePaySandboxE2eCallbackDiagnostic(purpose, response),
+  )
+
+  const redirect = await redirectLinePayHandlerResponseToCart({
     request,
     response,
     resolveStatus:
@@ -74,4 +84,15 @@ export async function executeLinePaySandboxE2eCallbackRoute(
         ? resolveLinePayConfirmCartRedirectStatus
         : resolveLinePayCancelCartRedirectStatus,
   })
+  for (const callbackPurpose of ['confirm', 'cancel'] as const) {
+    redirect.cookies.set(
+      linePaySandboxE2eCapabilityCookieName(callbackPurpose),
+      '',
+      {
+        ...LINE_PAY_SANDBOX_E2E_CAPABILITY_COOKIE_OPTIONS,
+        maxAge: 0,
+      },
+    )
+  }
+  return redirect
 }

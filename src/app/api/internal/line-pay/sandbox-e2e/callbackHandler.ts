@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import {
   handleProductOrderLinePayCapabilityCallback,
 } from '../../../product-orders/line-pay/capabilityHandler'
+import { readLinePaySandboxE2eCapabilityCookie } from './capabilityToken'
 import {
   isLinePaySandboxE2eRouteEnabled,
   type LinePaySandboxE2eStartEnvironment,
@@ -10,6 +11,20 @@ import {
 type CapabilityCallbackInput = Parameters<
   typeof handleProductOrderLinePayCapabilityCallback
 >[0]
+
+function requestWithServerCapability(
+  request: Request,
+  purpose: 'confirm' | 'cancel',
+) {
+  const url = new URL(request.url)
+  if (url.searchParams.has('capability')) return request
+
+  const capability = readLinePaySandboxE2eCapabilityCookie(request, purpose)
+  if (!capability) return request
+
+  url.searchParams.set('capability', capability)
+  return new Request(url, request)
+}
 
 export async function handleLinePaySandboxE2eCapabilityCallback(
   input: Omit<CapabilityCallbackInput, 'env'> & {
@@ -23,5 +38,8 @@ export async function handleLinePaySandboxE2eCapabilityCallback(
     )
   }
 
-  return handleProductOrderLinePayCapabilityCallback(input)
+  return handleProductOrderLinePayCapabilityCallback({
+    ...input,
+    request: requestWithServerCapability(input.request, input.purpose),
+  })
 }

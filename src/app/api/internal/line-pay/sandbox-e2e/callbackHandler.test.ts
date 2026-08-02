@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import type { ProductOrderLinePayCapabilityDatabase } from '../../../product-orders/line-pay/capabilityHandler'
+import { linePaySandboxE2eCapabilityCookieName } from './capabilityToken'
+import { buildLinePaySandboxE2eCallbackDiagnostic } from './callbackDiagnostic'
 import { handleLinePaySandboxE2eCapabilityCallback } from './callbackHandler'
 
 const tests: Array<{
@@ -127,6 +129,145 @@ test('enabled Preview Sandbox delegates to capability completion contract', asyn
 
   assert.equal(response.status, 200)
   assert.equal((await response.json()).markedPaid, true)
+})
+
+test('documented LINE Pay callback uses HttpOnly capability instead of custom query', async () => {
+  let claimCalls = 0
+  const callbackDatabase = database()
+  const capability = 'a'.repeat(43)
+  const response = await handleLinePaySandboxE2eCapabilityCallback({
+    purpose: 'confirm',
+    request: new Request(
+      `https://preview.example.com/api/internal/line-pay/sandbox-e2e/confirm?orderId=${merchantOrderNo}&transactionId=${transactionId}`,
+      {
+        headers: {
+          cookie: `${linePaySandboxE2eCapabilityCookieName('confirm')}=${capability}`,
+        },
+      },
+    ),
+    env: enabledEnv,
+    readContext: async () => ({
+      ...ids,
+      environment: 'sandbox',
+      status: 'pending',
+      requestState: 'pending',
+      amountTwd: 50,
+      currency: 'TWD',
+      merchantOrderNo,
+      transactionId,
+    }),
+    database: {
+      ...callbackDatabase,
+      claimCapability: async (input) => {
+        claimCalls += 1
+        assert.match(input.tokenHash, /^[0-9a-f]{64}$/)
+        return callbackDatabase.claimCapability(input)
+      },
+    },
+    confirmPayment: async () => ({
+      returnCode: '0000',
+      returnMessage: 'Success',
+      transactionId,
+      orderId: merchantOrderNo,
+    }),
+    createUuid: () => ids.claimId,
+  })
+
+  assert.equal(response.status, 200)
+  assert.equal(claimCalls, 1)
+  assert.equal((await response.json()).markedPaid, true)
+})
+
+test('callback without query capability or matching HttpOnly cookie fails closed', async () => {
+  let reads = 0
+  let claims = 0
+  const callbackDatabase = database()
+  const response = await handleLinePaySandboxE2eCapabilityCallback({
+    purpose: 'confirm',
+    request: new Request(
+      `https://preview.example.com/api/internal/line-pay/sandbox-e2e/confirm?orderId=${merchantOrderNo}&transactionId=${transactionId}`,
+    ),
+    env: enabledEnv,
+    readContext: async () => {
+      reads += 1
+      return null
+    },
+    database: {
+      ...callbackDatabase,
+      claimCapability: async (input) => {
+        claims += 1
+        return callbackDatabase.claimCapability(input)
+      },
+    },
+    confirmPayment: async () => {
+      throw new Error('must_not_call')
+    },
+  })
+
+  assert.equal(response.status, 400)
+  assert.equal(reads, 0)
+  assert.equal(claims, 0)
+})
+
+test('confirm callback rejects the cancel capability cookie before database access', async () => {
+  let reads = 0
+  const cancelCapability = 'b'.repeat(43)
+  const response = await handleLinePaySandboxE2eCapabilityCallback({
+    purpose: 'confirm',
+    request: new Request(
+      `https://preview.example.com/api/internal/line-pay/sandbox-e2e/confirm?orderId=${merchantOrderNo}&transactionId=${transactionId}`,
+      {
+        headers: {
+          cookie: `${linePaySandboxE2eCapabilityCookieName('cancel')}=${cancelCapability}`,
+        },
+      },
+    ),
+    env: enabledEnv,
+    readContext: async () => {
+      reads += 1
+      return null
+    },
+    database: database(),
+    confirmPayment: async () => {
+      throw new Error('must_not_call')
+    },
+  })
+
+  assert.equal(response.status, 400)
+  assert.equal(reads, 0)
+})
+
+test('callback diagnostic logs only allowlisted stage metadata', async () => {
+  const secret = 'must-never-appear-in-log'
+  const diagnostic = await buildLinePaySandboxE2eCallbackDiagnostic(
+    'confirm',
+    Response.json(
+      {
+        ok: false,
+        error: `unexpected-${secret}`,
+        transactionId: secret,
+        payload: secret,
+      },
+      { status: 502 },
+    ),
+  )
+
+  assert.deepEqual(diagnostic, {
+    purpose: 'confirm',
+    httpStatus: 502,
+    outcome: 'unknown_failure',
+  })
+  assert.equal(Object.isFrozen(diagnostic), true)
+  assert.equal(JSON.stringify(diagnostic).includes(secret), false)
+
+  const allowlisted = await buildLinePaySandboxE2eCallbackDiagnostic(
+    'confirm',
+    Response.json(
+      { ok: false, error: 'invalid_line_pay_callback' },
+      { status: 400 },
+    ),
+  )
+  assert.equal(allowlisted.outcome, 'invalid_line_pay_callback')
 })
 
 runTests().catch((error) => {
