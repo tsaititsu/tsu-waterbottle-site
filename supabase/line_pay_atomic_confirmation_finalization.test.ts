@@ -128,7 +128,15 @@ test('executor client is server-only and accepts only a dedicated secret API key
   assert.equal(executor.split('\n')[0], "import 'server-only'")
   assert.match(executor, /SUPABASE_LINE_PAY_EXECUTOR_API_KEY/)
   assert.match(executor, /\^sb_secret_/)
-  assert.match(executor, /functionName\s*!==\s*EXECUTOR_RPC/)
+  assert.match(
+    executor,
+    /EXECUTOR_FINALIZE_RPC\s*=\s*'finalize_product_order_line_pay_confirmation'/,
+  )
+  assert.match(
+    executor,
+    /EXECUTOR_RECOVERY_RPC\s*=\s*'recover_product_order_line_pay_confirmation'/,
+  )
+  assert.match(executor, /!EXECUTOR_RPCS\.has\(functionName\)/)
   assert.match(executor, /apikey:\s*executorApiKey/)
   assert.doesNotMatch(executor, /Authorization|Bearer|SUPABASE_LINE_PAY_EXECUTOR_JWT/)
   assert.doesNotMatch(executor, /console\.|logger\.|SUPABASE_SERVICE_ROLE_KEY/)
