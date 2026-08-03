@@ -15,9 +15,89 @@ lock table
   public.line_pay_request_outbox,
   public.line_pay_callback_capabilities,
   public.line_pay_callback_events,
-  public.line_pay_payment_audit_events,
-  line_pay_private.line_pay_completion_proofs
+  public.line_pay_payment_audit_events
 in access exclusive mode;
+
+select
+  pg_catalog.count(*) filter (
+    where grantor_role.rolname = current_user
+  ) = 0
+  and case when (
+    select role.rolsuper
+    from pg_catalog.pg_roles as role
+    where role.rolname = current_user
+  ) then pg_catalog.count(*) = 0
+  else
+    pg_catalog.count(*) filter (
+      where grantor_role.rolname <> current_user
+        and membership.admin_option
+        and not membership.inherit_option
+        and not membership.set_option
+    ) = 1
+    and pg_catalog.count(*) = 1
+  end
+  as line_pay_owner_bridge_clean
+from pg_catalog.pg_auth_members as membership
+join pg_catalog.pg_roles as granted_role
+  on granted_role.oid = membership.roleid
+join pg_catalog.pg_roles as member_role
+  on member_role.oid = membership.member
+join pg_catalog.pg_roles as grantor_role
+  on grantor_role.oid = membership.grantor
+where granted_role.rolname = 'line_pay_payment_function_owner'
+  and member_role.rolname = current_user
+\gset
+
+\if :line_pay_owner_bridge_clean
+\else
+  \echo ATOMIC_FINALIZATION_OWNER_BRIDGE_CONFLICT
+  \quit 3
+\endif
+
+grant line_pay_payment_function_owner to current_user
+  with admin false, inherit false, set true;
+set local role line_pay_payment_function_owner;
+lock table line_pay_private.line_pay_completion_proofs
+  in access exclusive mode;
+reset role;
+revoke line_pay_payment_function_owner from current_user
+  granted by current_user;
+
+select
+  pg_catalog.count(*) filter (
+    where grantor_role.rolname = current_user
+  ) = 0
+  and case when (
+    select role.rolsuper
+    from pg_catalog.pg_roles as role
+    where role.rolname = current_user
+  ) then pg_catalog.count(*) = 0
+  else
+    pg_catalog.count(*) filter (
+      where grantor_role.rolname <> current_user
+        and membership.admin_option
+        and not membership.inherit_option
+        and not membership.set_option
+    ) = 1
+    and pg_catalog.count(*) = 1
+  end
+  as temporary_owner_memberships
+from pg_catalog.pg_auth_members as membership
+join pg_catalog.pg_roles as granted_role
+  on granted_role.oid = membership.roleid
+join pg_catalog.pg_roles as member_role
+  on member_role.oid = membership.member
+join pg_catalog.pg_roles as grantor_role
+  on grantor_role.oid = membership.grantor
+where granted_role.rolname = 'line_pay_payment_function_owner'
+  and member_role.rolname = current_user
+\gset
+
+\if :temporary_owner_memberships
+\else
+  \echo ATOMIC_FINALIZATION_OWNER_BRIDGE_RELEASE_FAILED
+  \quit 3
+\endif
 
 \ir line_pay_atomic_confirmation_finalization_preflight.sql
 
@@ -117,9 +197,89 @@ lock table
   public.line_pay_request_outbox,
   public.line_pay_callback_capabilities,
   public.line_pay_callback_events,
-  public.line_pay_payment_audit_events,
-  line_pay_private.line_pay_completion_proofs
+  public.line_pay_payment_audit_events
 in access exclusive mode;
+
+select
+  pg_catalog.count(*) filter (
+    where grantor_role.rolname = current_user
+  ) = 0
+  and case when (
+    select role.rolsuper
+    from pg_catalog.pg_roles as role
+    where role.rolname = current_user
+  ) then pg_catalog.count(*) = 0
+  else
+    pg_catalog.count(*) filter (
+      where grantor_role.rolname <> current_user
+        and membership.admin_option
+        and not membership.inherit_option
+        and not membership.set_option
+    ) = 1
+    and pg_catalog.count(*) = 1
+  end
+  as line_pay_owner_bridge_clean
+from pg_catalog.pg_auth_members as membership
+join pg_catalog.pg_roles as granted_role
+  on granted_role.oid = membership.roleid
+join pg_catalog.pg_roles as member_role
+  on member_role.oid = membership.member
+join pg_catalog.pg_roles as grantor_role
+  on grantor_role.oid = membership.grantor
+where granted_role.rolname = 'line_pay_payment_function_owner'
+  and member_role.rolname = current_user
+\gset
+
+\if :line_pay_owner_bridge_clean
+\else
+  \echo ATOMIC_FINALIZATION_OWNER_BRIDGE_CONFLICT
+  \quit 3
+\endif
+
+grant line_pay_payment_function_owner to current_user
+  with admin false, inherit false, set true;
+set local role line_pay_payment_function_owner;
+lock table line_pay_private.line_pay_completion_proofs
+  in access exclusive mode;
+reset role;
+revoke line_pay_payment_function_owner from current_user
+  granted by current_user;
+
+select
+  pg_catalog.count(*) filter (
+    where grantor_role.rolname = current_user
+  ) = 0
+  and case when (
+    select role.rolsuper
+    from pg_catalog.pg_roles as role
+    where role.rolname = current_user
+  ) then pg_catalog.count(*) = 0
+  else
+    pg_catalog.count(*) filter (
+      where grantor_role.rolname <> current_user
+        and membership.admin_option
+        and not membership.inherit_option
+        and not membership.set_option
+    ) = 1
+    and pg_catalog.count(*) = 1
+  end
+  as temporary_owner_memberships
+from pg_catalog.pg_auth_members as membership
+join pg_catalog.pg_roles as granted_role
+  on granted_role.oid = membership.roleid
+join pg_catalog.pg_roles as member_role
+  on member_role.oid = membership.member
+join pg_catalog.pg_roles as grantor_role
+  on grantor_role.oid = membership.grantor
+where granted_role.rolname = 'line_pay_payment_function_owner'
+  and member_role.rolname = current_user
+\gset
+
+\if :temporary_owner_memberships
+\else
+  \echo ATOMIC_FINALIZATION_OWNER_BRIDGE_RELEASE_FAILED
+  \quit 3
+\endif
 
 select pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
   pg_catalog.jsonb_build_object(
