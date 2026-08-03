@@ -1,0 +1,95 @@
+name: Supabase Production LINE Pay Atomic Finalization Capability Diagnostic
+run-name: LINE Pay atomic finalization capability read-only diagnostic at ${{ github.sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      authorized_commit:
+        description: Exact main commit SHA authorized for this diagnostic
+        required: true
+        type: string
+      project_ref:
+        description: Exact authorized Supabase project ref
+        required: true
+        type: string
+      confirmation:
+        description: Exact read-only diagnostic confirmation phrase
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-production-line-pay-atomic-finalization-capability-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  source-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact workflow commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up fixed Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24.16.0"
+
+      - name: Validate exact Node.js runtime
+        run: node scripts/supabase/validate-line-pay-atomic-finalization-capability-diagnostic.mjs node
+
+      - name: Validate fixed PostgreSQL image identity
+        env:
+          POSTGRES_IMAGE: postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+        run: node scripts/supabase/validate-line-pay-atomic-finalization-capability-diagnostic.mjs image
+
+      - name: Validate fixed read-only capability diagnostic source
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_SHA: ${{ github.sha }}
+          AUTHORIZED_COMMIT: ${{ inputs.authorized_commit }}
+          PROJECT_REF_INPUT: ${{ inputs.project_ref }}
+          DIAGNOSTIC_CONFIRMATION: ${{ inputs.confirmation }}
+        run: node scripts/supabase/validate-line-pay-atomic-finalization-capability-diagnostic.mjs source
+
+  diagnose-production-atomic-finalization-capability:
+    needs: source-validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: supabase-production
+    steps:
+      - name: Check out the exact authorized commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up fixed Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24.16.0"
+
+      - name: Validate exact Node.js runtime
+        run: node scripts/supabase/validate-line-pay-atomic-finalization-capability-diagnostic.mjs node
+
+      - name: Validate fixed PostgreSQL image identity
+        env:
+          POSTGRES_IMAGE: postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+        run: node scripts/supabase/validate-line-pay-atomic-finalization-capability-diagnostic.mjs image
+
+      - name: Run one fixed read-only capability diagnostic session
+        env:
+          SUPABASE_PRODUCTION_CHANNEL_READY: ${{ vars.SUPABASE_PRODUCTION_CHANNEL_READY }}
+          SUPABASE_PRODUCTION_DB_URL: ${{ secrets.SUPABASE_PRODUCTION_DB_URL }}
+          SUPABASE_PROJECT_ID: ndbqoznvobmpkgxkiezz
+        run: node scripts/supabase/run-line-pay-atomic-finalization-capability-diagnostic.mjs
