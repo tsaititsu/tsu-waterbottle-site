@@ -71,6 +71,14 @@ function sha256(value: string) {
   return createHash('sha256').update(value).digest('hex')
 }
 
+export function linePaySandboxE2eMerchantOrderNoForCommit(commitSha: string) {
+  const normalized = commitSha.trim().toLowerCase()
+  if (!/^[0-9a-f]{40}$/.test(normalized)) {
+    throw new Error('line_pay_sandbox_e2e_commit_invalid')
+  }
+  return `LP_E2E_${sha256(`line-pay-sandbox-e2e:${normalized}`).slice(0, 32)}`
+}
+
 function hiddenResponse() {
   return NextResponse.json(
     { ok: false, error: 'not_found' },
@@ -206,7 +214,7 @@ export async function handleLinePaySandboxE2eStart(input: {
   const commitSha = input.env.VERCEL_GIT_COMMIT_SHA!.trim().toLowerCase()
   const runKey = sha256(`line-pay-sandbox-e2e:${commitSha}`).slice(0, 32)
   const orderNo = `LPE2E-${runKey}`
-  const merchantOrderNo = `LP_E2E_${runKey}`
+  const merchantOrderNo = linePaySandboxE2eMerchantOrderNoForCommit(commitSha)
   const idempotencyKey = `line-pay-sandbox-e2e:${commitSha}`
   const claimId = createUuid()
   const requestId = `line-pay-sandbox-e2e:${createUuid()}`

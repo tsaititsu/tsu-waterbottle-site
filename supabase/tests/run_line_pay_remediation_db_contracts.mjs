@@ -23,6 +23,9 @@ const migration = process.env.LINE_PAY_MIGRATION_UNDER_TEST
 const atomicFinalizationMigration = process.env.LINE_PAY_ATOMIC_FINALIZATION_MIGRATION_UNDER_TEST
   ? resolve(process.env.LINE_PAY_ATOMIC_FINALIZATION_MIGRATION_UNDER_TEST)
   : null
+const paidRecoveryMigration = process.env.LINE_PAY_PAID_RECOVERY_MIGRATION_UNDER_TEST
+  ? resolve(process.env.LINE_PAY_PAID_RECOVERY_MIGRATION_UNDER_TEST)
+  : null
 const baselineFiles = [
   'supabase/schema.sql',
   'supabase/bank_transfer_submissions_patch.sql',
@@ -207,6 +210,67 @@ async function testConcurrentClaim(database) {
       $$;
     `,
     'concurrent claim assertions',
+  )
+}
+
+async function testConcurrentPaidRecovery(database) {
+  psql(
+    database,
+    'select line_pay_paid_recovery_test.seed_reconciliation(25);',
+    'seed concurrent paid recovery',
+  )
+  const statement = `
+    set session authorization authenticator;
+    set role line_pay_payment_executor;
+    select result_code
+    from public.recover_product_order_line_pay_confirmation(
+      'sandbox',
+      '70000000-0000-4000-8000-000000000025',
+      '50000000-0000-4000-8000-000000000025',
+      '60000000-0000-4000-8000-000000000025',
+      'LP-PAID-RECOVERY-25',
+      'paid-recovery-transaction-25',
+      300,
+      'TWD',
+      '90000000-0000-4000-8000-000000000025',
+      '91000000-0000-4000-8000-000000000025',
+      repeat('c', 64),
+      'paid-recovery-concurrent-25'
+    );
+  `
+  const outputs = await Promise.all([
+    runPsqlAsync(database, statement),
+    runPsqlAsync(database, statement),
+  ])
+  const results = outputs
+    .flatMap((output) => output.split(/\s+/))
+    .filter((value) => ['completed', 'already_completed'].includes(value))
+    .sort()
+
+  if (
+    results.length !== 2
+    || results[0] !== 'already_completed'
+    || results[1] !== 'completed'
+  ) {
+    throw new Error(`concurrent paid recovery was not idempotent: ${JSON.stringify(results)}`)
+  }
+
+  psql(
+    database,
+    `do $$
+     begin
+       if (select pg_catalog.count(*)
+           from line_pay_private.line_pay_completion_proofs
+           where payment_id = '70000000-0000-4000-8000-000000000025') <> 1
+          or (select pg_catalog.count(*)
+              from public.line_pay_payment_audit_events
+              where payment_id = '70000000-0000-4000-8000-000000000025'
+                and event_type = 'confirmation_completed') <> 1 then
+         raise exception 'concurrent_paid_recovery_duplicate_evidence';
+       end if;
+     end
+     $$;`,
+    'concurrent paid recovery postcondition',
   )
 }
 
@@ -453,13 +517,28 @@ async function main() {
       'supabase/tests/line_pay_atomic_confirmation_finalization.sql',
     )
     psqlFile('line_pay_upgrade', atomicFinalizationMigration)
+    if (paidRecoveryMigration) {
+      psql(
+        'line_pay_clean',
+        `alter table line_pay_private.line_pay_completion_proofs owner to postgres;
+         alter function line_pay_private.line_pay_enforce_completion_proof() owner to postgres;`,
+        'seed completion proof owner drift',
+      )
+      psqlFile('line_pay_clean', paidRecoveryMigration)
+      psqlFile(
+        'line_pay_clean',
+        'supabase/tests/line_pay_paid_reconciliation_recovery.sql',
+      )
+      await testConcurrentPaidRecovery('line_pay_clean')
+      psqlFile('line_pay_upgrade', paidRecoveryMigration)
+    }
   }
 
   const postgresLogs = runDocker(['logs', containerName])
   assertNoFakeMarker(postgresLogs, 'PostgreSQL logs')
 
   process.stdout.write(
-    `line_pay_remediation_db_contracts: PASS (clean, upgrade, RPC, concurrency, rollback, RLS${atomicFinalizationMigration ? ', atomic-finalization' : ''})\n`,
+    `line_pay_remediation_db_contracts: PASS (clean, upgrade, RPC, concurrency, rollback, RLS${atomicFinalizationMigration ? ', atomic-finalization' : ''}${paidRecoveryMigration ? ', paid-recovery' : ''})\n`,
   )
 }
 

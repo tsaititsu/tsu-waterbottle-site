@@ -18,6 +18,11 @@ export type ProductOrderLinePayCapabilityContextClient = {
   }
 }
 
+export type ProductOrderLinePayRecoveryAssociations = Readonly<{
+  capabilityId: string
+  callbackEventId: string
+}>
+
 export type ProductOrderLinePayFinalizeConfirmationInput = {
   environment: 'sandbox' | 'production'
   paymentId: string
@@ -34,9 +39,16 @@ export type ProductOrderLinePayFinalizeConfirmationInput = {
   requestId: string
 }
 
+export type ProductOrderLinePayRecoverConfirmationInput = Omit<
+  ProductOrderLinePayFinalizeConfirmationInput,
+  'callbackClaimId'
+>
+
 export type ProductOrderLinePayCapabilityDatabaseDiagnostic = Readonly<{
-  stage: 'finalize_confirmation'
-  rpc: 'finalize_product_order_line_pay_confirmation'
+  stage: 'finalize_confirmation' | 'recover_confirmation'
+  rpc:
+    | 'finalize_product_order_line_pay_confirmation'
+    | 'recover_product_order_line_pay_confirmation'
   databaseRole: 'line_pay_payment_executor'
   sqlstate: string | null
 }>
@@ -187,6 +199,61 @@ export async function readProductOrderLinePayCapabilityContext(
   })
 }
 
+export async function readProductOrderLinePayRecoveryAssociations(
+  input: {
+    environment: 'sandbox'
+    paymentId: string
+    productOrderId: string
+    attemptId: string
+  },
+  client: ProductOrderLinePayCapabilityContextClient,
+): Promise<ProductOrderLinePayRecoveryAssociations> {
+  const exactIds = {
+    paymentId: uuid(input.paymentId),
+    productOrderId: uuid(input.productOrderId),
+    attemptId: uuid(input.attemptId),
+  }
+
+  const queryOne = async (
+    table: string,
+    filters: ReadonlyArray<readonly [string, string]>,
+  ) => {
+    let query = client.from(table).select('id') as {
+      eq: (name: string, value: string) => unknown
+      maybeSingle: () => PromiseLike<{ data: unknown; error: unknown }>
+    }
+    for (const [name, value] of filters) {
+      query = query.eq(name, value) as typeof query
+    }
+    let result: { data: unknown; error: unknown }
+    try {
+      result = await query.maybeSingle()
+    } catch {
+      databaseError()
+    }
+    if (result.error || result.data === null) databaseError()
+    return uuid(exactRecord(result.data, ['id']).id)
+  }
+
+  const capabilityId = await queryOne('line_pay_callback_capabilities', [
+    ['environment', input.environment],
+    ['payment_id', exactIds.paymentId],
+    ['product_order_id', exactIds.productOrderId],
+    ['checkout_attempt_id', exactIds.attemptId],
+    ['purpose', 'confirm'],
+  ])
+  const callbackEventId = await queryOne('line_pay_callback_events', [
+    ['environment', input.environment],
+    ['capability_id', capabilityId],
+    ['payment_id', exactIds.paymentId],
+    ['product_order_id', exactIds.productOrderId],
+    ['checkout_attempt_id', exactIds.attemptId],
+    ['purpose', 'confirm'],
+  ])
+
+  return Object.freeze({ capabilityId, callbackEventId })
+}
+
 export function createProductOrderLinePayCapabilityDatabase(
   serviceRoleClient: ProductOrderLinePayCapabilityRpcClient,
   executorClient?: ProductOrderLinePayCapabilityRpcClient,
@@ -306,6 +373,45 @@ export function createProductOrderLinePayCapabilityDatabase(
         }, {
           stage: 'finalize_confirmation',
           rpc: 'finalize_product_order_line_pay_confirmation',
+          databaseRole: 'line_pay_payment_executor',
+        }),
+        ['result_code', 'payment_id', 'product_order_id', 'transaction_id'],
+      )
+      const resultCode = string(row.result_code)
+      if (!['completed', 'already_completed'].includes(resultCode)) databaseError()
+      return Object.freeze({
+        resultCode,
+        transactionId: string(row.transaction_id),
+      }) as {
+        resultCode: 'completed' | 'already_completed'
+        transactionId: string
+      }
+    },
+
+    async recoverConfirmation(
+      input: ProductOrderLinePayRecoverConfirmationInput,
+    ) {
+      if (!executorClient) databaseError()
+      const row = exactRecord(
+        await rpc(executorClient, 'recover_product_order_line_pay_confirmation', {
+          p_environment: input.environment,
+          p_payment_id: input.paymentId,
+          p_product_order_id: input.productOrderId,
+          p_attempt_id: input.attemptId,
+          p_merchant_order_no: input.merchantOrderNo,
+          p_transaction_id: input.transactionId,
+          p_amount_twd: input.amountTwd,
+          p_currency: input.currency,
+          p_capability_id: input.capabilityId,
+          p_callback_event_id: input.callbackEventId,
+          p_confirm_result_sha256: string(
+            input.confirmResultSha256,
+            SHA256_PATTERN,
+          ),
+          p_request_id: input.requestId,
+        }, {
+          stage: 'recover_confirmation',
+          rpc: 'recover_product_order_line_pay_confirmation',
           databaseRole: 'line_pay_payment_executor',
         }),
         ['result_code', 'payment_id', 'product_order_id', 'transaction_id'],

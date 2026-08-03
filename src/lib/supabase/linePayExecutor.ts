@@ -27,7 +27,12 @@ type SafeRpcError = Readonly<{
   message: string
 }>
 
-const EXECUTOR_RPC = 'finalize_product_order_line_pay_confirmation'
+const EXECUTOR_FINALIZE_RPC = 'finalize_product_order_line_pay_confirmation'
+const EXECUTOR_RECOVERY_RPC = 'recover_product_order_line_pay_confirmation'
+const EXECUTOR_RPCS = new Set([
+  EXECUTOR_FINALIZE_RPC,
+  EXECUTOR_RECOVERY_RPC,
+])
 const EXECUTOR_REQUEST_TIMEOUT_MS = 5_000
 const MAX_EXECUTOR_RESPONSE_BYTES = 64 * 1024
 const EXPECTED_READINESS_CODE = 'P0002'
@@ -160,7 +165,7 @@ export function createLinePayExecutorClient(
 
   return Object.freeze({
     rpc(functionName: string, args: Record<string, unknown>) {
-      if (functionName !== EXECUTOR_RPC) {
+      if (!EXECUTOR_RPCS.has(functionName)) {
         throw new Error('line_pay_executor_rpc_not_allowed')
       }
 
@@ -173,7 +178,7 @@ export function createLinePayExecutorClient(
           )
           try {
             const response = await fetchFn(
-              `${supabaseUrl}/rest/v1/rpc/${EXECUTOR_RPC}`,
+              `${supabaseUrl}/rest/v1/rpc/${functionName}`,
               {
                 method: 'POST',
                 headers: {
@@ -220,7 +225,7 @@ export async function probeLinePayExecutorCallbackReadiness(
 ) {
   let result: { data: unknown; error: unknown }
   try {
-    result = await client.rpc(EXECUTOR_RPC, READINESS_ARGS).single()
+    result = await client.rpc(EXECUTOR_FINALIZE_RPC, READINESS_ARGS).single()
   } catch {
     throw createLinePayExecutorReadinessFailure('rpc_failed')
   }

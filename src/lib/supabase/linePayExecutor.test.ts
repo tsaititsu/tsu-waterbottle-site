@@ -116,10 +116,17 @@ test('rejects missing and non-secret executor API keys before network access', (
   }
 })
 
-test('rejects every RPC except the atomic confirmation finalizer', () => {
+test('allows only the atomic confirmation and paid-recovery RPCs', async () => {
+  const calls: string[] = []
   const client = createLinePayExecutorClient(baseEnv, async () => {
-    throw new Error('must_not_fetch')
+    calls.push('fetch')
+    return new Response(JSON.stringify({ result_code: 'completed' }), {
+      status: 200,
+    })
   })
+
+  await client.rpc('finalize_product_order_line_pay_confirmation', {}).single()
+  await client.rpc('recover_product_order_line_pay_confirmation', {}).single()
 
   assert.throws(
     () => client.rpc('arbitrary_function', {}),
@@ -127,6 +134,7 @@ test('rejects every RPC except the atomic confirmation finalizer', () => {
       error instanceof Error
       && error.message === 'line_pay_executor_rpc_not_allowed',
   )
+  assert.deepEqual(calls, ['fetch', 'fetch'])
 })
 
 test('returns a redacted stable error and never retries failed RPC requests', async () => {

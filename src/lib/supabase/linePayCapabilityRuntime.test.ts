@@ -4,6 +4,7 @@ import {
   createProductOrderLinePayCapabilityDatabase,
   readProductOrderLinePayCapabilityDatabaseDiagnostic,
   readProductOrderLinePayCapabilityContext,
+  readProductOrderLinePayRecoveryAssociations,
   type ProductOrderLinePayCapabilityRpcClient,
 } from './linePayCapabilityRuntime'
 
@@ -91,6 +92,52 @@ test('reads one exact LINE Pay capability payment context without raw payload', 
   ])
 })
 
+test('reads exact confirm capability and callback associations without payment payload', async () => {
+  const calls: Array<{ table: string; columns: string; filters: Array<[string, string]> }> = []
+  let table = ''
+  const rows: Record<string, unknown> = {
+    line_pay_callback_capabilities: { id: capabilityId },
+    line_pay_callback_events: { id: callbackEventId },
+  }
+  const client = {
+    from(nextTable: string) {
+      table = nextTable
+      const filters: Array<[string, string]> = []
+      return {
+        select(columns: string) {
+          calls.push({ table: nextTable, columns, filters })
+          return this
+        },
+        eq(name: string, value: string) {
+          filters.push([name, value])
+          return this
+        },
+        async maybeSingle() {
+          return { data: rows[nextTable], error: null }
+        },
+      }
+    },
+  }
+
+  const result = await readProductOrderLinePayRecoveryAssociations({
+    environment: 'sandbox',
+    paymentId,
+    productOrderId,
+    attemptId,
+  }, client)
+
+  assert.deepEqual(result, { capabilityId, callbackEventId })
+  assert.equal(Object.isFrozen(result), true)
+  assert.deepEqual(calls.map(({ table: calledTable, columns }) => ({
+    table: calledTable,
+    columns,
+  })), [
+    { table: 'line_pay_callback_capabilities', columns: 'id' },
+    { table: 'line_pay_callback_events', columns: 'id' },
+  ])
+  assert.equal(table, 'line_pay_callback_events')
+})
+
 test('maps the capability callback sequence to exact RPC names and arguments', async () => {
   const serviceRoleRpc = createRpcClient([
     {
@@ -124,6 +171,12 @@ test('maps the capability callback sequence to exact RPC names and arguments', a
   const executorRpc = createRpcClient([
     {
       result_code: 'completed',
+      payment_id: paymentId,
+      product_order_id: productOrderId,
+      transaction_id: transactionId,
+    },
+    {
+      result_code: 'already_completed',
       payment_id: paymentId,
       product_order_id: productOrderId,
       transaction_id: transactionId,
@@ -170,6 +223,20 @@ test('maps the capability callback sequence to exact RPC names and arguments', a
     confirmResultSha256: 'd'.repeat(64),
     requestId: 'line-pay-callback:request-1',
   })
+  await database.recoverConfirmation({
+    environment: 'sandbox',
+    paymentId,
+    productOrderId,
+    attemptId,
+    merchantOrderNo,
+    transactionId,
+    amountTwd: 50,
+    currency: 'TWD',
+    capabilityId,
+    callbackEventId,
+    confirmResultSha256: 'e'.repeat(64),
+    requestId: 'line-pay-recovery:request-1',
+  })
   await database.cancelPayment({
     environment: 'sandbox',
     paymentId,
@@ -198,7 +265,10 @@ test('maps the capability callback sequence to exact RPC names and arguments', a
   ])
   assert.deepEqual(
     executorRpc.calls.map(({ functionName }) => functionName),
-    ['finalize_product_order_line_pay_confirmation'],
+    [
+      'finalize_product_order_line_pay_confirmation',
+      'recover_product_order_line_pay_confirmation',
+    ],
   )
   assert.deepEqual(serviceRoleRpc.calls[0]?.args, {
     p_token_hash: 'a'.repeat(64),
@@ -219,6 +289,11 @@ test('maps the capability callback sequence to exact RPC names and arguments', a
     false,
   )
   assert.equal('p_paid_at' in (executorRpc.calls[0]?.args ?? {}), false)
+  assert.equal(
+    executorRpc.calls[1]?.args.p_confirm_result_sha256,
+    'e'.repeat(64),
+  )
+  assert.equal('p_callback_claim_id' in (executorRpc.calls[1]?.args ?? {}), false)
 })
 
 test('RPC failure and unexpected result shape fail closed without details', async () => {
