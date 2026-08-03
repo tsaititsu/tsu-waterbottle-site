@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { classifyLinePayExecutorReadinessFailure } from '@/lib/supabase/linePayExecutorReadiness'
 import type { LinePaySandboxE2eStartEnvironment } from '../start/handler'
 import { isLinePaySandboxE2eRouteEnabled } from '../start/handler'
 
@@ -41,9 +42,14 @@ export async function handleLinePayExecutorReadiness(input: {
     return NextResponse.json(result, {
       headers: { 'Cache-Control': 'no-store' },
     })
-  } catch {
+  } catch (error) {
+    const readinessReason = classifyLinePayExecutorReadinessFailure(error)
     return NextResponse.json(
-      { ok: false, error: 'line_pay_executor_readiness_failed' },
+      {
+        ok: false,
+        error: 'line_pay_executor_readiness_failed',
+        ...(readinessReason ? { readinessReason } : {}),
+      },
       { status: 502, headers: { 'Cache-Control': 'no-store' } },
     )
   }

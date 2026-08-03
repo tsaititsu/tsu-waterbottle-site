@@ -1,6 +1,15 @@
 import 'server-only'
 
 import type { ProductOrderLinePayCapabilityRpcClient } from './linePayCapabilityRuntime'
+import {
+  createLinePayExecutorReadinessFailure,
+  type LinePayExecutorReadinessFailureReason,
+} from './linePayExecutorReadiness'
+
+export {
+  classifyLinePayExecutorReadinessFailure,
+  type LinePayExecutorReadinessFailureReason,
+} from './linePayExecutorReadiness'
 
 type ExecutorEnv = {
   readonly [key: string]: string | undefined
@@ -25,6 +34,14 @@ const EXPECTED_READINESS_CODE = 'P0002'
 const EXPECTED_READINESS_MESSAGE = 'line_pay_confirmation_context_not_found'
 const SECRET_API_KEY_PATTERN = /^sb_secret_[A-Za-z0-9_-]{20,512}$/
 const SQLSTATE_PATTERN = /^[A-Z0-9]{5}$/
+const SAFE_RPC_ERROR_CODES = Object.freeze({
+  failed: 'line_pay_executor_rpc_failed',
+  forbidden: 'line_pay_executor_rpc_forbidden',
+  notFound: 'line_pay_executor_rpc_not_found',
+  timeout: 'line_pay_executor_rpc_timeout',
+  unauthorized: 'line_pay_executor_rpc_unauthorized',
+  unavailable: 'line_pay_executor_rpc_unavailable',
+})
 
 function invalidConfig(): never {
   throw new Error('line_pay_executor_config_invalid')
@@ -61,11 +78,19 @@ function requireExecutorApiKey(value: string | undefined) {
   return value
 }
 
-function stableRpcError(value: unknown): SafeRpcError {
+function safeResponseFailureCode(status: number) {
+  if (status === 401) return SAFE_RPC_ERROR_CODES.unauthorized
+  if (status === 403) return SAFE_RPC_ERROR_CODES.forbidden
+  if (status === 404) return SAFE_RPC_ERROR_CODES.notFound
+  if (status >= 500) return SAFE_RPC_ERROR_CODES.unavailable
+  return SAFE_RPC_ERROR_CODES.failed
+}
+
+function stableRpcError(value: unknown, status = 0): SafeRpcError {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return Object.freeze({
-      code: 'line_pay_executor_rpc_failed',
-      message: 'line_pay_executor_rpc_failed',
+      code: safeResponseFailureCode(status),
+      message: SAFE_RPC_ERROR_CODES.failed,
     })
   }
   const record = value as Record<string, unknown>
@@ -82,9 +107,17 @@ function stableRpcError(value: unknown): SafeRpcError {
     code:
       typeof record.code === 'string' && SQLSTATE_PATTERN.test(record.code)
         ? record.code
-        : 'line_pay_executor_rpc_failed',
-    message: 'line_pay_executor_rpc_failed',
+        : safeResponseFailureCode(status),
+    message: SAFE_RPC_ERROR_CODES.failed,
   })
+}
+
+function stableTransportRpcError(error: unknown): SafeRpcError {
+  const code =
+    error instanceof DOMException && error.name === 'AbortError'
+      ? SAFE_RPC_ERROR_CODES.timeout
+      : SAFE_RPC_ERROR_CODES.unavailable
+  return Object.freeze({ code, message: SAFE_RPC_ERROR_CODES.failed })
 }
 
 async function parseRpcResponse(response: Response) {
@@ -93,25 +126,25 @@ async function parseRpcResponse(response: Response) {
     Number.isFinite(contentLength)
     && contentLength > MAX_EXECUTOR_RESPONSE_BYTES
   ) {
-    return { data: null, error: stableRpcError(null) }
+    return { data: null, error: stableRpcError(null, response.status) }
   }
 
   let body: unknown
   try {
     const text = await response.text()
     if (text.length > MAX_EXECUTOR_RESPONSE_BYTES) {
-      return { data: null, error: stableRpcError(null) }
+      return { data: null, error: stableRpcError(null, response.status) }
     }
     body = JSON.parse(text) as unknown
   } catch {
-    return { data: null, error: stableRpcError(null) }
+    return { data: null, error: stableRpcError(null, response.status) }
   }
 
   if (!response.ok) {
-    return { data: null, error: stableRpcError(body) }
+    return { data: null, error: stableRpcError(body, response.status) }
   }
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-    return { data: null, error: stableRpcError(null) }
+    return { data: null, error: stableRpcError(null, response.status) }
   }
   return { data: body, error: null }
 }
@@ -155,8 +188,8 @@ export function createLinePayExecutorClient(
               },
             )
             return await parseRpcResponse(response)
-          } catch {
-            return { data: null, error: stableRpcError(null) }
+          } catch (error) {
+            return { data: null, error: stableTransportRpcError(error) }
           } finally {
             clearTimeout(timeout)
           }
@@ -189,14 +222,14 @@ export async function probeLinePayExecutorCallbackReadiness(
   try {
     result = await client.rpc(EXECUTOR_RPC, READINESS_ARGS).single()
   } catch {
-    throw new Error('line_pay_executor_readiness_failed')
+    throw createLinePayExecutorReadinessFailure('rpc_failed')
   }
   if (
     typeof result.error !== 'object'
     || result.error === null
     || Array.isArray(result.error)
   ) {
-    throw new Error('line_pay_executor_readiness_failed')
+    throw createLinePayExecutorReadinessFailure('rpc_unexpected_result')
   }
   const error = result.error as Record<string, unknown>
   if (
@@ -204,7 +237,9 @@ export async function probeLinePayExecutorCallbackReadiness(
     || error.code !== EXPECTED_READINESS_CODE
     || error.message !== EXPECTED_READINESS_MESSAGE
   ) {
-    throw new Error('line_pay_executor_readiness_failed')
+    throw createLinePayExecutorReadinessFailure(
+      safeReadinessFailureReason(error),
+    )
   }
   return Object.freeze({
     ok: true,
@@ -212,4 +247,29 @@ export async function probeLinePayExecutorCallbackReadiness(
     upstreamCalled: false,
     databaseWrites: false,
   })
+}
+
+function safeReadinessFailureReason(
+  error: Record<string, unknown>,
+): LinePayExecutorReadinessFailureReason {
+  switch (error.code) {
+    case '42501':
+      return 'rpc_insufficient_privilege'
+    case '42883':
+    case '42P01':
+    case SAFE_RPC_ERROR_CODES.notFound:
+      return 'rpc_contract_missing'
+    case SAFE_RPC_ERROR_CODES.unauthorized:
+      return 'rpc_unauthorized'
+    case SAFE_RPC_ERROR_CODES.forbidden:
+      return 'rpc_forbidden'
+    case SAFE_RPC_ERROR_CODES.timeout:
+      return 'rpc_timeout'
+    case SAFE_RPC_ERROR_CODES.unavailable:
+      return 'rpc_unavailable'
+    case SAFE_RPC_ERROR_CODES.failed:
+      return 'rpc_failed'
+    default:
+      return 'rpc_unexpected_result'
+  }
 }

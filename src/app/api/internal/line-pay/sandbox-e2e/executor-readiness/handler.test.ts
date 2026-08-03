@@ -122,6 +122,30 @@ test('probe failures return a stable redacted response', async () => {
   assert.equal(body.includes('html'), false)
 })
 
+test('probe failures expose only an allowlisted readiness reason', async () => {
+  const secretMarker = 'sb_secret_must_never_escape_1234567890'
+  const response = await handleLinePayExecutorReadiness({
+    request: request(),
+    env: enabledEnv,
+    authorize: async () => true,
+    probe: async () => {
+      throw Object.assign(
+        new Error('line_pay_executor_readiness_rpc_insufficient_privilege'),
+        { unsafeInternalDetail: secretMarker },
+      )
+    },
+  })
+  const body = JSON.stringify(await json(response))
+
+  assert.equal(response.status, 502)
+  assert.deepEqual(JSON.parse(body), {
+    ok: false,
+    error: 'line_pay_executor_readiness_failed',
+    readinessReason: 'rpc_insufficient_privilege',
+  })
+  assert.equal(body.includes(secretMarker), false)
+})
+
 test('route is POST-only, uses admin auth, and has no payment or provider call', () => {
   const routeSource = readFileSync(
     join(

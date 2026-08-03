@@ -48,6 +48,7 @@ try {
 }
 
 const {
+  classifyLinePayExecutorReadinessFailure,
   createLinePayExecutorClient,
   probeLinePayExecutorCallbackReadiness,
 } = serverModule
@@ -195,18 +196,55 @@ test('readiness probe accepts only the exact no-write sentinel result', async ()
 })
 
 test('readiness probe fails closed for success and unrelated database errors', async () => {
-  for (const result of [
-    { data: { finalized: true }, error: null },
-    { data: null, error: { code: '42501', message: 'permission denied' } },
-    { data: null, error: { code: 'P0002', message: 'different_error' } },
-  ]) {
+  for (const [result, expectedReason] of [
+    [
+      { data: { finalized: true }, error: null },
+      'rpc_unexpected_result',
+    ],
+    [
+      { data: null, error: { code: '42501', message: 'permission denied' } },
+      'rpc_insufficient_privilege',
+    ],
+    [
+      { data: null, error: { code: 'P0002', message: 'different_error' } },
+      'rpc_unexpected_result',
+    ],
+  ] as const) {
     await assert.rejects(
       probeLinePayExecutorCallbackReadiness({
         rpc: () => ({ single: async () => result }),
       }),
       (error: unknown) =>
-        error instanceof Error
-        && error.message === 'line_pay_executor_readiness_failed',
+        classifyLinePayExecutorReadinessFailure(error) === expectedReason,
     )
   }
+})
+
+test('readiness probe classifies insufficient privilege without exposing upstream details', async () => {
+  const secretMarker = baseEnv.SUPABASE_LINE_PAY_EXECUTOR_API_KEY
+  const client = createLinePayExecutorClient(baseEnv, async () =>
+    new Response(JSON.stringify({
+      code: '42501',
+      message: `permission denied ${secretMarker}`,
+      details: '<html>internal database detail</html>',
+    }), {
+      status: 403,
+      headers: { 'content-type': 'application/json' },
+    }))
+
+  let caught: unknown
+  try {
+    await probeLinePayExecutorCallbackReadiness(client)
+  } catch (error) {
+    caught = error
+  }
+
+  assert.equal(
+    classifyLinePayExecutorReadinessFailure(caught),
+    'rpc_insufficient_privilege',
+  )
+  const serialized = JSON.stringify(caught)
+  assert.equal(serialized.includes(secretMarker), false)
+  assert.equal(serialized.includes('permission denied'), false)
+  assert.equal(serialized.includes('html'), false)
 })
