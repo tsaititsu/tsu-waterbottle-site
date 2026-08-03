@@ -1,100 +1,215 @@
 import 'server-only'
 
-import { createClient } from '@supabase/supabase-js'
 import type { ProductOrderLinePayCapabilityRpcClient } from './linePayCapabilityRuntime'
 
 type ExecutorEnv = {
   readonly [key: string]: string | undefined
   NEXT_PUBLIC_SUPABASE_URL?: string
-  NEXT_PUBLIC_SUPABASE_ANON_KEY?: string
-  SUPABASE_LINE_PAY_EXECUTOR_JWT?: string
+  SUPABASE_LINE_PAY_EXECUTOR_API_KEY?: string
 }
 
-type ExecutorClientOptions = {
-  auth: {
-    autoRefreshToken: false
-    persistSession: false
-  }
-  global: {
-    headers: { Authorization: string }
-  }
-}
+type ExecutorFetch = (
+  input: string | URL | Request,
+  init?: RequestInit,
+) => Promise<Response>
 
-type SupabaseClientFactory = (
-  url: string,
-  anonKey: string,
-  options: ExecutorClientOptions,
-) => ProductOrderLinePayCapabilityRpcClient
+type SafeRpcError = Readonly<{
+  code: string
+  message: string
+}>
 
-const JWT_ALGORITHMS = new Set(['ES256', 'HS256', 'RS256'])
+const EXECUTOR_RPC = 'finalize_product_order_line_pay_confirmation'
+const EXECUTOR_REQUEST_TIMEOUT_MS = 5_000
+const MAX_EXECUTOR_RESPONSE_BYTES = 64 * 1024
+const EXPECTED_READINESS_CODE = 'P0002'
+const EXPECTED_READINESS_MESSAGE = 'line_pay_confirmation_context_not_found'
+const SECRET_API_KEY_PATTERN = /^sb_secret_[A-Za-z0-9_-]{20,512}$/
+const SQLSTATE_PATTERN = /^[A-Z0-9]{5}$/
 
 function invalidConfig(): never {
   throw new Error('line_pay_executor_config_invalid')
 }
 
-function decodeJwtPart(value: string) {
+function requireSupabaseUrl(value: string | undefined) {
+  if (typeof value !== 'string') invalidConfig()
+
+  let url: URL
   try {
-    const parsed: unknown = JSON.parse(
-      Buffer.from(value, 'base64url').toString('utf8'),
-    )
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      invalidConfig()
-    }
-    return parsed as Record<string, unknown>
+    url = new URL(value)
   } catch {
     invalidConfig()
   }
+  if (
+    url.protocol !== 'https:'
+    || !/^[a-z0-9-]+\.supabase\.co$/.test(url.hostname)
+    || url.port !== ''
+    || url.username !== ''
+    || url.password !== ''
+    || url.pathname !== '/'
+    || url.search !== ''
+    || url.hash !== ''
+  ) {
+    invalidConfig()
+  }
+  return url.origin
 }
 
-function requireExecutorJwt(value: string | undefined) {
-  if (typeof value !== 'string' || value.length < 32 || value.length > 8192) {
-    invalidConfig()
-  }
-  const parts = value.split('.')
-  if (parts.length !== 3 || parts.some((part) => part.length === 0)) {
-    invalidConfig()
-  }
-  const header = decodeJwtPart(parts[0]!)
-  const claims = decodeJwtPart(parts[1]!)
-  const nowSeconds = Math.floor(Date.now() / 1000)
-  if (
-    typeof header.alg !== 'string'
-    || !JWT_ALGORITHMS.has(header.alg)
-    || claims.aud !== 'authenticated'
-    || claims.role !== 'line_pay_payment_executor'
-    || typeof claims.exp !== 'number'
-    || !Number.isSafeInteger(claims.exp)
-    || claims.exp <= nowSeconds
-  ) {
+function requireExecutorApiKey(value: string | undefined) {
+  if (typeof value !== 'string' || !SECRET_API_KEY_PATTERN.test(value)) {
     invalidConfig()
   }
   return value
 }
 
+function stableRpcError(value: unknown): SafeRpcError {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return Object.freeze({
+      code: 'line_pay_executor_rpc_failed',
+      message: 'line_pay_executor_rpc_failed',
+    })
+  }
+  const record = value as Record<string, unknown>
+  if (
+    record.code === EXPECTED_READINESS_CODE
+    && record.message === EXPECTED_READINESS_MESSAGE
+  ) {
+    return Object.freeze({
+      code: EXPECTED_READINESS_CODE,
+      message: EXPECTED_READINESS_MESSAGE,
+    })
+  }
+  return Object.freeze({
+    code:
+      typeof record.code === 'string' && SQLSTATE_PATTERN.test(record.code)
+        ? record.code
+        : 'line_pay_executor_rpc_failed',
+    message: 'line_pay_executor_rpc_failed',
+  })
+}
+
+async function parseRpcResponse(response: Response) {
+  const contentLength = Number(response.headers.get('content-length'))
+  if (
+    Number.isFinite(contentLength)
+    && contentLength > MAX_EXECUTOR_RESPONSE_BYTES
+  ) {
+    return { data: null, error: stableRpcError(null) }
+  }
+
+  let body: unknown
+  try {
+    const text = await response.text()
+    if (text.length > MAX_EXECUTOR_RESPONSE_BYTES) {
+      return { data: null, error: stableRpcError(null) }
+    }
+    body = JSON.parse(text) as unknown
+  } catch {
+    return { data: null, error: stableRpcError(null) }
+  }
+
+  if (!response.ok) {
+    return { data: null, error: stableRpcError(body) }
+  }
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return { data: null, error: stableRpcError(null) }
+  }
+  return { data: body, error: null }
+}
+
 export function createLinePayExecutorClient(
   env: ExecutorEnv = process.env,
-  createClientFn: SupabaseClientFactory = (url, anonKey, options) =>
-    createClient(url, anonKey, options),
-) {
-  const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL
-  const anonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  if (
-    typeof supabaseUrl !== 'string'
-    || !/^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(supabaseUrl)
-    || typeof anonKey !== 'string'
-    || anonKey.length === 0
-  ) {
-    invalidConfig()
-  }
-  const executorJwt = requireExecutorJwt(env.SUPABASE_LINE_PAY_EXECUTOR_JWT)
+  fetchFn: ExecutorFetch = fetch,
+): ProductOrderLinePayCapabilityRpcClient {
+  const supabaseUrl = requireSupabaseUrl(env.NEXT_PUBLIC_SUPABASE_URL)
+  const executorApiKey = requireExecutorApiKey(
+    env.SUPABASE_LINE_PAY_EXECUTOR_API_KEY,
+  )
 
-  return createClientFn(supabaseUrl, anonKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
+  return Object.freeze({
+    rpc(functionName: string, args: Record<string, unknown>) {
+      if (functionName !== EXECUTOR_RPC) {
+        throw new Error('line_pay_executor_rpc_not_allowed')
+      }
+
+      return Object.freeze({
+        async single() {
+          const controller = new AbortController()
+          const timeout = setTimeout(
+            () => controller.abort(),
+            EXECUTOR_REQUEST_TIMEOUT_MS,
+          )
+          try {
+            const response = await fetchFn(
+              `${supabaseUrl}/rest/v1/rpc/${EXECUTOR_RPC}`,
+              {
+                method: 'POST',
+                headers: {
+                  accept: 'application/vnd.pgrst.object+json',
+                  apikey: executorApiKey,
+                  'content-type': 'application/json',
+                },
+                body: JSON.stringify(args),
+                cache: 'no-store',
+                redirect: 'error',
+                signal: controller.signal,
+              },
+            )
+            return await parseRpcResponse(response)
+          } catch {
+            return { data: null, error: stableRpcError(null) }
+          } finally {
+            clearTimeout(timeout)
+          }
+        },
+      })
     },
-    global: {
-      headers: { Authorization: `Bearer ${executorJwt}` },
-    },
+  })
+}
+
+const READINESS_ARGS = Object.freeze({
+  p_environment: 'sandbox',
+  p_payment_id: '00000000-0000-4000-8000-000000000001',
+  p_product_order_id: '00000000-0000-4000-8000-000000000002',
+  p_attempt_id: '00000000-0000-4000-8000-000000000003',
+  p_merchant_order_no: 'LINE_PAY_EXECUTOR_READINESS',
+  p_transaction_id: 'LINE_PAY_EXECUTOR_READINESS',
+  p_amount_twd: 1,
+  p_currency: 'TWD',
+  p_capability_id: '00000000-0000-4000-8000-000000000004',
+  p_callback_event_id: '00000000-0000-4000-8000-000000000005',
+  p_callback_claim_id: '00000000-0000-4000-8000-000000000006',
+  p_confirm_result_sha256: '0'.repeat(64),
+  p_request_id: 'line-pay-executor-readiness',
+})
+
+export async function probeLinePayExecutorCallbackReadiness(
+  client: ProductOrderLinePayCapabilityRpcClient,
+) {
+  let result: { data: unknown; error: unknown }
+  try {
+    result = await client.rpc(EXECUTOR_RPC, READINESS_ARGS).single()
+  } catch {
+    throw new Error('line_pay_executor_readiness_failed')
+  }
+  if (
+    typeof result.error !== 'object'
+    || result.error === null
+    || Array.isArray(result.error)
+  ) {
+    throw new Error('line_pay_executor_readiness_failed')
+  }
+  const error = result.error as Record<string, unknown>
+  if (
+    result.data !== null
+    || error.code !== EXPECTED_READINESS_CODE
+    || error.message !== EXPECTED_READINESS_MESSAGE
+  ) {
+    throw new Error('line_pay_executor_readiness_failed')
+  }
+  return Object.freeze({
+    ok: true,
+    authenticated: true,
+    upstreamCalled: false,
+    databaseWrites: false,
   })
 }

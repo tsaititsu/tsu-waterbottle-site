@@ -124,13 +124,13 @@ test('the application adapter exposes no split evidence or completion call', () 
   assert.doesNotMatch(runtime, /p_audit_evidence|p_paid_at/)
 })
 
-test('executor client is server-only and rejects broad or unsigned credentials', () => {
+test('executor client is server-only and accepts only a dedicated secret API key', () => {
   assert.equal(executor.split('\n')[0], "import 'server-only'")
-  assert.match(executor, /claims\.role\s*!==\s*'line_pay_payment_executor'/)
-  assert.match(executor, /claims\.aud\s*!==\s*'authenticated'/)
-  assert.match(executor, /const\s+nowSeconds\s*=\s*Math\.floor\(Date\.now\(\)\s*\/\s*1000\)/)
-  assert.match(executor, /claims\.exp\s*<=\s*nowSeconds/)
-  assert.match(executor, /const\s+JWT_ALGORITHMS\s*=\s*new\s+Set\(\['ES256',\s*'HS256',\s*'RS256'\]\)/)
+  assert.match(executor, /SUPABASE_LINE_PAY_EXECUTOR_API_KEY/)
+  assert.match(executor, /\^sb_secret_/)
+  assert.match(executor, /functionName\s*!==\s*EXECUTOR_RPC/)
+  assert.match(executor, /apikey:\s*executorApiKey/)
+  assert.doesNotMatch(executor, /Authorization|Bearer|SUPABASE_LINE_PAY_EXECUTOR_JWT/)
   assert.doesNotMatch(executor, /console\.|logger\.|SUPABASE_SERVICE_ROLE_KEY/)
 })
 
@@ -164,7 +164,11 @@ test('documents impact, backup, deployment order, compatibility, and fail-forwar
     '20260719033404_line_pay_remediation_contracts.sql',
     '20260728053215_line_pay_checkout_aggregate_initialization.sql',
     '20260802160000_line_pay_atomic_confirmation_finalization.sql',
-    'SUPABASE_LINE_PAY_EXECUTOR_JWT',
+    'SUPABASE_LINE_PAY_EXECUTOR_API_KEY',
+    'secret_jwt_template',
+    'role=line_pay_payment_executor',
+    'apikey',
+    '禁止放入 `Authorization`',
     '最小權限',
     '輪替',
     '舊版 callback',

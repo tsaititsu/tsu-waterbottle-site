@@ -47,87 +47,166 @@ try {
   moduleInternals._load = originalLoad
 }
 
-const { createLinePayExecutorClient } = serverModule
+const {
+  createLinePayExecutorClient,
+  probeLinePayExecutorCallbackReadiness,
+} = serverModule
 
-function base64url(value: unknown) {
-  return Buffer.from(JSON.stringify(value)).toString('base64url')
+const baseEnv = {
+  NEXT_PUBLIC_SUPABASE_URL: 'https://sandbox-project.supabase.co',
+  SUPABASE_LINE_PAY_EXECUTOR_API_KEY:
+    'sb_secret_executor_test_1234567890_abcdefghijklmnopqrstuvwxyz',
 }
 
-function executorJwt(overrides: Record<string, unknown> = {}) {
-  const nowSeconds = Math.floor(Date.now() / 1000)
-  return [
-    base64url({ alg: 'HS256', typ: 'JWT' }),
-    base64url({
-      aud: 'authenticated',
-      exp: nowSeconds + 300,
-      role: 'line_pay_payment_executor',
-      ...overrides,
-    }),
-    'test-signature',
-  ].join('.')
-}
-
-test('creates a server-only Supabase client with the dedicated executor JWT', () => {
-  const calls: unknown[][] = []
-  const expectedClient = Object.freeze({
-    rpc: () => ({ single: async () => ({ data: null, error: null }) }),
+test('executor RPC uses the dedicated secret key only as apikey with a fixed endpoint', async () => {
+  const calls: Array<{ input: string; init?: RequestInit }> = []
+  const client = createLinePayExecutorClient(baseEnv, async (input, init) => {
+    calls.push({ input: String(input), init })
+    return new Response(JSON.stringify({ finalized: true }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
   })
-  const token = executorJwt()
-  const client = createLinePayExecutorClient(
-    {
-      NEXT_PUBLIC_SUPABASE_URL: 'https://sandbox-project.supabase.co',
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: 'sandbox-anon-key',
-      SUPABASE_LINE_PAY_EXECUTOR_JWT: token,
-    },
-    (...args: unknown[]) => {
-      calls.push(args)
-      return expectedClient
-    },
-  )
 
-  assert.equal(client, expectedClient)
+  const result = await client.rpc(
+    'finalize_product_order_line_pay_confirmation',
+    { p_environment: 'sandbox' },
+  ).single()
+
+  assert.deepEqual(result, { data: { finalized: true }, error: null })
   assert.equal(calls.length, 1)
-  assert.equal(calls[0]?.[0], 'https://sandbox-project.supabase.co')
-  assert.equal(calls[0]?.[1], 'sandbox-anon-key')
-  assert.deepEqual(calls[0]?.[2], {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-    global: {
-      headers: { Authorization: `Bearer ${token}` },
-    },
-  })
+  assert.equal(
+    calls[0]?.input,
+    'https://sandbox-project.supabase.co/rest/v1/rpc/finalize_product_order_line_pay_confirmation',
+  )
+  assert.equal(calls[0]?.init?.method, 'POST')
+  assert.equal(calls[0]?.init?.redirect, 'error')
+  assert.equal(calls[0]?.init?.cache, 'no-store')
+  const headers = new Headers(calls[0]?.init?.headers)
+  assert.equal(headers.get('apikey'), baseEnv.SUPABASE_LINE_PAY_EXECUTOR_API_KEY)
+  assert.equal(headers.get('authorization'), null)
+  assert.equal(headers.get('content-type'), 'application/json')
+  assert.equal(headers.get('accept'), 'application/vnd.pgrst.object+json')
+  assert.equal(calls[0]?.init?.body, JSON.stringify({ p_environment: 'sandbox' }))
 })
 
-test('rejects absent, expired, service-role, and unsigned executor credentials', () => {
-  const baseEnv = {
-    NEXT_PUBLIC_SUPABASE_URL: 'https://sandbox-project.supabase.co',
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: 'sandbox-anon-key',
-  }
-  const invalidTokens = [
+test('rejects missing and non-secret executor API keys before network access', () => {
+  for (const value of [
     undefined,
-    executorJwt({ exp: 1 }),
-    executorJwt({ role: 'service_role' }),
-    `${base64url({ alg: 'none', typ: 'JWT' })}.${base64url({
-      aud: 'authenticated',
-      exp: Math.floor(Date.now() / 1000) + 300,
-      role: 'line_pay_payment_executor',
-    })}.`,
-  ]
-
-  for (const token of invalidTokens) {
+    '',
+    'sb_publishable_not_allowed',
+    'eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.signature',
+    'legacy-service-role-key',
+  ]) {
+    let fetchCalls = 0
     assert.throws(
-      () =>
-        createLinePayExecutorClient(
-          { ...baseEnv, SUPABASE_LINE_PAY_EXECUTOR_JWT: token },
-          () => {
-            throw new Error('must_not_create_client')
-          },
-        ),
+      () => createLinePayExecutorClient(
+        { ...baseEnv, SUPABASE_LINE_PAY_EXECUTOR_API_KEY: value },
+        async () => {
+          fetchCalls += 1
+          throw new Error('must_not_fetch')
+        },
+      ),
       (error: unknown) =>
         error instanceof Error
         && error.message === 'line_pay_executor_config_invalid',
+    )
+    assert.equal(fetchCalls, 0)
+  }
+})
+
+test('rejects every RPC except the atomic confirmation finalizer', () => {
+  const client = createLinePayExecutorClient(baseEnv, async () => {
+    throw new Error('must_not_fetch')
+  })
+
+  assert.throws(
+    () => client.rpc('arbitrary_function', {}),
+    (error: unknown) =>
+      error instanceof Error
+      && error.message === 'line_pay_executor_rpc_not_allowed',
+  )
+})
+
+test('returns a redacted stable error and never retries failed RPC requests', async () => {
+  let calls = 0
+  const secretMarker = baseEnv.SUPABASE_LINE_PAY_EXECUTOR_API_KEY
+  const client = createLinePayExecutorClient(baseEnv, async () => {
+    calls += 1
+    return new Response(JSON.stringify({
+      code: 'P0002',
+      message: 'line_pay_confirmation_context_not_found',
+      details: `must-not-escape-${secretMarker}`,
+      hint: '<html>internal</html>',
+    }), {
+      status: 404,
+      headers: { 'content-type': 'application/json' },
+    })
+  })
+
+  const result = await client.rpc(
+    'finalize_product_order_line_pay_confirmation',
+    {},
+  ).single()
+  const serialized = JSON.stringify(result)
+
+  assert.equal(calls, 1)
+  assert.deepEqual(result, {
+    data: null,
+    error: {
+      code: 'P0002',
+      message: 'line_pay_confirmation_context_not_found',
+    },
+  })
+  assert.equal(serialized.includes(secretMarker), false)
+  assert.equal(serialized.includes('details'), false)
+  assert.equal(serialized.includes('hint'), false)
+  assert.equal(serialized.includes('html'), false)
+})
+
+test('readiness probe accepts only the exact no-write sentinel result', async () => {
+  let receivedName = ''
+  let receivedArgs: Record<string, unknown> | undefined
+  const readiness = await probeLinePayExecutorCallbackReadiness({
+    rpc: (functionName, args) => {
+      receivedName = functionName
+      receivedArgs = args
+      return {
+        single: async () => ({
+          data: null,
+          error: {
+            code: 'P0002',
+            message: 'line_pay_confirmation_context_not_found',
+          },
+        }),
+      }
+    },
+  })
+
+  assert.equal(receivedName, 'finalize_product_order_line_pay_confirmation')
+  assert.equal(receivedArgs?.p_environment, 'sandbox')
+  assert.deepEqual(readiness, {
+    ok: true,
+    authenticated: true,
+    upstreamCalled: false,
+    databaseWrites: false,
+  })
+  assert.equal(Object.isFrozen(readiness), true)
+})
+
+test('readiness probe fails closed for success and unrelated database errors', async () => {
+  for (const result of [
+    { data: { finalized: true }, error: null },
+    { data: null, error: { code: '42501', message: 'permission denied' } },
+    { data: null, error: { code: 'P0002', message: 'different_error' } },
+  ]) {
+    await assert.rejects(
+      probeLinePayExecutorCallbackReadiness({
+        rpc: () => ({ single: async () => result }),
+      }),
+      (error: unknown) =>
+        error instanceof Error
+        && error.message === 'line_pay_executor_readiness_failed',
     )
   }
 })

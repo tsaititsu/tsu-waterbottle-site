@@ -46,6 +46,9 @@ on:
       - "src/lib/supabase/linePayCapabilityRuntime.test.ts"
       - "src/lib/supabase/linePayExecutor.ts"
       - "src/lib/supabase/linePayExecutor.test.ts"
+      - "src/app/api/internal/line-pay/sandbox-e2e/executor-readiness/handler.ts"
+      - "src/app/api/internal/line-pay/sandbox-e2e/executor-readiness/handler.test.ts"
+      - "src/app/api/internal/line-pay/sandbox-e2e/executor-readiness/route.ts"
       - "supabase/bank_transfer_submissions_patch.sql"
       - "supabase/bank_transfer_baseline_capture_runner.test.ts"
       - "supabase/bank_transfer_baseline_capture_workflow.test.ts"
@@ -156,6 +159,7 @@ jobs:
           node --import tsx --test src/lib/supabase/linePayCheckoutInitialization.test.ts
           node --import tsx --test src/lib/supabase/linePayCapabilityRuntime.test.ts
           node --import tsx --test src/lib/supabase/linePayExecutor.test.ts
+          node --import tsx --test src/app/api/internal/line-pay/sandbox-e2e/executor-readiness/handler.test.ts
 
       - name: Run LINE Pay Production exact-file contracts
         run: node supabase/tests/run_line_pay_production_exact_file_contracts.mjs

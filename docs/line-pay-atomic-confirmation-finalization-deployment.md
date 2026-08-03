@@ -30,11 +30,17 @@ Migration 不修改商業資料 rows，不啟用 Runtime，也不改寫既有 Mi
 2. `20260728053215_line_pay_checkout_aggregate_initialization.sql`
 3. 部署包含新 callback adapter 的 exact commit，但保持 Runtime disabled。
 4. `20260802160000_line_pay_atomic_confirmation_finalization.sql`
-5. 透過受控秘密通道設定 server-only `SUPABASE_LINE_PAY_EXECUTOR_JWT`，不得讀取
-   或顯示真值。此 credential 只能代表最小權限的
-   `line_pay_payment_executor`，不得改用 `service_role`；輪替必須透過受控秘密通道
-   更新並重新部署，無有效 credential 時 callback 必須 fail closed。
-6. 執行唯讀 catalog／ACL／callback readiness postflight。
+5. 透過受控秘密通道建立 server-only Supabase Secret API Key，並將
+   `secret_jwt_template` 精確限制為 `role=line_pay_payment_executor`；以環境變數
+   `SUPABASE_LINE_PAY_EXECUTOR_API_KEY` 注入，不得讀取或顯示真值。Executor client
+   只可將該 key 放入 `apikey` header，禁止放入 `Authorization`、禁止改用
+   `service_role`。這是最小權限 credential；Sandbox 與 Production 必須使用各自
+   獨立的 key；輪替必須透過
+   受控秘密通道更新並重新部署，無有效 credential 時 callback 必須 fail closed。
+6. 執行唯讀 catalog／ACL／callback readiness postflight。Readiness 使用不存在的
+   固定 sentinel UUID，且只接受 RPC 在任何寫入前回傳的精確
+   `P0002 / line_pay_confirmation_context_not_found`；不得呼叫 LINE Pay Provider、
+   不得建立或更新訂單與付款。
 7. 另行取得 Runtime 啟用與付款測試授權。
 
 不得使用 `supabase db push`、`migration up`、apply-all、retry 或 fallback。
