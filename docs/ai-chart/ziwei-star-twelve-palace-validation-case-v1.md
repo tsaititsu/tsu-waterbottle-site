@@ -337,7 +337,6 @@
 - `home.living_environment`
 - `home.nearby_environment`
 - `home.family_interaction`
-- `home.family_background`
 - `reserve.saving_method`
 - `reserve.accumulation_retention`
 

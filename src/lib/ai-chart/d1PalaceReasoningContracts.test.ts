@@ -70,6 +70,17 @@ function clone<T>(value: T): T {
   return structuredClone(value)
 }
 
+function firstFacetForPalace(
+  palaceId: AiChartD1P1StructuralInput['targetPalace']['palaceId'],
+) {
+  const facetId = AI_CHART_D1_PALACE_FACET_REGISTRY.find(
+    (entry) => entry.palaceId === palaceId,
+  )?.facetIds[0]
+  assert.notEqual(facetId, undefined)
+  if (!facetId) throw new Error('missing synthetic source facet')
+  return facetId
+}
+
 function directAxisFixture(): MutableRecord {
   return {
     contractVersion: 'ai-chart-d1-palace-axis-result/v1',
@@ -194,6 +205,7 @@ function structuralInfluenceFixture(
   )
   assert.notEqual(trigger, undefined)
   if (!trigger) throw new Error('missing synthetic positive trigger')
+  const sourceFacetId = firstFacetForPalace(relation.sourcePalaceId)
 
   const influenceId = 'influence:synthetic:ming:trine:positive'
   return {
@@ -212,6 +224,7 @@ function structuralInfluenceFixture(
         relationKind: relation.relationKind,
         visibility: relation.visibility,
         sourcePalaceId: relation.sourcePalaceId,
+        sourceFacetId,
         sourceFactRefs: [relation.relationFactRef, trigger.placementId],
         targetPalaceId: axisResult.targetPalaceId,
         targetFacetId: axisResult.claims[0].facetId,
@@ -322,9 +335,17 @@ check('palace facet Registry v1 is versioned and covers twelve palaces', () => {
   )
 })
 
-check('the approved Registry has exactly 63 unique facet IDs', () => {
-  assert.equal(AI_CHART_D1_PALACE_FACET_IDS.length, 63)
-  assert.equal(new Set(AI_CHART_D1_PALACE_FACET_IDS).size, 63)
+check('the approved Registry has exactly 59 unique canonical facet IDs', () => {
+  assert.equal(AI_CHART_D1_PALACE_FACET_IDS.length, 59)
+  assert.equal(new Set(AI_CHART_D1_PALACE_FACET_IDS).size, 59)
+  for (const retiredFacetId of [
+    'life.appearance_optional',
+    'possessions.owned_items',
+    'body.appearance_optional',
+    'home.family_background',
+  ]) {
+    assert.ok(!AI_CHART_D1_PALACE_FACET_IDS.includes(retiredFacetId as never))
+  }
 })
 
 check('confirmed palace boundaries are represented by exact facet ownership', () => {
@@ -345,6 +366,13 @@ check('confirmed palace boundaries are represented by exact facet ownership', ()
       'reserve.saving_method',
     ),
     true,
+  )
+  assert.equal(
+    isAiChartD1PalaceFacetAllowed(
+      'palace:property',
+      'home.family_background',
+    ),
+    false,
   )
   assert.equal(
     isAiChartD1PalaceFacetAllowed('palace:friends', 'social.coworkers'),
@@ -928,8 +956,42 @@ check('positive trine influence is source-bound without replacing the Axis resul
   )
   assert.equal(parsed.influences[0].influenceMode, 'SUPPORT')
   assert.equal(parsed.influences[0].visibility, 'EXPLICIT')
+  assert.equal(
+    isAiChartD1PalaceFacetAllowed(
+      parsed.influences[0].sourcePalaceId,
+      parsed.influences[0].sourceFacetId,
+    ),
+    true,
+  )
   assert.equal(JSON.stringify(axis), axisBefore)
   assert.equal(Object.hasOwn(parsed, 'claims'), false)
+})
+
+check('structural source facet must belong to the authenticated source palace', () => {
+  const input = createStructuralInputs(
+    completeModelInputSnapshot(),
+    'structural-source-facet',
+  )[0]
+  const axis = validateAiChartD1PalaceAxisResultAgainstStructuralInput(
+    axisFixtureForStructuralInput(input),
+    input,
+  )
+
+  const wrongPalaceFacet = structuralInfluenceFixture(axis, input)
+  ;(wrongPalaceFacet.influences as MutableRecord[])[0].sourceFacetId =
+    'life.core_personality'
+  expectStructuralInfluenceInvalid(
+    wrongPalaceFacet,
+    'SOURCE_FACET_INVALID',
+  )
+
+  const inventedFacet = structuralInfluenceFixture(axis, input)
+  ;(inventedFacet.influences as MutableRecord[])[0].sourceFacetId =
+    'children.generic_execution_domain'
+  expectStructuralInfluenceInvalid(
+    inventedFacet,
+    'SOURCE_FACET_INVALID',
+  )
 })
 
 check('hidden combination influence must remain latent and source-bound', () => {
@@ -965,6 +1027,7 @@ check('hidden combination influence must remain latent and source-bound', () => 
   influence.relationKind = 'HIDDEN_COMBINATION'
   influence.visibility = 'LATENT'
   influence.sourcePalaceId = relation.sourcePalaceId
+  influence.sourceFacetId = firstFacetForPalace(relation.sourcePalaceId)
   influence.sourceFactRefs = [
     relation.relationFactRef,
     positiveTrigger.placementId,
@@ -1005,6 +1068,9 @@ check('opposite palace cannot be reintroduced as a structural influence source',
   const fixture = structuralInfluenceFixture(axis, input)
   const influence = (fixture.influences as MutableRecord[])[0]
   influence.sourcePalaceId = input.oppositePalace.palaceId
+  influence.sourceFacetId = firstFacetForPalace(
+    input.oppositePalace.palaceId,
+  )
   influence.sourceFactRefs = [
     `relation:trine:${input.targetPalace.palaceId}:${input.oppositePalace.palaceId}`,
     input.oppositePalace.canonicalMajorStars[0].placementId,
@@ -1072,6 +1138,9 @@ check('positive and negative structural triggers cannot be mislabeled or mixed',
   const negative = structuralInfluenceFixture(axis, input)
   const influence = (negative.influences as MutableRecord[])[0]
   influence.sourcePalaceId = negativeRelation.sourcePalaceId
+  influence.sourceFacetId = firstFacetForPalace(
+    negativeRelation.sourcePalaceId,
+  )
   influence.sourceFactRefs = [
     negativeRelation.relationFactRef,
     negativeTrigger.placementId,
@@ -1570,6 +1639,9 @@ check('Palace Integration preserves separate positive and negative influence ref
   negativeInfluence.influenceId =
     'influence:synthetic:ming:trine:negative'
   negativeInfluence.sourcePalaceId = negativeRelation.sourcePalaceId
+  negativeInfluence.sourceFacetId = firstFacetForPalace(
+    negativeRelation.sourcePalaceId,
+  )
   negativeInfluence.sourceFactRefs = [
     negativeRelation.relationFactRef,
     negativeTrigger.placementId,
@@ -1691,5 +1763,5 @@ check('Palace Integration errors are safe and all nested result data is immutabl
   }
 })
 
-assert.equal(checks, 45)
+assert.equal(checks, 46)
 console.log(`AI chart D1 Palace Reasoning Contract tests passed (${checks} checks)`)

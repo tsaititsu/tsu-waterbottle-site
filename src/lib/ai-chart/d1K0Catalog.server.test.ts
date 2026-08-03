@@ -92,9 +92,76 @@ function bullets(content: string): readonly string[] {
   return value.bullets as string[]
 }
 
+const EXPECTED_PALACE_MEANINGS = Object.freeze({
+  'palace:ming': ['個性', '價值觀', '能力', '人生方向'],
+  'palace:siblings': ['母親', '同性別兄弟姊妹', '新認識的朋友'],
+  'palace:spouse': ['感情態度與對待方式', '喜歡的對象類型'],
+  'palace:children': [
+    '對子女的教養方式',
+    '與寵物的互動方式',
+    '吃與玩樂',
+    '旅遊方式',
+  ],
+  'palace:wealth': [
+    '對錢的看法',
+    '理財方式',
+    '賺錢的方式',
+    '實際用錢與花錢方式',
+  ],
+  'palace:health': [
+    '健康',
+    '身體的使用方式',
+    '遺傳或較弱、需要保養的身體面向',
+  ],
+  'palace:travel': ['在外人際關係', '內心想法', '外界對命主的看法'],
+  'palace:friends': [
+    '異性別兄弟姊妹',
+    '一般同事',
+    '朋友',
+    '團隊中的相處過程、對待關係與價值觀',
+  ],
+  'palace:career': [
+    '工作態度與做事方式',
+    '工作方向與選擇',
+    '工作中的價值觀與生活重心',
+  ],
+  'palace:property': [
+    '居住環境',
+    '家人相處方式',
+    '存錢方式與財庫',
+    '住家附近的環境',
+  ],
+  'palace:fortune': [
+    '精神享受',
+    '社會價值觀',
+    '福分',
+    '運氣',
+    '潛意識',
+    '品味',
+    '意志力與精神耐力',
+  ],
+  'palace:parents': [
+    '父親的特質與相處關係',
+    '對長輩與權威人物的看法',
+    '命主面對長輩、主管階層或政府機關的態度',
+  ],
+} as const)
+
 async function run() {
   const first = await compileAiChartD1K0Catalog()
   const second = await compileAiChartD1K0Catalog()
+
+  await asyncCheck('teacher-confirmed Tianxiang health mapping excludes neck', async () => {
+    const source = await readFile(
+      join(
+        process.cwd(),
+        'content/ai-chart/d1-v1/knowledge/core/C_十二宮分面與身宮疾厄田宅.md',
+      ),
+      'utf8',
+    )
+    assert.match(source, /天相（腎、內分泌、淋巴、循環）/u)
+    assert.doesNotMatch(source, /天相（[^）]*頸部[^）]*）/u)
+  })
 
   check('catalog version and manifest lock', () => {
     assert.equal(first.contractVersion, AI_CHART_D1_K0_CATALOG_VERSION)
@@ -111,6 +178,136 @@ async function run() {
     assert.equal(
       new Set(first.palaceMeanings.map((entry) => entry.meaningId)).size,
       first.palaceMeanings.length,
+    )
+  })
+  check('palace meanings use only the teacher-confirmed canonical facets', () => {
+    assert.equal(first.palaceMeanings.length, 44)
+    for (const [palaceId, expectedMeanings] of Object.entries(
+      EXPECTED_PALACE_MEANINGS,
+    )) {
+      assert.deepEqual(
+        first.palaceMeanings
+          .filter((meaning) => meaning.palaceId === palaceId)
+          .map((meaning) => meaning.text),
+        expectedMeanings,
+      )
+    }
+  })
+  check('trine and hidden-combination rules preserve one causal formula', () => {
+    const trine = first.rules.find(
+      (rule) => rule.ruleId === 'rule:structure:trine',
+    )
+    const hiddenCombination = first.rules.find(
+      (rule) => rule.ruleId === 'rule:structure:hidden-combination',
+    )
+    assert.ok(trine)
+    assert.ok(hiddenCombination)
+    assert.match(
+      trine.content,
+      /來源宮位代表的生活領域.*該宮星曜.*如何影響本宮/s,
+    )
+    assert.match(
+      trine.content,
+      /不得只列出.*某宮有某星.*不得將三方星曜說成本宮主星/s,
+    )
+    assert.match(
+      hiddenCombination.content,
+      /暗合宮位代表的人事領域.*該宮星曜.*背後如何影響本宮/s,
+    )
+    assert.match(
+      hiddenCombination.content,
+      /爸爸、長輩、權威人物或早期家庭經驗/s,
+    )
+    assert.match(hiddenCombination.content, /不會成為本宮主星/s)
+  })
+  check('opposite rule combines star meanings without moving palace facets', () => {
+    const opposite = first.rules.find(
+      (rule) => rule.ruleId === 'rule:structure:opposite',
+    )
+    assert.ok(opposite)
+    assert.match(opposite.content, /本宮與對宮的主星含義可以合併推演/u)
+    assert.match(opposite.content, /客戶文字不得寫出對宮宮名/u)
+    assert.match(opposite.content, /不得把對宮原本的宮位分面搬入本宮/u)
+    assert.match(
+      opposite.content,
+      /只有三方與暗合.*交代來源宮位及其生活領域/su,
+    )
+    assert.match(
+      opposite.content,
+      /對宮星曜含義.*重新綁定到本宮分面/su,
+    )
+    assert.match(
+      opposite.content,
+      /太陽與太陰對拱.*兩側.*變動與調整/su,
+    )
+  })
+  check('relationship integration is direct one-hop and never inherits a source palace relationship', () => {
+    const integration = first.rules.find(
+      (rule) => rule.ruleId === 'rule:structure:integration-order',
+    )
+    assert.ok(integration)
+    assert.match(integration.content, /只使用目標宮位直接對應的本宮、對宮、兩個三方宮與暗合宮/u)
+    assert.match(
+      integration.content,
+      /不得再沿著來源宮位自己的對宮、三方或暗合繼續取星/u,
+    )
+    assert.match(integration.content, /第二層關係不得傳回目標宮位/u)
+    assert.match(
+      integration.content,
+      /來源宮位的生活領域只能從該宮已提供的正式分面中選取/u,
+    )
+    assert.match(
+      integration.content,
+      /不得用星曜特質、推導結果或通用詞彙替來源分面改名或新增分面/u,
+    )
+    assert.match(
+      integration.content,
+      /無法建立.*正式分面.*星曜運作.*對本宮影響.*省略這條關係/su,
+    )
+  })
+  check('lecture-backed health card scans four palaces and writes only in the health palace', () => {
+    const health = first.rules.find(
+      (rule) => rule.ruleId === 'rule:health:body-weakness',
+    )
+    assert.ok(health)
+    assert.equal(health.kind, 'common')
+    assert.equal(health.ruleStatus, 'lecture_backfill')
+    assert.equal(health.sourceAuthority, 'lecture_backfill')
+    assert.match(health.content, /只掃描命宮、遷移宮、疾厄宮、父母宮/u)
+    assert.match(health.content, /四宮內實際存在的每一顆主星/u)
+    assert.match(health.content, /只在疾厄宮的客戶分析中統一說明/u)
+    assert.match(health.content, /命宮、遷移宮與父母宮不得各自輸出身體弱項/u)
+    assert.match(health.content, /不是疾病診斷/u)
+
+    const expectedMappings = [
+      '紫微：脾胃、消化系統',
+      '天機：肝、四肢、筋脈、神經反應',
+      '太陽：心臟、心血管、血液循環、眼睛',
+      '武曲：肺、呼吸系統、骨骼、骨架',
+      '天同：腎、牙齒、耳朵、代謝',
+      '廉貞：血液系統、心血管',
+      '天府：腸胃、消化系統、便秘、代謝',
+      '太陰：腎、眼睛；女性另看婦科、子宮、生殖系統',
+      '貪狼：肝、筋脈',
+      '巨門：腎、支氣管、口腔、牙齒',
+      '天相：腎、內分泌、淋巴、循環系統',
+      '天梁：脊椎、脾胃',
+      '七殺：肺、骨頭、頭部、皮膚',
+      '破軍：腎、泌尿系統；女性另看婦科、生殖系統',
+    ]
+    for (const mapping of expectedMappings) {
+      assert.match(health.content, new RegExp(mapping, 'u'))
+    }
+    assert.doesNotMatch(health.content, /天相[^\n]*頸部/u)
+  })
+  check('eligible borrowed stars are not counted again as opposite evidence', () => {
+    const emptyBorrow = first.rules.find(
+      (rule) => rule.ruleId === 'rule:structure:empty-palace-borrow',
+    )
+    assert.ok(emptyBorrow)
+    assert.match(
+      emptyBorrow.content,
+      /同一組借入主星不得再當成獨立的對宮證據重複解讀/u,
     )
   })
   check('fourteen canonical stars contain only approved fields', () => {
@@ -167,6 +364,32 @@ async function run() {
       ),
       false,
     )
+  })
+  check('Lianzhen Tanlang uses the teacher-confirmed abundant-romance core', () => {
+    const inventory = first.doubleStarInventory.find(
+      (entry) => entry.pairKey === 'pair:lianzhen-tanlang',
+    )
+    assert.ok(inventory)
+    assert.equal(inventory.specificRuleStatus, 'teacher_confirmed')
+    assert.equal(inventory.missingReason, null)
+    assert.equal(inventory.specificRuleId, 'rule:double:lianzhen-tanlang:core')
+
+    const rule = first.rules.find(
+      (entry) => entry.ruleId === inventory.specificRuleId,
+    )
+    assert.ok(rule)
+    assert.equal(rule.kind, 'double_star')
+    assert.equal(rule.sourceAuthority, 'reasoning_teacher_confirmed')
+    assert.deepEqual(bullets(rule.content), [
+      '桃花很旺。容易吸引別人注意，異性緣、感情機會與被追求的機會通常較多。',
+      '前星廉貞為主：會觀察場合、在意界線與原則，也會先判斷對方是否符合自己的選擇標準。',
+      '後星貪狼為輔：以魅力、好奇心、話題、熱情、興趣與社交接觸，把廉貞的選擇與吸引力表現出來。',
+      '桃花旺代表吸引力與機會較多，不等於一定花心、出軌或同時發展多段關係。',
+      '沒有煞忌時的一般低強度失衡：可能太在意是否被喜歡、不易拒絕邀約，或容易被新鮮感分散注意力。',
+      '只有實際煞忌成立時，才延伸為界線失衡、高風險或打破世俗規則的可能性。',
+      '在人際對待宮位，前星可描述宮位人物，後星可描述命主的回應；仍須保留廉貞貪狼完整組合互動。',
+      '本命先解價值觀與傾向；具體事件留待大限、流年。',
+    ])
   })
   check('Ziwei lecture-backfill double-star work versions are source-bound rules', () => {
     const ziweiLectureBackfillPairs = [
@@ -252,8 +475,8 @@ async function run() {
     assert.ok(rule)
     assert.deepEqual(contentObject(rule.content), AI_CHART_D1_K0_EVENT_BOUNDARY)
     assert.deepEqual(first.coverage.structureRuleCoverage, {
-      covered: 14,
-      total: 15,
+      covered: 15,
+      total: 16,
     })
     assert.equal(
       first.rules.some(

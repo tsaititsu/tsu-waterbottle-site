@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import Module, { createRequire } from 'node:module'
 import { normalizeAiChartD1N0 } from './d1N0'
 import {
-  AI_CHART_D1_K0_PALACE_ROLES,
   compareAiChartD1K0Rules,
   createAiChartD1K0CatalogFingerprint,
   parseAiChartD1K0Catalog,
@@ -373,11 +372,47 @@ async function run() {
       true,
     )
   })
-  check('five palace roles receive meanings in fixed order', () => {
-    for (const bundle of bundles) {
+  check('opposite life facets are excluded while target, hidden, and trine meanings remain exact', () => {
+    bundles.forEach((bundle, index) => {
       const roles = [...new Set(bundle.selectedMeanings.map((entry) => entry.palaceRole))]
-      assert.deepEqual(roles, AI_CHART_D1_K0_PALACE_ROLES)
-    }
+      assert.deepEqual(roles, [
+        'target',
+        'hidden_combination',
+        'trine_1',
+        'trine_2',
+      ])
+      assert.equal(
+        new Set<string>(
+          bundle.selectedMeanings.map((meaning) => meaning.palaceRole),
+        ).has('opposite'),
+        false,
+      )
+      assert.equal(
+        bundle.selectedRules.some(
+          (rule) =>
+            rule.ruleId ===
+            `rule:palace:${inputs[index].oppositePalace.palaceId.slice('palace:'.length)}:meanings`,
+        ),
+        false,
+      )
+
+      const expectedMeaningPalaces = [
+        ['target', inputs[index].targetPalace.palaceId],
+        ['hidden_combination', inputs[index].hiddenCombinationPalace.palaceId],
+        ['trine_1', inputs[index].otherTrinePalaces[0].palaceId],
+        ['trine_2', inputs[index].otherTrinePalaces[1].palaceId],
+      ] as const
+      for (const [role, palaceId] of expectedMeaningPalaces) {
+        assert.deepEqual(
+          bundle.selectedMeanings
+            .filter((meaning) => meaning.palaceRole === role)
+            .map((meaning) => meaning.meaningId),
+          catalog.palaceMeanings
+            .filter((meaning) => meaning.palaceId === palaceId)
+            .map((meaning) => meaning.meaningId),
+        )
+      }
+    })
   })
   check('only stars visible in five palace views are selected', () => {
     bundles.forEach((bundle, index) => {
@@ -738,6 +773,76 @@ async function run() {
       confirmedDoubleInputs[0],
       withoutSelectedRule(confirmedDoubleBundles[0], ruleId),
     )
+  })
+
+  const lianzhenTanlangSnapshot = completeSnapshot()
+  const lianzhenTanlangPalaces =
+    lianzhenTanlangSnapshot.palaces as MutableRecord[]
+  lianzhenTanlangPalaces[7].majorStars = [
+    star('廉貞', 'major'),
+    star('貪狼', 'major'),
+  ]
+  const lianzhenTanlangInputs = createInputs(
+    lianzhenTanlangSnapshot,
+    'lianzhen-tanlang',
+  )
+  const lianzhenTanlangBundles = buildAiChartD1K0P1KnowledgeBundles(
+    catalog,
+    lianzhenTanlangInputs,
+    { bundleIds: bundleIds('lianzhen-tanlang') },
+  )
+  const lianzhenTanlangExpectedRoles = lianzhenTanlangInputs.map((input) => {
+    const views = [
+      ['target', input.targetPalace],
+      ['opposite', input.oppositePalace],
+      ['hidden_combination', input.hiddenCombinationPalace],
+      ...input.otherTrinePalaces.map(
+        (palace, index) =>
+          [index === 0 ? 'trine_1' : 'trine_2', palace] as const,
+      ),
+    ] as const
+    return views.find(([, palace]) => palace.palaceId === 'palace:friends')?.[0] ?? null
+  })
+  check('Lianzhen Tanlang keeps all twelve K0/P1 bundles ready', () => {
+    assert.equal(
+      lianzhenTanlangBundles.every(
+        (bundle) =>
+          bundle.knowledgeStatus === 'ready' &&
+          bundle.missingRequirements.length === 0,
+      ),
+      true,
+    )
+  })
+  check('Lianzhen Tanlang selects one fixed rule through every visible palace role', () => {
+    assert.equal(
+      lianzhenTanlangExpectedRoles.filter((role) => role !== null).length,
+      5,
+    )
+    assert.deepEqual(
+      new Set(lianzhenTanlangExpectedRoles.filter((role) => role !== null)),
+      new Set([
+        'target',
+        'opposite',
+        'hidden_combination',
+        'trine_1',
+        'trine_2',
+      ]),
+    )
+    lianzhenTanlangBundles.forEach((bundle, index) => {
+      const traces = bundle.selectionTrace.filter(
+        (trace) =>
+          trace.ruleId === 'rule:double:lianzhen-tanlang:core' &&
+          trace.reason === 'double_star_present',
+      )
+      const expectedRole = lianzhenTanlangExpectedRoles[index]
+      if (expectedRole === null) {
+        assert.deepEqual(traces, [])
+        return
+      }
+      assert.equal(traces.length, 1)
+      assert.equal(traces[0].palaceId, 'palace:friends')
+      assert.equal(traces[0].palaceRole, expectedRole)
+    })
   })
 
   const missingMutagenCatalog = withoutMutagenSpecificRule(

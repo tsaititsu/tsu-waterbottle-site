@@ -455,7 +455,11 @@ async function run() {
     fixture,
     'meaning role changed with recalculated fingerprint is rejected',
     (value) => {
-      value.knowledgeContext.meanings[0].palaceRole = 'opposite'
+      ;(
+        value.knowledgeContext.meanings[0] as unknown as {
+          palaceRole: string
+        }
+      ).palaceRole = 'opposite'
     },
   )
   mutateAndReject(
@@ -618,6 +622,23 @@ async function run() {
     const meanings = knowledge.meanings.items as Record<string, unknown>
     assert.equal(Object.prototype.hasOwnProperty.call(rules.properties as object, 'name'), false)
     assert.equal(Object.prototype.hasOwnProperty.call(meanings.properties as object, 'name'), false)
+  })
+  check('schema excludes the opposite palace role from meanings', () => {
+    const knowledge = properties.knowledgeContext.properties as Record<
+      string,
+      Record<string, unknown>
+    >
+    const meanings = knowledge.meanings.items as Record<string, unknown>
+    const meaningProperties = meanings.properties as Record<
+      string,
+      Record<string, unknown>
+    >
+    assert.deepEqual(meaningProperties.palaceRole.enum, [
+      'target',
+      'hidden_combination',
+      'trine_1',
+      'trine_2',
+    ])
   })
   check('schema has no unsupported uniqueItems', () => {
     assert.doesNotMatch(JSON.stringify(schema), /uniqueItems/u)

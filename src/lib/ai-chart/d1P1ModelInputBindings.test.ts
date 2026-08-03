@@ -293,6 +293,18 @@ async function run() {
     assert.deepEqual(modelInputs[0].knowledgeContext.meanings, bundles[0].selectedMeanings)
     assert.notEqual(modelInputs[0].knowledgeContext.meanings, bundles[0].selectedMeanings)
   })
+  check('Model Input excludes opposite palace life facets', () => {
+    for (const modelInput of modelInputs) {
+      assert.equal(
+        new Set<string>(
+          modelInput.knowledgeContext.meanings.map(
+            (meaning) => meaning.palaceRole,
+          ),
+        ).has('opposite'),
+        false,
+      )
+    }
+  })
   check('selection trace is an exact deep copy in source order', () => {
     assert.deepEqual(modelInputs[0].knowledgeContext.selectionTrace, bundles[0].selectionTrace)
     assert.notEqual(modelInputs[0].knowledgeContext.selectionTrace, bundles[0].selectionTrace)
