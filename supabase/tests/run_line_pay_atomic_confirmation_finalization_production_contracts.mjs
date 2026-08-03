@@ -57,7 +57,7 @@ function runDocker(args) {
   return result.stdout.trim()
 }
 
-function psqlArgs() {
+function psqlArgs(username = 'postgres') {
   return [
     'exec',
     '--env',
@@ -69,7 +69,7 @@ function psqlArgs() {
     '--quiet',
     '--no-align',
     '--tuples-only',
-    '--username=postgres',
+    `--username=${username}`,
     '--dbname=postgres',
   ]
 }
@@ -81,6 +81,32 @@ function psqlSql(sql) {
   })
   if (result.status !== 0) throw new Error(result.stderr || result.stdout)
   return result.stdout.trim()
+}
+
+function psqlSqlAs(username, sql) {
+  const result = spawnSync(
+    'docker',
+    [...psqlArgs(username), '--command', sql],
+    {
+      cwd: root,
+      encoding: 'utf8',
+    },
+  )
+  if (result.status !== 0) throw new Error(result.stderr || result.stdout)
+  return result.stdout.trim()
+}
+
+function psqlSqlExpectFailure(username, sql, expectedFailure) {
+  const result = spawnSync('docker', [...psqlArgs(username), '--command', sql], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+  if (result.status === 0) {
+    throw new Error('EXPECTED_DATABASE_FAILURE_NOT_OBSERVED')
+  }
+  if (!`${result.stderr}\n${result.stdout}`.includes(expectedFailure)) {
+    throw new Error('UNEXPECTED_DATABASE_FAILURE')
+  }
 }
 
 function psqlFile(path) {
@@ -143,6 +169,169 @@ function dataSnapshot() {
   `)
 }
 
+function verifyOwnerLockBridge() {
+  psqlSql(`
+    create role line_pay_atomic_deployment_fixture
+      login noinherit nosuperuser nocreatedb nocreaterole
+      noreplication nobypassrls;
+    grant maintain on table
+      public.product_orders,
+      public.payments,
+      public.line_pay_checkout_attempts,
+      public.line_pay_request_outbox,
+      public.line_pay_callback_capabilities,
+      public.line_pay_callback_events,
+      public.line_pay_payment_audit_events
+    to line_pay_atomic_deployment_fixture;
+    grant usage on schema line_pay_private
+    to line_pay_atomic_deployment_fixture;
+    grant select on table line_pay_private.line_pay_completion_proofs
+    to line_pay_atomic_deployment_fixture;
+    grant line_pay_payment_function_owner
+    to line_pay_atomic_deployment_fixture
+      with admin true, inherit false, set false;
+  `)
+
+  const bridgeResult = psqlSqlAs(
+    'line_pay_atomic_deployment_fixture',
+    `
+    begin;
+    lock table public.product_orders in access exclusive mode;
+    grant line_pay_payment_function_owner to current_user
+      with admin false, inherit false, set true;
+    set local role line_pay_payment_function_owner;
+    lock table line_pay_private.line_pay_completion_proofs
+      in access exclusive mode;
+    reset role;
+    revoke line_pay_payment_function_owner from current_user
+      granted by current_user;
+    select
+      current_user = 'line_pay_atomic_deployment_fixture',
+      not pg_catalog.has_table_privilege(
+        current_user,
+        'line_pay_private.line_pay_completion_proofs',
+        'MAINTAIN'
+      ),
+      not exists (
+        select 1
+        from pg_catalog.pg_auth_members as membership
+        join pg_catalog.pg_roles as granted_role
+          on granted_role.oid = membership.roleid
+        join pg_catalog.pg_roles as member_role
+          on member_role.oid = membership.member
+        join pg_catalog.pg_roles as grantor_role
+          on grantor_role.oid = membership.grantor
+        where granted_role.rolname = 'line_pay_payment_function_owner'
+          and member_role.rolname = current_user
+          and grantor_role.rolname = current_user
+      ),
+      exists (
+        select 1
+        from pg_catalog.pg_auth_members as membership
+        join pg_catalog.pg_roles as granted_role
+          on granted_role.oid = membership.roleid
+        join pg_catalog.pg_roles as member_role
+          on member_role.oid = membership.member
+        join pg_catalog.pg_roles as grantor_role
+          on grantor_role.oid = membership.grantor
+        where granted_role.rolname = 'line_pay_payment_function_owner'
+          and member_role.rolname = current_user
+          and grantor_role.rolname <> current_user
+          and membership.admin_option
+          and not membership.inherit_option
+          and not membership.set_option
+      ),
+      (
+        select pg_catalog.count(*)
+        from pg_catalog.pg_locks as lock
+        where lock.pid = pg_catalog.pg_backend_pid()
+          and lock.locktype = 'relation'
+          and lock.mode = 'AccessExclusiveLock'
+          and lock.granted
+          and lock.relation in (
+            'public.product_orders'::regclass,
+            'line_pay_private.line_pay_completion_proofs'::regclass
+          )
+      ) = 2;
+    commit;
+  `,
+  )
+  if (bridgeResult !== 't|t|t|t|t') {
+    throw new Error(`OWNER_LOCK_BRIDGE_NOT_PROVEN:${bridgeResult}`)
+  }
+
+  psqlSqlExpectFailure(
+    'line_pay_atomic_deployment_fixture',
+    `
+      begin;
+      grant line_pay_payment_function_owner to current_user
+        with admin false, inherit false, set true;
+      do $$
+      begin
+        raise exception 'owner_lock_bridge_forced_rollback';
+      end
+      $$;
+      commit;
+    `,
+    'owner_lock_bridge_forced_rollback',
+  )
+
+  const rollbackResult = psqlSql(`
+    select
+      not exists (
+        select 1
+        from pg_catalog.pg_auth_members as membership
+        join pg_catalog.pg_roles as granted_role
+          on granted_role.oid = membership.roleid
+        join pg_catalog.pg_roles as member_role
+          on member_role.oid = membership.member
+        join pg_catalog.pg_roles as grantor_role
+          on grantor_role.oid = membership.grantor
+        where granted_role.rolname = 'line_pay_payment_function_owner'
+          and member_role.rolname = 'line_pay_atomic_deployment_fixture'
+          and grantor_role.rolname = 'line_pay_atomic_deployment_fixture'
+      )
+      and exists (
+        select 1
+        from pg_catalog.pg_auth_members as membership
+        join pg_catalog.pg_roles as granted_role
+          on granted_role.oid = membership.roleid
+        join pg_catalog.pg_roles as member_role
+          on member_role.oid = membership.member
+        join pg_catalog.pg_roles as grantor_role
+          on grantor_role.oid = membership.grantor
+        where granted_role.rolname = 'line_pay_payment_function_owner'
+          and member_role.rolname = 'line_pay_atomic_deployment_fixture'
+          and grantor_role.rolname = current_user
+          and membership.admin_option
+          and not membership.inherit_option
+          and not membership.set_option
+      );
+  `)
+  if (rollbackResult !== 't') {
+    throw new Error('OWNER_LOCK_BRIDGE_ROLLBACK_NOT_PROVEN')
+  }
+
+  psqlSql(`
+    revoke line_pay_payment_function_owner
+    from line_pay_atomic_deployment_fixture;
+    revoke maintain on table
+      public.product_orders,
+      public.payments,
+      public.line_pay_checkout_attempts,
+      public.line_pay_request_outbox,
+      public.line_pay_callback_capabilities,
+      public.line_pay_callback_events,
+      public.line_pay_payment_audit_events
+    from line_pay_atomic_deployment_fixture;
+    revoke select on table line_pay_private.line_pay_completion_proofs
+    from line_pay_atomic_deployment_fixture;
+    revoke usage on schema line_pay_private
+    from line_pay_atomic_deployment_fixture;
+    drop role line_pay_atomic_deployment_fixture;
+  `)
+}
+
 for (const [path, expected] of [
   [migrationFile, EXPECTED_MIGRATION_SHA256],
   [diagnosticFile, EXPECTED_DIAGNOSTIC_SHA256],
@@ -176,8 +365,15 @@ try {
   for (const file of baselineFiles) psqlFile(file)
   psqlFile(baseMigration)
   psqlFile(initializerMigration)
+  verifyOwnerLockBridge()
 
   const preflightOutput = `${psqlFile(preflightFile)}\n`
+  const preflightInventory = parseAndValidateAtomicOutput(preflightOutput)
+  if (preflightInventory.application_state !== 'UNAPPLIED') {
+    throw new Error(
+      `UNAPPLIED_FIXTURE_NOT_PROVEN:${JSON.stringify(preflightInventory)}`,
+    )
+  }
   const preflight = parseAndValidateAtomicPreflightOutput(preflightOutput)
   if (preflight.application_state !== 'UNAPPLIED') {
     throw new Error('UNAPPLIED_STATE_NOT_OBSERVED')
@@ -191,7 +387,12 @@ try {
     !evidence.postflight_commit_observed ||
     !evidence.markerSequenceValid
   ) {
-    throw new Error('DEPLOY_ATTESTATION_INCOMPLETE')
+    const observedMarkers = deploymentOutput
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter((line) => /^(?:LINE_PAY_DEPLOY_|ATOMIC_FINALIZATION_)/u.test(line))
+      .join(',')
+    throw new Error(`DEPLOY_ATTESTATION_INCOMPLETE:${observedMarkers}`)
   }
   const full = parseAndValidateAtomicDeployOutput(evidence.auditOutput)
   if (full.application_state !== 'FULL' || !full.contracts.atomic_exact) {
@@ -214,11 +415,11 @@ try {
   ) {
     throw new Error('WRAPPER_ACL_MUTATION_NOT_CAUGHT')
   }
-
   process.stdout.write(
     'line_pay_atomic_confirmation_finalization_production_contracts: PASS ' +
       '(PostgreSQL 17, UNAPPLIED/FULL, exact-file deploy, commit attestations, ' +
-      'data fingerprint preserved, grantor/role/ACL contracts, and ACL mutation caught)\n',
+      'transaction-scoped owner lock bridge and rollback, data fingerprint ' +
+      'preserved, grantor/role/ACL contracts, and ACL mutation caught)\n',
   )
 } finally {
   if (started) {

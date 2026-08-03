@@ -57,7 +57,7 @@ export const EXPECTED_PREFLIGHT_SHA256 =
 export const EXPECTED_POSTFLIGHT_SHA256 =
   '87f2d3398c1e98b588d415ea73a9f66fd195b9bf1b861bf10db8c92a07d0bfee'
 export const EXPECTED_DEPLOY_SHA256 =
-  '2577c57c0978387b6b4c2d6fece06487501975fedcfff7d4b25202547b8d6510'
+  'e972c9579f183c05d4130843bc6794fc220e5f2af168b77098ba3514e10747a3'
 
 const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/u
 const FORBIDDEN_SQL_PATTERN =
@@ -373,6 +373,8 @@ export function parseAndValidateAtomicDeployOutput(text) {
 
 export function assertDeploymentSql(preflight, postflight, deploy) {
   const stripped = stripSqlForStaticAnalysis(`${preflight}\n${postflight}\n${deploy}`)
+  const occursExactlyTwice = (pattern) =>
+    (deploy.match(pattern) ?? []).length === 2
   if (
     FORBIDDEN_SQL_PATTERN.test(stripped) ||
     !/\\ir line_pay_atomic_confirmation_finalization_application_state[.]sql/u.test(
@@ -387,8 +389,32 @@ export function assertDeploymentSql(preflight, postflight, deploy) {
     !/\\ir \.\.\/migrations\/20260802160000_line_pay_atomic_confirmation_finalization[.]sql/u.test(
       deploy,
     ) ||
-    !/lock table[\s\S]*public[.]product_orders[\s\S]*public[.]payments[\s\S]*public[.]line_pay_checkout_attempts[\s\S]*public[.]line_pay_callback_events[\s\S]*line_pay_private[.]line_pay_completion_proofs[\s\S]*in access exclusive mode/iu.test(
-      deploy,
+    !occursExactlyTwice(
+      /lock table\s+public[.]product_orders,\s+public[.]payments,\s+public[.]line_pay_checkout_attempts,\s+public[.]line_pay_request_outbox,\s+public[.]line_pay_callback_capabilities,\s+public[.]line_pay_callback_events,\s+public[.]line_pay_payment_audit_events\s+in access exclusive mode;/giu,
+    ) ||
+    !occursExactlyTwice(
+      /grant line_pay_payment_function_owner to current_user\s+with admin false, inherit false, set true;/giu,
+    ) ||
+    !occursExactlyTwice(
+      /set local role line_pay_payment_function_owner;/giu,
+    ) ||
+    !occursExactlyTwice(
+      /lock table line_pay_private[.]line_pay_completion_proofs\s+in access exclusive mode;/giu,
+    ) ||
+    !occursExactlyTwice(/reset role;/giu) ||
+    !occursExactlyTwice(
+      /revoke line_pay_payment_function_owner from current_user\s+granted by current_user;/giu,
+    ) ||
+    !occursExactlyTwice(
+      /as temporary_owner_memberships/giu,
+    ) ||
+    (deploy.match(/membership[.]admin_option/giu) ?? []).length !== 4 ||
+    (deploy.match(/not membership[.]inherit_option/giu) ?? []).length !== 4 ||
+    (deploy.match(/not membership[.]set_option/giu) ?? []).length !== 4 ||
+    (deploy.match(/select role[.]rolsuper/giu) ?? []).length !== 4 ||
+    !occursExactlyTwice(/ATOMIC_FINALIZATION_OWNER_BRIDGE_CONFLICT/gu) ||
+    !occursExactlyTwice(
+      /ATOMIC_FINALIZATION_OWNER_BRIDGE_RELEASE_FAILED/gu,
     ) ||
     !/baseline_atomic_data_fingerprint/u.test(deploy) ||
     !/line_pay_atomic_data_preserved/u.test(deploy) ||

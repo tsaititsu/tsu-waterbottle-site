@@ -132,6 +132,39 @@ describe('LINE Pay Atomic Confirmation Finalization Production workflow', () => 
     )
   })
 
+  it('uses a transaction-scoped owner-role bridge for both private-table locks', () => {
+    for (const pattern of [
+      /grant line_pay_payment_function_owner to current_user\s+with admin false, inherit false, set true;/giu,
+      /set local role line_pay_payment_function_owner;/giu,
+      /lock table line_pay_private[.]line_pay_completion_proofs\s+in access exclusive mode;/giu,
+      /reset role;/giu,
+      /revoke line_pay_payment_function_owner from current_user\s+granted by current_user;/giu,
+    ]) {
+      assert.equal(deploySql.match(pattern)?.length, 2)
+    }
+
+    assert.equal(
+      deploySql.match(/as temporary_owner_memberships/giu)?.length,
+      2,
+    )
+    assert.equal(deploySql.match(/membership[.]admin_option/giu)?.length, 4)
+    assert.equal(deploySql.match(/select role[.]rolsuper/giu)?.length, 4)
+  })
+
+  it('rejects a deploy wrapper that omits owner-role bridge cleanup', () => {
+    const unsafeDeploySql = deploySql.replace(
+      /reset role;\s+revoke line_pay_payment_function_owner from current_user\s+granted by current_user;/iu,
+      '',
+    )
+    assert.throws(() =>
+      validator.assertDeploymentSql(
+        preflightSql,
+        postflightSql,
+        unsafeDeploySql,
+      ),
+    )
+  })
+
   it('pins preflight to UNAPPLIED and postflight to FULL', () => {
     const unapplied = validator.buildExpectedAtomicFixture('UNAPPLIED')
     const full = validator.buildExpectedAtomicFixture('FULL')
