@@ -34,10 +34,31 @@ export type ProductOrderLinePayFinalizeConfirmationInput = {
   requestId: string
 }
 
+export type ProductOrderLinePayCapabilityDatabaseDiagnostic = Readonly<{
+  stage: 'finalize_confirmation'
+  rpc: 'finalize_product_order_line_pay_confirmation'
+  databaseRole: 'line_pay_payment_executor'
+  sqlstate: string | null
+}>
+
+export class LinePayCapabilityDatabaseError extends Error {
+  readonly diagnostic: ProductOrderLinePayCapabilityDatabaseDiagnostic | null
+
+  constructor(
+    diagnostic: ProductOrderLinePayCapabilityDatabaseDiagnostic | null = null,
+  ) {
+    super('line_pay_capability_database_error')
+    this.name = 'LinePayCapabilityDatabaseError'
+    this.diagnostic = diagnostic ? Object.freeze({ ...diagnostic }) : null
+    Object.freeze(this)
+  }
+}
+
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const SHA256_PATTERN = /^[0-9a-f]{64}$/
 const SAFE_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,128}$/
+const SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/
 const CONTEXT_COLUMNS = [
   'id',
   'product_order_id',
@@ -51,12 +72,29 @@ const CONTEXT_COLUMNS = [
   'line_pay_transaction_id',
 ].join(',')
 
-function databaseError(): never {
-  throw new Error('line_pay_capability_database_error')
+function databaseError(
+  diagnostic: ProductOrderLinePayCapabilityDatabaseDiagnostic | null = null,
+): never {
+  throw new LinePayCapabilityDatabaseError(diagnostic)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function safeSqlstate(value: unknown) {
+  if (!isRecord(value)) return null
+  return typeof value.code === 'string' && SQLSTATE_PATTERN.test(value.code)
+    ? value.code
+    : null
+}
+
+export function readProductOrderLinePayCapabilityDatabaseDiagnostic(
+  error: unknown,
+) {
+  return error instanceof LinePayCapabilityDatabaseError
+    ? error.diagnostic
+    : null
 }
 
 function exactRecord(value: unknown, keys: readonly string[]) {
@@ -91,14 +129,21 @@ async function rpc(
   client: ProductOrderLinePayCapabilityRpcClient,
   functionName: string,
   args: Record<string, unknown>,
+  diagnostic?: Omit<ProductOrderLinePayCapabilityDatabaseDiagnostic, 'sqlstate'>,
 ) {
   let result: { data: unknown; error: unknown }
   try {
     result = await client.rpc(functionName, args).single()
   } catch {
-    databaseError()
+    databaseError(diagnostic ? { ...diagnostic, sqlstate: null } : null)
   }
-  if (result.error) databaseError()
+  if (result.error) {
+    databaseError(
+      diagnostic
+        ? { ...diagnostic, sqlstate: safeSqlstate(result.error) }
+        : null,
+    )
+  }
   return result.data
 }
 
@@ -258,6 +303,10 @@ export function createProductOrderLinePayCapabilityDatabase(
             SHA256_PATTERN,
           ),
           p_request_id: input.requestId,
+        }, {
+          stage: 'finalize_confirmation',
+          rpc: 'finalize_product_order_line_pay_confirmation',
+          databaseRole: 'line_pay_payment_executor',
         }),
         ['result_code', 'payment_id', 'product_order_id', 'transaction_id'],
       )

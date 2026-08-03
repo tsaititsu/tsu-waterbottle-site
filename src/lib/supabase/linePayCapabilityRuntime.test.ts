@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   createProductOrderLinePayCapabilityDatabase,
+  readProductOrderLinePayCapabilityDatabaseDiagnostic,
   readProductOrderLinePayCapabilityContext,
   type ProductOrderLinePayCapabilityRpcClient,
 } from './linePayCapabilityRuntime'
@@ -248,6 +249,120 @@ test('RPC failure and unexpected result shape fail closed without details', asyn
       error instanceof Error
       && error.message === 'line_pay_capability_database_error'
       && !JSON.stringify(error).includes(secret),
+  )
+})
+
+test('atomic finalize preserves only allowlisted database failure metadata', async () => {
+  const secret = 'database-internal-secret'
+  const executorClient: ProductOrderLinePayCapabilityRpcClient = {
+    rpc(functionName) {
+      assert.equal(
+        functionName,
+        'finalize_product_order_line_pay_confirmation',
+      )
+      return {
+        single: async () => ({
+          data: null,
+          error: {
+            code: '42501',
+            message: secret,
+            details: `payment=${paymentId}`,
+            hint: `transaction=${transactionId}`,
+          },
+        }),
+      }
+    },
+  }
+  const database = createProductOrderLinePayCapabilityDatabase(
+    createRpcClient([]).client,
+    executorClient,
+  )
+
+  await assert.rejects(
+    () => database.finalizeConfirmation({
+      environment: 'sandbox',
+      paymentId,
+      productOrderId,
+      attemptId,
+      merchantOrderNo,
+      transactionId,
+      amountTwd: 50,
+      currency: 'TWD',
+      capabilityId,
+      callbackEventId,
+      callbackClaimId: claimId,
+      confirmResultSha256: 'd'.repeat(64),
+      requestId: 'line-pay-callback:request-1',
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.equal(error.message, 'line_pay_capability_database_error')
+      const diagnostic = readProductOrderLinePayCapabilityDatabaseDiagnostic(
+        error,
+      )
+      assert.deepEqual(diagnostic, {
+        stage: 'finalize_confirmation',
+        rpc: 'finalize_product_order_line_pay_confirmation',
+        databaseRole: 'line_pay_payment_executor',
+        sqlstate: '42501',
+      })
+      assert.equal(Object.isFrozen(diagnostic), true)
+      const serialized = JSON.stringify(error)
+      assert.equal(serialized.includes(secret), false)
+      assert.equal(serialized.includes(paymentId), false)
+      assert.equal(serialized.includes(transactionId), false)
+      return true
+    },
+  )
+})
+
+test('database diagnostics reject malformed SQLSTATE and raw transport errors', async () => {
+  const unsafeCode = '42501-secret'
+  const executorClient: ProductOrderLinePayCapabilityRpcClient = {
+    rpc() {
+      return {
+        single: async () => ({
+          data: null,
+          error: { code: unsafeCode, message: 'raw database detail' },
+        }),
+      }
+    },
+  }
+  const database = createProductOrderLinePayCapabilityDatabase(
+    createRpcClient([]).client,
+    executorClient,
+  )
+
+  await assert.rejects(
+    () => database.finalizeConfirmation({
+      environment: 'sandbox',
+      paymentId,
+      productOrderId,
+      attemptId,
+      merchantOrderNo,
+      transactionId,
+      amountTwd: 50,
+      currency: 'TWD',
+      capabilityId,
+      callbackEventId,
+      callbackClaimId: claimId,
+      confirmResultSha256: 'd'.repeat(64),
+      requestId: 'line-pay-callback:request-1',
+    }),
+    (error: unknown) => {
+      assert.deepEqual(
+        readProductOrderLinePayCapabilityDatabaseDiagnostic(error),
+        {
+          stage: 'finalize_confirmation',
+          rpc: 'finalize_product_order_line_pay_confirmation',
+          databaseRole: 'line_pay_payment_executor',
+          sqlstate: null,
+        },
+      )
+      assert.equal(JSON.stringify(error).includes(unsafeCode), false)
+      assert.equal(JSON.stringify(error).includes('raw database detail'), false)
+      return true
+    },
   )
 })
 

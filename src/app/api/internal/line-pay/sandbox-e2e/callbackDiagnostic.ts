@@ -1,6 +1,9 @@
 import type {
   LinePayCapabilityCallbackDiagnosticStage,
 } from '../../../product-orders/line-pay/capabilityHandler'
+import type {
+  ProductOrderLinePayCapabilityDatabaseDiagnostic,
+} from '../../../../../lib/supabase/linePayCapabilityRuntime'
 
 const SAFE_CALLBACK_ERRORS = new Set([
   'invalid_line_pay_callback',
@@ -21,16 +24,50 @@ const SAFE_CALLBACK_STAGES = new Set<LinePayCapabilityCallbackDiagnosticStage>([
   'callback_transaction_id_invalid',
   'callback_context_mismatch',
   'capability_claim_failed',
+  'confirmation_finalize_failed',
 ])
+
+const SAFE_DATABASE_STAGES = new Set(['finalize_confirmation'])
+const SAFE_DATABASE_RPCS = new Set([
+  'finalize_product_order_line_pay_confirmation',
+])
+const SAFE_DATABASE_ROLES = new Set(['line_pay_payment_executor'])
+const SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function safeDatabaseDiagnostic(value: unknown) {
+  if (
+    !isRecord(value)
+    || typeof value.stage !== 'string'
+    || !SAFE_DATABASE_STAGES.has(value.stage)
+    || typeof value.rpc !== 'string'
+    || !SAFE_DATABASE_RPCS.has(value.rpc)
+    || typeof value.databaseRole !== 'string'
+    || !SAFE_DATABASE_ROLES.has(value.databaseRole)
+    || (value.sqlstate !== null
+      && (typeof value.sqlstate !== 'string'
+        || !SQLSTATE_PATTERN.test(value.sqlstate)))
+  ) {
+    return null
+  }
+
+  return Object.freeze({
+    stage: value.stage as ProductOrderLinePayCapabilityDatabaseDiagnostic['stage'],
+    rpc: value.rpc as ProductOrderLinePayCapabilityDatabaseDiagnostic['rpc'],
+    databaseRole:
+      value.databaseRole as ProductOrderLinePayCapabilityDatabaseDiagnostic['databaseRole'],
+    sqlstate: value.sqlstate as string | null,
+  })
 }
 
 export async function buildLinePaySandboxE2eCallbackDiagnostic(
   purpose: 'confirm' | 'cancel',
   response: Response,
   observedStage?: LinePayCapabilityCallbackDiagnosticStage | null,
+  databaseDiagnostic?: ProductOrderLinePayCapabilityDatabaseDiagnostic | null,
 ) {
   let payload: unknown = null
   try {
@@ -58,5 +95,6 @@ export async function buildLinePaySandboxE2eCallbackDiagnostic(
       observedStage && SAFE_CALLBACK_STAGES.has(observedStage)
         ? observedStage
         : 'not_observed',
+    database: safeDatabaseDiagnostic(databaseDiagnostic),
   })
 }

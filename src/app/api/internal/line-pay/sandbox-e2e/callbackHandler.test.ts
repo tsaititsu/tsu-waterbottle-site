@@ -257,6 +257,7 @@ test('callback diagnostic logs only allowlisted stage metadata', async () => {
     httpStatus: 502,
     outcome: 'unknown_failure',
     stage: 'capability_claim_failed',
+    database: null,
   })
   assert.equal(Object.isFrozen(diagnostic), true)
   assert.equal(JSON.stringify(diagnostic).includes(secret), false)
@@ -281,6 +282,52 @@ test('callback diagnostic logs only allowlisted stage metadata', async () => {
   )
   assert.equal(untrustedStage.stage, 'not_observed')
   assert.equal(JSON.stringify(untrustedStage).includes(secret), false)
+
+  const databaseFailure = await buildLinePaySandboxE2eCallbackDiagnostic(
+    'confirm',
+    Response.json(
+      { ok: false, error: 'line_pay_confirmation_reconciliation_required' },
+      { status: 502 },
+    ),
+    'confirmation_finalize_failed',
+    {
+      stage: 'finalize_confirmation',
+      rpc: 'finalize_product_order_line_pay_confirmation',
+      databaseRole: 'line_pay_payment_executor',
+      sqlstate: '42501',
+    },
+  )
+  assert.deepEqual(databaseFailure, {
+    purpose: 'confirm',
+    httpStatus: 502,
+    outcome: 'line_pay_confirmation_reconciliation_required',
+    stage: 'confirmation_finalize_failed',
+    database: {
+      stage: 'finalize_confirmation',
+      rpc: 'finalize_product_order_line_pay_confirmation',
+      databaseRole: 'line_pay_payment_executor',
+      sqlstate: '42501',
+    },
+  })
+  assert.equal(Object.isFrozen(databaseFailure), true)
+  assert.equal(Object.isFrozen(databaseFailure.database), true)
+
+  const rejectedDatabaseFailure = await buildLinePaySandboxE2eCallbackDiagnostic(
+    'confirm',
+    Response.json(
+      { ok: false, error: 'line_pay_confirmation_reconciliation_required' },
+      { status: 502 },
+    ),
+    'confirmation_finalize_failed',
+    {
+      stage: secret,
+      rpc: secret,
+      databaseRole: secret,
+      sqlstate: `${secret}42501`,
+    } as never,
+  )
+  assert.equal(rejectedDatabaseFailure.database, null)
+  assert.equal(JSON.stringify(rejectedDatabaseFailure).includes(secret), false)
 })
 
 runTests().catch((error) => {

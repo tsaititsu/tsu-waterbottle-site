@@ -5,6 +5,7 @@ import {
   type ProductOrderLinePayCapabilityDatabase,
   type ProductOrderLinePayCapabilityPaymentContext,
 } from './capabilityHandler'
+import { LinePayCapabilityDatabaseError } from '../../../../lib/supabase/linePayCapabilityRuntime'
 
 const paymentId = '71000000-0000-4000-8000-000000000001'
 const productOrderId = '51000000-0000-4000-8000-000000000001'
@@ -169,6 +170,64 @@ test('ambiguous confirm failure marks reconciliation and leaks no provider detai
   ])
   assert.equal(body.includes(secret), false)
   assert.deepEqual(JSON.parse(body), {
+    ok: false,
+    error: 'line_pay_confirmation_reconciliation_required',
+  })
+})
+
+test('atomic finalize failure reports only frozen allowlisted database metadata', async () => {
+  const { calls, database } = createDatabase()
+  const diagnosticStages: string[] = []
+  const databaseDiagnostics: unknown[] = []
+  const secret = 'database-internal-secret'
+  const response = await handleProductOrderLinePayCapabilityCallback({
+    purpose: 'confirm',
+    request: request('confirm', {
+      orderId: merchantOrderNo,
+      transactionId,
+      capability: token,
+    }),
+    env,
+    readContext: async () => context,
+    database: {
+      ...database,
+      finalizeConfirmation: async () => {
+        throw new LinePayCapabilityDatabaseError({
+          stage: 'finalize_confirmation',
+          rpc: 'finalize_product_order_line_pay_confirmation',
+          databaseRole: 'line_pay_payment_executor',
+          sqlstate: '42501',
+        })
+      },
+    },
+    confirmPayment: async () => ({
+      returnCode: '0000',
+      returnMessage: secret,
+      transactionId,
+      orderId: merchantOrderNo,
+    }),
+    createUuid: () => callbackClaimId,
+    onDiagnosticStage: (stage) => diagnosticStages.push(stage),
+    onDatabaseDiagnostic: (diagnostic) => databaseDiagnostics.push(diagnostic),
+  })
+
+  assert.equal(response.status, 502)
+  assert.deepEqual(diagnosticStages, ['confirmation_finalize_failed'])
+  assert.deepEqual(databaseDiagnostics, [{
+    stage: 'finalize_confirmation',
+    rpc: 'finalize_product_order_line_pay_confirmation',
+    databaseRole: 'line_pay_payment_executor',
+    sqlstate: '42501',
+  }])
+  assert.equal(Object.isFrozen(databaseDiagnostics[0]), true)
+  assert.equal(JSON.stringify(databaseDiagnostics).includes(secret), false)
+  assert.equal(JSON.stringify(databaseDiagnostics).includes(paymentId), false)
+  assert.deepEqual(calls.map(({ operation }) => operation), [
+    'claimCapability',
+    'claimConfirmation',
+    'markReconciliation',
+  ])
+  assert.deepEqual(await json(response), {
     ok: false,
     error: 'line_pay_confirmation_reconciliation_required',
   })

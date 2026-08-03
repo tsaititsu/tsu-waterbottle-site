@@ -141,7 +141,7 @@ test('shares one finalize confirmation input type across handler and runtime', (
   )
   assert.match(
     handler,
-    /import\s+type\s+\{\s*ProductOrderLinePayFinalizeConfirmationInput\s*\}\s+from\s+'\.\.\/\.\.\/\.\.\/\.\.\/lib\/supabase\/linePayCapabilityRuntime'/,
+    /import\s+\{[\s\S]*?type\s+ProductOrderLinePayFinalizeConfirmationInput,[\s\S]*?\}\s+from\s+'\.\.\/\.\.\/\.\.\/\.\.\/lib\/supabase\/linePayCapabilityRuntime'/,
   )
   assert.match(
     handler,

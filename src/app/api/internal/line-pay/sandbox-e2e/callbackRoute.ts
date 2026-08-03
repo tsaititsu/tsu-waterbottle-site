@@ -8,6 +8,7 @@ import { createLinePayExecutorClient } from '@/lib/supabase/linePayExecutor'
 import {
   createProductOrderLinePayCapabilityDatabase,
   readProductOrderLinePayCapabilityContext,
+  type ProductOrderLinePayCapabilityDatabaseDiagnostic,
   type ProductOrderLinePayCapabilityContextClient,
   type ProductOrderLinePayCapabilityRpcClient,
 } from '@/lib/supabase/linePayCapabilityRuntime'
@@ -77,6 +78,7 @@ export async function executeLinePaySandboxE2eCallbackRoute(
     ? requireCapabilityRpcClient(createLinePayExecutorClient(process.env))
     : undefined
   let diagnosticStage: LinePayCapabilityCallbackDiagnosticStage | null = null
+  let databaseDiagnostic: ProductOrderLinePayCapabilityDatabaseDiagnostic | null = null
   const response = await handleLinePaySandboxE2eCapabilityCallback({
     purpose,
     request,
@@ -97,6 +99,9 @@ export async function executeLinePaySandboxE2eCallbackRoute(
     onDiagnosticStage: (stage) => {
       diagnosticStage = stage
     },
+    onDatabaseDiagnostic: (diagnostic) => {
+      databaseDiagnostic = diagnostic
+    },
   })
 
   console.info(
@@ -105,6 +110,7 @@ export async function executeLinePaySandboxE2eCallbackRoute(
       purpose,
       response,
       diagnosticStage,
+      databaseDiagnostic,
     ),
   )
 

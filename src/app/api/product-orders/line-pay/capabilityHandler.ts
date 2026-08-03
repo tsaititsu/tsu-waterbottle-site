@@ -5,7 +5,11 @@ import {
   type LinePayServerEnv,
 } from '../../../../lib/linePay'
 import type { ParsedLinePayConfirmResponse } from '../../../../lib/linePay/responseParser'
-import type { ProductOrderLinePayFinalizeConfirmationInput } from '../../../../lib/supabase/linePayCapabilityRuntime'
+import {
+  readProductOrderLinePayCapabilityDatabaseDiagnostic,
+  type ProductOrderLinePayCapabilityDatabaseDiagnostic,
+  type ProductOrderLinePayFinalizeConfirmationInput,
+} from '../../../../lib/supabase/linePayCapabilityRuntime'
 
 export type ProductOrderLinePayCapabilityPaymentContext = {
   paymentId: string
@@ -90,6 +94,7 @@ export type LinePayCapabilityCallbackDiagnosticStage =
   | 'callback_transaction_id_invalid'
   | 'callback_context_mismatch'
   | 'capability_claim_failed'
+  | 'confirmation_finalize_failed'
 
 function sha256(value: string) {
   return createHash('sha256').update(value).digest('hex')
@@ -118,6 +123,20 @@ function reportDiagnosticStage(
 ) {
   try {
     observer?.(stage)
+  } catch {
+    // Preview diagnostics must never alter payment callback behavior.
+  }
+}
+
+function reportDatabaseDiagnostic(
+  observer:
+    | ((diagnostic: ProductOrderLinePayCapabilityDatabaseDiagnostic) => void)
+    | undefined,
+  diagnostic: ProductOrderLinePayCapabilityDatabaseDiagnostic | null,
+) {
+  if (!diagnostic) return
+  try {
+    observer?.(diagnostic)
   } catch {
     // Preview diagnostics must never alter payment callback behavior.
   }
@@ -169,6 +188,9 @@ export async function handleProductOrderLinePayCapabilityCallback(input: {
   now?: () => Date
   createUuid?: () => string
   onDiagnosticStage?: (stage: LinePayCapabilityCallbackDiagnosticStage) => void
+  onDatabaseDiagnostic?: (
+    diagnostic: ProductOrderLinePayCapabilityDatabaseDiagnostic,
+  ) => void
 }) {
   let config
   try {
@@ -378,7 +400,15 @@ export async function handleProductOrderLinePayCapabilityCallback(input: {
     if (completed.transactionId !== context.transactionId) {
       throw new Error('line_pay_confirmation_transaction_mismatch')
     }
-  } catch {
+  } catch (error) {
+    reportDiagnosticStage(
+      input.onDiagnosticStage,
+      'confirmation_finalize_failed',
+    )
+    reportDatabaseDiagnostic(
+      input.onDatabaseDiagnostic,
+      readProductOrderLinePayCapabilityDatabaseDiagnostic(error),
+    )
     await bestEffortReconciliation(
       input.database,
       context,
