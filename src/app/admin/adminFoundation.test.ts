@@ -25,6 +25,16 @@ assert.match(adminPageSource, /既有營運工具/)
 assert.match(adminPageSource, /預約時段工具包含既有資料寫入能力/)
 assert.match(adminPageSource, /尚未啟用/)
 assert.doesNotMatch(adminPageSource, /disabled=/, '尚未啟用模組不得用假 disabled 操作按鈕')
+assert.match(
+  adminPageSource,
+  /isLinePaySandboxE2eRouteEnabled\(process\.env\)/,
+  'Sandbox E2E panel 必須共用 server-side Preview route gate',
+)
+assert.match(
+  adminPageSource,
+  /sandboxE2eEnabled \? <LinePaySandboxE2ePanel \/> : null/,
+  'Sandbox E2E panel 只能在完整 server-side gate 通過後顯示',
+)
 
 assert.match(layoutClientSource, /return <AdminShell pathname=\{pathname\}>\{children\}<\/AdminShell>/)
 assert.equal(

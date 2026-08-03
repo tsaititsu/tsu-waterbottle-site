@@ -73,6 +73,84 @@ function isJsonContentType(value: string | undefined) {
   return value?.split(';', 1)[0]?.trim().toLowerCase() === 'application/json'
 }
 
+const LINE_PAY_NUMERIC_IDENTIFIER_KEYS = new Set([
+  'transactionId',
+  'refundTransactionId',
+])
+
+function isJsonWhitespace(value: string | undefined) {
+  return value === ' ' || value === '\n' || value === '\r' || value === '\t'
+}
+
+function jsonStringEnd(value: string, start: number) {
+  for (let index = start + 1; index < value.length; index += 1) {
+    if (value[index] === '\\') {
+      index += 1
+      continue
+    }
+    if (value[index] === '"') return index
+  }
+  return -1
+}
+
+function preserveLinePayNumericIdentifiers(value: string) {
+  let output = ''
+  let copiedThrough = 0
+
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] !== '"') continue
+
+    const end = jsonStringEnd(value, index)
+    if (end === -1) break
+
+    let key: unknown = null
+    try {
+      key = JSON.parse(value.slice(index, end + 1))
+    } catch {
+      index = end
+      continue
+    }
+
+    let colon = end + 1
+    while (isJsonWhitespace(value[colon])) colon += 1
+    if (
+      typeof key !== 'string'
+      || !LINE_PAY_NUMERIC_IDENTIFIER_KEYS.has(key)
+      || value[colon] !== ':'
+    ) {
+      index = end
+      continue
+    }
+
+    let numberStart = colon + 1
+    while (isJsonWhitespace(value[numberStart])) numberStart += 1
+    let numberEnd = numberStart
+    while (/\d/.test(value[numberEnd] ?? '')) numberEnd += 1
+    const digits = value.slice(numberStart, numberEnd)
+    const delimiter = value[numberEnd]
+    if (
+      digits.length === 0
+      || digits.length > 128
+      || !(
+        delimiter === ','
+        || delimiter === '}'
+        || delimiter === ']'
+        || isJsonWhitespace(delimiter)
+      )
+    ) {
+      index = end
+      continue
+    }
+
+    output += value.slice(copiedThrough, numberStart)
+    output += `"${digits}"`
+    copiedThrough = numberEnd
+    index = numberEnd - 1
+  }
+
+  return output + value.slice(copiedThrough)
+}
+
 function errorResponse(error: unknown): GatewayResponse {
   if (error instanceof GatewayHttpError) {
     return { statusCode: error.statusCode, body: { ok: false, error: error.code } }
@@ -123,7 +201,7 @@ async function callLinePayUpstream(
 
   let body: unknown
   try {
-    body = JSON.parse(responseText)
+    body = JSON.parse(preserveLinePayNumericIdentifiers(responseText))
   } catch {
     throw new GatewayHttpError(502, 'invalid_upstream_json')
   }

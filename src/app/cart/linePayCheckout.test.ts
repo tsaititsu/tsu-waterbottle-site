@@ -261,6 +261,18 @@ test('linePay=pending shows pending message', () => {
   assert.equal(result.message, 'LINE Pay 付款狀態確認中，請稍後再查看訂單狀態。')
 })
 
+test('linePay=reconciliation says payment was received and forbids paying again', () => {
+  const result = buildLinePayReturnMessage('reconciliation')
+
+  assert.equal(result.visible, true)
+  assert.equal(result.tone, 'warning')
+  assert.equal(result.title, 'LINE Pay 付款已收到，訂單確認中。')
+  assert.equal(result.message, '請勿再次付款。')
+  assert.equal(JSON.stringify(result).includes('付款失敗'), false)
+  assert.equal(JSON.stringify(result).includes('重新付款'), false)
+  assert.equal(JSON.stringify(result).includes('重新結帳'), false)
+})
+
 test('linePay=failed shows failed message', () => {
   const result = buildLinePayReturnMessage('failed')
 
@@ -286,6 +298,7 @@ test('return messages do not expose transaction or secret details', () => {
     buildLinePayReturnMessage('success'),
     buildLinePayReturnMessage('canceled'),
     buildLinePayReturnMessage('pending'),
+    buildLinePayReturnMessage('reconciliation'),
     buildLinePayReturnMessage('failed'),
     buildLinePayReturnMessage('error'),
   ])

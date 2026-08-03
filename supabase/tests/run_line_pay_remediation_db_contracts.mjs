@@ -20,6 +20,12 @@ const fakeMarkers = [
 const migration = process.env.LINE_PAY_MIGRATION_UNDER_TEST
   ? resolve(process.env.LINE_PAY_MIGRATION_UNDER_TEST)
   : join(root, 'supabase/migrations/20260719033404_line_pay_remediation_contracts.sql')
+const atomicFinalizationMigration = process.env.LINE_PAY_ATOMIC_FINALIZATION_MIGRATION_UNDER_TEST
+  ? resolve(process.env.LINE_PAY_ATOMIC_FINALIZATION_MIGRATION_UNDER_TEST)
+  : null
+const paidRecoveryMigration = process.env.LINE_PAY_PAID_RECOVERY_MIGRATION_UNDER_TEST
+  ? resolve(process.env.LINE_PAY_PAID_RECOVERY_MIGRATION_UNDER_TEST)
+  : null
 const baselineFiles = [
   'supabase/schema.sql',
   'supabase/bank_transfer_submissions_patch.sql',
@@ -81,6 +87,25 @@ function psql(database, sql, label) {
 function psqlFile(database, relativePath) {
   const absolutePath = relativePath.startsWith('/') ? relativePath : join(root, relativePath)
   psql(database, readFileSync(absolutePath, 'utf8'), relativePath)
+}
+
+function psqlFileExpectFailure(database, relativePath, expectedMarker, label) {
+  const absolutePath = relativePath.startsWith('/') ? relativePath : join(root, relativePath)
+  const result = spawnSync(
+    'docker',
+    ['exec', '-i', containerName, 'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', database],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      input: readFileSync(absolutePath, 'utf8'),
+    },
+  )
+  const combinedOutput = `${result.stdout}\n${result.stderr}`
+  assertNoFakeMarker(combinedOutput, label)
+
+  if (result.status === 0 || !combinedOutput.includes(expectedMarker)) {
+    throw new Error(`${label} did not fail closed with ${expectedMarker}`)
+  }
 }
 
 function psqlExpectDenied(database, sql, label) {
@@ -185,6 +210,67 @@ async function testConcurrentClaim(database) {
       $$;
     `,
     'concurrent claim assertions',
+  )
+}
+
+async function testConcurrentPaidRecovery(database) {
+  psql(
+    database,
+    'select line_pay_paid_recovery_test.seed_reconciliation(25);',
+    'seed concurrent paid recovery',
+  )
+  const statement = `
+    set session authorization authenticator;
+    set role line_pay_payment_executor;
+    select result_code
+    from public.recover_product_order_line_pay_confirmation(
+      'sandbox',
+      '70000000-0000-4000-8000-000000000025',
+      '50000000-0000-4000-8000-000000000025',
+      '60000000-0000-4000-8000-000000000025',
+      'LP-PAID-RECOVERY-25',
+      'paid-recovery-transaction-25',
+      300,
+      'TWD',
+      '90000000-0000-4000-8000-000000000025',
+      '91000000-0000-4000-8000-000000000025',
+      repeat('c', 64),
+      'paid-recovery-concurrent-25'
+    );
+  `
+  const outputs = await Promise.all([
+    runPsqlAsync(database, statement),
+    runPsqlAsync(database, statement),
+  ])
+  const results = outputs
+    .flatMap((output) => output.split(/\s+/))
+    .filter((value) => ['completed', 'already_completed'].includes(value))
+    .sort()
+
+  if (
+    results.length !== 2
+    || results[0] !== 'already_completed'
+    || results[1] !== 'completed'
+  ) {
+    throw new Error(`concurrent paid recovery was not idempotent: ${JSON.stringify(results)}`)
+  }
+
+  psql(
+    database,
+    `do $$
+     begin
+       if (select pg_catalog.count(*)
+           from line_pay_private.line_pay_completion_proofs
+           where payment_id = '70000000-0000-4000-8000-000000000025') <> 1
+          or (select pg_catalog.count(*)
+              from public.line_pay_payment_audit_events
+              where payment_id = '70000000-0000-4000-8000-000000000025'
+                and event_type = 'confirmation_completed') <> 1 then
+         raise exception 'concurrent_paid_recovery_duplicate_evidence';
+       end if;
+     end
+     $$;`,
+    'concurrent paid recovery postcondition',
   )
 }
 
@@ -365,6 +451,13 @@ async function main() {
 
   psql('postgres', 'create database line_pay_clean;', 'create clean database')
   psql('postgres', 'create database line_pay_upgrade;', 'create upgrade database')
+  if (atomicFinalizationMigration) {
+    psql(
+      'postgres',
+      'create database line_pay_atomic_acl_drift;',
+      'create atomic ACL drift database',
+    )
+  }
 
   prepareBaseline('line_pay_clean')
   psqlFile('line_pay_clean', migration)
@@ -374,16 +467,79 @@ async function main() {
   psqlFile('line_pay_clean', 'supabase/tests/line_pay_second_remediation_invariants.sql')
   await testConcurrentClaim('line_pay_clean')
   testRoleAccess('line_pay_clean')
-
   prepareBaseline('line_pay_upgrade')
   psqlFile('line_pay_upgrade', 'supabase/tests/line_pay_upgrade_fixture.sql')
   psqlFile('line_pay_upgrade', migration)
   psqlFile('line_pay_upgrade', 'supabase/tests/line_pay_upgrade_assertions.sql')
+  if (atomicFinalizationMigration) {
+    psql(
+      'postgres',
+      'create role authenticator noinherit nologin;',
+      'create local authenticator role',
+    )
+    prepareBaseline('line_pay_atomic_acl_drift')
+    psqlFile('line_pay_atomic_acl_drift', migration)
+    psql(
+      'line_pay_atomic_acl_drift',
+      'grant select on public.payments to line_pay_payment_executor;',
+      'seed atomic executor relation ACL drift',
+    )
+    psqlFileExpectFailure(
+      'line_pay_atomic_acl_drift',
+      atomicFinalizationMigration,
+      'line_pay_atomic_finalize_executor_relation_acl_postcondition_failed',
+      'atomic executor relation ACL drift',
+    )
+    psql(
+      'line_pay_atomic_acl_drift',
+      `do $$
+       begin
+         if to_regprocedure(
+              'public.finalize_product_order_line_pay_confirmation(text,uuid,uuid,uuid,text,text,integer,text,uuid,uuid,uuid,text,text)'
+            ) is not null
+            or not pg_catalog.has_table_privilege(
+              'line_pay_payment_executor', 'public.payments', 'select'
+            )
+            or not pg_catalog.has_function_privilege(
+              'line_pay_payment_executor',
+              'public.record_product_order_line_pay_confirmation_evidence(text,uuid,uuid,text,text,text)',
+              'execute'
+            ) then
+           raise exception 'atomic_executor_acl_drift_rollback_failed';
+         end if;
+       end
+       $$;`,
+      'atomic executor ACL drift rollback assertion',
+    )
+    psqlFile('line_pay_clean', atomicFinalizationMigration)
+    psqlFile(
+      'line_pay_clean',
+      'supabase/tests/line_pay_atomic_confirmation_finalization.sql',
+    )
+    psqlFile('line_pay_upgrade', atomicFinalizationMigration)
+    if (paidRecoveryMigration) {
+      psql(
+        'line_pay_clean',
+        `alter table line_pay_private.line_pay_completion_proofs owner to postgres;
+         alter function line_pay_private.line_pay_enforce_completion_proof() owner to postgres;`,
+        'seed completion proof owner drift',
+      )
+      psqlFile('line_pay_clean', paidRecoveryMigration)
+      psqlFile(
+        'line_pay_clean',
+        'supabase/tests/line_pay_paid_reconciliation_recovery.sql',
+      )
+      await testConcurrentPaidRecovery('line_pay_clean')
+      psqlFile('line_pay_upgrade', paidRecoveryMigration)
+    }
+  }
 
   const postgresLogs = runDocker(['logs', containerName])
   assertNoFakeMarker(postgresLogs, 'PostgreSQL logs')
 
-  process.stdout.write('line_pay_remediation_db_contracts: PASS (clean, upgrade, RPC, concurrency, rollback, RLS)\n')
+  process.stdout.write(
+    `line_pay_remediation_db_contracts: PASS (clean, upgrade, RPC, concurrency, rollback, RLS${atomicFinalizationMigration ? ', atomic-finalization' : ''}${paidRecoveryMigration ? ', paid-recovery' : ''})\n`,
+  )
 }
 
 try {

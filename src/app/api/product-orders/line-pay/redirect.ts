@@ -1,11 +1,18 @@
 import { NextResponse } from 'next/server'
 
-export type LinePayCartRedirectStatus = 'success' | 'canceled' | 'pending' | 'failed' | 'error'
+export type LinePayCartRedirectStatus =
+  | 'success'
+  | 'canceled'
+  | 'pending'
+  | 'reconciliation'
+  | 'failed'
+  | 'error'
 
 const allowedLinePayCartRedirectStatuses = new Set<LinePayCartRedirectStatus>([
   'success',
   'canceled',
   'pending',
+  'reconciliation',
   'failed',
   'error',
 ])
@@ -44,6 +51,10 @@ export function resolveLinePayConfirmCartRedirectStatus(payload: unknown): LineP
   if (!isRecord(payload)) return 'error'
 
   if (payload.error === 'product_order_already_paid') return 'success'
+
+  if (payload.error === 'line_pay_confirmation_reconciliation_required') {
+    return 'reconciliation'
+  }
 
   if (payload.ok === true && payload.confirmed === true && payload.markedPaid === true) {
     return 'success'

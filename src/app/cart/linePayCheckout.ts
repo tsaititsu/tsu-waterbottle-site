@@ -2,7 +2,13 @@ export const CART_LINE_PAY_BUTTON_LABEL = 'LINE Pay'
 export const CART_LINE_PAY_READY_MESSAGE = '將前往 LINE Pay 完成付款。'
 export const CART_LINE_PAY_LOADING_MESSAGE = '正在建立 LINE Pay 付款資料...'
 
-export type CartLinePayReturnStatus = 'success' | 'canceled' | 'pending' | 'failed' | 'error'
+export type CartLinePayReturnStatus =
+  | 'success'
+  | 'canceled'
+  | 'pending'
+  | 'reconciliation'
+  | 'failed'
+  | 'error'
 
 export type CartLinePayReturnMessage = {
   visible: boolean
@@ -194,6 +200,13 @@ export function buildLinePayReturnMessage(linePayStatus: unknown): CartLinePayRe
         tone: 'info',
         title: 'LINE Pay 付款確認中',
         message: 'LINE Pay 付款狀態確認中，請稍後再查看訂單狀態。',
+      }
+    case 'reconciliation':
+      return {
+        visible: true,
+        tone: 'warning',
+        title: 'LINE Pay 付款已收到，訂單確認中。',
+        message: '請勿再次付款。',
       }
     case 'failed':
       return {

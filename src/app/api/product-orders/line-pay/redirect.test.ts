@@ -60,6 +60,7 @@ async function assertRedirect(payload: unknown, resolver: (payload: unknown) => 
 
 test('buildLinePayCartRedirectUrl only writes allowed linePay status', () => {
   assert.equal(String(buildLinePayCartRedirectUrl({ baseUrl: 'https://example.com/from', status: 'success' })), 'https://example.com/cart?linePay=success')
+  assert.equal(String(buildLinePayCartRedirectUrl({ baseUrl: 'https://example.com/from', status: 'reconciliation' })), 'https://example.com/cart?linePay=reconciliation')
   assert.equal(String(buildLinePayCartRedirectUrl({ baseUrl: 'https://example.com/from', status: 'not-safe' })), 'https://example.com/cart?linePay=error')
 })
 
@@ -99,6 +100,19 @@ test('confirm unsafe pending or ambiguous outcome redirects to pending', async (
     },
     resolveLinePayConfirmCartRedirectStatus,
     'pending',
+  )
+})
+
+test('provider-paid local reconciliation redirects to reconciliation without payment identifiers', async () => {
+  await assertRedirect(
+    {
+      ok: false,
+      error: 'line_pay_confirmation_reconciliation_required',
+      transactionId: '2026070800000000001',
+      orderId: 'LP_product_order_1_20260708',
+    },
+    resolveLinePayConfirmCartRedirectStatus,
+    'reconciliation',
   )
 })
 

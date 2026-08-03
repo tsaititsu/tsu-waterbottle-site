@@ -127,6 +127,69 @@ test('valid HMAC is accepted and request operation reaches the fixed sandbox hos
   assert.equal(calls[0]?.url, 'https://sandbox-api-pay.line.me/v3/payments/request')
 })
 
+test('request response preserves a 19-digit numeric transactionId as an exact string', async () => {
+  const transactionId = '2026080201234567890'
+  const fetchFn: GatewayUpstreamFetch = async () => ({
+    status: 200,
+    text: async () =>
+      `{"returnCode":"0000","info":{"transactionId":${transactionId},"paymentUrl":{"web":"https://sandbox-web-pay.line.me/test"}}}`,
+  })
+  const handler = createGatewayHandler(config, { fetchFn, now: () => nowMs })
+  const response = await handler(
+    buildSignedRequest(requestPayload(), {
+      nonce: 'nonce-transaction-precision',
+      requestId: 'request-transaction-precision',
+    }),
+  )
+  const body = response.body.body as {
+    info?: { transactionId?: unknown }
+  }
+
+  assert.equal(response.statusCode, 200)
+  assert.equal(body.info?.transactionId, transactionId)
+  assert.equal(typeof body.info?.transactionId, 'string')
+})
+
+test('upstream identifier normalization preserves strings, nested refund ids, and string contents', async () => {
+  const transactionId = '2026080201234567890'
+  const refundTransactionId = '2026080209876543210'
+  const note = `literal \\"transactionId\\":${transactionId}`
+  const fetchFn: GatewayUpstreamFetch = async () => ({
+    status: 200,
+    text: async () =>
+      JSON.stringify({
+        returnCode: '0000',
+        info: {
+          transactionId,
+          refunds: [{ refundTransactionId: Number(refundTransactionId) }],
+          note,
+        },
+      }).replace(
+        String(Number(refundTransactionId)),
+        refundTransactionId,
+      ),
+  })
+  const handler = createGatewayHandler(config, { fetchFn, now: () => nowMs })
+  const response = await handler(
+    buildSignedRequest(requestPayload(), {
+      nonce: 'nonce-identifier-boundaries',
+      requestId: 'request-identifier-boundaries',
+    }),
+  )
+  const body = response.body.body as {
+    info?: {
+      transactionId?: unknown
+      refunds?: Array<{ refundTransactionId?: unknown }>
+      note?: unknown
+    }
+  }
+
+  assert.equal(response.statusCode, 200)
+  assert.equal(body.info?.transactionId, transactionId)
+  assert.equal(body.info?.refunds?.[0]?.refundTransactionId, refundTransactionId)
+  assert.equal(body.info?.note, note)
+})
+
 test('request operation keeps an upstream deadline above the official 10-second minimum', async () => {
   const scheduledDelays: number[] = []
   const timeoutScheduler = {
