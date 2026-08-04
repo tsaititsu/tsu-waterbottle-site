@@ -488,6 +488,8 @@ flowchart TD
 - Runtime 只掃描 N0 的 `sourceMajorStars`，固定順序為命宮、遷移宮、疾厄宮、父母宮；不掃描 `borrowedMajorStars`，也不沿三方、暗合或對宮二次擴張主星身體對應。
 - 天機遇天梁同宮或對宮時可另加脊椎方向；這是講義明定的單一條件規則，不是允許掃描器匯入所有對宮身體含義。
 - 太陽、太陰只在星曜實際落於午或未時增加眼睛方向；太陰、破軍只在女性條件成立時增加婦科與生殖方向。性別只用來觸發固定條件，不寫入健康掃描結果。
+- `d1ReportAssemblyContracts.ts` 是十二宮客戶文章的單一正式組裝接點。它要求十二宮依 canonical 順序完整出現，逐宮重驗 Writing Prompt Package、Writing Result 與 Fidelity Review，並綁定同一 chart、run、Snapshot、內容格與報告語境；任一宮需要修補、缺漏、重排或來源漂移都 fail-closed。
+- 組裝器完整保留已核准的 `customerText`，不進行第二次改寫。它只把同一 N0 的身體方向掃描交給固定健康卡選擇器，並只在疾厄宮附加提醒；技術組裝完成仍固定 `humanReviewStatus=required`、`customerDeliveryStatus=blocked_pending_human_review` 與 `openAiCallable=false`。
 - 同一身體方向由多顆星或多宮觸發時，客戶提醒只需輸出一次，但 Runtime 必須保留每個來源宮位、placement ID、固定 rule ID 與條件軌跡。
 - 外貌不是目前強項，只能在正式依據充分時低比重提及。
 
