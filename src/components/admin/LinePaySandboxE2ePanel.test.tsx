@@ -62,6 +62,20 @@ assert.equal(
       state: 'failed',
       error: 'sandbox_request_failed',
       diagnostic: {
+        stage: 'execution',
+        reason: 'gateway_unauthorized',
+      },
+    },
+    'sandbox',
+  ),
+  'Sandbox Gateway 認證失敗（原因：gateway_unauthorized）；尚未取得付款網址，且不會自動重試。',
+)
+assert.equal(
+  linePayOneDollarSnapshotMessage(
+    {
+      state: 'failed',
+      error: 'sandbox_request_failed',
+      diagnostic: {
         stage: 'initialization',
         reason: 'rpc_insufficient_privilege',
       },

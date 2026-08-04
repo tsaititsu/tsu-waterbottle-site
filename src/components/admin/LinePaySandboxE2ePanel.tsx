@@ -46,6 +46,12 @@ export function linePayOneDollarSnapshotMessage(
       if (snapshot.diagnostic.reason === 'gateway_request_failed') {
         return `${environmentLabel} Gateway 已回應，但拒絕或無法完成請求（原因：gateway_request_failed）；${environment === 'sandbox' ? '尚未取得付款網址，且不會自動重試。' : stoppedMessage}`
       }
+      if (snapshot.diagnostic.reason === 'gateway_unauthorized') {
+        return `${environmentLabel} Gateway 認證失敗（原因：gateway_unauthorized）；${environment === 'sandbox' ? '尚未取得付款網址，且不會自動重試。' : stoppedMessage}`
+      }
+      if (snapshot.diagnostic.reason === 'gateway_environment_mismatch') {
+        return `${environmentLabel} Gateway 環境設定不一致（原因：gateway_environment_mismatch）；${environment === 'sandbox' ? '尚未取得付款網址，且不會自動重試。' : stoppedMessage}`
+      }
       if (snapshot.diagnostic.reason) {
         return `${environmentLabel} Gateway／LINE Pay 請求失敗（原因：${snapshot.diagnostic.reason}）；${environment === 'sandbox' ? '尚未取得付款網址，且不會自動重試。' : stoppedMessage}`
       }

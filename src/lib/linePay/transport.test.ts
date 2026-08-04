@@ -788,6 +788,28 @@ test('gateway non-JSON response becomes a stable controlled error', async () => 
   )
 })
 
+test('Gateway controlled errors retain only an allowlisted safe category', async () => {
+  const cases = [
+    ['unauthorized', 'line_pay_gateway_unauthorized'],
+    ['environment_mismatch', 'line_pay_gateway_environment_mismatch'],
+    ['rate_limited', 'line_pay_gateway_rate_limited'],
+    ['upstream_unavailable', 'line_pay_gateway_upstream_unavailable'],
+    ['invalid_upstream_json', 'line_pay_gateway_upstream_response_invalid'],
+  ] as const
+
+  for (const [gatewayError, expected] of cases) {
+    const fetchFn: LinePayTransportFetch = async () => ({
+      status: 502,
+      json: async () => ({ ok: false, error: gatewayError }),
+    })
+    await assert.rejects(
+      () => requestLinePayPayment(requestInput(fetchFn)),
+      (error: unknown) =>
+        error instanceof LinePayTransportError && error.code === expected,
+    )
+  }
+})
+
 test('production gateway mode fails closed when any required setting is missing', async () => {
   let calls = 0
   const fetchFn: LinePayTransportFetch = async () => {

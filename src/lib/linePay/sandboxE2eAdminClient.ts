@@ -39,6 +39,14 @@ const LINE_PAY_ONE_DOLLAR_EXECUTION_REASONS = [
   'gateway_timeout',
   'gateway_unavailable',
   'gateway_upstream_timeout',
+  'gateway_contract_rejected',
+  'gateway_environment_mismatch',
+  'gateway_internal_error',
+  'gateway_rate_limited',
+  'gateway_replay_detected',
+  'gateway_unauthorized',
+  'gateway_upstream_response_invalid',
+  'gateway_upstream_unavailable',
 ] as const
 
 export type LinePayOneDollarExecutionReason =

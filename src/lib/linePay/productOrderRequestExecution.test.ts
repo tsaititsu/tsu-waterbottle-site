@@ -318,6 +318,25 @@ test('Gateway request failures retain only the allowlisted transport reason', as
   assert.deepEqual(calls, ['claim', 'markUnknown'])
 })
 
+test('Gateway authentication failures retain the safe execution reason', async () => {
+  const { calls, database } = createDatabase()
+
+  await assert.rejects(
+    () =>
+      executeInitializedProductOrderLinePayRequest({
+        ...createInput(database),
+        requestPayment: async () => {
+          throw new LinePayTransportError('line_pay_gateway_unauthorized')
+        },
+      }),
+    (error: unknown) =>
+      error instanceof LinePayProductOrderRequestExecutionError
+      && error.code === 'gateway_unauthorized',
+  )
+
+  assert.deepEqual(calls, ['claim', 'markUnknown'])
+})
+
 test('database failure after upstream success attempts fail-closed unknown marking', async () => {
   const { calls, database } = createDatabase({
     async recordSuccess() {

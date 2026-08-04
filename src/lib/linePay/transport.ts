@@ -407,9 +407,39 @@ async function sendDirectLinePayRequest(
   }
 }
 
+const SAFE_GATEWAY_RESPONSE_ERRORS: Readonly<Record<string, string>> = Object.freeze({
+  body_too_large: 'line_pay_gateway_contract_rejected',
+  environment_mismatch: 'line_pay_gateway_environment_mismatch',
+  internal_error: 'line_pay_gateway_internal_error',
+  invalid_environment: 'line_pay_gateway_contract_rejected',
+  invalid_json: 'line_pay_gateway_contract_rejected',
+  invalid_json_encoding: 'line_pay_gateway_contract_rejected',
+  invalid_line_pay_headers: 'line_pay_gateway_contract_rejected',
+  invalid_operation: 'line_pay_gateway_contract_rejected',
+  invalid_operation_target: 'line_pay_gateway_contract_rejected',
+  invalid_proxy_client_ip: 'line_pay_gateway_contract_rejected',
+  invalid_request: 'line_pay_gateway_contract_rejected',
+  invalid_request_body: 'line_pay_gateway_contract_rejected',
+  invalid_upstream_json: 'line_pay_gateway_upstream_response_invalid',
+  invalid_upstream_response: 'line_pay_gateway_upstream_response_invalid',
+  method_not_allowed: 'line_pay_gateway_contract_rejected',
+  not_found: 'line_pay_gateway_contract_rejected',
+  rate_limited: 'line_pay_gateway_rate_limited',
+  replay_detected: 'line_pay_gateway_replay_detected',
+  unauthorized: 'line_pay_gateway_unauthorized',
+  unsafe_upstream_target: 'line_pay_gateway_internal_error',
+  unsupported_media_type: 'line_pay_gateway_contract_rejected',
+  upstream_timeout: 'line_pay_gateway_upstream_timeout',
+  upstream_unavailable: 'line_pay_gateway_upstream_unavailable',
+})
+
 function normalizeGatewayError(payload: unknown) {
-  if (isRecord(payload) && typeof payload.error === 'string' && payload.error.includes('timeout')) {
-    return 'line_pay_gateway_upstream_timeout'
+  if (
+    isRecord(payload)
+    && typeof payload.error === 'string'
+    && Object.hasOwn(SAFE_GATEWAY_RESPONSE_ERRORS, payload.error)
+  ) {
+    return SAFE_GATEWAY_RESPONSE_ERRORS[payload.error]
   }
 
   return 'line_pay_gateway_request_failed'

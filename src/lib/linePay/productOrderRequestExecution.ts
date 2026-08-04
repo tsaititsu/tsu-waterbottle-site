@@ -19,6 +19,14 @@ export type LinePayProductOrderRequestExecutionErrorCode =
   | 'gateway_timeout'
   | 'gateway_unavailable'
   | 'gateway_upstream_timeout'
+  | 'gateway_contract_rejected'
+  | 'gateway_environment_mismatch'
+  | 'gateway_internal_error'
+  | 'gateway_rate_limited'
+  | 'gateway_replay_detected'
+  | 'gateway_unauthorized'
+  | 'gateway_upstream_response_invalid'
+  | 'gateway_upstream_unavailable'
 
 export class LinePayProductOrderRequestExecutionError extends Error {
   readonly code: LinePayProductOrderRequestExecutionErrorCode
@@ -92,9 +100,17 @@ const SAFE_GATEWAY_EXECUTION_ERRORS: Readonly<Record<
   invalid_line_pay_gateway_url: 'gateway_config_invalid',
   invalid_line_pay_transport: 'gateway_config_invalid',
   line_pay_gateway_request_failed: 'gateway_request_failed',
+  line_pay_gateway_contract_rejected: 'gateway_contract_rejected',
+  line_pay_gateway_environment_mismatch: 'gateway_environment_mismatch',
+  line_pay_gateway_internal_error: 'gateway_internal_error',
+  line_pay_gateway_rate_limited: 'gateway_rate_limited',
+  line_pay_gateway_replay_detected: 'gateway_replay_detected',
   line_pay_gateway_timeout: 'gateway_timeout',
+  line_pay_gateway_unauthorized: 'gateway_unauthorized',
   line_pay_gateway_unavailable: 'gateway_unavailable',
+  line_pay_gateway_upstream_response_invalid: 'gateway_upstream_response_invalid',
   line_pay_gateway_upstream_timeout: 'gateway_upstream_timeout',
+  line_pay_gateway_upstream_unavailable: 'gateway_upstream_unavailable',
   line_pay_preview_requires_gateway: 'gateway_config_invalid',
   missing_line_pay_gateway_config: 'gateway_config_invalid',
 })

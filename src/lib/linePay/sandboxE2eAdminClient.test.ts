@@ -230,6 +230,33 @@ test('Gateway execution failure preserves only an allowlisted reason', async () 
   })
 })
 
+test('Gateway authentication failure preserves the allowlisted reason', async () => {
+  const snapshots: LinePaySandboxE2eAdminSnapshot[] = []
+  const controller = createLinePaySandboxE2eAdminController(
+    {
+      getAccessToken: async () => 'synthetic-token',
+      fetchStart: async () => response(502, {
+        ok: false,
+        error: 'line_pay_sandbox_e2e_execution_failed',
+        executionReason: 'gateway_unauthorized',
+      }),
+      navigate: () => assert.fail('failed response must not navigate'),
+    },
+    (snapshot) => snapshots.push(snapshot),
+  )
+
+  await controller.start()
+
+  assert.deepEqual(snapshots.at(-1), {
+    state: 'failed',
+    error: 'sandbox_request_failed',
+    diagnostic: {
+      stage: 'execution',
+      reason: 'gateway_unauthorized',
+    },
+  })
+})
+
 test('initializer failure preserves only an allowlisted reason', async () => {
   const sensitiveText = 'synthetic-database-detail'
   const snapshots: LinePaySandboxE2eAdminSnapshot[] = []
