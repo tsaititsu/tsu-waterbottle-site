@@ -56,12 +56,16 @@ function reportScopedId(prefix: string, reportId: string) {
   return `${prefix}:${normalized}`.slice(0, 128)
 }
 
+export function createAiChartD1ReportChartId(reportId: string) {
+  return reportScopedId('chart', reportId)
+}
+
 export function buildAiChartD1ReportGenerationPlan(input: {
   reportId: string
   chartSnapshot: unknown
   d1K0Catalog: unknown
 }): AiChartD1ReportGenerationPlan {
-  const chartId = reportScopedId('chart', input.reportId)
+  const chartId = createAiChartD1ReportChartId(input.reportId)
   const runId = reportScopedId('run:d1-report', input.reportId)
   const n0 = normalizeAiChartD1N0(input.chartSnapshot, { chartId })
   const callIds = AI_CHART_D1_PALACE_IDENTITIES.map(

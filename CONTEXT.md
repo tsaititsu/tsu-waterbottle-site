@@ -60,6 +60,10 @@ _避免：模型自行選卡、為了文章流暢改寫醫療語意、同一張�
 只有 canonical 十二宮順序中的每一份客戶文章都通過原 Prompt Package source binding 與忠實度審查，程式才可保留原文組成一份不可變報告。健康方向由同一份 N0 deterministic 掃描，固定提醒只附在疾厄宮；組裝完成仍須等待人工審查，不能直接交付。
 _避免：缺宮或重排仍組裝、跨 Report／Snapshot 混用文章、組裝時再改寫模型正文、把健康提醒複製到其他十一宮、把技術組裝成功等同客戶可領取_
 
+**報告完成待審交接**：
+付款後的背景完成器可接收新版十二宮 Assembly，但必須重新綁定 Server 讀回的 Report UUID、canonical Snapshot digest 與固定 chart ID，並先由受限持久化 Port 保存，才回報 `human_review_required`。這個結果只含 Assembly fingerprint 與宮位數，不含客戶正文；不得呼叫 completed writer，也不得把技術組裝成功當成客戶可領取。
+_避免：從 Client 接受 Snapshot digest、來源漂移後仍持久化、沒有保存待審成果就回報成功、把完整 Assembly 放進背景 log、在人工審查前寫入正式 report content_
+
 **輔星補充主張**：
 每顆輔星在單一宮位內產生的獨立補充；本命盤預設先描述命主主動展現的特質或行為，只有固定規則或清楚因果支持時，才另加他人回應或環境助力，最後再與主星整合。
 _避免：只把輔星寫成外界憑空給予的好處、強迫每顆輔星都產生他人回應、讓輔星取代主星方向_
