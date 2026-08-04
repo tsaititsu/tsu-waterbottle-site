@@ -6,6 +6,8 @@ import LinePaySandboxE2ePanel from '@/components/admin/LinePaySandboxE2ePanel'
 import { isLinePaySandboxE2eRouteEnabled } from '@/app/api/internal/line-pay/sandbox-e2e/start/handler'
 import { isLinePayProductionOneDollarRouteEnabled } from '@/app/api/internal/line-pay/production-one-dollar/start/handler'
 
+export const dynamic = 'force-dynamic'
+
 const readOnlyModules = getAdminModulesBySection('readonly')
 const toolModules = getAdminModulesBySection('tool')
 const unavailableModules = getAdminModulesBySection('unavailable')

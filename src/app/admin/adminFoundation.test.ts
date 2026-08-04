@@ -37,6 +37,11 @@ assert.match(
 )
 assert.match(
   adminPageSource,
+  /export const dynamic = 'force-dynamic'/,
+  'Production NT$1 臨時期限必須在每次後台請求重新判斷',
+)
+assert.match(
+  adminPageSource,
   /linePayTestEnvironment \? <LinePaySandboxE2ePanel environment=\{linePayTestEnvironment\} \/> : null/,
   'LINE Pay NT$1 panel 只能在對應 server-side gate 通過後顯示',
 )

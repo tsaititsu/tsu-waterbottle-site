@@ -11,6 +11,7 @@
 - Production 付款網址只接受 `https://web-pay.line.me/web/...`；Sandbox 只接受 `https://sandbox-web-pay.line.me/...`。
 - Production 測試商品與訂單明確標示「不出貨」，使用固定的非個資寄送資料以符合正式訂單契約。
 - 同一個完整 commit SHA 與管理員帳號只會產生同一組 Production database identity，避免重新載入造成第二筆測試訂單。
+- Production 測試使用固定的單次操作期限，重新載入時不會因期限漂移而發生 database idempotency conflict；期限必須晚於現在 5 分鐘且不超過 24 小時。
 - API 回應不提供 payment、order、attempt 或 transaction 識別碼。
 
 ## Preview Sandbox 設定
@@ -34,9 +35,10 @@ Production 除既有 LINE Pay Production 與 Gateway 設定外，還必須同時
 ```text
 LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_ENABLED=true
 LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_CONFIRMATION=RUN_LINE_PAY_PRODUCTION_NT1_ONCE
+LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_EXPIRES_AT=<YYYY-MM-DDTHH:mm:ss.sssZ，距現在 5 分鐘以上、24 小時以內>
 ```
 
-兩個值都不是金流 Secret；它們是 fail-closed 的臨時操作開關。只有 Vercel Production、完整 commit SHA 與兩個值完全一致時，後台才顯示「LINE Pay Production NT$1」。
+三個值都不是金流 Secret；它們是 fail-closed 的臨時操作開關。只有 Vercel Production、完整 commit SHA、確認值與有效期限全部符合時，後台才顯示「LINE Pay Production NT$1」。固定期限也讓同一個 commit 與管理員重試時沿用完全一致的資料庫能力資料。
 
 ## 執行順序
 
@@ -44,10 +46,10 @@ LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_CONFIRMATION=RUN_LINE_PAY_PRODUCTION_NT1_ONC
 2. 由管理員完成 Sandbox 付款，回到 `/cart?linePay=success`。
 3. 檢查 Sandbox payment 與 product order 已同步為 paid，且沒有重複訂單。
 4. 通過 Preview checks 並取得完整 commit SHA 部署授權後，合併與正式部署。
-5. 在 Production 啟用兩個臨時開關，確認 `/admin` 只顯示 Production NT$1 面板。
+5. 在 Production 啟用三個臨時設定，確認 `/admin` 只顯示 Production NT$1 面板。
 6. 由管理員確認「真實扣款 NT$1」後完成付款，回到 `/cart?linePay=success`。
 7. 檢查 Production payment 與 product order 已同步為 paid，訂單標記「不出貨」，且沒有重複訂單。
-8. 測試完成後將兩個 Production 臨時開關停用並重新部署，確認面板消失。
+8. 測試完成後將 Production 臨時開關停用、清除單次期限並重新部署，確認面板消失。
 
 ## 結果回報
 

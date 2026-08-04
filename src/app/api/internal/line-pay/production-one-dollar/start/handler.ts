@@ -21,6 +21,8 @@ import {
 export const LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION =
   'RUN_LINE_PAY_PRODUCTION_NT1_ONCE'
 export const LINE_PAY_PRODUCTION_ONE_DOLLAR_AMOUNT_TWD = 1
+const LINE_PAY_PRODUCTION_ONE_DOLLAR_MIN_WINDOW_MS = 5 * 60 * 1000
+const LINE_PAY_PRODUCTION_ONE_DOLLAR_MAX_WINDOW_MS = 24 * 60 * 60 * 1000
 
 export type LinePayProductionOneDollarEnvironment = LinePayServerEnv & {
   VERCEL_ENV?: string
@@ -28,6 +30,7 @@ export type LinePayProductionOneDollarEnvironment = LinePayServerEnv & {
   LINE_PAY_TRANSPORT?: string
   LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_ENABLED?: string
   LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_CONFIRMATION?: string
+  LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_EXPIRES_AT?: string
 }
 
 type AuthorizedProductionOneDollarContext = {
@@ -83,7 +86,12 @@ function errorResponse(error: string, status: number) {
 
 export function isLinePayProductionOneDollarRouteEnabled(
   env: LinePayProductionOneDollarEnvironment,
+  now = new Date(),
 ) {
+  const expiresAt = env.LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_EXPIRES_AT?.trim()
+  const expiresAtMs = expiresAt ? Date.parse(expiresAt) : Number.NaN
+  const remainingWindowMs = expiresAtMs - now.getTime()
+
   return (
     env.VERCEL_ENV?.trim().toLowerCase() === 'production'
     && env.NEXT_PUBLIC_ENABLE_LINE_PAY?.trim().toLowerCase() === 'true'
@@ -93,6 +101,10 @@ export function isLinePayProductionOneDollarRouteEnabled(
       === 'true'
     && env.LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_CONFIRMATION?.trim()
       === LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION
+    && Number.isFinite(expiresAtMs)
+    && new Date(expiresAtMs).toISOString() === expiresAt
+    && remainingWindowMs > LINE_PAY_PRODUCTION_ONE_DOLLAR_MIN_WINDOW_MS
+    && remainingWindowMs <= LINE_PAY_PRODUCTION_ONE_DOLLAR_MAX_WINDOW_MS
     && /^[0-9a-f]{40}$/i.test(env.VERCEL_GIT_COMMIT_SHA?.trim() ?? '')
   )
 }
@@ -146,7 +158,8 @@ export async function handleLinePayProductionOneDollarStart(input: {
   createUuid?: () => string
   createToken?: (purpose: 'confirm' | 'cancel') => string
 }) {
-  if (!isLinePayProductionOneDollarRouteEnabled(input.env)) {
+  const now = input.now?.() ?? new Date()
+  if (!isLinePayProductionOneDollarRouteEnabled(input.env, now)) {
     return hiddenResponse()
   }
 
@@ -187,7 +200,6 @@ export async function handleLinePayProductionOneDollarStart(input: {
     return errorResponse('line_pay_production_one_dollar_config_failed', 502)
   }
 
-  const now = input.now?.() ?? new Date()
   const createUuid = input.createUuid ?? randomUUID
   const commitSha = input.env.VERCEL_GIT_COMMIT_SHA!.trim().toLowerCase()
   const identity = sha256(
@@ -199,9 +211,8 @@ export async function handleLinePayProductionOneDollarStart(input: {
     `line-pay-production-one-dollar:${commitSha}:${authorization.userId}`
   const claimId = createUuid()
   const requestId = `line-pay-production-one-dollar:${createUuid()}`
-  const capabilityExpiresAt = new Date(
-    now.getTime() + 30 * 60 * 1000,
-  ).toISOString()
+  const capabilityExpiresAt =
+    input.env.LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_EXPIRES_AT!.trim()
   const createToken = input.createToken
     ?? ((purpose: 'confirm' | 'cancel') =>
       createHmac('sha256', config.channelSecret)

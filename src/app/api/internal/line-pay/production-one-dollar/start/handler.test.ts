@@ -33,6 +33,8 @@ const enabledEnv: LinePayProductionOneDollarEnvironment = {
   LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_ENABLED: 'true',
   LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_CONFIRMATION:
     LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION,
+  LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_EXPIRES_AT:
+    '2026-08-04T13:00:00.000Z',
   LINE_PAY_CHANNEL_ID: 'production-channel-id',
   LINE_PAY_CHANNEL_SECRET: 'production-channel-secret',
   LINE_PAY_CONFIRM_URL:
@@ -182,6 +184,20 @@ for (const [name, env] of [
     ...enabledEnv,
     LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_CONFIRMATION: undefined,
   }],
+  ['test expiration missing', {
+    ...enabledEnv,
+    LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_EXPIRES_AT: undefined,
+  }],
+  ['test expiration too close', {
+    ...enabledEnv,
+    LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_EXPIRES_AT:
+      '2026-08-04T12:05:00.000Z',
+  }],
+  ['test expiration too far away', {
+    ...enabledEnv,
+    LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_EXPIRES_AT:
+      '2026-08-05T12:00:00.001Z',
+  }],
   ['exact Head missing', { ...enabledEnv, VERCEL_GIT_COMMIT_SHA: undefined }],
 ] as const) {
   test(`${name} returns 404 before authorization or writes`, async () => {
@@ -240,6 +256,7 @@ test('one Production Head and admin always derive one database identity', async 
     request: createRequest(),
     env: enabledEnv,
     ...second,
+    now: () => new Date('2026-08-04T12:05:00.000Z'),
     createToken: undefined,
   })
 
@@ -249,10 +266,15 @@ test('one Production Head and admin always derive one database identity', async 
     'idempotencyKey',
     'confirmTokenHash',
     'cancelTokenHash',
+    'capabilityExpiresAt',
   ] as const) {
     assert.equal(first.initializations[0]?.[key], second.initializations[0]?.[key])
   }
   assert.match(String(first.initializations[0]?.idempotencyKey), /production-one-dollar/)
+  assert.equal(
+    first.initializations[0]?.capabilityExpiresAt,
+    enabledEnv.LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_EXPIRES_AT,
+  )
 })
 
 test('untrusted Production payment URL is redacted and never returned', async () => {
