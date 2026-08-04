@@ -65,12 +65,16 @@ test('missing OpenAI server configuration returns generic maintenance copy', () 
   assert.equal(source.includes('OPENAI_API_KEY_MISSING'), true)
 })
 
-test('divination model helper remains gpt-5.5 and paid gate imports remain', () => {
+test('divination model helper uses Terra and paid gate imports remain', () => {
   const modelSource = readSource('src/lib/openai/divinationModel.ts')
   const routeSource = readSource('src/app/api/divination/interpret/route.ts')
+  const engineSource = readSource('src/lib/divination/ziweiCardReadingEngine.ts')
 
-  assert.equal(modelSource.includes('gpt-5.5'), true)
-  assert.equal(routeSource.includes('getDivinationOpenAIModel(process.env)'), true)
+  assert.equal(modelSource.includes('gpt-5.6-terra'), true)
+  assert.equal(modelSource.includes('max'), true)
+  assert.equal(routeSource.includes('generateZiweiCardReading'), true)
+  assert.equal(engineSource.includes('getDivinationOpenAIModel(process.env)'), true)
+  assert.equal(engineSource.includes('getDivinationReasoningEffort()'), true)
   assert.equal(routeSource.includes('decideDivinationInterpretationStart'), true)
   assert.equal(routeSource.includes('paymentRequiredResponse'), true)
 })

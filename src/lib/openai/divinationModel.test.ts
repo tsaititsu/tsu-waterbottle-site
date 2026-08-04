@@ -3,7 +3,9 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   DEFAULT_DIVINATION_OPENAI_MODEL,
+  DEFAULT_DIVINATION_REASONING_EFFORT,
   getDivinationOpenAIModel,
+  getDivinationReasoningEffort,
 } from './divinationModel'
 
 function test(name: string, fn: () => void) {
@@ -65,42 +67,55 @@ function assertAiChartRuntimeModelIsolation(files: readonly RuntimeSourceFile[])
   }
 }
 
-test('default divination OpenAI model is gpt-5.5', () => {
-  assert.equal(DEFAULT_DIVINATION_OPENAI_MODEL, 'gpt-5.5')
-  assert.equal(getDivinationOpenAIModel(), 'gpt-5.5')
-  assert.equal(getDivinationOpenAIModel({}), 'gpt-5.5')
+test('default divination OpenAI model is Terra with max reasoning', () => {
+  assert.equal(DEFAULT_DIVINATION_OPENAI_MODEL, 'gpt-5.6-terra')
+  assert.equal(DEFAULT_DIVINATION_REASONING_EFFORT, 'max')
+  assert.equal(getDivinationOpenAIModel(), 'gpt-5.6-terra')
+  assert.equal(getDivinationOpenAIModel({}), 'gpt-5.6-terra')
+  assert.equal(getDivinationReasoningEffort(), 'max')
 })
 
-test('OPENAI_DIVINATION_MODEL can override the default model', () => {
+test('divination model stays on Terra even when a legacy override exists', () => {
   assert.equal(
     getDivinationOpenAIModel({
       OPENAI_DIVINATION_MODEL: 'custom-divination-model',
     }),
-    'custom-divination-model',
+    'gpt-5.6-terra',
   )
 })
 
-test('OPENAI_DIVINATION_MODEL override is trimmed', () => {
-  assert.equal(
-    getDivinationOpenAIModel({
-      OPENAI_DIVINATION_MODEL: '  custom-divination-model  ',
-    }),
-    'custom-divination-model',
-  )
+test('empty OPENAI_DIVINATION_MODEL falls back to Terra', () => {
+  assert.equal(getDivinationOpenAIModel({ OPENAI_DIVINATION_MODEL: '' }), 'gpt-5.6-terra')
+  assert.equal(getDivinationOpenAIModel({ OPENAI_DIVINATION_MODEL: '   ' }), 'gpt-5.6-terra')
+  assert.equal(getDivinationOpenAIModel({ OPENAI_DIVINATION_MODEL: null }), 'gpt-5.6-terra')
 })
 
-test('empty OPENAI_DIVINATION_MODEL falls back to gpt-5.5', () => {
-  assert.equal(getDivinationOpenAIModel({ OPENAI_DIVINATION_MODEL: '' }), 'gpt-5.5')
-  assert.equal(getDivinationOpenAIModel({ OPENAI_DIVINATION_MODEL: '   ' }), 'gpt-5.5')
-  assert.equal(getDivinationOpenAIModel({ OPENAI_DIVINATION_MODEL: null }), 'gpt-5.5')
+test('reasoning effort is fixed at max for the divination workload', () => {
+  assert.equal(getDivinationReasoningEffort(), 'max')
+  assert.equal(getDivinationReasoningEffort({ OPENAI_DIVINATION_REASONING_EFFORT: 'xhigh' }), 'max')
 })
 
 test('divination interpret route uses the dedicated model helper', () => {
   const source = readWorkspaceFile('src/app/api/divination/interpret/route.ts')
+  const engineSource = readWorkspaceFile('src/lib/divination/ziweiCardReadingEngine.ts')
 
-  assert.match(source, /getDivinationOpenAIModel\(process\.env\)/)
-  assert.doesNotMatch(source, /process\.env\.OPENAI_MODEL/)
-  assert.doesNotMatch(source, /fallbackOpenAiModel/)
+  assert.match(engineSource, /getDivinationOpenAIModel\(process\.env\)/)
+  assert.match(engineSource, /getDivinationReasoningEffort\(\)/)
+  assert.match(engineSource, /reasoning:\s*\{\s*effort:/)
+  assert.doesNotMatch(`${source}\n${engineSource}`, /process\.env\.OPENAI_MODEL/)
+  assert.doesNotMatch(`${source}\n${engineSource}`, /fallbackOpenAiModel/)
+})
+
+test('divination route uses the migrated ziwei-card reasoning engine', () => {
+  const source = readWorkspaceFile('src/app/api/divination/interpret/route.ts')
+  const engineSource = readWorkspaceFile('src/lib/divination/ziweiCardReadingEngine.ts')
+
+  assert.match(source, /generateZiweiCardReading/)
+  assert.match(engineSource, /questionDomain/)
+  assert.match(engineSource, /questionIntent/)
+  assert.match(engineSource, /single_investment_guarded/)
+  assert.match(engineSource, /經營｜商品品項決策/)
+  assert.match(engineSource, /合約｜法律勝負/)
 })
 
 test('missing legacy reading and line routes are not active OpenAI call sites', () => {
