@@ -512,7 +512,7 @@ test('success result does not expose contact fields, secrets, or raw TradeInfo',
   }
 })
 
-test('cart page renders only credit card and Apple Pay payment options', () => {
+test('cart page preserves credit card and Apple Pay while gating LINE Pay separately', () => {
   const source = readCartPageSource()
   const optionsStart = source.indexOf('const cartPaymentMethodOptions')
   const optionsEnd = source.indexOf('\n]\n\ntype PostOfficeShippingInfo', optionsStart)
@@ -523,15 +523,17 @@ test('cart page renders only credit card and Apple Pay payment options', () => {
   assert.equal(source.includes('付款方式'), true)
   assert.equal(optionsStart >= 0, true)
   assert.equal(optionsEnd > optionsStart, true)
-  assert.equal(optionsSource.match(/    value: '/g)?.length, 2)
+  assert.equal(optionsSource.match(/    value: '/g)?.length, 3)
   assert.equal(optionsSource.includes("value: 'credit'"), true)
   assert.equal(optionsSource.includes("value: 'product_order_apple_pay'"), true)
+  assert.equal(optionsSource.includes("value: 'line_pay'"), true)
   assert.equal(optionsSource.includes("label: '信用卡付款'"), true)
   assert.equal(optionsSource.includes("label: 'Apple Pay 付款（iPhone / Safari）'"), true)
   assert.equal(optionsSource.includes('郵局匯款'), false)
   assert.equal(optionsSource.includes("value: 'post_office'"), false)
   assert.equal(optionsSource.includes("ctaLabel: '前往信用卡付款'"), true)
   assert.equal(optionsSource.includes("ctaLabel: '前往 Apple Pay 付款'"), true)
+  assert.equal(source.includes("option.value !== 'line_pay' || linePayButtonState.visible"), true)
   assert.equal(source.includes('href="/bank-transfer"'), false)
   assert.equal(source.includes('前往結帳'), false)
   assert.equal(source.includes('前往付款'), false)
@@ -552,15 +554,20 @@ test('cart page selector wires NewebPay choices to product order and NewebPay cr
 
 test('cart page posts only NewebPay credit parameters and submits payment form', () => {
   const source = readCartPageSource()
+  const handlerStart = source.indexOf('const handleNewebPayCheckoutClick')
+  const handlerEnd = source.indexOf('\n  const handleLinePayCheckoutClick', handlerStart)
+  const handlerSource = source.slice(handlerStart, handlerEnd)
 
   assert.equal(source.includes('submitCartNewebPayForm'), true)
   assert.equal(source.includes('window.location.assign(data'), false)
-  assert.equal(source.includes("paymentMethod: 'newebpay'"), true)
-  assert.equal(source.includes("paymentMode: body.paymentMode"), true)
+  assert.equal(handlerStart >= 0, true)
+  assert.equal(handlerEnd > handlerStart, true)
+  assert.equal(handlerSource.includes("paymentMethod: 'newebpay'"), true)
+  assert.equal(handlerSource.includes("paymentMode: body.paymentMode"), true)
   assert.equal(source.includes("value: 'credit'"), true)
   assert.equal(source.includes('handleNewebPayCheckoutClick(selectedPaymentMethod)'), true)
   assert.equal(source.includes("value: 'product_order_apple_pay'"), true)
-  assert.equal(source.includes("paymentMethod: 'line_pay'"), false)
+  assert.equal(handlerSource.includes("paymentMethod: 'line_pay'"), false)
   assert.equal(source.includes("paymentMode: 'linepay'"), false)
   assert.equal(source.includes("paymentMode: 'atm'"), false)
   assert.equal(source.includes('APPLEPAY'), false)
@@ -576,9 +583,10 @@ test('cart page posts only NewebPay credit parameters and submits payment form',
 test('cart page prevents duplicate NewebPay checkout while loading', () => {
   const source = readCartPageSource()
 
-  assert.equal(source.includes('if (isNewebPayCheckingOut) return'), true)
+  assert.equal(source.includes('const isCheckoutPending = isNewebPayCheckingOut || isLinePayCheckingOut'), true)
+  assert.equal(source.includes('if (isCheckoutPending) return'), true)
   assert.equal(source.includes('setIsNewebPayCheckingOut(true)'), true)
-  assert.equal(source.includes('disabled={isNewebPayCheckingOut}'), true)
+  assert.equal(source.includes('disabled={isCheckoutPending}'), true)
 })
 
 test('post office shipping data remains in memory and is not persisted in browser storage', () => {
