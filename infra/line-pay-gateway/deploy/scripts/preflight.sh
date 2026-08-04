@@ -16,6 +16,7 @@ cloudflare_dns_mode="${CLOUDFLARE_DNS_MODE:-}"
 gateway_bind_port="${GATEWAY_BIND_PORT:-3000}"
 gateway_image_name="${GATEWAY_IMAGE_NAME:-line-pay-fixed-ip-gateway}"
 gateway_image_tag="${GATEWAY_IMAGE_TAG:-}"
+expected_gateway_environment="${EXPECTED_GATEWAY_ENVIRONMENT:-sandbox}"
 gateway_domain="linepay-gateway.tsu-waterbottle.com"
 minimum_memory_kib="${MINIMUM_MEMORY_KIB:-524288}"
 minimum_disk_kib="${MINIMUM_DISK_KIB:-2097152}"
@@ -161,8 +162,13 @@ done
 pass "all required Gateway environment variables exist without displaying their values"
 
 gateway_environment="$(read_env_value LINE_PAY_GATEWAY_ENV)"
-[[ "$gateway_environment" == "sandbox" ]] || fail "Gateway environment must be sandbox and must never be production in Phase 2A"
-pass "Gateway environment is sandbox"
+case "$expected_gateway_environment" in
+  sandbox|production) ;;
+  *) fail "EXPECTED_GATEWAY_ENVIRONMENT must be sandbox or production" ;;
+esac
+[[ "$gateway_environment" == "$expected_gateway_environment" ]] \
+  || fail "Gateway environment does not match the explicitly expected environment"
+pass "Gateway environment matches the explicit $expected_gateway_environment expectation"
 
 gateway_port="$(read_env_value PORT)"
 [[ "$gateway_port" == "3000" ]] || fail "Gateway container PORT must be 3000 for the reviewed Compose and Caddy configuration"
@@ -187,7 +193,7 @@ pass "Compose provides Proxy env and retains the localhost-only application port
 if [[ "$preflight_mode" == "public-caddy" ]]; then
   [[ -f "$caddyfile" ]] || fail "Caddyfile is missing: $caddyfile"
   grep -Eq "^${gateway_domain//./\\.}[[:space:]]*\\{" "$caddyfile" \
-    || fail "Caddyfile must use the approved Sandbox domain: $gateway_domain"
+    || fail "Caddyfile must use the approved Gateway domain: $gateway_domain"
   if grep -Eqi 'LINE_PAY_GATEWAY_SECRET|X-Gateway-Signature|X-LINE-Authorization' "$caddyfile"; then
     fail "Caddyfile must not contain secrets or sensitive authorization headers"
   fi

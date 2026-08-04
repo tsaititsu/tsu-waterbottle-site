@@ -92,6 +92,7 @@ jobs:
         run: |
           set -euo pipefail
           deploy/tests/security-hardening.test.sh
+          deploy/tests/production-deployment-contract.test.sh
           deploy/tests/caddy-systemd-security.test.sh
 
           proxy_env_file="$(mktemp)"
@@ -213,6 +214,23 @@ jobs:
         run: |
           set -euo pipefail
           deploy/scripts/compose.sh config --quiet
+          LINE_PAY_GATEWAY_PRODUCTION_CONFIRMATION=CONFIRM_LINE_PAY_GATEWAY_PRODUCTION_MODE \
+            deploy/scripts/compose-production.sh config --quiet
+          GATEWAY_IMAGE_TAG_VALIDATED="$GATEWAY_IMAGE_TAG" \
+            docker compose \
+              -f deploy/compose.yaml \
+              -f deploy/compose.production.yaml \
+              config >production-compose.resolved.yaml
+          grep -Fxq 'name: line-pay-gateway-sandbox' production-compose.resolved.yaml
+          test "$(grep -Ec '^[[:space:]]+LINE_PAY_GATEWAY_ENV:[[:space:]]+production$' production-compose.resolved.yaml)" -eq 1
+          test "$(grep -Ec 'host_ip:[[:space:]]+127\.0\.0\.1$' production-compose.resolved.yaml)" -eq 1
+          grep -Fxq "    image: line-pay-fixed-ip-gateway:${GATEWAY_IMAGE_TAG}" production-compose.resolved.yaml
+          grep -Fxq '    read_only: true' production-compose.resolved.yaml
+          grep -Fxq '    user: node' production-compose.resolved.yaml
+          grep -Fxq '      - ALL' production-compose.resolved.yaml
+          grep -Fxq '      - no-new-privileges:true' production-compose.resolved.yaml
+          ! grep -Eq 'network_mode:[[:space:]]+host|privileged:[[:space:]]+true' production-compose.resolved.yaml
+          unlink production-compose.resolved.yaml
           if GATEWAY_IMAGE_TAG="${GATEWAY_IMAGE_TAG}" \
             docker compose -f deploy/compose.yaml config --quiet >/dev/null 2>&1
           then
