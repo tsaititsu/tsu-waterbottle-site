@@ -6,9 +6,10 @@ import {
   stringifyLinePayJsonBody,
   type LinePayServerEnv,
 } from '../../../../../../lib/linePay'
-import type {
-  ExecuteInitializedProductOrderLinePayRequestInput,
-  ExecuteInitializedProductOrderLinePayRequestResult,
+import {
+  LinePayProductOrderRequestExecutionError,
+  type ExecuteInitializedProductOrderLinePayRequestInput,
+  type ExecuteInitializedProductOrderLinePayRequestResult,
 } from '../../../../../../lib/linePay/productOrderRequestExecution'
 import type { InitializeProductOrderLinePayCheckoutResult } from '../../../../../../lib/supabase/linePayCheckoutInitialization'
 import { LinePaySandboxE2eInitializationError } from '../../../../../../lib/supabase/linePaySandboxE2eInitialization'
@@ -277,7 +278,17 @@ export async function handleLinePayProductionOneDollarStart(input: {
       channelSecret: config.channelSecret,
       transportEnv: input.env,
     })
-  } catch {
+  } catch (error) {
+    if (error instanceof LinePayProductOrderRequestExecutionError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'line_pay_production_one_dollar_execution_failed',
+          executionReason: error.code,
+        },
+        { status: 502, headers: { 'Cache-Control': 'no-store' } },
+      )
+    }
     return errorResponse('line_pay_production_one_dollar_execution_failed', 502)
   }
 

@@ -7,6 +7,7 @@ import {
   LinePayProductOrderRequestExecutionError,
   executeInitializedProductOrderLinePayRequest,
 } from './productOrderRequestExecution'
+import { LinePayTransportError } from './transport'
 
 const tests: Array<{
   name: string
@@ -293,6 +294,25 @@ test('ambiguous upstream failure marks the request unknown and returns only a sa
       error instanceof LinePayProductOrderRequestExecutionError
       && error.code === 'upstream_result_unknown'
       && !JSON.stringify(error).includes(secret),
+  )
+
+  assert.deepEqual(calls, ['claim', 'markUnknown'])
+})
+
+test('Gateway request failures retain only the allowlisted transport reason', async () => {
+  const { calls, database } = createDatabase()
+
+  await assert.rejects(
+    () =>
+      executeInitializedProductOrderLinePayRequest({
+        ...createInput(database),
+        requestPayment: async () => {
+          throw new LinePayTransportError('line_pay_gateway_request_failed')
+        },
+      }),
+    (error: unknown) =>
+      error instanceof LinePayProductOrderRequestExecutionError
+      && error.code === 'gateway_request_failed',
   )
 
   assert.deepEqual(calls, ['claim', 'markUnknown'])

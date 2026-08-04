@@ -6,6 +6,7 @@ import {
   type LinePaySandboxE2eStartEnvironment,
 } from './handler'
 import { LinePaySandboxE2eInitializationError } from '../../../../../../lib/supabase/linePaySandboxE2eInitialization'
+import { LinePayProductOrderRequestExecutionError } from '../../../../../../lib/linePay/productOrderRequestExecution'
 import {
   LINE_PAY_SANDBOX_E2E_CAPABILITY_COOKIE_OPTIONS,
   linePaySandboxE2eCapabilityCookieName,
@@ -444,6 +445,25 @@ test('request execution failure returns only its stable redacted stage', async (
   assert.equal(body.includes(secret), false)
   assert.equal(body.includes('html'), false)
   assert.deepEqual(deps.calls, ['authorize', 'initialize'])
+})
+
+test('request execution failure preserves only an allowlisted safe reason', async () => {
+  const deps = successDependencies()
+  const response = await handleLinePaySandboxE2eStart({
+    request: createRequest(),
+    env: enabledEnv,
+    ...deps,
+    execute: async () => {
+      throw new LinePayProductOrderRequestExecutionError('gateway_request_failed')
+    },
+  })
+
+  assert.equal(response.status, 502)
+  assert.deepEqual(await json(response), {
+    ok: false,
+    error: 'line_pay_sandbox_e2e_execution_failed',
+    executionReason: 'gateway_request_failed',
+  })
 })
 
 test('non-LINE Sandbox payment URL is rejected without returning the URL', async () => {

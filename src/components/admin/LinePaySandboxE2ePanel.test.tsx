@@ -48,6 +48,20 @@ assert.equal(
       state: 'failed',
       error: 'sandbox_request_failed',
       diagnostic: {
+        stage: 'execution',
+        reason: 'gateway_request_failed',
+      },
+    },
+    'sandbox',
+  ),
+  'Sandbox Gateway 已回應，但拒絕或無法完成請求（原因：gateway_request_failed）；尚未取得付款網址，且不會自動重試。',
+)
+assert.equal(
+  linePayOneDollarSnapshotMessage(
+    {
+      state: 'failed',
+      error: 'sandbox_request_failed',
+      diagnostic: {
         stage: 'initialization',
         reason: 'rpc_insufficient_privilege',
       },

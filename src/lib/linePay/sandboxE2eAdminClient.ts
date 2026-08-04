@@ -27,13 +27,33 @@ const LINE_PAY_ONE_DOLLAR_INITIALIZATION_REASONS = [
 export type LinePayOneDollarInitializationReason =
   typeof LINE_PAY_ONE_DOLLAR_INITIALIZATION_REASONS[number]
 
+const LINE_PAY_ONE_DOLLAR_EXECUTION_REASONS = [
+  'database_contract_mismatch',
+  'durable_result_missing',
+  'provider_rejected',
+  'success_record_failed',
+  'upstream_result_unknown',
+  'gateway_config_invalid',
+  'gateway_request_failed',
+  'gateway_response_invalid',
+  'gateway_timeout',
+  'gateway_unavailable',
+  'gateway_upstream_timeout',
+] as const
+
+export type LinePayOneDollarExecutionReason =
+  typeof LINE_PAY_ONE_DOLLAR_EXECUTION_REASONS[number]
+
 export type LinePayOneDollarAdminDiagnostic = Readonly<
   | { stage: 'config' }
   | {
       stage: 'initialization'
       reason?: LinePayOneDollarInitializationReason
     }
-  | { stage: 'execution' }
+  | {
+      stage: 'execution'
+      reason?: LinePayOneDollarExecutionReason
+    }
   | { stage: 'not_ready' }
   | { stage: 'payment_url' }
 >
@@ -102,6 +122,20 @@ function parseStartFailureDiagnostic(
   const stages = START_FAILURE_STAGES[environment]
   const stage = stages[value.error as keyof typeof stages]
   if (!stage) return null
+  if (stage === 'execution') {
+    const reason = value.executionReason
+    if (
+      typeof reason === 'string'
+      && (LINE_PAY_ONE_DOLLAR_EXECUTION_REASONS as readonly string[])
+        .includes(reason)
+    ) {
+      return Object.freeze({
+        stage,
+        reason: reason as LinePayOneDollarExecutionReason,
+      })
+    }
+    return Object.freeze({ stage })
+  }
   if (stage !== 'initialization') return Object.freeze({ stage })
 
   const reason = value.initializationReason

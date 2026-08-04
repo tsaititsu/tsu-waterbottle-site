@@ -9,6 +9,7 @@ import {
   LINE_PAY_CAPABILITY_COOKIE_OPTIONS,
   linePayCapabilityCookieName,
 } from '../../../../product-orders/line-pay/capabilityToken'
+import { LinePayProductOrderRequestExecutionError } from '../../../../../../lib/linePay/productOrderRequestExecution'
 
 const tests: Array<{ name: string; run: () => void | Promise<void> }> = []
 
@@ -279,6 +280,25 @@ test('untrusted Production payment URL is redacted and never returned', async ()
   assert.deepEqual(JSON.parse(body), {
     ok: false,
     error: 'line_pay_production_one_dollar_payment_url_failed',
+  })
+})
+
+test('Production execution failure preserves only an allowlisted safe reason', async () => {
+  const deps = successDependencies()
+  const response = await handleLinePayProductionOneDollarStart({
+    request: createRequest(),
+    env: enabledEnv,
+    ...deps,
+    execute: async () => {
+      throw new LinePayProductOrderRequestExecutionError('provider_rejected')
+    },
+  })
+
+  assert.equal(response.status, 502)
+  assert.deepEqual(await json(response), {
+    ok: false,
+    error: 'line_pay_production_one_dollar_execution_failed',
+    executionReason: 'provider_rejected',
   })
 })
 

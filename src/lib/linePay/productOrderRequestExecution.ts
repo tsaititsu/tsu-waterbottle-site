@@ -5,6 +5,7 @@ import type {
 } from '../supabase/linePayDatabaseContracts'
 import type { LinePayRequestPayloadInput } from './requestPayload'
 import type { ParsedLinePayRequestResponse } from './responseParser'
+import { LinePayTransportError } from './transport'
 
 export type LinePayProductOrderRequestExecutionErrorCode =
   | 'database_contract_mismatch'
@@ -12,6 +13,12 @@ export type LinePayProductOrderRequestExecutionErrorCode =
   | 'provider_rejected'
   | 'success_record_failed'
   | 'upstream_result_unknown'
+  | 'gateway_config_invalid'
+  | 'gateway_request_failed'
+  | 'gateway_response_invalid'
+  | 'gateway_timeout'
+  | 'gateway_unavailable'
+  | 'gateway_upstream_timeout'
 
 export class LinePayProductOrderRequestExecutionError extends Error {
   readonly code: LinePayProductOrderRequestExecutionErrorCode
@@ -74,6 +81,27 @@ function executionError(
   code: LinePayProductOrderRequestExecutionErrorCode,
 ): never {
   throw new LinePayProductOrderRequestExecutionError(code)
+}
+
+const SAFE_GATEWAY_EXECUTION_ERRORS: Readonly<Record<
+  string,
+  LinePayProductOrderRequestExecutionErrorCode
+>> = Object.freeze({
+  invalid_line_pay_gateway_response: 'gateway_response_invalid',
+  invalid_line_pay_gateway_timeout: 'gateway_config_invalid',
+  invalid_line_pay_gateway_url: 'gateway_config_invalid',
+  invalid_line_pay_transport: 'gateway_config_invalid',
+  line_pay_gateway_request_failed: 'gateway_request_failed',
+  line_pay_gateway_timeout: 'gateway_timeout',
+  line_pay_gateway_unavailable: 'gateway_unavailable',
+  line_pay_gateway_upstream_timeout: 'gateway_upstream_timeout',
+  line_pay_preview_requires_gateway: 'gateway_config_invalid',
+  missing_line_pay_gateway_config: 'gateway_config_invalid',
+})
+
+function safeGatewayExecutionError(error: unknown) {
+  if (!(error instanceof LinePayTransportError)) return null
+  return SAFE_GATEWAY_EXECUTION_ERRORS[error.code] ?? null
 }
 
 function sha256(value: string) {
@@ -204,6 +232,12 @@ export async function executeInitializedProductOrderLinePayRequest(
         )
       }
       executionError('provider_rejected')
+    }
+
+    const gatewayError = safeGatewayExecutionError(error)
+    if (gatewayError) {
+      await bestEffortMarkUnknown(input, gatewayError)
+      executionError(gatewayError)
     }
 
     await bestEffortMarkUnknown(input, 'upstream_result_unknown')

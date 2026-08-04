@@ -8,9 +8,10 @@ import {
 } from '../../../../../../lib/linePay'
 import type { InitializeProductOrderLinePayCheckoutResult } from '../../../../../../lib/supabase/linePayCheckoutInitialization'
 import { LinePaySandboxE2eInitializationError } from '../../../../../../lib/supabase/linePaySandboxE2eInitialization'
-import type {
-  ExecuteInitializedProductOrderLinePayRequestInput,
-  ExecuteInitializedProductOrderLinePayRequestResult,
+import {
+  LinePayProductOrderRequestExecutionError,
+  type ExecuteInitializedProductOrderLinePayRequestInput,
+  type ExecuteInitializedProductOrderLinePayRequestResult,
 } from '../../../../../../lib/linePay/productOrderRequestExecution'
 import {
   LINE_PAY_SANDBOX_E2E_CAPABILITY_COOKIE_OPTIONS,
@@ -308,7 +309,17 @@ export async function handleLinePaySandboxE2eStart(input: {
       channelSecret: config.channelSecret,
       transportEnv: input.env,
     })
-  } catch {
+  } catch (error) {
+    if (error instanceof LinePayProductOrderRequestExecutionError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'line_pay_sandbox_e2e_execution_failed',
+          executionReason: error.code,
+        },
+        { status: 502, headers: { 'Cache-Control': 'no-store' } },
+      )
+    }
     return errorResponse('line_pay_sandbox_e2e_execution_failed', 502)
   }
 
