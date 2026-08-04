@@ -37,6 +37,14 @@ const partialRecoveryPath = join(
   root,
   'supabase/migrations/20260729130000_line_pay_partial_acl_metadata_recovery.sql',
 )
+const initializerPath = join(
+  root,
+  'supabase/migrations/20260728053215_line_pay_checkout_aggregate_initialization.sql',
+)
+const atomicFinalizationPath = join(
+  root,
+  'supabase/migrations/20260802160000_line_pay_atomic_confirmation_finalization.sql',
+)
 const runnerPath = join(
   root,
   'scripts/supabase/run-line-pay-application-state-diagnostic.mjs',
@@ -190,6 +198,7 @@ function waitForPostgres() {
 
 function prepareBaseline() {
   psqlFile('supabase/tests/line_pay_local_postgres_bootstrap.sql')
+  psql('create role authenticator nologin;', 'authenticator role baseline')
   for (const file of baselineFiles) psqlFile(file)
   psql(
     `
@@ -239,7 +248,11 @@ function runApplicationStateScenario(
     assert.equal(
       result.application_state,
       expectedState,
-      `${name}:${JSON.stringify(result.inventory)}`,
+      `${name}:${JSON.stringify({
+        inventory: result.inventory,
+        contracts: result.contracts,
+        details: result.details,
+      })}`,
     )
     scenariosPassed += 1
     return result
@@ -898,6 +911,55 @@ try {
     `,
     'line_pay_applied_template',
   )
+
+  psql(readFileSync(initializerPath, 'utf8'), 'initializer generation fixture')
+  const initializerGeneration = runApplicationStateScenario(
+    'initializer generation is complete',
+    'FULL_WITHOUT_HISTORY',
+  )
+  assertIncompleteCategories(
+    initializerGeneration,
+    [],
+    'initializer generation details',
+  )
+
+  psql(
+    readFileSync(atomicFinalizationPath, 'utf8'),
+    'atomic generation fixture',
+  )
+  const atomicGeneration = runApplicationStateScenario(
+    'atomic generation is complete',
+    'FULL_WITHOUT_HISTORY',
+  )
+  assertIncompleteCategories(
+    atomicGeneration,
+    [],
+    'atomic generation details',
+  )
+  const mixedGeneration = runApplicationStateScenario(
+    'mixed release generation remains partial',
+    'PARTIAL',
+    `
+      drop index public.line_pay_payment_audit_events_checkout_initialized_once_idx;
+      drop policy line_pay_payment_function_owner_checkout_initialized_audit_insert
+      on public.line_pay_payment_audit_events;
+    `,
+  )
+  assertIncompleteCategories(
+    mixedGeneration,
+    ['functions'],
+    'mixed release generation details',
+  )
+  psql(
+    `
+      revoke line_pay_payment_executor
+      from authenticator
+      granted by postgres;
+    `,
+    'atomic generation membership cleanup',
+  )
+  restoreDatabaseFromTemplate('line_pay_applied_template')
+
   const aclMismatch = runApplicationStateScenario(
     'ACL mismatch',
     'PARTIAL',
@@ -1136,13 +1198,13 @@ try {
   )
 
   runStaticMutations()
-  assert.equal(scenariosPassed, 18)
+  assert.equal(scenariosPassed, 21)
   assert.equal(mutationsCaught, 13)
 } finally {
   cleanup()
 }
 
-console.log(`Application state scenarios: ${scenariosPassed}/18 PASS`)
+console.log(`Application state scenarios: ${scenariosPassed}/21 PASS`)
 console.log(`Mutations: ${mutationsCaught}/13 caught`)
 console.log('Uncaught mutations: 0')
 console.log('PostgreSQL: 17 PASS')
