@@ -543,17 +543,83 @@ catalog_fingerprints as (
   from catalog_rows
   group by category
 ),
-expected_fingerprints(category, row_count, digest) as (
+expected_generation_fingerprints(
+  generation,
+  category,
+  row_count,
+  digest
+) as (
   values
-    ('roles', 2, '786d1c5ca588b748675bdf743ca951a1e6257d965510e07ce416af73b12e0d52'),
-    ('columns', 127, '912bb632ea158c789e9d888be2fc2d4bdfbc916c53ff15a04bf91129e6ad31e3'),
-    ('indexes', 39, '1b46355b945fd1b645515cafa42953da7d97a73441ddb607e35712735299ea05'),
-    ('schemas', 1, '7f4bc5f9792e18737278e4014cf568d3984d9a2eee712f15c10ce7dd14dfd278'),
-    ('policies', 14, '82835fd30a53aa319123d691a0cd46742b9b28da77b5cf44eceebdcb82aed915'),
-    ('triggers', 11, '110eb112b655178d1d1f2d0ee1d67ac0966a37efff2ca8cf8c15eb8747f5899e'),
-    ('functions', 21, 'a63fb3c9d868be844ff836d655d5c96ec77b1b79eda85869d8a6251279f4ee85'),
-    ('relations', 7, 'd4d62e30c89763b49e6c33c77c4b3d6f38a1921848bdda5144ccaec9cc12407f'),
-    ('constraints', 115, '8a78fcbe6ca7e07e8cd9bd560da6fdea601ce09b825948bb9b1d1de33e86bcb6')
+    ('base', 'roles', 2, '786d1c5ca588b748675bdf743ca951a1e6257d965510e07ce416af73b12e0d52'),
+    ('base', 'columns', 127, '912bb632ea158c789e9d888be2fc2d4bdfbc916c53ff15a04bf91129e6ad31e3'),
+    ('base', 'indexes', 39, '1b46355b945fd1b645515cafa42953da7d97a73441ddb607e35712735299ea05'),
+    ('base', 'schemas', 1, '7f4bc5f9792e18737278e4014cf568d3984d9a2eee712f15c10ce7dd14dfd278'),
+    ('base', 'policies', 14, '82835fd30a53aa319123d691a0cd46742b9b28da77b5cf44eceebdcb82aed915'),
+    ('base', 'triggers', 11, '110eb112b655178d1d1f2d0ee1d67ac0966a37efff2ca8cf8c15eb8747f5899e'),
+    ('base', 'functions', 21, 'a63fb3c9d868be844ff836d655d5c96ec77b1b79eda85869d8a6251279f4ee85'),
+    ('base', 'relations', 7, 'd4d62e30c89763b49e6c33c77c4b3d6f38a1921848bdda5144ccaec9cc12407f'),
+    ('base', 'constraints', 115, '8a78fcbe6ca7e07e8cd9bd560da6fdea601ce09b825948bb9b1d1de33e86bcb6'),
+    ('initializer', 'roles', 2, '786d1c5ca588b748675bdf743ca951a1e6257d965510e07ce416af73b12e0d52'),
+    ('initializer', 'columns', 127, '912bb632ea158c789e9d888be2fc2d4bdfbc916c53ff15a04bf91129e6ad31e3'),
+    ('initializer', 'indexes', 40, 'c7b51ef6e68e36ed072da33315f04c4cbce64aabdef7ce8a42ff8e989206e960'),
+    ('initializer', 'schemas', 1, '7f4bc5f9792e18737278e4014cf568d3984d9a2eee712f15c10ce7dd14dfd278'),
+    ('initializer', 'policies', 15, '9ed14f8011d92938fbefbf5fddfe45882615c64b8986820ed8645ebe0eaebc4e'),
+    ('initializer', 'triggers', 11, '110eb112b655178d1d1f2d0ee1d67ac0966a37efff2ca8cf8c15eb8747f5899e'),
+    ('initializer', 'functions', 21, 'a63fb3c9d868be844ff836d655d5c96ec77b1b79eda85869d8a6251279f4ee85'),
+    ('initializer', 'relations', 7, 'd4d62e30c89763b49e6c33c77c4b3d6f38a1921848bdda5144ccaec9cc12407f'),
+    ('initializer', 'constraints', 115, '8a78fcbe6ca7e07e8cd9bd560da6fdea601ce09b825948bb9b1d1de33e86bcb6'),
+    ('atomic', 'roles', 2, '786d1c5ca588b748675bdf743ca951a1e6257d965510e07ce416af73b12e0d52'),
+    ('atomic', 'columns', 127, '912bb632ea158c789e9d888be2fc2d4bdfbc916c53ff15a04bf91129e6ad31e3'),
+    ('atomic', 'indexes', 40, 'c7b51ef6e68e36ed072da33315f04c4cbce64aabdef7ce8a42ff8e989206e960'),
+    ('atomic', 'schemas', 1, '7f4bc5f9792e18737278e4014cf568d3984d9a2eee712f15c10ce7dd14dfd278'),
+    ('atomic', 'policies', 15, '9ed14f8011d92938fbefbf5fddfe45882615c64b8986820ed8645ebe0eaebc4e'),
+    ('atomic', 'triggers', 11, '110eb112b655178d1d1f2d0ee1d67ac0966a37efff2ca8cf8c15eb8747f5899e'),
+    ('atomic', 'functions', 21, '1c0a8b75e0836b4c0b995d9e5d15bf0046f752670f75c4ee348ac13b9e0b16b9'),
+    ('atomic', 'relations', 7, 'd4d62e30c89763b49e6c33c77c4b3d6f38a1921848bdda5144ccaec9cc12407f'),
+    ('atomic', 'constraints', 115, '8a78fcbe6ca7e07e8cd9bd560da6fdea601ce09b825948bb9b1d1de33e86bcb6')
+),
+generation_contracts as (
+  select
+    expected.generation,
+    pg_catalog.count(*) filter (
+      where coalesce(
+        actual.row_count = expected.row_count
+          and actual.digest = expected.digest,
+        false
+      )
+    )::integer as matched_categories,
+    pg_catalog.bool_and(
+      coalesce(
+        actual.row_count = expected.row_count
+          and actual.digest = expected.digest,
+        false
+      )
+    ) as complete
+  from expected_generation_fingerprints as expected
+  left join catalog_fingerprints as actual using (category)
+  group by expected.generation
+),
+selected_generation as (
+  select coalesce(
+    (
+      select generation
+      from generation_contracts
+      order by
+        matched_categories desc,
+        case generation
+          when 'atomic' then 1
+          when 'initializer' then 2
+          else 3
+        end
+      limit 1
+    ),
+    'atomic'
+  ) as generation
+),
+expected_fingerprints(category, row_count, digest) as (
+  select expected.category, expected.row_count, expected.digest
+  from expected_generation_fingerprints as expected
+  join selected_generation using (generation)
 ),
 category_contracts as (
   select
@@ -938,7 +1004,7 @@ diagnostic_details as (
   cross join relation_metadata_details
   cross join existing_relation_access_details
 ),
-role_integrity as (
+baseline_role_integrity as (
   select
     not exists (
       select 1
@@ -992,6 +1058,94 @@ role_integrity as (
       join pg_catalog.pg_roles as role on role.oid = default_acl.defaclrole
       where role.rolname in (select role_name from expected_roles)
     ) as complete
+),
+atomic_role_integrity as (
+  select
+    not exists (
+      select 1
+      from pg_catalog.pg_auth_members as membership
+      join pg_catalog.pg_roles as granted_role
+        on granted_role.oid = membership.roleid
+      join pg_catalog.pg_roles as member_role
+        on member_role.oid = membership.member
+      join pg_catalog.pg_roles as grantor_role
+        on grantor_role.oid = membership.grantor
+      where (
+        granted_role.rolname in (select role_name from expected_roles)
+        or member_role.rolname in (select role_name from expected_roles)
+      )
+      and not (
+        granted_role.rolname = 'line_pay_payment_executor'
+        and member_role.rolname = 'authenticator'
+        and grantor_role.rolname = current_user
+        and not membership.admin_option
+        and not membership.inherit_option
+        and membership.set_option
+      )
+      and not (
+        granted_role.rolname in (select role_name from expected_roles)
+        and member_role.rolname = current_user
+        and grantor_role.rolsuper
+        and membership.admin_option
+        and not membership.inherit_option
+        and not membership.set_option
+      )
+    )
+    and (
+      select pg_catalog.count(*)
+      from pg_catalog.pg_auth_members as membership
+      join pg_catalog.pg_roles as granted_role
+        on granted_role.oid = membership.roleid
+      join pg_catalog.pg_roles as member_role
+        on member_role.oid = membership.member
+      join pg_catalog.pg_roles as grantor_role
+        on grantor_role.oid = membership.grantor
+      where granted_role.rolname = 'line_pay_payment_executor'
+        and member_role.rolname = 'authenticator'
+        and grantor_role.rolname = current_user
+        and not membership.admin_option
+        and not membership.inherit_option
+        and membership.set_option
+    ) = 1
+    and coalesce((
+      select case
+        when executor_role.rolsuper then bootstrap.membership_count = 0
+        else bootstrap.membership_count = 2
+      end
+      from pg_catalog.pg_roles as executor_role
+      cross join lateral (
+        select pg_catalog.count(*)::integer as membership_count
+        from pg_catalog.pg_auth_members as membership
+        join pg_catalog.pg_roles as granted_role
+          on granted_role.oid = membership.roleid
+        join pg_catalog.pg_roles as member_role
+          on member_role.oid = membership.member
+        join pg_catalog.pg_roles as grantor_role
+          on grantor_role.oid = membership.grantor
+        where granted_role.rolname in (select role_name from expected_roles)
+          and member_role.rolname = current_user
+          and grantor_role.rolsuper
+          and membership.admin_option
+          and not membership.inherit_option
+          and not membership.set_option
+      ) as bootstrap
+      where executor_role.rolname = current_user
+    ), false)
+    and not exists (
+      select 1
+      from pg_catalog.pg_default_acl as default_acl
+      join pg_catalog.pg_roles as role on role.oid = default_acl.defaclrole
+      where role.rolname in (select role_name from expected_roles)
+    ) as complete
+),
+role_integrity as (
+  select case selected.generation
+    when 'atomic' then atomic.complete
+    else baseline.complete
+  end as complete
+  from selected_generation as selected
+  cross join baseline_role_integrity as baseline
+  cross join atomic_role_integrity as atomic
 ),
 inventory as (
   select

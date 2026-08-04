@@ -34,7 +34,7 @@ export const FENCE_MIGRATION_FILE =
 export const SHARED_RUNNER_FILE =
   'scripts/supabase/run-line-pay-production-diagnostic.mjs'
 export const EXPECTED_DIAGNOSTIC_SHA256 =
-  '6f0442e832d7137fa9f3ba6e8f8edd12a39c1242bbd1c824346dd9ac56e599fc'
+  'b4e7e7f921242d3c83bb8dc3ba481ec9907bdf990bc90bba9250cdf6607f700d'
 export const EXPECTED_MIGRATION_SHA256 =
   '8da1fb429aecb1c35b12a245b63907135dbe7c467ef0a5f069afd431d21e94b8'
 export const EXPECTED_FENCE_SHA256 =
@@ -193,6 +193,11 @@ const REQUIRED_SQL_IDENTITIES = Object.freeze([
   'line_pay_payment_function_owner_audit_insert',
   'payments_line_pay_contract_check',
   'payments_line_pay_transaction_idx',
+  'expected_generation_fingerprints',
+  'selected_generation',
+  'matched_categories desc',
+  "when 'atomic' then 1",
+  "when 'initializer' then 2",
 ])
 const REQUIRED_SQL_EXACT_ONCE = Object.freeze([
   "('public', 'app_environment_attestation')",
@@ -431,7 +436,7 @@ export function assertApplicationStateDiagnosticSql(sql) {
       /^BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY;$/gmu,
     ) ?? []).length !== 1 ||
     (sql.match(/^ROLLBACK;$/gmu) ?? []).length !== 1 ||
-    (sql.match(/actual[.]digest = expected[.]digest/gu) ?? []).length !== 3 ||
+    (sql.match(/actual[.]digest = expected[.]digest/gu) ?? []).length !== 5 ||
     !/'details', pg_catalog[.]jsonb_build_object/u.test(sql) ||
     !/'incomplete_categories'/u.test(sql) ||
     !/'relation_metadata'/u.test(sql) ||
@@ -444,6 +449,13 @@ export function assertApplicationStateDiagnosticSql(sql) {
     !/then 'PARTIAL'/u.test(sql)
   ) {
     fail('APPLICATION_STATE_DIAGNOSTIC_SQL_INVALID')
+  }
+  for (const generation of ['base', 'initializer', 'atomic']) {
+    if (
+      (sql.match(new RegExp(`\\('${generation}',`, 'gu')) ?? []).length !== 9
+    ) {
+      fail('APPLICATION_STATE_DIAGNOSTIC_SQL_INVALID')
+    }
   }
   for (const state of APPLICATION_STATES) {
     if (!sql.includes(`'${state}'`)) {
