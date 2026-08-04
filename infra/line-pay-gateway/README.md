@@ -185,6 +185,13 @@ Phase 2A 的可審核部署資料位於 `deploy/`：
 - `SANDBOX_ROLLBACK_RUNBOOK.md`：只回復既有 image tag，不刪除資料或雲端資源。
 - `scripts/`：完整 SHA／image name validator、受保護 Compose wrapper、顯式階段 preflight、Caddy systemd 有效設定驗證、journal 洩漏 guard、egress、嚴格 localhost health、TLS、secure log directory 與 guarded rollback。
 
+正式切換另有 additive、fail-closed 的 Production 通道，不會改變上述 Sandbox 預設：
+
+- `compose.production.yaml`：只覆寫 `LINE_PAY_GATEWAY_ENV=production`；刻意保留既有 Docker project／container 身分，以原地重建避免 Sandbox 與 Production 同時爭用 localhost port，其餘 non-root、read-only、capabilities、healthcheck 與資源限制全部繼承受審查的 base Compose。
+- `scripts/compose-production.sh`：固定同時載入 base 與 Production overlay，要求完整 commit SHA 及 `CONFIRM_LINE_PAY_GATEWAY_PRODUCTION_MODE`，不接受任意 Compose 路徑。
+- `scripts/preflight-production.sh`：先驗證 Production overlay，再要求主機 env 明確為 production；仍為唯讀檢查。
+- `PRODUCTION_DEPLOY_RUNBOOK.md`：把 Gateway production cutover、Vercel Production 設定與網站 Runtime 啟用拆成三個獨立授權門檻。
+
 部署架構固定為：
 
 ```text

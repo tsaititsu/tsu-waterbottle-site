@@ -1,0 +1,4 @@
+services:
+  gateway:
+    environment:
+      LINE_PAY_GATEWAY_ENV: production
