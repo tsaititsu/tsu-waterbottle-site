@@ -468,7 +468,7 @@ export async function handleCreateNewebPayPaymentRequest(
 
   // --- 紫微占卜管理員限定 NT$1 實刷測試模式（22J-45）---
   // server 端重新驗證：登入 + ADMIN_EMAILS + 雙 flag（含 production confirmation）。
-  // 任一不符即拒絕，不會退回 NT$50 靜默執行，避免管理員誤以為在測試。
+  // 任一不符即拒絕，不會退回正式價格靜默執行，避免管理員誤以為在測試。
   let divinationOneDollarTestContext: NewebPayOneDollarTestContext | null = null
   let divinationOneDollarTestRequester: DivinationOneDollarTestUser | null = null
 

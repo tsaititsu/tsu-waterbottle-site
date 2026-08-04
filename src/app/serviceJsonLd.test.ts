@@ -39,7 +39,7 @@ const services = [
     description: PUBLIC_PAGE_METADATA.aiDivination.description,
     offer: {
       name: '紫微牌卡 AI 解讀',
-      price: 50,
+      price: 200,
     },
   },
   {
@@ -150,7 +150,7 @@ for (const service of services) {
 const aiChartPage = readFileSync(join(root, 'src/app/ai-chart/page.tsx'), 'utf8')
 assert.equal(aiChartPage.includes('單次分析 NT$100'), true)
 assert.equal(AI_DIVINATION_SERVICE_JSON_LD.description.includes('抽牌免費'), true)
-assert.equal(AI_DIVINATION_SERVICE_JSON_LD.description.includes('AI 解讀每次 NT$50'), true)
+assert.equal(AI_DIVINATION_SERVICE_JSON_LD.description.includes('AI 解讀每次 NT$200'), true)
 
 const injectionProbe = serializeJsonLd({ value: '</script><script>alert(1)</script>' })
 assert.equal(injectionProbe.includes('<'), false)

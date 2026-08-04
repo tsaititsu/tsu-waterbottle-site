@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { DIVINATION_READING_PRICE_LABEL } from '@/lib/divination/pricing'
 
 export const SITE_NAME = 'WATERBOTTLE'
 export const SITE_TITLE = 'WATERBOTTLE 紫微命理'
@@ -24,8 +25,8 @@ export const PUBLIC_PAGE_METADATA = {
     path: '/ai-chart',
   },
   aiDivination: {
-    title: '紫微牌卡占卜 NT$50',
-    description: '輸入你的問題並抽取紫微牌卡，AI 即時提供深度解讀；抽牌免費，AI 解讀每次 NT$50。',
+    title: `紫微牌卡占卜 ${DIVINATION_READING_PRICE_LABEL}`,
+    description: `輸入你的問題並抽取紫微牌卡，AI 即時提供深度解讀；抽牌免費，AI 解讀每次 ${DIVINATION_READING_PRICE_LABEL}。`,
     path: '/ai-divination',
   },
   booking: {

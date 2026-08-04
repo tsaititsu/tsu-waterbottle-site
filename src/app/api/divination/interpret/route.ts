@@ -5,6 +5,7 @@ import {
   runPreOpenAISafetyCheck,
 } from "@/lib/divination/legacyReadingEngine"
 import { generateZiweiCardReading } from "@/lib/divination/ziweiCardReadingEngine"
+import { DIVINATION_READING_PAYMENT_MESSAGE } from "@/lib/divination/pricing"
 import {
   consumeLocalDivinationEntitlement,
   READING_COST_TWD,
@@ -52,7 +53,7 @@ function paymentRequiredResponse() {
     {
       ok: false,
       error: "PAYMENT_REQUIRED",
-      message: "本次 AI 占卜解讀需 NT$50。",
+      message: DIVINATION_READING_PAYMENT_MESSAGE,
       requiresPayment: true,
       amountTwd: READING_COST_TWD,
     },

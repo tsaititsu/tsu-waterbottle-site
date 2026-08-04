@@ -180,19 +180,19 @@ async function readJson(response: Response) {
 
 // --- 正式價格保持不變（規格 8、9）---
 
-test('一般使用者（未登入、無測試欄位）維持正式 NT$50', async () => {
+test('一般使用者（未登入、無測試欄位）使用正式 NT$200', async () => {
   const { deps, calls } = createDivinationDeps({ requester: null, useRealPaymentData: true })
   const response = await handleCreateNewebPayPaymentRequest(divinationBody(), deps)
 
   assert.equal(response.status, 200)
-  assert.equal(calls.pendingPayments[0].amountTwd, 50)
+  assert.equal(calls.pendingPayments[0].amountTwd, 200)
   assert.deepEqual(calls.drawSelectionUpdates[0], {
     readingId,
     cardId: 'ziwei',
     cardName: '紫微星',
     position: 'upright',
   })
-  assert.equal(calls.paymentDataInputs[0].amount, undefined) // 由 item 預設 50 決定
+  assert.equal(calls.paymentDataInputs[0].amount, undefined) // 由 item 預設 200 決定
   const serialized = JSON.stringify(calls.pendingPayments[0].rawPayload)
   assert.equal(serialized.includes('test_payment'), false)
 
@@ -200,18 +200,18 @@ test('一般使用者（未登入、無測試欄位）維持正式 NT$50', async
   const params = new URLSearchParams(
     decryptTradeInfo(String(fields.TradeInfo), fakeConfig.hashKey, fakeConfig.hashIv),
   )
-  assert.equal(params.get('Amt'), '50')
+  assert.equal(params.get('Amt'), '200')
   assert.equal(params.get('CREDIT'), '1')
   assert.equal(params.get('InstFlag'), '0')
   assert.equal(params.has('APPLEPAY'), false)
 })
 
-test('admin＋flags 全開但未選測試模式，仍為 NT$50 信用卡', async () => {
+test('admin＋flags 全開但未選測試模式，仍為 NT$200 信用卡', async () => {
   const { deps, calls } = createDivinationDeps({ useRealPaymentData: true })
   const response = await handleCreateNewebPayPaymentRequest(divinationBody(), deps)
 
   assert.equal(response.status, 200)
-  assert.equal(calls.pendingPayments[0].amountTwd, 50)
+  assert.equal(calls.pendingPayments[0].amountTwd, 200)
   assert.equal(JSON.stringify(calls.pendingPayments[0].rawPayload).includes('test_payment'), false)
   assert.equal(calls.paymentDataInputs[0].paymentMode, 'credit')
 
@@ -219,7 +219,7 @@ test('admin＋flags 全開但未選測試模式，仍為 NT$50 信用卡', async
   const params = new URLSearchParams(
     decryptTradeInfo(String(fields.TradeInfo), fakeConfig.hashKey, fakeConfig.hashIv),
   )
-  assert.equal(params.get('Amt'), '50')
+  assert.equal(params.get('Amt'), '200')
   assert.equal(params.get('CREDIT'), '1')
   assert.equal(params.get('InstFlag'), '0')
   assert.equal(params.has('APPLEPAY'), false)
@@ -535,7 +535,7 @@ test('測試 payment metadata 完整標記', async () => {
   assert.equal(rawPayload.one_dollar_test_mode, true)
   assert.equal(rawPayload.divination_one_dollar_test, true)
   assert.equal(rawPayload.divination_apple_pay_test, true)
-  assert.equal(rawPayload.original_amount, 50)
+  assert.equal(rawPayload.original_amount, 200)
   assert.equal(rawPayload.test_source, 'divination')
   assert.equal(rawPayload.payment_method, 'apple_pay')
   assert.equal(rawPayload.paymentMode, 'apple_pay_test')

@@ -3,6 +3,7 @@ import type {
   DivinationPosition,
   DivinationPreviousReadingSummary,
 } from "@/lib/divination/types"
+import { DIVINATION_READING_PRICE_LABEL } from "@/lib/divination/pricing"
 
 type DivinationQuestionContextPanelProps = {
   isFollowUp: boolean
@@ -51,8 +52,8 @@ export function DivinationQuestionContextPanel({
       </p>
       <p className="line-clamp-2 overflow-hidden leading-7 text-textMuted">
         {isFollowUp
-          ? "請輸入這次想追問的問題。下一步仍會重新抽牌，AI 解讀每次 NT$50。"
-          : "選擇手動或自動抽牌。抽牌本身不收費，開始 AI 解讀時每次 NT$50。"}
+          ? `請輸入這次想追問的問題。下一步仍會重新抽牌，AI 解讀每次 ${DIVINATION_READING_PRICE_LABEL}。`
+          : `選擇手動或自動抽牌。抽牌本身不收費，開始 AI 解讀時每次 ${DIVINATION_READING_PRICE_LABEL}。`}
       </p>
       <details className="rounded-xl border border-purple-100 bg-softPurple/60 px-4 py-3">
         <summary className="cursor-pointer truncate text-sm font-semibold text-deepPurple">

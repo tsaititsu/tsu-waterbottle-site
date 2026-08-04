@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { DIVINATION_READING_PRICE_LABEL } from '@/lib/divination/pricing'
 
 type DrawMode = 'manual' | 'auto'
 
@@ -51,7 +52,7 @@ export function DivinationQuestionForm({ disabled = false, onQuestionSubmit }: D
           請寫下一個清楚的問題，再選擇手動抽牌或自動抽牌。
         </p>
         <p className="mt-2 text-sm leading-7 text-textMuted">
-          抽牌本身不收費，開始 AI 解讀時每次 NT$50。
+          抽牌本身不收費，開始 AI 解讀時每次 {DIVINATION_READING_PRICE_LABEL}。
         </p>
 
         <div className="mt-6">
@@ -122,7 +123,7 @@ export function DivinationQuestionForm({ disabled = false, onQuestionSubmit }: D
               onClick={() => handlePreviewDraw('auto', { mockPaid: true })}
               className="mt-3 rounded-full bg-deepPurple px-5 py-3 text-sm font-semibold text-white transition hover:bg-purpleMain"
             >
-              支付 NT$50 開始解讀
+              支付 {DIVINATION_READING_PRICE_LABEL} 開始解讀
             </button>
           </div>
         ) : null}

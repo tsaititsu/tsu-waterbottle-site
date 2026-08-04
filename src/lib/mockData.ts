@@ -1,4 +1,8 @@
 import { BookOpen, CalendarDays, Compass, CreditCard, FileText, MoonStar, Sparkles, UserRound } from 'lucide-react'
+import {
+  DIVINATION_READING_PRICE_LABEL,
+  DIVINATION_READING_PRICE_TWD,
+} from '@/lib/divination/pricing'
 
 export const serviceCards = [
   {
@@ -47,8 +51,8 @@ export const pricingPlans = [
     itemType: 'ai-divination',
     title: '紫微牌卡占卜單次',
     description: '針對單一問題提供指引與建議',
-    price: 50,
-    priceLabel: 'NT$50 / 次',
+    price: DIVINATION_READING_PRICE_TWD,
+    priceLabel: `${DIVINATION_READING_PRICE_LABEL} / 次`,
     cta: '立即占卜',
     href: '/ai-divination',
     featured: false,

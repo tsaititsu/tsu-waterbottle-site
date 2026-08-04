@@ -5,6 +5,7 @@ import {
   AI_DIVINATION_ITEM_TYPE,
   buildDivinationPaymentPayload,
 } from './divinationPayment'
+import { READING_COST_TWD } from '../divination/localEntitlement'
 
 const readingId = '2df1a8da-3893-4b81-8d00-774a9cc0e472'
 const merchantOrderNo = 'WB20260705143000ABCD'
@@ -14,14 +15,16 @@ const creditPayload = buildDivinationPaymentPayload({
 })
 
 assert.equal(AI_DIVINATION_ITEM_KEY, 'ai_divination_single')
-assert.equal(AI_DIVINATION_AMOUNT_TWD, 50)
+assert.equal(AI_DIVINATION_AMOUNT_TWD, 200)
+assert.equal(READING_COST_TWD, 200)
+assert.equal(READING_COST_TWD, AI_DIVINATION_AMOUNT_TWD)
 assert.equal(AI_DIVINATION_ITEM_TYPE, 'ai_divination')
 
 assert.deepEqual(creditPayload, {
   itemKey: 'ai_divination_single',
   itemType: 'ai_divination',
   itemId: readingId,
-  amount: 50,
+  amount: 200,
   source: 'ai_divination',
   paymentMode: 'credit',
   merchantOrderNo,
@@ -29,14 +32,14 @@ assert.deepEqual(creditPayload, {
     itemKey: 'ai_divination_single',
     itemType: 'ai_divination',
     readingId,
-    amount: 50,
+    amount: 200,
     source: 'ai_divination',
     paymentMode: 'credit',
     merchantOrderNo,
   },
 })
 
-assert.equal(creditPayload.rawPayload.amount, 50)
+assert.equal(creditPayload.rawPayload.amount, 200)
 assert.equal(creditPayload.rawPayload.readingId, readingId)
 assert.equal(creditPayload.paymentMode, 'credit')
 

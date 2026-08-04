@@ -255,7 +255,7 @@ async function runPaymentPersistenceAssertions() {
           one_dollar_test_mode: true,
           divination_one_dollar_test: true,
           divination_apple_pay_test: true,
-          original_amount: 50,
+          original_amount: 200,
           test_source: 'divination',
           payment_method: 'apple_pay',
           merchantOrderNo: 'WB20260703172530A1B2',
@@ -280,7 +280,7 @@ async function runPaymentPersistenceAssertions() {
   const oneDollarDivinationMismatch = await persistNewebPayNotifyPaymentResult(
     {
       ...parsedQuery,
-      amount: 50,
+      amount: 200,
     },
     async () =>
       createPaymentRecord({
