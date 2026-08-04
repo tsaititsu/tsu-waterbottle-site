@@ -22,11 +22,11 @@ const APPROVED_SOURCE_HOSTS = new Set([
   'www.cancer.gov',
 ])
 
-test('health reminder registry exposes twenty immutable independent cards', () => {
-  assert.equal(AI_CHART_D1_HEALTH_REMINDER_CARD_REGISTRY.length, 20)
+test('health reminder registry exposes twenty-one immutable independent cards', () => {
+  assert.equal(AI_CHART_D1_HEALTH_REMINDER_CARD_REGISTRY.length, 21)
   assert.deepEqual(
     AI_CHART_D1_HEALTH_REMINDER_CARD_REGISTRY.map((card) => card.cardId),
-    Array.from({ length: 20 }, (_, index) =>
+    Array.from({ length: 21 }, (_, index) =>
       `H${String(index + 1).padStart(2, '0')}`,
     ),
   )
@@ -56,6 +56,23 @@ test('health reminder registry exposes twenty immutable independent cards', () =
       assert.equal(APPROVED_SOURCE_HOSTS.has(url.hostname), true)
     }
   }
+})
+
+test('天相頸部方向使用獨立 H21 固定提醒卡', () => {
+  const section = buildAiChartD1HealthReminderSection({
+    targetPalaceId: 'palace:health',
+    canonicalHealthDirections: ['頸部相關'],
+  })
+
+  assert.ok(section)
+  assert.deepEqual(section.canonicalHealthDirections, ['頸部相關'])
+  assert.deepEqual(
+    section.reminderCards.map((card) => card.cardId),
+    ['H21'],
+  )
+  assert.match(section.reminderCards[0].customerReminder, /頸部疼痛、僵硬/u)
+  assert.match(section.reminderCards[0].customerReminder, /不是頸椎或神經疾病診斷/u)
+  assert.equal(Object.isFrozen(section.reminderCards[0]), true)
 })
 
 test('selection policy keeps card choice and exact reminder copy outside the model', () => {

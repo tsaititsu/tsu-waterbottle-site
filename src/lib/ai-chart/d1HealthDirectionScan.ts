@@ -131,7 +131,13 @@ const mainStarRules: readonly AiChartD1HealthMainStarRule[] = [
   {
     ruleId: 'HEALTH_MAIN_TIANXIANG',
     starName: '天相',
-    directDirections: ['腎臟相關', '內分泌與代謝相關', '淋巴相關', '循環相關'],
+    directDirections: [
+      '腎臟相關',
+      '內分泌與代謝相關',
+      '淋巴相關',
+      '頸部相關',
+      '循環相關',
+    ],
   },
   {
     ruleId: 'HEALTH_MAIN_TIANLIANG',

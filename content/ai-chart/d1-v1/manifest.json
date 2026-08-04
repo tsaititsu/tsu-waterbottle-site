@@ -190,7 +190,7 @@
     {
       "path": "content/ai-chart/d1-v1/knowledge/core/C_十二宮分面與身宮疾厄田宅.md",
       "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/知識庫_v1.0/C_十二宮分面與身宮疾厄田宅.md",
-      "sha256": "89ffcd47a05ad7b894b75ea0ece6ff8ea098d8a4ea5a00409a22c38fb3edd0ef",
+      "sha256": "09ce170ac595e1886f6d7ee03d057ed52d92b5878390b345985e56f2a27651da",
       "classification": "current_knowledge_source",
       "status": "current_source_candidate",
       "runtimeEligible": true,
@@ -199,7 +199,7 @@
     {
       "path": "content/ai-chart/d1-v1/knowledge/core/紫微斗數知識庫_v1.2_A_十四主星核心字典_正式定稿版.md",
       "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/知識庫_v1.0/紫微斗數知識庫_v1.2_A_十四主星核心字典_正式定稿版.md",
-      "sha256": "3aff99921f7917dba7b2a921c6c2d2a71fda85e33b33d96dab207927d188ec0f",
+      "sha256": "f029b9e517822a071e50255b9763fcca3805ef98a28b516b721ed8fa0a5757f2",
       "classification": "formal_knowledge",
       "status": "formal_confirmed",
       "runtimeEligible": true,
@@ -208,7 +208,7 @@
     {
       "path": "content/ai-chart/d1-v1/knowledge/core/紫微斗數知識庫_v1.2_A_十四主星核心字典_正式定稿版.json",
       "sourcePath": "AI 命盤 OpenAI/SOP重構版_v1.0/知識庫_v1.0/紫微斗數知識庫_v1.2_A_十四主星核心字典_正式定稿版.json",
-      "sha256": "a7febeaafca60375c24bbb69ec97d6bc436707beaa6625d0fb7f62452636891e",
+      "sha256": "dfb4120dd43d1685a4f7a513a9c50e9f3dfc9536fe7683c467fd44dec106090d",
       "classification": "formal_knowledge",
       "status": "formal_confirmed",
       "runtimeEligible": true,

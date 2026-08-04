@@ -515,7 +515,7 @@ const cards: readonly AiChartD1HealthReminderCard[] = [
     urgentCare: ['腫脹快速加劇並影響呼吸或吞嚥時，立即就醫。'],
     forbiddenInferences: [
       '不得因天相就宣稱淋巴結腫大或淋巴癌。',
-      '不得把講義中已排除的「頸部」器官對應重新加回；這張卡提到頸部只是現實中淋巴結可能被摸到的位置。',
+      '不得把淋巴方向與頸部方向混成同一項；頸部疼痛或僵硬應使用獨立頸部提醒卡。',
     ],
     sources: [
       { label: 'NHS：Swollen glands', url: 'https://www.nhs.uk/symptoms/swollen-glands/' },
@@ -625,6 +625,34 @@ const cards: readonly AiChartD1HealthReminderCard[] = [
       { label: 'NIAMS：Sports Injuries', url: 'https://www.niams.nih.gov/health-topics/sports-injuries' },
       { label: 'CDC：Symptoms of Mild TBI and Concussion', url: 'https://www.cdc.gov/traumatic-brain-injury/signs-symptoms/index.html' },
       { label: 'American Academy of Dermatology：Rash 101', url: 'https://www.aad.org/public/everyday-care/itchy-skin/rash/rash-101' },
+    ],
+    status: 'reviewed',
+  },
+  {
+    cardId: 'H21',
+    name: '頸部',
+    canonicalHealthDirections: ['頸部相關'],
+    customerReminder:
+      '頸部較需要保養。生活中可以留意頸部疼痛、僵硬或活動角度變小，是否持續數週、反覆出現，或已影響睡眠與日常活動；若疼痛延伸到肩膀或手臂，並伴隨麻刺感、手臂發冷或無力，也應讓醫師評估。這是保養提醒，不是頸椎或神經疾病診斷。',
+    observableStates: [
+      '頸部疼痛、僵硬或轉動角度受限。',
+      '疼痛延伸到肩膀或手臂。',
+      '手臂或手指出現麻刺感、發冷或無力。',
+    ],
+    generalCareThreshold:
+      '頸部不適持續數週、反覆發作、止痛與日常調整後仍未改善，或影響睡眠與活動時，接受醫師評估。',
+    urgentCare: [
+      '重大碰撞、跌倒或其他外傷後出現嚴重頸痛，或同時出現明顯肢體無力、感覺異常時，應儘速就醫。',
+    ],
+    forbiddenInferences: [
+      '不得因天相就診斷頸椎間盤突出、神經壓迫、甲狀腺疾病或其他頸部疾病。',
+      '不得把頸部方向與淋巴、內分泌方向混成同一項疾病推論。',
+    ],
+    sources: [
+      {
+        label: 'NHS：Neck pain and stiff neck',
+        url: 'https://www.nhs.uk/symptoms/neck-pain-and-stiff-neck/',
+      },
     ],
     status: 'reviewed',
   },

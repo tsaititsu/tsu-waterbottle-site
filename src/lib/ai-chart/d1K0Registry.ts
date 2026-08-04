@@ -46,9 +46,9 @@ export const AI_CHART_D1_K0_SOURCE_WHITELIST = Object.freeze(
 
 export const AI_CHART_D1_K0_SOURCE_SHA256 = Object.freeze({
   [AI_CHART_D1_K0_SOURCE_FILES.stars]:
-    'a7febeaafca60375c24bbb69ec97d6bc436707beaa6625d0fb7f62452636891e',
+    'dfb4120dd43d1685a4f7a513a9c50e9f3dfc9536fe7683c467fd44dec106090d',
   [AI_CHART_D1_K0_SOURCE_FILES.palaces]:
-    '89ffcd47a05ad7b894b75ea0ece6ff8ea098d8a4ea5a00409a22c38fb3edd0ef',
+    '09ce170ac595e1886f6d7ee03d057ed52d92b5878390b345985e56f2a27651da',
   [AI_CHART_D1_K0_SOURCE_FILES.mutagens]:
     '5c67e03928e76f2da0a87c2f104aa65e17b2e183e1e0d1674af3119cc9f0b67a',
   [AI_CHART_D1_K0_SOURCE_FILES.doubles]:

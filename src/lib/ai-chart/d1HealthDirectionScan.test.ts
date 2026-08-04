@@ -172,7 +172,7 @@ test('fixed fourteen-star rules match the approved lecture mappings', () => {
       { starName: '太陰', directions: ['腎臟相關'] },
       { starName: '貪狼', directions: ['肝臟相關', '肌肉筋脈與四肢相關'] },
       { starName: '巨門', directions: ['腎臟相關', '支氣管與呼吸道相關', '口腔與牙齒相關'] },
-      { starName: '天相', directions: ['腎臟相關', '內分泌與代謝相關', '淋巴相關', '循環相關'] },
+      { starName: '天相', directions: ['腎臟相關', '內分泌與代謝相關', '淋巴相關', '頸部相關', '循環相關'] },
       { starName: '天梁', directions: ['骨骼與脊椎相關', '脾胃相關'] },
       { starName: '七殺', directions: ['肺部與呼吸相關', '骨骼與脊椎相關', '頭部與神經急症相關', '皮膚相關'] },
       { starName: '破軍', directions: ['腎臟相關', '泌尿相關'] },
@@ -211,7 +211,7 @@ test('all fourteen main stars produce their approved direct directions through t
     ['太陰', ['腎臟相關']],
     ['貪狼', ['肝臟相關', '肌肉筋脈與四肢相關']],
     ['巨門', ['腎臟相關', '支氣管與呼吸道相關', '口腔與牙齒相關']],
-    ['天相', ['腎臟相關', '內分泌與代謝相關', '淋巴相關', '循環相關']],
+    ['天相', ['腎臟相關', '內分泌與代謝相關', '淋巴相關', '頸部相關', '循環相關']],
     ['天梁', ['骨骼與脊椎相關', '脾胃相關']],
     [
       '七殺',
@@ -351,9 +351,10 @@ test('掃描只使用四宮實際主星，不把借星、三方或輔星改寫�
     '腎臟相關',
     '內分泌與代謝相關',
     '淋巴相關',
+    '頸部相關',
     '循環相關',
   ])
-  assert.equal(scan.canonicalHealthDirections.includes('頸部相關'), false)
+  assert.equal(scan.canonicalHealthDirections.includes('頸部相關'), true)
 })
 
 test('巨門固定為腎臟、支氣管與口腔，不擴張成肺部、過敏或代謝', () => {
