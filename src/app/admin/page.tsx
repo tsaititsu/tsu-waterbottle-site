@@ -4,6 +4,7 @@ import AdminStatusBadge from '@/components/admin/AdminStatusBadge'
 import { getAdminModulesBySection } from '@/components/admin/adminModules'
 import LinePaySandboxE2ePanel from '@/components/admin/LinePaySandboxE2ePanel'
 import { isLinePaySandboxE2eRouteEnabled } from '@/app/api/internal/line-pay/sandbox-e2e/start/handler'
+import { isLinePayProductionOneDollarRouteEnabled } from '@/app/api/internal/line-pay/production-one-dollar/start/handler'
 
 const readOnlyModules = getAdminModulesBySection('readonly')
 const toolModules = getAdminModulesBySection('tool')
@@ -11,6 +12,13 @@ const unavailableModules = getAdminModulesBySection('unavailable')
 
 export default function AdminPage() {
   const sandboxE2eEnabled = isLinePaySandboxE2eRouteEnabled(process.env)
+  const productionOneDollarEnabled =
+    isLinePayProductionOneDollarRouteEnabled(process.env)
+  const linePayTestEnvironment = sandboxE2eEnabled
+    ? 'sandbox'
+    : productionOneDollarEnabled
+      ? 'production'
+      : null
 
   return (
     <main className="grid gap-5">
@@ -71,7 +79,7 @@ export default function AdminPage() {
         })}
       </section>
 
-      {sandboxE2eEnabled ? <LinePaySandboxE2ePanel /> : null}
+      {linePayTestEnvironment ? <LinePaySandboxE2ePanel environment={linePayTestEnvironment} /> : null}
 
       <section aria-labelledby="unavailable-modules" className="rounded-2xl border border-borderSoft bg-white p-5 shadow-soft md:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">

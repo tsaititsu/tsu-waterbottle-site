@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import type { LinePayCheckoutInitializationRpcClient } from './linePayCheckoutInitialization'
 import {
   LinePaySandboxE2eInitializationError,
+  initializeLinePayOneDollarTestCheckout,
   initializeLinePaySandboxE2eCheckout,
 } from './linePaySandboxE2eInitialization'
 
@@ -39,7 +40,7 @@ function createInput(client: LinePayCheckoutInitializationRpcClient) {
     client,
     userId,
     environment: 'sandbox' as const,
-    amountTwd: 50 as const,
+    amountTwd: 1 as const,
     orderNo: 'LPE2E-a1000000000040008000000000000001',
     merchantOrderNo: result.merchant_order_no,
     idempotencyKey:
@@ -51,7 +52,7 @@ function createInput(client: LinePayCheckoutInitializationRpcClient) {
   }
 }
 
-test('calls only the atomic initializer with the fixed NT$50 Sandbox item', async () => {
+test('calls only the atomic initializer with the fixed NT$1 Sandbox item', async () => {
   const rpc = createClient({ data: result, error: null })
   const initialized = await initializeLinePaySandboxE2eCheckout(
     createInput(rpc.client),
@@ -69,18 +70,18 @@ test('calls only the atomic initializer with the fixed NT$50 Sandbox item', asyn
           customer_name: 'LINE Pay Sandbox E2E',
           customer_email: null,
           customer_phone: null,
-          note: 'Preview-only LINE Pay Sandbox NT$50 E2E',
+          note: 'Preview-only LINE Pay Sandbox NT$1 E2E',
           items: [
             {
-              product_slug: 'line-pay-sandbox-e2e-nt50',
+              product_slug: 'line-pay-sandbox-e2e-nt1',
               product_name: 'LINE Pay Sandbox E2E 測試',
-              unit_price_twd: 50,
+              unit_price_twd: 1,
               quantity: 1,
               product_snapshot: {
-                slug: 'line-pay-sandbox-e2e-nt50',
+                slug: 'line-pay-sandbox-e2e-nt1',
                 name: 'LINE Pay Sandbox E2E 測試',
                 category: '符咒商品',
-                priceTwd: 50,
+                priceTwd: 1,
               },
             },
           ],
@@ -111,12 +112,75 @@ test('calls only the atomic initializer with the fixed NT$50 Sandbox item', asyn
   assert.equal(Object.isFrozen(initialized), true)
 })
 
-test('production or a non-50 amount fails before RPC', async () => {
+test('Production NT$1 test uses a fixed non-fulfillment snapshot and complete synthetic shipping data', async () => {
+  const rpc = createClient({ data: result, error: null })
+  const initialized = await initializeLinePayOneDollarTestCheckout({
+    ...createInput(rpc.client),
+    environment: 'production',
+    orderNo: 'LPONE-a1000000000040008000000000000001',
+    idempotencyKey:
+      'line-pay-production-one-dollar:a1000000-0000-4000-8000-000000000001',
+  })
+
+  assert.deepEqual(rpc.calls, [
+    {
+      functionName: 'initialize_product_order_line_pay_checkout',
+      args: {
+        p_payload: {
+          user_id: userId,
+          environment: 'production',
+          order_no: 'LPONE-a1000000000040008000000000000001',
+          merchant_order_no: result.merchant_order_no,
+          customer_name: 'LINE Pay Production NT$1 測試',
+          customer_email: null,
+          customer_phone: '0900000000',
+          note: 'Production 管理員 NT$1 金流測試，請勿出貨',
+          items: [
+            {
+              product_slug: 'line-pay-production-one-dollar-test',
+              product_name: 'LINE Pay Production NT$1 測試（不出貨）',
+              unit_price_twd: 1,
+              quantity: 1,
+              product_snapshot: {
+                slug: 'line-pay-production-one-dollar-test',
+                name: 'LINE Pay Production NT$1 測試（不出貨）',
+                category: '符咒商品',
+                priceTwd: 1,
+              },
+            },
+          ],
+          shipping_info: {
+            recipient_name: 'LINE Pay NT$1 測試（請勿出貨）',
+            recipient_phone: '0900000000',
+            recipient_email: null,
+            shipping_method: 'manual',
+            postal_code: null,
+            address: '內部金流測試訂單，請勿出貨',
+            store_type: null,
+            store_id: null,
+            store_name: null,
+            store_address: null,
+            store_phone: null,
+          },
+          idempotency_key:
+            'line-pay-production-one-dollar:a1000000-0000-4000-8000-000000000001',
+          request_body_sha256: 'a'.repeat(64),
+          confirm_token_hash: 'b'.repeat(64),
+          cancel_token_hash: 'c'.repeat(64),
+          capability_expires_at: '2026-07-31T12:30:00.000Z',
+        },
+      },
+    },
+  ])
+  assert.deepEqual(initialized, result)
+})
+
+test('production or a non-1 amount fails before RPC', async () => {
   const rpc = createClient({ data: result, error: null })
 
   for (const override of [
     { environment: 'production' },
-    { amountTwd: 51 },
+    { amountTwd: 2 },
   ]) {
     await assert.rejects(
       () =>

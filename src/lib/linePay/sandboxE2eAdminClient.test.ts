@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import {
+  createLinePayProductionOneDollarAdminController,
   createLinePaySandboxE2eAdminController,
   type LinePaySandboxE2eAdminSnapshot,
 } from './sandboxE2eAdminClient'
@@ -18,7 +19,7 @@ function response(status: number, payload: unknown) {
   }
 }
 
-test('authorized admin starts the exact NT$50 sandbox flow once', async () => {
+test('authorized admin starts the exact NT$1 sandbox flow once', async () => {
   const sensitiveToken = 'synthetic-admin-session-token'
   const snapshots: LinePaySandboxE2eAdminSnapshot[] = []
   const calls: Array<{ input: string; init: RequestInit }> = []
@@ -31,7 +32,7 @@ test('authorized admin starts the exact NT$50 sandbox flow once', async () => {
         return response(200, {
           ok: true,
           environment: 'sandbox',
-          amountTwd: 50,
+          amountTwd: 1,
           currency: 'TWD',
           paymentUrl: 'https://sandbox-web-pay.line.me/payment',
         })
@@ -51,11 +52,74 @@ test('authorized admin starts the exact NT$50 sandbox flow once', async () => {
     'content-type': 'application/json',
   })
   assert.deepEqual(JSON.parse(String(calls[0]?.init.body)), {
-    confirmation: 'RUN_LINE_PAY_SANDBOX_E2E_NT50_ONCE',
+    confirmation: 'RUN_LINE_PAY_SANDBOX_E2E_NT1_ONCE',
   })
   assert.deepEqual(navigations, ['https://sandbox-web-pay.line.me/payment'])
   assert.equal(snapshots.at(-1)?.state, 'redirecting')
   assert.equal(JSON.stringify(snapshots).includes(sensitiveToken), false)
+})
+
+test('authorized admin starts the exact NT$1 Production flow once', async () => {
+  const sensitiveToken = 'synthetic-production-admin-session-token'
+  const snapshots: LinePaySandboxE2eAdminSnapshot[] = []
+  const calls: Array<{ input: string; init: RequestInit }> = []
+  const navigations: string[] = []
+  const controller = createLinePayProductionOneDollarAdminController(
+    {
+      getAccessToken: async () => sensitiveToken,
+      fetchStart: async (input, init) => {
+        calls.push({ input, init })
+        return response(200, {
+          ok: true,
+          environment: 'production',
+          amountTwd: 1,
+          currency: 'TWD',
+          paymentUrl: 'https://web-pay.line.me/web/payment/wait',
+        })
+      },
+      navigate: (url) => navigations.push(url),
+    },
+    (snapshot) => snapshots.push(snapshot),
+  )
+
+  await Promise.all([controller.start(), controller.start()])
+
+  assert.equal(calls.length, 1)
+  assert.equal(
+    calls[0]?.input,
+    '/api/internal/line-pay/production-one-dollar/start',
+  )
+  assert.deepEqual(JSON.parse(String(calls[0]?.init.body)), {
+    confirmation: 'RUN_LINE_PAY_PRODUCTION_NT1_ONCE',
+  })
+  assert.deepEqual(navigations, ['https://web-pay.line.me/web/payment/wait'])
+  assert.equal(snapshots.at(-1)?.state, 'redirecting')
+  assert.equal(JSON.stringify(snapshots).includes(sensitiveToken), false)
+})
+
+test('Production controller rejects a Sandbox payment URL', async () => {
+  const snapshots: LinePaySandboxE2eAdminSnapshot[] = []
+  const controller = createLinePayProductionOneDollarAdminController(
+    {
+      getAccessToken: async () => 'synthetic-token',
+      fetchStart: async () => response(200, {
+        ok: true,
+        environment: 'production',
+        amountTwd: 1,
+        currency: 'TWD',
+        paymentUrl: 'https://sandbox-web-pay.line.me/payment',
+      }),
+      navigate: () => assert.fail('cross-environment URL must not navigate'),
+    },
+    (snapshot) => snapshots.push(snapshot),
+  )
+
+  await controller.start()
+
+  assert.deepEqual(snapshots.at(-1), {
+    state: 'failed',
+    error: 'invalid_production_payment_url',
+  })
 })
 
 test('missing admin session fails closed before the request', async () => {
@@ -91,7 +155,7 @@ test('non-sandbox payment URL fails closed without navigation', async () => {
       fetchStart: async () => response(200, {
         ok: true,
         environment: 'sandbox',
-        amountTwd: 50,
+        amountTwd: 1,
         currency: 'TWD',
         paymentUrl: 'https://example.com/not-line-pay',
       }),

@@ -38,11 +38,11 @@ export class LinePaySandboxE2eInitializationError extends Error {
   }
 }
 
-export type InitializeLinePaySandboxE2eCheckoutInput = {
+export type InitializeLinePayOneDollarTestCheckoutInput = {
   client: LinePayCheckoutInitializationRpcClient
   userId: string
-  environment: 'sandbox'
-  amountTwd: 50
+  environment: 'sandbox' | 'production'
+  amountTwd: 1
   orderNo: string
   merchantOrderNo: string
   idempotencyKey: string
@@ -51,6 +51,10 @@ export type InitializeLinePaySandboxE2eCheckoutInput = {
   cancelTokenHash: string
   capabilityExpiresAt: string
 }
+
+export type InitializeLinePaySandboxE2eCheckoutInput =
+  & Omit<InitializeLinePayOneDollarTestCheckoutInput, 'environment'>
+  & { environment: 'sandbox' }
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -143,11 +147,11 @@ function validText(value: unknown, maxLength: number, pattern?: RegExp) {
   )
 }
 
-function validateInput(input: InitializeLinePaySandboxE2eCheckoutInput) {
+function validateInput(input: InitializeLinePayOneDollarTestCheckoutInput) {
   if (
     !isRecord(input)
-    || input.environment !== 'sandbox'
-    || input.amountTwd !== 50
+    || (input.environment !== 'sandbox' && input.environment !== 'production')
+    || input.amountTwd !== 1
     || !validText(input.userId, 36, UUID_PATTERN)
     || !validText(input.orderNo, 100, SAFE_IDENTIFIER_PATTERN)
     || !validText(input.merchantOrderNo, 100, SAFE_IDENTIFIER_PATTERN)
@@ -218,41 +222,53 @@ function parseResult(
   }) as InitializeProductOrderLinePayCheckoutResult
 }
 
-export async function initializeLinePaySandboxE2eCheckout(
-  input: InitializeLinePaySandboxE2eCheckoutInput,
+export async function initializeLinePayOneDollarTestCheckout(
+  input: InitializeLinePayOneDollarTestCheckoutInput,
 ): Promise<InitializeProductOrderLinePayCheckoutResult> {
   validateInput(input)
 
+  const production = input.environment === 'production'
+  const productSlug = production
+    ? 'line-pay-production-one-dollar-test'
+    : 'line-pay-sandbox-e2e-nt1'
+  const productName = production
+    ? 'LINE Pay Production NT$1 測試（不出貨）'
+    : 'LINE Pay Sandbox E2E 測試'
+
   const payload = {
     user_id: input.userId,
-    environment: 'sandbox',
+    environment: input.environment,
     order_no: input.orderNo,
     merchant_order_no: input.merchantOrderNo,
-    customer_name: 'LINE Pay Sandbox E2E',
+    customer_name: production
+      ? 'LINE Pay Production NT$1 測試'
+      : 'LINE Pay Sandbox E2E',
     customer_email: null,
-    customer_phone: null,
-    note: 'Preview-only LINE Pay Sandbox NT$50 E2E',
+    customer_phone: production ? '0900000000' : null,
+    note: production
+      ? 'Production 管理員 NT$1 金流測試，請勿出貨'
+      : 'Preview-only LINE Pay Sandbox NT$1 E2E',
     items: [
       {
-        product_slug: 'line-pay-sandbox-e2e-nt50',
-        product_name: 'LINE Pay Sandbox E2E 測試',
-        unit_price_twd: 50,
+        product_slug: productSlug,
+        product_name: productName,
+        unit_price_twd: 1,
         quantity: 1,
         product_snapshot: {
-          slug: 'line-pay-sandbox-e2e-nt50',
-          name: 'LINE Pay Sandbox E2E 測試',
+          slug: productSlug,
+          name: productName,
           category: '符咒商品',
-          priceTwd: 50,
+          priceTwd: 1,
         },
       },
     ],
     shipping_info: {
-      recipient_name: null,
-      recipient_phone: null,
+      recipient_name: production ? 'LINE Pay NT$1 測試（請勿出貨）' : null,
+      recipient_phone: production ? '0900000000' : null,
       recipient_email: null,
       shipping_method: 'manual',
       postal_code: null,
-      address: null,
+      address: production ? '內部金流測試訂單，請勿出貨' : null,
       store_type: null,
       store_id: null,
       store_name: null,
@@ -279,4 +295,11 @@ export async function initializeLinePaySandboxE2eCheckout(
 
   if (response.error) fail('rpc_failed', safeRpcFailureReason(response.error))
   return parseResult(response.data, input.merchantOrderNo)
+}
+
+export async function initializeLinePaySandboxE2eCheckout(
+  input: InitializeLinePaySandboxE2eCheckoutInput,
+): Promise<InitializeProductOrderLinePayCheckoutResult> {
+  if (input.environment !== 'sandbox') fail('invalid_input')
+  return initializeLinePayOneDollarTestCheckout(input)
 }

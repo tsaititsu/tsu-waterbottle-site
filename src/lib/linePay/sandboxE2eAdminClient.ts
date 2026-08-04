@@ -3,6 +3,9 @@ export type LinePaySandboxE2eAdminError =
   | 'sandbox_request_failed'
   | 'sandbox_response_invalid'
   | 'invalid_sandbox_payment_url'
+  | 'production_request_failed'
+  | 'production_response_invalid'
+  | 'invalid_production_payment_url'
 
 export type LinePaySandboxE2eAdminSnapshot =
   | Readonly<{ state: 'starting' }>
@@ -35,7 +38,10 @@ type StartSuccessPayload = {
   paymentUrl: string
 }
 
-function parseStartSuccessPayload(value: unknown): StartSuccessPayload | null {
+function parseStartSuccessPayload(
+  value: unknown,
+  environment: 'sandbox' | 'production',
+): StartSuccessPayload | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return null
   }
@@ -43,8 +49,8 @@ function parseStartSuccessPayload(value: unknown): StartSuccessPayload | null {
   const payload = value as Record<string, unknown>
   if (
     payload.ok !== true
-    || payload.environment !== 'sandbox'
-    || payload.amountTwd !== 50
+    || payload.environment !== environment
+    || payload.amountTwd !== 1
     || payload.currency !== 'TWD'
     || typeof payload.paymentUrl !== 'string'
   ) {
@@ -54,7 +60,10 @@ function parseStartSuccessPayload(value: unknown): StartSuccessPayload | null {
   return { paymentUrl: payload.paymentUrl }
 }
 
-function parseSandboxPaymentUrl(value: string) {
+function parsePaymentUrl(
+  value: string,
+  environment: 'sandbox' | 'production',
+) {
   let url: URL
   try {
     url = new URL(value)
@@ -62,12 +71,16 @@ function parseSandboxPaymentUrl(value: string) {
     return null
   }
 
+  const expectedHostname = environment === 'sandbox'
+    ? 'sandbox-web-pay.line.me'
+    : 'web-pay.line.me'
   if (
     url.protocol !== 'https:'
-    || url.hostname !== 'sandbox-web-pay.line.me'
+    || url.hostname !== expectedHostname
     || url.port !== ''
     || url.username !== ''
     || url.password !== ''
+    || (environment === 'production' && !url.pathname.startsWith('/web/'))
   ) {
     return null
   }
@@ -75,11 +88,27 @@ function parseSandboxPaymentUrl(value: string) {
   return url.toString()
 }
 
-export function createLinePaySandboxE2eAdminController(
+function createLinePayOneDollarAdminController(
+  environment: 'sandbox' | 'production',
   deps: LinePaySandboxE2eAdminDeps,
   onSnapshot: (snapshot: LinePaySandboxE2eAdminSnapshot) => void,
 ): LinePaySandboxE2eAdminController {
   let started = false
+  const endpoint = environment === 'sandbox'
+    ? '/api/internal/line-pay/sandbox-e2e/start'
+    : '/api/internal/line-pay/production-one-dollar/start'
+  const confirmation = environment === 'sandbox'
+    ? 'RUN_LINE_PAY_SANDBOX_E2E_NT1_ONCE'
+    : 'RUN_LINE_PAY_PRODUCTION_NT1_ONCE'
+  const requestError = environment === 'sandbox'
+    ? 'sandbox_request_failed'
+    : 'production_request_failed'
+  const responseError = environment === 'sandbox'
+    ? 'sandbox_response_invalid'
+    : 'production_response_invalid'
+  const paymentUrlError = environment === 'sandbox'
+    ? 'invalid_sandbox_payment_url'
+    : 'invalid_production_payment_url'
 
   return {
     async start() {
@@ -99,7 +128,7 @@ export function createLinePaySandboxE2eAdminController(
         }
 
         const response = await deps.fetchStart(
-          '/api/internal/line-pay/sandbox-e2e/start',
+          endpoint,
           {
             method: 'POST',
             headers: {
@@ -107,7 +136,7 @@ export function createLinePaySandboxE2eAdminController(
               'content-type': 'application/json',
             },
             body: JSON.stringify({
-              confirmation: 'RUN_LINE_PAY_SANDBOX_E2E_NT50_ONCE',
+              confirmation,
             }),
           },
         )
@@ -115,25 +144,25 @@ export function createLinePaySandboxE2eAdminController(
         if (!response.ok) {
           onSnapshot(Object.freeze({
             state: 'failed',
-            error: 'sandbox_request_failed',
+            error: requestError,
           }))
           return
         }
 
-        const success = parseStartSuccessPayload(payload)
+        const success = parseStartSuccessPayload(payload, environment)
         if (!success) {
           onSnapshot(Object.freeze({
             state: 'failed',
-            error: 'sandbox_response_invalid',
+            error: responseError,
           }))
           return
         }
 
-        const paymentUrl = parseSandboxPaymentUrl(success.paymentUrl)
+        const paymentUrl = parsePaymentUrl(success.paymentUrl, environment)
         if (!paymentUrl) {
           onSnapshot(Object.freeze({
             state: 'failed',
-            error: 'invalid_sandbox_payment_url',
+            error: paymentUrlError,
           }))
           return
         }
@@ -143,11 +172,25 @@ export function createLinePaySandboxE2eAdminController(
       } catch {
         onSnapshot(Object.freeze({
           state: 'failed',
-          error: 'sandbox_request_failed',
+          error: requestError,
         }))
       } finally {
         accessToken = null
       }
     },
   }
+}
+
+export function createLinePaySandboxE2eAdminController(
+  deps: LinePaySandboxE2eAdminDeps,
+  onSnapshot: (snapshot: LinePaySandboxE2eAdminSnapshot) => void,
+) {
+  return createLinePayOneDollarAdminController('sandbox', deps, onSnapshot)
+}
+
+export function createLinePayProductionOneDollarAdminController(
+  deps: LinePaySandboxE2eAdminDeps,
+  onSnapshot: (snapshot: LinePaySandboxE2eAdminSnapshot) => void,
+) {
+  return createLinePayOneDollarAdminController('production', deps, onSnapshot)
 }

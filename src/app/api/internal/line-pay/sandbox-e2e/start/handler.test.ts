@@ -81,7 +81,7 @@ function successDependencies() {
       calls.push('initialize')
       initializations.push(input)
       assert.equal(input.environment, 'sandbox')
-      assert.equal(input.amountTwd, 50)
+      assert.equal(input.amountTwd, 1)
       assert.equal(input.userId, '41000000-0000-4000-8000-000000000001')
       assert.match(String(input.requestBodySha256), /^[0-9a-f]{64}$/)
       assert.match(String(input.confirmTokenHash), /^[0-9a-f]{64}$/)
@@ -108,7 +108,7 @@ function successDependencies() {
         confirmUrl: string
         cancelUrl: string
       }
-      assert.equal(payloadInput.amount, 50)
+      assert.equal(payloadInput.amount, 1)
       assert.equal(new URL(payloadInput.confirmUrl).search, '')
       assert.equal(new URL(payloadInput.cancelUrl).search, '')
       assert.equal(
@@ -147,7 +147,7 @@ function successDependencies() {
   }
 }
 
-test('Preview sandbox admin confirmation initializes NT$50 and returns one payment URL', async () => {
+test('Preview sandbox admin confirmation initializes NT$1 and returns one payment URL', async () => {
   const deps = successDependencies()
   const response = await handleLinePaySandboxE2eStart({
     request: createRequest(),
@@ -161,7 +161,7 @@ test('Preview sandbox admin confirmation initializes NT$50 and returns one payme
   assert.deepEqual(body, {
     ok: true,
     environment: 'sandbox',
-    amountTwd: 50,
+    amountTwd: 1,
     currency: 'TWD',
     paymentUrl: 'https://sandbox-web-pay.line.me/payment',
   })
@@ -294,14 +294,22 @@ test('one exact Preview Head always derives the same database identity', async (
     request: createRequest(),
     env: enabledEnv,
     ...first,
+    createToken: undefined,
   })
   await handleLinePaySandboxE2eStart({
     request: createRequest(),
     env: enabledEnv,
     ...second,
+    createToken: undefined,
   })
 
-  for (const key of ['orderNo', 'merchantOrderNo', 'idempotencyKey'] as const) {
+  for (const key of [
+    'orderNo',
+    'merchantOrderNo',
+    'idempotencyKey',
+    'confirmTokenHash',
+    'cancelTokenHash',
+  ] as const) {
     assert.equal(first.initializations[0]?.[key], second.initializations[0]?.[key])
   }
   assert.equal(

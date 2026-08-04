@@ -32,8 +32,13 @@ assert.match(
 )
 assert.match(
   adminPageSource,
-  /sandboxE2eEnabled \? <LinePaySandboxE2ePanel \/> : null/,
-  'Sandbox E2E panel 只能在完整 server-side gate 通過後顯示',
+  /isLinePayProductionOneDollarRouteEnabled\(process\.env\)/,
+  'Production NT$1 panel 必須共用 server-side Production route gate',
+)
+assert.match(
+  adminPageSource,
+  /linePayTestEnvironment \? <LinePaySandboxE2ePanel environment=\{linePayTestEnvironment\} \/> : null/,
+  'LINE Pay NT$1 panel 只能在對應 server-side gate 通過後顯示',
 )
 
 assert.match(layoutClientSource, /return <AdminShell pathname=\{pathname\}>\{children\}<\/AdminShell>/)

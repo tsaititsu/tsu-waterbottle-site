@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { createHash, createHmac, randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import {
   buildLinePayRequestPayload,
@@ -18,8 +18,8 @@ import {
 } from '../capabilityToken'
 
 export const LINE_PAY_SANDBOX_E2E_CONFIRMATION =
-  'RUN_LINE_PAY_SANDBOX_E2E_NT50_ONCE'
-export const LINE_PAY_SANDBOX_E2E_AMOUNT_TWD = 50
+  'RUN_LINE_PAY_SANDBOX_E2E_NT1_ONCE'
+export const LINE_PAY_SANDBOX_E2E_AMOUNT_TWD = 1
 
 export type LinePaySandboxE2eStartEnvironment = LinePayServerEnv & {
   VERCEL_ENV?: string
@@ -40,7 +40,7 @@ type InitializeSandboxE2e = (
     client: unknown
     userId: string
     environment: 'sandbox'
-    amountTwd: 50
+    amountTwd: 1
     orderNo: string
     merchantOrderNo: string
     idempotencyKey: string
@@ -173,7 +173,7 @@ export async function handleLinePaySandboxE2eStart(input: {
   execute: ExecuteSandboxE2e
   now?: () => Date
   createUuid?: () => string
-  createToken?: () => string
+  createToken?: (purpose: 'confirm' | 'cancel') => string
 }) {
   if (!isLinePaySandboxE2eRouteEnabled(input.env)) return hiddenResponse()
 
@@ -209,8 +209,6 @@ export async function handleLinePaySandboxE2eStart(input: {
 
   const now = input.now?.() ?? new Date()
   const createUuid = input.createUuid ?? randomUUID
-  const createToken =
-    input.createToken ?? (() => randomBytes(32).toString('base64url'))
   const commitSha = input.env.VERCEL_GIT_COMMIT_SHA!.trim().toLowerCase()
   const runKey = sha256(`line-pay-sandbox-e2e:${commitSha}`).slice(0, 32)
   const orderNo = `LPE2E-${runKey}`
@@ -232,8 +230,13 @@ export async function handleLinePaySandboxE2eStart(input: {
     return hiddenResponse()
   }
 
-  const confirmToken = createToken()
-  const cancelToken = createToken()
+  const createToken = input.createToken
+    ?? ((purpose: 'confirm' | 'cancel') =>
+      createHmac('sha256', config.channelSecret)
+        .update(`line-pay-sandbox-e2e-capability:${commitSha}:${purpose}`)
+        .digest('base64url'))
+  const confirmToken = createToken('confirm')
+  const cancelToken = createToken('cancel')
 
   const payloadInput = {
     orderId: merchantOrderNo,

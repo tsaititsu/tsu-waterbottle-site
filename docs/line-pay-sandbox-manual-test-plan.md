@@ -52,10 +52,10 @@ cart
 - NewebPay 仍是 `newebpay`。
 - 不使用藍新 MPG `LINEPAY=1`。
 
-### Preview-only NT$50 E2E 邊界
+### Preview-only NT$1 E2E 邊界
 
 - 啟動入口固定為 `POST /api/internal/line-pay/sandbox-e2e/start`，且需管理員登入。
-- request body 只接受固定確認字串；金額與商品固定在 server 為 NT$50，不能由呼叫端改寫。
+- request body 只接受固定確認字串；金額與商品固定在 server 為 NT$1，不能由呼叫端改寫。
 - confirm／cancel 使用 `/api/internal/line-pay/sandbox-e2e/confirm` 與 `/api/internal/line-pay/sandbox-e2e/cancel`。
 - 三個入口都同時要求 Vercel Preview、Sandbox、Gateway、Runtime flag、E2E flag 與完整 Preview commit SHA；Production 一律回 404。
 - 相同 exact-head Preview 會產生相同 database identity，避免重複操作建立第二筆付款請求。
