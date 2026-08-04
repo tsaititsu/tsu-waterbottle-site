@@ -50,7 +50,7 @@ assert.deepEqual(getNewebPayPaymentItem('newebpay_live_smoke_test_1'), {
 assert.deepEqual(getNewebPayPaymentItem('ai_divination_single'), {
   itemKey: 'ai_divination_single',
   itemDesc: '紫微牌卡占卜單次',
-  amount: 50,
+  amount: 200,
 })
 assert.deepEqual(getNewebPayPaymentItem('ai_chart_report_single'), {
   itemKey: 'ai_chart_report_single',
@@ -470,8 +470,8 @@ const divinationData = createNewebPayMpgPaymentData({
 const decryptedDivination = new URLSearchParams(decryptTradeInfo(divinationData.fields.TradeInfo, hashKey, hashIv))
 
 assert.equal(divinationData.itemKey, 'ai_divination_single')
-assert.equal(divinationData.amount, 50)
-assert.equal(decryptedDivination.get('Amt'), '50')
+assert.equal(divinationData.amount, 200)
+assert.equal(decryptedDivination.get('Amt'), '200')
 assert.equal(decryptedDivination.get('ItemDesc'), '紫微牌卡占卜單次')
 assert.equal(decryptedDivination.get('CREDIT'), '1')
 assert.equal(decryptedDivination.get('InstFlag'), '0')
@@ -597,7 +597,7 @@ assert.deepEqual(divinationPendingPaymentMetadata.rawPayload, {
   itemKey: 'ai_divination_single',
   itemType: 'ai_divination',
   readingId,
-  amount: 50,
+  amount: 200,
   source: 'ai_divination',
   paymentMode: 'credit',
   merchantOrderNo: divinationData.merchantOrderNo,

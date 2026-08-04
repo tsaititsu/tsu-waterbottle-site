@@ -1,15 +1,11 @@
 import { NextResponse } from "next/server"
 import { ziweiCards } from "@/lib/divination/cards"
 import {
-  buildLegacyDraftPrompt,
-  buildLegacyReadingContext,
-  buildLegacyReviewPrompt,
-  buildLegacyStructuredInterpretation,
   buildFollowUpSafetyCheckText,
-  parseLegacyReviewResult,
-  reviewAnswer,
   runPreOpenAISafetyCheck,
 } from "@/lib/divination/legacyReadingEngine"
+import { generateZiweiCardReading } from "@/lib/divination/ziweiCardReadingEngine"
+import { DIVINATION_READING_PAYMENT_MESSAGE } from "@/lib/divination/pricing"
 import {
   consumeLocalDivinationEntitlement,
   READING_COST_TWD,
@@ -24,7 +20,6 @@ import {
   markDivinationReadingInterpreting,
   updateDivinationReadingDrawSelection,
 } from "@/lib/supabase/divinationReadings"
-import { getDivinationOpenAIModel } from "@/lib/openai/divinationModel"
 import {
   defaultResumePersistedDivinationReadingDeps,
   resumePersistedDivinationReadingFromDb,
@@ -34,6 +29,7 @@ import type {
   DivinationDrawMode,
   DivinationInterpretRequest,
   DivinationInterpretResponse,
+  DivinationInterpretation,
   DivinationMockPaymentGate,
   DivinationPosition,
 } from "@/lib/divination/types"
@@ -43,7 +39,8 @@ type RequestBody = Partial<Record<keyof DivinationInterpretRequest, unknown>>
 const drawModes = new Set<DivinationDrawMode>(["manual", "auto"])
 const positions = new Set<DivinationPosition>(["upright", "reversed"])
 
-const openAiResponsesUrl = "https://api.openai.com/v1/responses"
+export const maxDuration = 300
+
 const openAiServiceUnavailableMessage = "AI 解讀服務暫時維護中，請稍後再試。"
 const paidOpenAiServiceUnavailableMessage = "付款已完成，但 AI 解讀暫時無法產生，請聯繫客服。"
 
@@ -56,7 +53,7 @@ function paymentRequiredResponse() {
     {
       ok: false,
       error: "PAYMENT_REQUIRED",
-      message: "本次 AI 占卜解讀需 NT$50。",
+      message: DIVINATION_READING_PAYMENT_MESSAGE,
       requiresPayment: true,
       amountTwd: READING_COST_TWD,
     },
@@ -72,101 +69,27 @@ function isPersistedDivinationReadingsEnabled() {
   return process.env.ENABLE_DIVINATION_DB_READINGS === "true"
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
-function extractResponseText(value: unknown) {
-  if (!isRecord(value)) return ""
-
-  if (typeof value.output_text === "string") {
-    return value.output_text.trim()
-  }
-
-  const output = Array.isArray(value.output) ? value.output : []
-  const textParts: string[] = []
-
-  for (const item of output) {
-    if (!isRecord(item)) continue
-    const content = Array.isArray(item.content) ? item.content : []
-
-    for (const contentItem of content) {
-      if (!isRecord(contentItem)) continue
-
-      if (typeof contentItem.text === "string") {
-        textParts.push(contentItem.text)
-      }
-    }
-  }
-
-  return textParts.join("\n").trim()
-}
-
-async function requestOpenAiText(input: {
-  apiKey: string
-  model: string
-  prompt: string
-  textFormat?: Record<string, unknown>
-}) {
-  let response: Response
-
-  try {
-    response = await fetch(openAiResponsesUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${input.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: input.model,
-        input: [
-          {
-            role: "user",
-            content: input.prompt,
-          },
-        ],
-        ...(input.textFormat ? { text: { format: input.textFormat } } : {}),
-      }),
-    })
-  } catch {
-    console.error("OpenAI divination request failed")
-
-    return {
-      ok: false as const,
-      status: 502,
-      error: "OPENAI_REQUEST_FAILED",
-      message: "解讀產生失敗，請稍後再試。",
-    }
-  }
-
-  if (!response.ok) {
-    console.error("OpenAI divination request failed:", {
-      status: response.status,
-    })
-
-    return {
-      ok: false as const,
-      status: 502,
-      error: "OPENAI_REQUEST_FAILED",
-      message: "解讀產生失敗，請稍後再試。",
-    }
-  }
-
-  const data = (await response.json()) as unknown
-  const text = extractResponseText(data)
-
-  if (!text) {
-    return {
-      ok: false as const,
-      status: 502,
-      error: "OPENAI_RESPONSE_INVALID",
-      message: "解讀格式異常，請稍後再試。",
-    }
-  }
+function buildStructuredInterpretation(finalAnswer: string): DivinationInterpretation {
+  const normalized = finalAnswer.trim().replace(/\r\n/g, "\n")
+  const paragraphs = normalized
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+  const summary = normalized
+    .replace(/\s+/g, " ")
+    .split("。")
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("。")
+    .slice(0, 220)
 
   return {
-    ok: true as const,
-    text,
+    finalAnswer: normalized,
+    summary: summary || paragraphs[0] || normalized,
+    cardMessage: paragraphs[1] || paragraphs[0] || normalized,
+    situationAnalysis: paragraphs[0] || normalized,
+    advice: paragraphs[2] || paragraphs.at(-1) || normalized,
+    reminder: paragraphs[3] || "占卜是提醒，不是保證；重要決定仍要回到現實條件與專業判斷。",
   }
 }
 
@@ -188,59 +111,51 @@ async function createOpenAiInterpretation(input: {
     }
   }
 
-  const model = getDivinationOpenAIModel(process.env)
-  const legacyContext = buildLegacyReadingContext(input)
-  const draftResult = await requestOpenAiText({
-    apiKey,
-    model,
-    prompt: buildLegacyDraftPrompt(legacyContext),
-  })
+  let engineResponse: Response
 
-  if (!draftResult.ok) {
-    return draftResult
+  try {
+    engineResponse = await generateZiweiCardReading(
+      new Request("http://localhost/internal/divination-reading", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: input.question,
+          cardId: input.card.id,
+          position: input.position === "upright" ? "正位" : "反位",
+          followUpContext: input.followUpContext,
+        }),
+      }),
+    )
+  } catch (error) {
+    console.error("Ziwei-card divination engine failed:", error)
+    return {
+      ok: false as const,
+      status: 502,
+      error: "OPENAI_REQUEST_FAILED",
+      message: "解讀產生失敗，請稍後再試。",
+    }
   }
 
-  const draftAnswer = reviewAnswer(draftResult.text, legacyContext)
-  const reviewResult = await requestOpenAiText({
-    apiKey,
-    model,
-    prompt: buildLegacyReviewPrompt(legacyContext, draftAnswer),
-    textFormat: {
-      type: "json_schema",
-      name: "divination_review",
-      strict: true,
-      schema: {
-        type: "object",
-        additionalProperties: false,
-        required: ["finalAnswer", "changedMeaning", "safetyAdjusted", "issuesFixed"],
-        properties: {
-          finalAnswer: {
-            type: "string",
-            description: "整理後給使用者看的完整最終解讀。",
-          },
-          changedMeaning: {
-            type: "boolean",
-            description: "是否改動原本命理主結論。",
-          },
-          safetyAdjusted: {
-            type: "boolean",
-            description: "是否因安全規則調整語氣或內容。",
-          },
-          issuesFixed: {
-            type: "array",
-            items: { type: "string" },
-            description: "簡短列出有修正的問題。",
-          },
-        },
-      },
-    },
-  })
-  const reviewedAnswer =
-    reviewResult.ok && parseLegacyReviewResult(reviewResult.text)?.finalAnswer
-      ? parseLegacyReviewResult(reviewResult.text)?.finalAnswer
-      : draftAnswer
-  const finalAnswer = reviewAnswer(reviewedAnswer || draftAnswer, legacyContext)
-  const interpretation = buildLegacyStructuredInterpretation(finalAnswer, legacyContext)
+  const engineData = (await engineResponse.json()) as {
+    answer?: unknown
+    error?: unknown
+  }
+  const finalAnswer = typeof engineData.answer === "string" ? engineData.answer.trim() : ""
+
+  if (!engineResponse.ok || !finalAnswer) {
+    console.error("Ziwei-card divination engine returned an invalid response:", {
+      status: engineResponse.status,
+      error: typeof engineData.error === "string" ? engineData.error : "invalid_response",
+    })
+    return {
+      ok: false as const,
+      status: engineResponse.status >= 500 ? 502 : engineResponse.status,
+      error: "OPENAI_RESPONSE_INVALID",
+      message: "解讀格式異常，請稍後再試。",
+    }
+  }
+
+  const interpretation = buildStructuredInterpretation(finalAnswer)
 
   return {
     ok: true as const,

@@ -106,11 +106,11 @@ assert.equal(context.metadata.divination_one_dollar_test, true)
 assert.equal(context.metadata.divination_apple_pay_test, true)
 assert.equal(context.metadata.test_source, DIVINATION_ONE_DOLLAR_TEST_SOURCE)
 assert.equal(context.metadata.original_amount, AI_DIVINATION_AMOUNT_TWD)
-assert.equal(context.metadata.original_amount, 50)
+assert.equal(context.metadata.original_amount, 200)
 assert.equal(context.metadata.payment_method, 'apple_pay')
 
 const oneDollarDetails = context.metadata.newebpay_one_dollar_test as Record<string, unknown>
-assert.equal(oneDollarDetails.originalAmount, 50)
+assert.equal(oneDollarDetails.originalAmount, 200)
 assert.equal(oneDollarDetails.testAmount, 1)
 
 // flags 未全開時 context 不啟用、維持原價

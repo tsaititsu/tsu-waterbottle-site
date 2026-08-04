@@ -6,6 +6,7 @@ import { shouldHideAiDivinationServices } from '@/lib/siteVisibility'
 import { redirect } from 'next/navigation'
 import { createPublicMetadata, PUBLIC_PAGE_METADATA } from '@/lib/seo/publicMetadata'
 import { AI_DIVINATION_SERVICE_JSON_LD, serializeJsonLd } from '@/lib/seo/serviceJsonLd'
+import { DIVINATION_READING_PRICE_LABEL } from '@/lib/divination/pricing'
 
 export const metadata: Metadata = createPublicMetadata(PUBLIC_PAGE_METADATA.aiDivination)
 
@@ -24,7 +25,7 @@ export default function AiDivinationPage() {
       <PageHero
         eyebrow="紫微牌卡"
         title="紫微牌卡占卜"
-        description="輸入你的問題，抽一張紫微牌卡，AI 立即為你深度解讀。抽牌免費，AI 解讀每次 NT$50。"
+        description={`輸入你的問題，抽一張紫微牌卡，AI 立即為你深度解讀。抽牌免費，AI 解讀每次 ${DIVINATION_READING_PRICE_LABEL}。`}
       />
       <section className="bg-white py-12 md:py-16">
         <div className="section-shell grid gap-8">

@@ -1,6 +1,10 @@
 import { randomUUID } from "crypto"
+import {
+  DIVINATION_READING_PAYMENT_MESSAGE,
+  DIVINATION_READING_PRICE_TWD,
+} from "./pricing"
 
-export const READING_COST_TWD = 50
+export const READING_COST_TWD = DIVINATION_READING_PRICE_TWD
 export const TIME_ZONE = "Asia/Taipei"
 
 type LocalEntitlementType = "daily_free" | "mock_paid"
@@ -104,7 +108,7 @@ export function reserveLocalDivinationEntitlement(input: ReserveInput): ReserveR
       return {
         ok: false,
         error: "PAYMENT_REQUIRED",
-        message: "本次 AI 占卜解讀需 NT$50。",
+        message: DIVINATION_READING_PAYMENT_MESSAGE,
         requiresPayment: true,
         amountTwd: READING_COST_TWD,
       }
@@ -130,7 +134,7 @@ export function reserveLocalDivinationEntitlement(input: ReserveInput): ReserveR
     return {
       ok: false,
       error: "PAYMENT_REQUIRED",
-      message: "本次 AI 占卜解讀需 NT$50。",
+      message: DIVINATION_READING_PAYMENT_MESSAGE,
       requiresPayment: true,
       amountTwd: READING_COST_TWD,
     }

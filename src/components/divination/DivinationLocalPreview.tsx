@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { DivinationQuestionForm } from "./DivinationQuestionForm"
 import { DivinationQuestionContextPanel } from "./DivinationQuestionContextPanel"
 import { getAuthAccessToken } from "@/lib/mockAuth"
+import { DIVINATION_READING_PRICE_LABEL } from "@/lib/divination/pricing"
 import {
   clearDivinationFollowUpDraft,
   clearDivinationFollowUpDisplayThread,
@@ -207,7 +208,7 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
         <p className="text-sm font-semibold tracking-[0.18em] text-darkGold">紫微牌卡占卜</p>
         <h2 className="mt-2 font-serifTC text-3xl font-semibold text-textDark">開始你的紫微牌卡占卜</h2>
         <p className="mt-3 max-w-3xl leading-7 text-textMuted">
-          請先寫下你想詢問的問題，再選擇手動抽牌或自動抽牌。抽牌本身不收費，開始 AI 解讀時每次 NT$50。
+          請先寫下你想詢問的問題，再選擇手動抽牌或自動抽牌。抽牌本身不收費，開始 AI 解讀時每次 {DIVINATION_READING_PRICE_LABEL}。
         </p>
         <p className="mt-2 text-sm text-textMuted">私人問題只保留在目前分頁記憶體；重新整理或切換帳號後需重新輸入。</p>
       </div>

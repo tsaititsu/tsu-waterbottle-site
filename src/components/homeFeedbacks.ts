@@ -44,8 +44,8 @@ export const HOME_FEEDBACKS: readonly HomeFeedback[] = [
   {
     id: 'divination-detail',
     category: '紫微牌卡占卜',
-    highlight: '占卜一次 50 元，講得比外面 15 分鐘 300 元的還要詳細。',
-    fullText: '占卜一次 50 元，講得比外面 15 分鐘 300 元的還要詳細。',
+    highlight: '占卜解讀講得比外面 15 分鐘 300 元的還要詳細。',
+    fullText: '占卜解讀講得比外面 15 分鐘 300 元的還要詳細。',
     author: '匿名會員',
   },
   {

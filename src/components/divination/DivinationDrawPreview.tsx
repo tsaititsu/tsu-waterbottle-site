@@ -3,6 +3,11 @@
 import { DivinationResultPreview } from "@/components/divination/DivinationResultPreview"
 import { ziweiCards, type ZiweiCard } from "@/lib/divination/cards"
 import {
+  DIVINATION_READING_PAYMENT_MESSAGE,
+  DIVINATION_READING_PRICE_LABEL,
+  DIVINATION_READING_PRICE_TWD,
+} from "@/lib/divination/pricing"
+import {
   buildDivinationFollowUpDraft,
   clearDivinationFollowUpDraft,
   clearDivinationFollowUpDisplayThread,
@@ -280,7 +285,7 @@ function DivinationConsentNotice({
           <div>
             <p className="font-semibold text-deepPurple">付費解讀規則</p>
             <ul className="mt-2 grid gap-2">
-              <li>抽牌本身不收費；當你按下「開始解讀」並產生 AI 解讀時，本次服務費用為 NT$50。</li>
+              <li>抽牌本身不收費；當你按下「開始解讀」並產生 AI 解讀時，本次服務費用為 {DIVINATION_READING_PRICE_LABEL}。</li>
               <li>完整 AI 解讀需完成付款確認後才會產生。</li>
               <li>若付款或解讀服務暫時無法使用，請稍後再試或聯繫客服協助。</li>
             </ul>
@@ -309,7 +314,7 @@ function DivinationConsentNotice({
       </details>
 
       <p className="mt-3 text-xs leading-6 text-textMuted">
-        勾選後即可進行付費解讀；本次 AI 解讀費用為 NT$50。
+        勾選後即可進行付費解讀；本次 AI 解讀費用為 {DIVINATION_READING_PRICE_LABEL}。
       </p>
     </div>
   )
@@ -702,11 +707,11 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
           if (interpretRequestRef.current !== requestId) return
 
           setPaymentRequired({
-            message: interpretData.message || "本次 AI 占卜解讀需 NT$50。",
-            amountTwd: interpretData.amountTwd ?? 50,
+            message: interpretData.message || DIVINATION_READING_PAYMENT_MESSAGE,
+            amountTwd: interpretData.amountTwd ?? DIVINATION_READING_PRICE_TWD,
           })
           setErrorMessage("")
-          setMessage("本次 AI 占卜解讀需 NT$50。")
+          setMessage(DIVINATION_READING_PAYMENT_MESSAGE)
           return
         }
 
@@ -801,14 +806,14 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
       if (!response.ok || !data?.ok) {
         const error = data && !data.ok ? data.error : undefined
         setErrorMessage(getNewebPayCheckoutErrorMessage(error))
-        setMessage(paymentRequired?.message || "本次 AI 占卜解讀需 NT$50。")
+        setMessage(paymentRequired?.message || DIVINATION_READING_PAYMENT_MESSAGE)
         return
       }
 
       const formFields = buildNewebPayClientFormFields(data.fields)
       if (!formFields.ok) {
         setErrorMessage("線上付款資料不完整，請稍後再試。")
-        setMessage(paymentRequired?.message || "本次 AI 占卜解讀需 NT$50。")
+        setMessage(paymentRequired?.message || DIVINATION_READING_PAYMENT_MESSAGE)
         return
       }
 
@@ -825,7 +830,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
       })
     } catch {
       setErrorMessage("線上付款資料建立失敗，請稍後再試。")
-      setMessage(paymentRequired?.message || "本次 AI 占卜解讀需 NT$50。")
+      setMessage(paymentRequired?.message || DIVINATION_READING_PAYMENT_MESSAGE)
     } finally {
       if (!shouldSubmitForm) {
         setIsNewebPayCheckingOut(false)
@@ -1201,8 +1206,8 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
               {isManualMode && paymentRequired ? (
                 <p className="rounded-lg border border-darkGold/20 bg-lightGold/40 p-3 text-sm text-textDark">
                   {isPersistedReading
-                    ? "本次 AI 占卜解讀需 NT$50，請完成線上付款後再產生解讀。"
-                    : "本次 AI 占卜解讀需 NT$50。"}
+                    ? `本次 AI 占卜解讀需 ${DIVINATION_READING_PRICE_LABEL}，請完成線上付款後再產生解讀。`
+                    : DIVINATION_READING_PAYMENT_MESSAGE}
                 </p>
               ) : null}
               <LineInAppBrowserPaymentNotice visible={showLineInAppBrowserPaymentNotice} />
@@ -1245,7 +1250,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                         ? `支付 NT$${paymentRequired.amountTwd} 開始解讀`
                         : isPersistedReading
                           ? "就是這張，開始解讀"
-                          : "支付 NT$50 開始解讀"}
+                          : `支付 ${DIVINATION_READING_PRICE_LABEL} 開始解讀`}
                   </button>
                 )}
                 <button
@@ -1264,8 +1269,8 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
             <div className="grid w-full max-w-2xl gap-2 rounded-2xl border border-borderSoft bg-white p-4 text-textDark">
               <p className="text-sm text-textMuted">
                 {isPersistedReading
-                  ? "本次 AI 占卜解讀需 NT$50，請完成線上付款後再產生解讀。"
-                  : "本次 AI 占卜解讀需 NT$50。"}
+                  ? `本次 AI 占卜解讀需 ${DIVINATION_READING_PRICE_LABEL}，請完成線上付款後再產生解讀。`
+                  : DIVINATION_READING_PAYMENT_MESSAGE}
               </p>
               <LineInAppBrowserPaymentNotice visible={showLineInAppBrowserPaymentNotice} />
               {isPersistedReading ? (

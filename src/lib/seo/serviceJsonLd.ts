@@ -1,5 +1,6 @@
 import { serializeJsonLd } from './homepageJsonLd'
 import { PUBLIC_PAGE_METADATA } from './publicMetadata'
+import { DIVINATION_READING_PRICE_TWD } from '@/lib/divination/pricing'
 
 const SITE_URL = 'https://tsu-waterbottle.com'
 const ORGANIZATION_ID = `${SITE_URL}/#organization`
@@ -40,7 +41,7 @@ export const AI_DIVINATION_SERVICE_JSON_LD = {
   offers: {
     '@type': 'Offer',
     name: '紫微牌卡 AI 解讀',
-    price: 50,
+    price: DIVINATION_READING_PRICE_TWD,
     priceCurrency: 'TWD',
     url: `${SITE_URL}/ai-divination`,
   },

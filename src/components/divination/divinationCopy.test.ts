@@ -13,6 +13,7 @@ function readSource(path: string) {
 }
 
 const divinationSources = [
+  'src/lib/divination/pricing.ts',
   'src/app/ai-divination/page.tsx',
   'src/components/divination/DivinationLocalPreview.tsx',
   'src/components/divination/DivinationDrawPreview.tsx',
@@ -43,8 +44,9 @@ test('divination user-facing source does not expose local test or OpenAI key cop
 test('divination payment button copy uses production wording', () => {
   const text = readDivinationText()
 
-  assert.equal(text.includes('支付 NT$50 開始解讀'), true)
-  assert.equal(text.includes('支付 NT$50 開始解讀（'), false)
+  assert.equal(text.includes('DIVINATION_READING_PRICE_TWD = 200'), true)
+  assert.equal(text.includes('DIVINATION_READING_PRICE_LABEL'), true)
+  assert.equal(text.includes('NT$50'), false)
   assert.equal(text.includes('支付 NT$${paymentRequired.amountTwd} 開始解讀（'), false)
 })
 
@@ -53,8 +55,7 @@ test('divination entry uses current production copy instead of legacy availabili
 
   assert.equal(text.includes('後續開放'), false)
   assert.equal(text.includes('保留在獨立系統'), false)
-  assert.equal(text.includes('AI 解讀每次 NT$50'), true)
-  assert.equal(text.includes('開始 AI 解讀時每次 NT$50'), true)
+  assert.equal(text.includes('DIVINATION_READING_PRICE_LABEL'), true)
 })
 
 test('missing OpenAI server configuration returns generic maintenance copy', () => {
@@ -65,12 +66,16 @@ test('missing OpenAI server configuration returns generic maintenance copy', () 
   assert.equal(source.includes('OPENAI_API_KEY_MISSING'), true)
 })
 
-test('divination model helper remains gpt-5.5 and paid gate imports remain', () => {
+test('divination model helper uses Terra and paid gate imports remain', () => {
   const modelSource = readSource('src/lib/openai/divinationModel.ts')
   const routeSource = readSource('src/app/api/divination/interpret/route.ts')
+  const engineSource = readSource('src/lib/divination/ziweiCardReadingEngine.ts')
 
-  assert.equal(modelSource.includes('gpt-5.5'), true)
-  assert.equal(routeSource.includes('getDivinationOpenAIModel(process.env)'), true)
+  assert.equal(modelSource.includes('gpt-5.6-terra'), true)
+  assert.equal(modelSource.includes('max'), true)
+  assert.equal(routeSource.includes('generateZiweiCardReading'), true)
+  assert.equal(engineSource.includes('getDivinationOpenAIModel(process.env)'), true)
+  assert.equal(engineSource.includes('getDivinationReasoningEffort()'), true)
   assert.equal(routeSource.includes('decideDivinationInterpretationStart'), true)
   assert.equal(routeSource.includes('paymentRequiredResponse'), true)
 })
