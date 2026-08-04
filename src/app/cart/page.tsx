@@ -5,6 +5,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { useCart } from '@/components/CartContext'
 import {
   buildLinePayReturnMessage,
+  getCartLinePayButtonState,
+  getLinePayCartCheckoutErrorMessage,
+  startLinePayCartCheckout,
+  type CartLinePayCreateProductOrderInput,
+  type CartLinePayRequestBody,
   type CartLinePayReturnMessage,
 } from './linePayCheckout'
 import {
@@ -25,7 +30,7 @@ const typeLabel: Record<string, string> = {
   other: '其他'
 }
 
-type CartPaymentMethod = CartNewebPayPaymentMode
+type CartPaymentMethod = CartNewebPayPaymentMode | 'line_pay'
 
 const cartPaymentMethodOptions: Array<{
   value: CartPaymentMethod
@@ -44,6 +49,12 @@ const cartPaymentMethodOptions: Array<{
     label: 'Apple Pay 付款（iPhone / Safari）',
     description: '前往藍新金流 Apple Pay 付款頁',
     ctaLabel: '前往 Apple Pay 付款',
+  },
+  {
+    value: 'line_pay',
+    label: 'LINE Pay',
+    description: '前往 LINE Pay 安全付款頁',
+    ctaLabel: '使用 LINE Pay 付款',
   },
 ]
 
@@ -98,6 +109,7 @@ export default function CartPage() {
   const [postOfficeShippingInfo, setPostOfficeShippingInfo] = useState<PostOfficeShippingInfo>(emptyPostOfficeShippingInfo)
   const [checkoutError, setCheckoutError] = useState('')
   const [isNewebPayCheckingOut, setIsNewebPayCheckingOut] = useState(false)
+  const [isLinePayCheckingOut, setIsLinePayCheckingOut] = useState(false)
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<CartPaymentMethod>('credit')
   const [linePayReturnMessage, setLinePayReturnMessage] = useState<CartLinePayReturnMessage>(() =>
     buildLinePayReturnMessage(null),
@@ -105,8 +117,17 @@ export default function CartPage() {
 
   const formattedTotal = useMemo(() => `NT$${totalAmount.toLocaleString('zh-TW')}`, [totalAmount])
   const hasSpiritualProduct = items.some((item) => item.type === 'spiritual_product')
+  const isCheckoutPending = isNewebPayCheckingOut || isLinePayCheckingOut
+  const linePayButtonState = getCartLinePayButtonState(
+    process.env.NEXT_PUBLIC_ENABLE_LINE_PAY,
+    isLinePayCheckingOut,
+  )
+  const availableCartPaymentMethodOptions = cartPaymentMethodOptions.filter(
+    (option) => option.value !== 'line_pay' || linePayButtonState.visible,
+  )
   const selectedPaymentMethodOption =
-    cartPaymentMethodOptions.find((option) => option.value === selectedPaymentMethod) ?? cartPaymentMethodOptions[0]
+    availableCartPaymentMethodOptions.find((option) => option.value === selectedPaymentMethod) ??
+    availableCartPaymentMethodOptions[0]
 
   const updatePostOfficeShippingInfo = (key: keyof PostOfficeShippingInfo, value: string) => {
     setPostOfficeShippingInfo((current) => ({
@@ -155,7 +176,7 @@ export default function CartPage() {
   }
 
   const handleNewebPayCheckoutClick = async (paymentMode: CartNewebPayPaymentMode = 'credit') => {
-    if (isNewebPayCheckingOut) return
+    if (isCheckoutPending) return
 
     const shippingInfo = getValidatedShippingInfo()
     if (!shippingInfo) return
@@ -225,6 +246,78 @@ export default function CartPage() {
     if (!result.ok) {
       setCheckoutError(getNewebPayCartCheckoutErrorMessage(result.error))
       setIsNewebPayCheckingOut(false)
+    }
+  }
+
+  const handleLinePayCheckoutClick = async () => {
+    if (isCheckoutPending) return
+
+    const shippingInfo = getValidatedShippingInfo()
+    if (!shippingInfo) return
+
+    const productItems = items.filter((item) => item.type === 'spiritual_product')
+    setIsLinePayCheckingOut(true)
+    setCheckoutError('')
+
+    const result = await startLinePayCartCheckout({
+      cartItems: productItems,
+      customerInfo: {
+        customerName: shippingInfo.recipientName,
+        customerPhone: shippingInfo.recipientPhone,
+        recipientName: shippingInfo.recipientName,
+        recipientPhone: shippingInfo.recipientPhone,
+        postalCode: shippingInfo.postalCode,
+        address: `${shippingInfo.city}${shippingInfo.district}${shippingInfo.address}`,
+        note: shippingInfo.note,
+      },
+      createProductOrder: async (input: CartLinePayCreateProductOrderInput) => {
+        const response = await fetch('/api/product-orders/create', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            ...input,
+            paymentMethod: 'line_pay',
+          }),
+        })
+        const data = await response.json().catch(() => null)
+
+        if (!response.ok || !data || data.ok !== true) {
+          throw new Error('line_pay_create_order_failed')
+        }
+
+        return {
+          ...data,
+          productOrderId: data.productOrderId ?? data.orderId,
+        }
+      },
+      requestLinePayPayment: async (body: CartLinePayRequestBody) => {
+        const response = await fetch('/api/product-orders/line-pay/request', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            productOrderId: body.productOrderId,
+          }),
+        })
+        const data = await response.json().catch(() => null)
+
+        if (!response.ok || !data || data.ok !== true) {
+          throw new Error('line_pay_request_failed')
+        }
+
+        return data
+      },
+      redirectToPaymentUrl: (paymentUrlWeb) => {
+        window.location.assign(paymentUrlWeb)
+      },
+    })
+
+    if (!result.ok) {
+      setCheckoutError(getLinePayCartCheckoutErrorMessage(result.error))
+      setIsLinePayCheckingOut(false)
     }
   }
 
@@ -477,7 +570,7 @@ export default function CartPage() {
                           }}
                           value={selectedPaymentMethod}
                         >
-                          {cartPaymentMethodOptions.map((option) => (
+                          {availableCartPaymentMethodOptions.map((option) => (
                             <option key={option.value} value={option.value}>
                               {option.label}
                             </option>
@@ -490,17 +583,29 @@ export default function CartPage() {
                   <div className="flex flex-wrap gap-3 sm:justify-end">
                     {hasSpiritualProduct ? (
                       <button
-                        aria-busy={isNewebPayCheckingOut}
+                        aria-busy={isCheckoutPending}
                         className={`focus-ring rounded-xl px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70 ${
-                          selectedPaymentMethod === 'product_order_apple_pay' ? 'bg-black' : 'bg-deepPurple'
+                          selectedPaymentMethod === 'product_order_apple_pay'
+                            ? 'bg-black'
+                            : selectedPaymentMethod === 'line_pay'
+                              ? 'bg-[#06c755]'
+                              : 'bg-deepPurple'
                         }`}
-                        disabled={isNewebPayCheckingOut}
+                        disabled={isCheckoutPending}
                         onClick={() => {
+                          if (selectedPaymentMethod === 'line_pay') {
+                            void handleLinePayCheckoutClick()
+                            return
+                          }
                           void handleNewebPayCheckoutClick(selectedPaymentMethod)
                         }}
                         type="button"
                       >
-                        {isNewebPayCheckingOut ? '正在建立付款資料...' : selectedPaymentMethodOption.ctaLabel}
+                        {isCheckoutPending
+                          ? selectedPaymentMethod === 'line_pay'
+                            ? linePayButtonState.message
+                            : '正在建立付款資料...'
+                          : selectedPaymentMethodOption.ctaLabel}
                       </button>
                     ) : null}
                   <Link href="/" className="focus-ring rounded-xl border border-borderSoft px-5 py-3 font-semibold text-textDark">

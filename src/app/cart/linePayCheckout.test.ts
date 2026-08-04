@@ -116,50 +116,52 @@ test('ready and loading messages are safe checkout notices', () => {
   assert.equal(getCartLinePayButtonState('true', true).message, CART_LINE_PAY_LOADING_MESSAGE)
 })
 
-test('cart page keeps LINE Pay return message but no longer renders a LINE Pay payment button', () => {
+test('cart page renders the LINE Pay payment option behind the feature flag', () => {
   const source = readCartPageSource()
 
   assert.equal(source.includes('buildLinePayReturnMessage'), true)
   assert.equal(source.includes("params.get('linePay')"), true)
-  assert.equal(source.includes('getCartLinePayButtonState'), false)
-  assert.equal(source.includes('disabled={linePayButtonState.disabled}'), false)
-  assert.equal(source.includes('{linePayButtonState.label}'), false)
-  assert.equal(source.includes('handleLinePayCheckoutClick'), false)
+  assert.equal(source.includes('getCartLinePayButtonState'), true)
+  assert.equal(source.includes("value: 'line_pay'"), true)
+  assert.equal(source.includes('linePayButtonState.visible'), true)
+  assert.equal(source.includes('handleLinePayCheckoutClick'), true)
 })
 
-test('cart page does not call LINE Pay request route from the current payment selector', () => {
+test('cart page routes LINE Pay checkout through the existing request endpoint', () => {
   const source = readCartPageSource()
 
-  assert.equal(source.includes('/api/product-orders/line-pay/request'), false)
+  assert.equal(source.includes('/api/product-orders/line-pay/request'), true)
   assert.equal(readLinePayCheckoutSource().includes('/api/payments/newebpay/create'), false)
 })
 
-test('cart page keeps product order fetch but does not fetch LINE Pay request API', () => {
+test('cart page creates a line_pay product order before requesting payment', () => {
   const source = readCartPageSource()
 
   assert.equal(source.includes("fetch('/api/product-orders/create'"), true)
-  assert.equal(source.includes("fetch('/api/product-orders/line-pay/request'"), false)
+  assert.equal(source.includes("fetch('/api/product-orders/line-pay/request'"), true)
+  assert.equal(source.includes("paymentMethod: 'line_pay'"), true)
 })
 
-test('cart page does not redirect to LINE Pay paymentUrl from the current selector', () => {
+test('cart page redirects only through the payment URL supplied to the checkout adapter', () => {
   const source = readCartPageSource()
 
-  assert.equal(source.includes('window.location.assign(paymentUrlWeb)'), false)
+  assert.equal(source.includes('window.location.assign(paymentUrlWeb)'), true)
   assert.equal(source.includes('window.location.assign(data'), false)
 })
 
-test('cart page does not keep LINE Pay checkout loading state for the current selector', () => {
+test('cart page keeps an independent LINE Pay checkout loading guard', () => {
   const source = readCartPageSource()
 
-  assert.equal(source.includes('if (isLinePayCheckingOut) return'), false)
-  assert.equal(source.includes('setIsLinePayCheckingOut(true)'), false)
+  assert.equal(source.includes('if (isCheckoutPending) return'), true)
+  assert.equal(source.includes('setIsLinePayCheckingOut(true)'), true)
+  assert.equal(source.includes('setIsLinePayCheckingOut(false)'), true)
 })
 
-test('cart page does not send LINE Pay request body in current payment selector', () => {
+test('cart page sends only the product order id to the LINE Pay request endpoint', () => {
   const source = readCartPageSource()
 
-  assert.equal(source.includes('productOrderId: body.productOrderId'), false)
-  assert.equal(source.includes('...body'), false)
+  assert.equal(source.includes('productOrderId: body.productOrderId'), true)
+  assert.equal(source.includes("body: JSON.stringify({\n            productOrderId: body.productOrderId,"), true)
 })
 
 test('cart page reads linePay query for return message only', () => {
