@@ -224,8 +224,8 @@ const cards: readonly AiChartD1HealthReminderCard[] = [
   },
   {
     cardId: 'H06',
-    name: '支氣管與過敏',
-    canonicalHealthDirections: ['支氣管與過敏相關'],
+    name: '支氣管與呼吸道',
+    canonicalHealthDirections: ['支氣管與呼吸道相關'],
     customerReminder:
       '支氣管與呼吸道較需要保養。可以留意是否常在夜間或清晨咳嗽、呼吸有喘鳴聲、胸口緊，或遇到冷空氣、運動、灰塵與過敏原時特別明顯；若反覆發作、影響睡眠或活動，應由醫師判斷是否需要肺功能或過敏評估。這是保養提醒，不是氣喘或過敏診斷。',
     observableStates: [
@@ -491,7 +491,7 @@ const cards: readonly AiChartD1HealthReminderCard[] = [
       '無固定單一項目；若出現意識改變、嚴重虛弱、持續嘔吐等急性狀態，應立即就醫。',
     ],
     forbiddenInferences: [
-      '不得由天相、天同或巨門直接宣稱糖尿病、甲狀腺疾病或荷爾蒙失調。',
+      '不得由天相或天同直接宣稱糖尿病、甲狀腺疾病或荷爾蒙失調。',
       '不得以單一症狀自行選定要檢查的疾病。',
     ],
     sources: [
