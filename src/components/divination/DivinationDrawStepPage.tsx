@@ -50,7 +50,7 @@ export function DivinationDrawStepPage() {
           依照你選擇的方式抽出一張紫微牌卡，先查看牌卡基礎牌義。
         </p>
       </div>
-      <DivinationDrawPreview readingSession={readingSession} autoMockPaid={readingSession.autoMockPaid === true} />
+      <DivinationDrawPreview readingSession={readingSession} />
     </section>
   )
 }
