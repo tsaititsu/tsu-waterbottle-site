@@ -175,7 +175,7 @@ test('non-sandbox payment URL fails closed without navigation', async () => {
   })
 })
 
-test('upstream failure exposes only the stable safe error', async () => {
+test('upstream failure preserves only the allowlisted execution stage', async () => {
   const sensitiveText = 'synthetic-upstream-secret-payload'
   const snapshots: LinePaySandboxE2eAdminSnapshot[] = []
   const controller = createLinePaySandboxE2eAdminController(
@@ -196,8 +196,64 @@ test('upstream failure exposes only the stable safe error', async () => {
   assert.deepEqual(snapshots.at(-1), {
     state: 'failed',
     error: 'sandbox_request_failed',
+    diagnostic: {
+      stage: 'execution',
+    },
   })
   assert.equal(JSON.stringify(snapshots).includes(sensitiveText), false)
+})
+
+test('initializer failure preserves only an allowlisted reason', async () => {
+  const sensitiveText = 'synthetic-database-detail'
+  const snapshots: LinePaySandboxE2eAdminSnapshot[] = []
+  const controller = createLinePaySandboxE2eAdminController(
+    {
+      getAccessToken: async () => 'synthetic-token',
+      fetchStart: async () => response(502, {
+        ok: false,
+        error: 'line_pay_sandbox_e2e_initialization_failed',
+        initializationReason: 'rpc_insufficient_privilege',
+        internal: sensitiveText,
+      }),
+      navigate: () => assert.fail('failed response must not navigate'),
+    },
+    (snapshot) => snapshots.push(snapshot),
+  )
+
+  await controller.start()
+
+  assert.deepEqual(snapshots.at(-1), {
+    state: 'failed',
+    error: 'sandbox_request_failed',
+    diagnostic: {
+      stage: 'initialization',
+      reason: 'rpc_insufficient_privilege',
+    },
+  })
+  assert.equal(JSON.stringify(snapshots).includes(sensitiveText), false)
+})
+
+test('unknown failure details remain redacted', async () => {
+  const snapshots: LinePaySandboxE2eAdminSnapshot[] = []
+  const controller = createLinePaySandboxE2eAdminController(
+    {
+      getAccessToken: async () => 'synthetic-token',
+      fetchStart: async () => response(502, {
+        ok: false,
+        error: 'unexpected_provider_failure',
+        initializationReason: 'unexpected_database_detail',
+      }),
+      navigate: () => assert.fail('failed response must not navigate'),
+    },
+    (snapshot) => snapshots.push(snapshot),
+  )
+
+  await controller.start()
+
+  assert.deepEqual(snapshots.at(-1), {
+    state: 'failed',
+    error: 'sandbox_request_failed',
+  })
 })
 
 async function main() {

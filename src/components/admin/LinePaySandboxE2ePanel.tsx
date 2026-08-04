@@ -11,7 +11,7 @@ import {
 
 const CONFIRMATION_ID = 'line-pay-sandbox-e2e-confirmation'
 
-function snapshotMessage(
+export function linePayOneDollarSnapshotMessage(
   snapshot: LinePaySandboxE2eAdminSnapshot | null,
   environment: 'sandbox' | 'production',
 ) {
@@ -25,6 +25,27 @@ function snapshotMessage(
     return environment === 'sandbox'
       ? '正在前往 LINE Pay Sandbox，付款核准由管理員本人操作。'
       : '正在前往 LINE Pay 正式付款頁，將由管理員本人核准真實 NT$1 扣款。'
+  }
+  if (snapshot.diagnostic) {
+    const environmentLabel = environment === 'sandbox' ? 'Sandbox' : 'Production'
+    const stoppedMessage = environment === 'sandbox'
+      ? '尚未送往 LINE Pay，且不會自動重試。'
+      : '尚未送出真實扣款，且不會自動重試。'
+
+    if (snapshot.diagnostic.stage === 'config') {
+      return `${environmentLabel} 設定檢查失敗（階段：config）；${stoppedMessage}`
+    }
+    if (snapshot.diagnostic.stage === 'initialization') {
+      const reason = snapshot.diagnostic.reason ?? 'initialization'
+      return `${environmentLabel} 訂單初始化失敗（原因：${reason}）；${stoppedMessage}`
+    }
+    if (snapshot.diagnostic.stage === 'execution') {
+      return `${environmentLabel} Gateway／LINE Pay 請求失敗（階段：execution）；${environment === 'sandbox' ? '尚未取得付款網址，且不會自動重試。' : stoppedMessage}`
+    }
+    if (snapshot.diagnostic.stage === 'not_ready') {
+      return `${environmentLabel} 付款請求狀態未就緒（階段：not_ready）；${stoppedMessage}`
+    }
+    return `${environmentLabel} 付款網址處理失敗（階段：payment_url）；${stoppedMessage}`
   }
   if (snapshot.error === 'admin_session_unavailable') {
     return environment === 'sandbox'
@@ -150,7 +171,7 @@ export default function LinePaySandboxE2ePanel({
                 : '執行一次正式 NT$1 測試'}
         </button>
         <p aria-live="polite" className="text-sm leading-6 text-textMuted" role="status">
-          {snapshotMessage(snapshot, environment)}
+          {linePayOneDollarSnapshotMessage(snapshot, environment)}
         </p>
       </div>
     </section>

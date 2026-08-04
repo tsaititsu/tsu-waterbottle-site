@@ -7,12 +7,44 @@ export type LinePaySandboxE2eAdminError =
   | 'production_response_invalid'
   | 'invalid_production_payment_url'
 
+const LINE_PAY_ONE_DOLLAR_INITIALIZATION_REASONS = [
+  'invalid_input',
+  'rpc_failed',
+  'contract_mismatch',
+  'database_invalid_input',
+  'database_items_total_mismatch',
+  'database_idempotency_conflict',
+  'database_order_link_failed',
+  'database_audit_binding_invalid',
+  'rpc_insufficient_privilege',
+  'rpc_foreign_key_violation',
+  'rpc_unique_violation',
+  'rpc_check_violation',
+  'rpc_contract_missing',
+  'rpc_application_exception',
+] as const
+
+export type LinePayOneDollarInitializationReason =
+  typeof LINE_PAY_ONE_DOLLAR_INITIALIZATION_REASONS[number]
+
+export type LinePayOneDollarAdminDiagnostic = Readonly<
+  | { stage: 'config' }
+  | {
+      stage: 'initialization'
+      reason?: LinePayOneDollarInitializationReason
+    }
+  | { stage: 'execution' }
+  | { stage: 'not_ready' }
+  | { stage: 'payment_url' }
+>
+
 export type LinePaySandboxE2eAdminSnapshot =
   | Readonly<{ state: 'starting' }>
   | Readonly<{ state: 'redirecting' }>
   | Readonly<{
       state: 'failed'
       error: LinePaySandboxE2eAdminError
+      diagnostic?: LinePayOneDollarAdminDiagnostic
     }>
 
 type SandboxE2eStartResponse = {
@@ -36,6 +68,55 @@ export type LinePaySandboxE2eAdminController = {
 
 type StartSuccessPayload = {
   paymentUrl: string
+}
+
+const START_FAILURE_STAGES = {
+  sandbox: {
+    line_pay_sandbox_e2e_config_failed: 'config',
+    line_pay_sandbox_e2e_initialization_failed: 'initialization',
+    line_pay_sandbox_e2e_execution_failed: 'execution',
+    line_pay_sandbox_e2e_not_ready: 'not_ready',
+    line_pay_sandbox_e2e_payment_url_failed: 'payment_url',
+  },
+  production: {
+    line_pay_production_one_dollar_config_failed: 'config',
+    line_pay_production_one_dollar_initialization_failed: 'initialization',
+    line_pay_production_one_dollar_execution_failed: 'execution',
+    line_pay_production_one_dollar_not_ready: 'not_ready',
+    line_pay_production_one_dollar_payment_url_failed: 'payment_url',
+  },
+} as const
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function parseStartFailureDiagnostic(
+  value: unknown,
+  environment: 'sandbox' | 'production',
+): LinePayOneDollarAdminDiagnostic | null {
+  if (!isRecord(value) || value.ok !== false || typeof value.error !== 'string') {
+    return null
+  }
+
+  const stages = START_FAILURE_STAGES[environment]
+  const stage = stages[value.error as keyof typeof stages]
+  if (!stage) return null
+  if (stage !== 'initialization') return Object.freeze({ stage })
+
+  const reason = value.initializationReason
+  if (
+    typeof reason === 'string'
+    && (LINE_PAY_ONE_DOLLAR_INITIALIZATION_REASONS as readonly string[])
+      .includes(reason)
+  ) {
+    return Object.freeze({
+      stage,
+      reason: reason as LinePayOneDollarInitializationReason,
+    })
+  }
+
+  return Object.freeze({ stage })
 }
 
 function parseStartSuccessPayload(
@@ -142,9 +223,11 @@ function createLinePayOneDollarAdminController(
         )
         const payload = await response.json().catch(() => null)
         if (!response.ok) {
+          const diagnostic = parseStartFailureDiagnostic(payload, environment)
           onSnapshot(Object.freeze({
             state: 'failed',
             error: requestError,
+            ...(diagnostic ? { diagnostic } : {}),
           }))
           return
         }
