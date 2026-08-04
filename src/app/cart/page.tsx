@@ -1,15 +1,15 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useCart } from '@/components/CartContext'
+import { getAuthAccessToken } from '@/lib/mockAuth'
 import {
   buildLinePayReturnMessage,
   getCartLinePayButtonState,
   getLinePayCartCheckoutErrorMessage,
   startLinePayCartCheckout,
-  type CartLinePayCreateProductOrderInput,
-  type CartLinePayRequestBody,
+  type CartLinePayStartBody,
   type CartLinePayReturnMessage,
 } from './linePayCheckout'
 import {
@@ -114,6 +114,11 @@ export default function CartPage() {
   const [linePayReturnMessage, setLinePayReturnMessage] = useState<CartLinePayReturnMessage>(() =>
     buildLinePayReturnMessage(null),
   )
+  const linePayCheckoutPendingRef = useRef(false)
+  const linePayAttemptRef = useRef<{
+    fingerprint: string
+    idempotencyKey: string
+  } | null>(null)
 
   const formattedTotal = useMemo(() => `NT$${totalAmount.toLocaleString('zh-TW')}`, [totalAmount])
   const hasSpiritualProduct = items.some((item) => item.type === 'spiritual_product')
@@ -250,17 +255,32 @@ export default function CartPage() {
   }
 
   const handleLinePayCheckoutClick = async () => {
-    if (isCheckoutPending) return
+    if (linePayCheckoutPendingRef.current || isCheckoutPending) return
 
     const shippingInfo = getValidatedShippingInfo()
     if (!shippingInfo) return
 
     const productItems = items.filter((item) => item.type === 'spiritual_product')
+    const fingerprint = JSON.stringify({
+      items: productItems.map((item) => ({ id: item.id, quantity: item.quantity })),
+      shippingInfo,
+    })
+    if (linePayAttemptRef.current?.fingerprint !== fingerprint) {
+      linePayAttemptRef.current = {
+        fingerprint,
+        idempotencyKey: `cart-line-pay:${crypto.randomUUID()}`,
+      }
+    }
+
+    linePayCheckoutPendingRef.current = true
     setIsLinePayCheckingOut(true)
     setCheckoutError('')
 
+    const accessToken = await getAuthAccessToken().catch(() => null)
+
     const result = await startLinePayCartCheckout({
       cartItems: productItems,
+      idempotencyKey: linePayAttemptRef.current.idempotencyKey,
       customerInfo: {
         customerName: shippingInfo.recipientName,
         customerPhone: shippingInfo.recipientPhone,
@@ -270,45 +290,22 @@ export default function CartPage() {
         address: `${shippingInfo.city}${shippingInfo.district}${shippingInfo.address}`,
         note: shippingInfo.note,
       },
-      createProductOrder: async (input: CartLinePayCreateProductOrderInput) => {
-        const response = await fetch('/api/product-orders/create', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            ...input,
-            paymentMethod: 'line_pay',
-          }),
-        })
-        const data = await response.json().catch(() => null)
-
-        if (!response.ok || !data || data.ok !== true) {
-          throw new Error('line_pay_create_order_failed')
+      startLinePayPayment: async (body: CartLinePayStartBody) => {
+        if (!accessToken) {
+          return { ok: false, error: 'line_pay_login_required' }
         }
 
-        return {
-          ...data,
-          productOrderId: data.productOrderId ?? data.orderId,
-        }
-      },
-      requestLinePayPayment: async (body: CartLinePayRequestBody) => {
         const response = await fetch('/api/product-orders/line-pay/request', {
           method: 'POST',
           headers: {
+            Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            productOrderId: body.productOrderId,
-          }),
+          body: JSON.stringify(body),
         })
         const data = await response.json().catch(() => null)
 
-        if (!response.ok || !data || data.ok !== true) {
-          throw new Error('line_pay_request_failed')
-        }
-
-        return data
+        return data ?? { ok: false, error: 'line_pay_request_failed' }
       },
       redirectToPaymentUrl: (paymentUrlWeb) => {
         window.location.assign(paymentUrlWeb)
@@ -317,6 +314,7 @@ export default function CartPage() {
 
     if (!result.ok) {
       setCheckoutError(getLinePayCartCheckoutErrorMessage(result.error))
+      linePayCheckoutPendingRef.current = false
       setIsLinePayCheckingOut(false)
     }
   }

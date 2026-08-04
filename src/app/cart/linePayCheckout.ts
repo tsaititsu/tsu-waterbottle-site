@@ -60,11 +60,34 @@ export type CartLinePayRequestBody = {
   productOrderId: string
 }
 
+export type CartLinePayStartBody = {
+  idempotencyKey: string
+  customerInfo: {
+    customerName: string
+    customerPhone: string
+    customerEmail: string | null
+    recipientName: string
+    recipientPhone: string
+    recipientEmail: string | null
+    postalCode: string | null
+    address: string
+    note: string | null
+  }
+  items: Array<{
+    productSlug: string
+    quantity: number
+  }>
+}
+
 export type StartLinePayCartCheckoutInput = {
   cartItems: CartLinePayCheckoutItem[]
   customerInfo: CartLinePayCustomerInfo
-  createProductOrder: (input: CartLinePayCreateProductOrderInput) => Promise<unknown>
-  requestLinePayPayment: (body: CartLinePayRequestBody) => Promise<unknown>
+  idempotencyKey?: string
+  startLinePayPayment?: (body: CartLinePayStartBody) => Promise<unknown>
+  /** @deprecated Compatibility seam for tests predating atomic checkout. */
+  createProductOrder?: (input: CartLinePayCreateProductOrderInput) => Promise<unknown>
+  /** @deprecated Compatibility seam for tests predating atomic checkout. */
+  requestLinePayPayment?: (body: CartLinePayRequestBody) => Promise<unknown>
   redirectToPaymentUrl: (paymentUrlWeb: string) => Promise<void> | void
 }
 
@@ -87,6 +110,7 @@ export type StartLinePayCartCheckoutResult =
         | 'line_pay_create_order_failed'
         | 'line_pay_product_order_id_missing'
         | 'line_pay_request_failed'
+        | 'line_pay_login_required'
         | 'line_pay_payment_url_missing'
         | 'line_pay_redirect_failed'
     }
@@ -239,6 +263,8 @@ export function getLinePayCartCheckoutErrorMessage(error: StartLinePayCartChecko
       return '商品訂單資料不完整，請稍後再試。'
     case 'line_pay_request_failed':
       return 'LINE Pay 付款資料建立失敗，請稍後再試。'
+    case 'line_pay_login_required':
+      return '請先登入會員，再使用 LINE Pay 付款。'
     case 'line_pay_payment_url_missing':
       return 'LINE Pay 付款連結建立失敗，請稍後再試。'
     case 'line_pay_redirect_failed':
@@ -249,6 +275,8 @@ export function getLinePayCartCheckoutErrorMessage(error: StartLinePayCartChecko
 export async function startLinePayCartCheckout({
   cartItems,
   customerInfo,
+  idempotencyKey,
+  startLinePayPayment,
   createProductOrder,
   requestLinePayPayment,
   redirectToPaymentUrl,
@@ -267,6 +295,92 @@ export async function startLinePayCartCheckout({
       ok: false,
       provider: 'line_pay',
       error: 'line_pay_customer_info_missing',
+    }
+  }
+
+  if (startLinePayPayment) {
+    if (!idempotencyKey || idempotencyKey.trim().length < 16) {
+      return {
+        ok: false,
+        provider: 'line_pay',
+        error: 'line_pay_request_failed',
+      }
+    }
+
+    let linePayResponse: unknown
+    try {
+      linePayResponse = await startLinePayPayment({
+        idempotencyKey,
+        customerInfo: {
+          customerName: createOrderInput.customerName,
+          customerPhone: createOrderInput.customerPhone,
+          customerEmail: createOrderInput.customerEmail,
+          recipientName: createOrderInput.shippingInfo.recipientName,
+          recipientPhone: createOrderInput.shippingInfo.recipientPhone,
+          recipientEmail: createOrderInput.shippingInfo.recipientEmail,
+          postalCode: createOrderInput.shippingInfo.postalCode,
+          address: createOrderInput.shippingInfo.address,
+          note: createOrderInput.note,
+        },
+        items: createOrderInput.items,
+      })
+    } catch {
+      return {
+        ok: false,
+        provider: 'line_pay',
+        error: 'line_pay_request_failed',
+      }
+    }
+
+    if (isRecord(linePayResponse) && linePayResponse.ok === false) {
+      return {
+        ok: false,
+        provider: 'line_pay',
+        error:
+          linePayResponse.error === 'line_pay_login_required'
+            ? 'line_pay_login_required'
+            : 'line_pay_request_failed',
+      }
+    }
+
+    const paymentUrl = isRecord(linePayResponse)
+      ? linePayResponse.paymentUrl
+      : null
+    const paymentUrlWeb = getStringField(paymentUrl, 'web')
+    if (!paymentUrlWeb) {
+      return {
+        ok: false,
+        provider: 'line_pay',
+        error: 'line_pay_payment_url_missing',
+      }
+    }
+
+    try {
+      await redirectToPaymentUrl(paymentUrlWeb)
+    } catch {
+      return {
+        ok: false,
+        provider: 'line_pay',
+        error: 'line_pay_redirect_failed',
+      }
+    }
+
+    return {
+      ok: true,
+      provider: 'line_pay',
+      productOrderId: '',
+      paymentId: null,
+      orderId: null,
+      transactionId: null,
+      paymentUrlWeb,
+    }
+  }
+
+  if (!createProductOrder || !requestLinePayPayment) {
+    return {
+      ok: false,
+      provider: 'line_pay',
+      error: 'line_pay_request_failed',
     }
   }
 

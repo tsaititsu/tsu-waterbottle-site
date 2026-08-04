@@ -13,6 +13,7 @@ import {
   type CartLinePayCreateProductOrderInput,
   type CartLinePayCustomerInfo,
   type CartLinePayRequestBody,
+  type CartLinePayStartBody,
 } from './linePayCheckout'
 
 function test(name: string, fn: () => void) {
@@ -134,12 +135,14 @@ test('cart page routes LINE Pay checkout through the existing request endpoint',
   assert.equal(readLinePayCheckoutSource().includes('/api/payments/newebpay/create'), false)
 })
 
-test('cart page creates a line_pay product order before requesting payment', () => {
+test('cart page sends one atomic LINE Pay checkout request', () => {
   const source = readCartPageSource()
 
-  assert.equal(source.includes("fetch('/api/product-orders/create'"), true)
   assert.equal(source.includes("fetch('/api/product-orders/line-pay/request'"), true)
-  assert.equal(source.includes("paymentMethod: 'line_pay'"), true)
+  assert.equal(source.includes("paymentMethod: 'line_pay'"), false)
+  assert.equal(source.includes('startLinePayPayment'), true)
+  assert.equal(source.includes('idempotencyKey'), true)
+  assert.equal(source.includes('getAuthAccessToken()'), true)
 })
 
 test('cart page redirects only through the payment URL supplied to the checkout adapter', () => {
@@ -152,16 +155,18 @@ test('cart page redirects only through the payment URL supplied to the checkout 
 test('cart page keeps an independent LINE Pay checkout loading guard', () => {
   const source = readCartPageSource()
 
-  assert.equal(source.includes('if (isCheckoutPending) return'), true)
+  assert.equal(source.includes('linePayCheckoutPendingRef.current || isCheckoutPending'), true)
+  assert.equal(source.includes('linePayCheckoutPendingRef.current'), true)
   assert.equal(source.includes('setIsLinePayCheckingOut(true)'), true)
   assert.equal(source.includes('setIsLinePayCheckingOut(false)'), true)
 })
 
-test('cart page sends only the product order id to the LINE Pay request endpoint', () => {
+test('cart page authenticates and sends the atomic checkout body', () => {
   const source = readCartPageSource()
 
-  assert.equal(source.includes('productOrderId: body.productOrderId'), true)
-  assert.equal(source.includes("body: JSON.stringify({\n            productOrderId: body.productOrderId,"), true)
+  assert.equal(source.includes('Authorization: `Bearer ${accessToken}`'), true)
+  assert.equal(source.includes('body: JSON.stringify(body)'), true)
+  assert.equal(source.includes('productOrderId: body.productOrderId'), false)
 })
 
 test('cart page reads linePay query for return message only', () => {
@@ -228,6 +233,37 @@ test('checkout errors map to friendly messages', () => {
   assert.equal(getLinePayCartCheckoutErrorMessage('line_pay_create_order_failed'), '商品訂單建立失敗，請稍後再試。')
   assert.equal(getLinePayCartCheckoutErrorMessage('line_pay_request_failed'), 'LINE Pay 付款資料建立失敗，請稍後再試。')
   assert.equal(getLinePayCartCheckoutErrorMessage('line_pay_payment_url_missing'), 'LINE Pay 付款連結建立失敗，請稍後再試。')
+  assert.equal(getLinePayCartCheckoutErrorMessage('line_pay_login_required'), '請先登入會員，再使用 LINE Pay 付款。')
+})
+
+test('atomic checkout sends cart data once and redirects to the server-approved URL', async () => {
+  const startCalls: CartLinePayStartBody[] = []
+  const redirects: string[] = []
+  const result = await startLinePayCartCheckout({
+    cartItems,
+    customerInfo,
+    idempotencyKey: 'cart-line-pay:attempt-0001',
+    startLinePayPayment: async (body) => {
+      startCalls.push(body)
+      return {
+        ok: true,
+        paymentUrl: {
+          web: 'https://sandbox-web-pay.line.me/web/payment/wait?id=synthetic',
+        },
+      }
+    },
+    redirectToPaymentUrl: redirectOk(redirects),
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(startCalls.length, 1)
+  assert.deepEqual(startCalls[0].items, [
+    { productSlug: 'ren-yuan-fu', quantity: 1 },
+  ])
+  assert.equal('amount' in startCalls[0].items[0], false)
+  assert.deepEqual(redirects, [
+    'https://sandbox-web-pay.line.me/web/payment/wait?id=synthetic',
+  ])
 })
 
 test('no linePay query hides return message', () => {
