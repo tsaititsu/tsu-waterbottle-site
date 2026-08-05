@@ -5,9 +5,7 @@ import type {
   DivinationReadingSession,
 } from '@/lib/divination/types'
 
-export type InMemoryDivinationReadingSession = DivinationReadingSession & {
-  autoMockPaid?: boolean
-}
+export type InMemoryDivinationReadingSession = DivinationReadingSession
 
 let localUserId = ''
 let readingSession: InMemoryDivinationReadingSession | null = null

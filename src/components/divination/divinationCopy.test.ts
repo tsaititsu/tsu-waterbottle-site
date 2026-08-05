@@ -58,6 +58,61 @@ test('divination entry uses current production copy instead of legacy availabili
   assert.equal(text.includes('DIVINATION_READING_PRICE_LABEL'), true)
 })
 
+test('automatic draw starts before payment and never prepays from the question form', () => {
+  const source = readSource('src/components/divination/DivinationQuestionForm.tsx')
+
+  assert.equal(source.includes("handlePreviewDraw('auto')"), true)
+  assert.equal(source.includes('mockPaid'), false)
+  assert.equal(source.includes('自動抽牌會在付款後'), false)
+  assert.equal(source.includes('支付 {DIVINATION_READING_PRICE_LABEL} 開始解讀'), false)
+})
+
+test('manual and automatic payment require the AI divination consent after a card is drawn', () => {
+  const source = readSource('src/components/divination/DivinationDrawPreview.tsx')
+  const consentUsages = source.match(/<DivinationConsentNotice/g) ?? []
+  const checkoutStart = source.indexOf('async function handleNewebPayDivinationCheckout')
+  const checkoutEnd = source.indexOf('\n  async function confirmCard', checkoutStart)
+  const checkoutSource = source.slice(checkoutStart, checkoutEnd)
+  const mockPaymentStart = source.indexOf('async function handleMockPaidInterpret')
+  const mockPaymentEnd = source.indexOf('\n  function returnToDivinationStart', mockPaymentStart)
+  const mockPaymentSource = source.slice(mockPaymentStart, mockPaymentEnd)
+
+  assert.equal(consentUsages.length, 2)
+  assert.equal(source.includes('AI 占卜解讀同意確認'), true)
+  assert.equal(source.includes('紫微牌卡 AI 解讀｜'), true)
+  assert.equal(source.includes('《AI 占卜解讀服務說明》、《付款與退款規則》及《服務條款》'), true)
+  assert.equal(source.includes('此服務為付款後產生占卜解讀結果之數位內容服務'), true)
+  assert.equal(source.includes('正式網站目前作為占卜入口與流程展示'), false)
+  assert.equal(source.includes('目前正式網站僅作為占卜入口與流程展示'), false)
+  assert.equal(checkoutSource.includes('if (!hasAcceptedTerms)'), true)
+  assert.equal(mockPaymentSource.includes('if (!hasAcceptedTerms)'), true)
+})
+
+test('automatic draw never carries an advance-payment bypass into the draw page', () => {
+  const flowSource = [
+    'src/components/divination/DivinationLocalPreview.tsx',
+    'src/components/divination/DivinationDrawStepPage.tsx',
+    'src/components/divination/DivinationDrawPreview.tsx',
+    'src/lib/divination/readingSessionMemory.ts',
+  ].map((path) => readSource(path)).join('\n')
+
+  assert.equal(flowSource.includes('autoMockPaid'), false)
+})
+
+test('automatic draw reveals the drawn card before showing payment', () => {
+  const source = readSource('src/components/divination/DivinationDrawPreview.tsx')
+  const autoPaymentStart = source.indexOf(
+    'isAutoMode && pendingCard && pendingPosition && !hasResultPreview && paymentRequired',
+  )
+  const autoPaymentEnd = source.indexOf('\n          {confirmedCard && confirmedPosition', autoPaymentStart)
+  const autoPaymentSource = source.slice(autoPaymentStart, autoPaymentEnd)
+
+  assert.equal(autoPaymentSource.includes('已為你抽出這張牌'), true)
+  assert.equal(autoPaymentSource.includes('pendingCardImage'), true)
+  assert.equal(autoPaymentSource.includes('alt={pendingCard.name}'), true)
+  assert.equal(autoPaymentSource.includes('positionLabels[pendingPosition]'), true)
+})
+
 test('missing OpenAI server configuration returns generic maintenance copy', () => {
   const source = readSource('src/app/api/divination/interpret/route.ts')
 

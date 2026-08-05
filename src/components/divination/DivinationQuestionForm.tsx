@@ -10,7 +10,6 @@ type DivinationQuestionFormProps = {
   onQuestionSubmit?: (payload: {
     question: string
     mode: DrawMode
-    mockPaid?: boolean
   }) => void | Promise<void>
 }
 
@@ -23,7 +22,7 @@ export function DivinationQuestionForm({ disabled = false, onQuestionSubmit }: D
   const [messageType, setMessageType] = useState<'error' | 'info'>('info')
   const [selectedMode, setSelectedMode] = useState<DrawMode | null>(null)
 
-  const handlePreviewDraw = (mode: DrawMode, options?: { mockPaid?: boolean }) => {
+  const handlePreviewDraw = (mode: DrawMode) => {
     const trimmedQuestion = question.trim()
 
     if (!trimmedQuestion) {
@@ -35,7 +34,6 @@ export function DivinationQuestionForm({ disabled = false, onQuestionSubmit }: D
     onQuestionSubmit?.({
       question: trimmedQuestion,
       mode,
-      mockPaid: options?.mockPaid,
     })
     setMessageType('info')
     setMessage(mode === 'auto' ? '正在建立占卜紀錄並前往自動抽牌頁。' : '已收到問題，正在確認是否可以進入抽牌流程。')
@@ -94,8 +92,7 @@ export function DivinationQuestionForm({ disabled = false, onQuestionSubmit }: D
               type="button"
               onClick={() => {
                 setSelectedMode('auto')
-                setMessageType('info')
-                setMessage('已選擇自動抽牌。請按下方按鈕完成付款後開始解讀。')
+                handlePreviewDraw('auto')
               }}
               className={`focus-ring min-h-12 rounded-xl px-6 py-3 text-sm font-semibold transition ${
                 selectedMode === 'auto'
@@ -111,22 +108,6 @@ export function DivinationQuestionForm({ disabled = false, onQuestionSubmit }: D
             <p>自動抽牌：由系統為你隨機抽牌。</p>
           </div>
         </div>
-
-        {selectedMode === 'auto' ? (
-          <div className="mt-5 rounded-2xl border border-purple-100 bg-softPurple p-4">
-            <p className="text-sm leading-7 text-textMuted">
-              自動抽牌會在付款後建立占卜紀錄，接著自動洗牌、抽牌並開始 AI 解讀。
-            </p>
-            <button
-              disabled={disabled}
-              type="button"
-              onClick={() => handlePreviewDraw('auto', { mockPaid: true })}
-              className="mt-3 rounded-full bg-deepPurple px-5 py-3 text-sm font-semibold text-white transition hover:bg-purpleMain"
-            >
-              支付 {DIVINATION_READING_PRICE_LABEL} 開始解讀
-            </button>
-          </div>
-        ) : null}
 
         {message ? (
           <p

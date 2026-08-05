@@ -43,7 +43,6 @@ import { useEffect, useRef, useState } from "react"
 
 type DivinationDrawPreviewProps = {
   readingSession?: DivinationReadingSession | null
-  autoMockPaid?: boolean
 }
 
 type PaymentRequiredState = {
@@ -249,8 +248,13 @@ function DivinationConsentNotice({
   onCheckedChange: (checked: boolean) => void
 }) {
   return (
-    <div className="rounded-2xl border border-borderSoft bg-white p-4">
-      <details className="group">
+    <div className="grid gap-3 rounded-xl border border-borderSoft bg-softPurple/55 p-4">
+      <div>
+        <p className="font-serifTC text-lg font-semibold text-deepPurple">AI 占卜解讀同意確認</p>
+        <p className="mt-1 text-sm text-textMuted">紫微牌卡 AI 解讀｜{DIVINATION_READING_PRICE_LABEL} / 次</p>
+      </div>
+
+      <details className="group rounded-xl border border-borderSoft bg-white p-4">
         <summary className="cursor-pointer list-none">
           <div className="flex items-start gap-3 text-sm leading-7 text-textMuted">
             <input
@@ -261,7 +265,7 @@ function DivinationConsentNotice({
               type="checkbox"
             />
             <span>
-              我已詳細閱讀並同意《AI 占卜服務說明》、《付費解讀規則》及《服務條款》，並了解占卜前相關注意事項。
+              我已詳細閱讀並同意《AI 占卜解讀服務說明》、《付款與退款規則》及《服務條款》，並了解此服務為付款後產生占卜解讀結果之數位內容服務。
               <span className="ml-1 font-semibold text-darkGold underline underline-offset-4 group-open:hidden">
                 點我查看
               </span>
@@ -274,20 +278,23 @@ function DivinationConsentNotice({
 
         <div className="mt-4 max-h-72 space-y-5 overflow-y-auto rounded-lg bg-softPurple/60 p-4 text-sm leading-7 text-textMuted">
           <div>
-            <p className="font-semibold text-deepPurple">AI 占卜服務說明</p>
+            <p className="font-semibold text-deepPurple">AI 占卜解讀服務說明</p>
             <ul className="mt-2 grid gap-1">
-              <li>占卜會在水瓶先生紫微牌卡系統中完成。</li>
-              <li>正式網站目前作為占卜入口與流程展示。</li>
-              <li>抽牌、解讀、紀錄與問題回報，會以占卜流程內顯示為準。</li>
+              <li>服務名稱：紫微牌卡 AI 解讀</li>
+              <li>價格：{DIVINATION_READING_PRICE_LABEL} / 次</li>
+              <li>服務內容：依照使用者填寫的問題及抽出的紫微牌卡產生 AI 解讀。</li>
+              <li>交付方式：付款後於網站產生本次占卜解讀結果。</li>
             </ul>
           </div>
 
           <div>
-            <p className="font-semibold text-deepPurple">付費解讀規則</p>
+            <p className="font-semibold text-deepPurple">付款與退款規則</p>
             <ul className="mt-2 grid gap-2">
-              <li>抽牌本身不收費；當你按下「開始解讀」並產生 AI 解讀時，本次服務費用為 {DIVINATION_READING_PRICE_LABEL}。</li>
-              <li>完整 AI 解讀需完成付款確認後才會產生。</li>
-              <li>若付款或解讀服務暫時無法使用，請稍後再試或聯繫客服協助。</li>
+              <li>本服務為數位內容服務；抽牌本身不收費，完整 AI 解讀需完成付款後才會產生。</li>
+              <li>付款完成並產生解讀結果後，因服務已開始提供，原則上不接受取消或退款。</li>
+              <li>若因系統異常導致付款成功但沒有產生解讀結果，可聯繫水瓶先生官方 LINE 協助處理。</li>
+              <li>若使用者填錯占卜問題，或付款前未確認抽出的牌卡，導致解讀結果不符合期待，恕不提供退款。</li>
+              <li>使用者送出付款前，應自行確認占卜問題與抽出的牌卡。</li>
             </ul>
           </div>
 
@@ -301,26 +308,13 @@ function DivinationConsentNotice({
               <li>若有占卜資料、付款或系統問題，可聯繫水瓶先生官方 LINE。</li>
             </ul>
           </div>
-
-          <div>
-            <p className="font-semibold text-deepPurple">補充說明</p>
-            <ul className="mt-2 grid gap-2">
-              <li>目前正式網站僅作為占卜入口與流程展示，不在正式網站存放舊占卜問題、解答、會員點數或 LINE Token。</li>
-                <li>若遇到登入、付款、占卜紀錄相關問題，仍以原占卜系統內處理為主。</li>
-              <li>目前不搬舊會員資料、不合併點數、不碰原扣點流程。</li>
-            </ul>
-          </div>
         </div>
       </details>
-
-      <p className="mt-3 text-xs leading-6 text-textMuted">
-        勾選後即可進行付費解讀；本次 AI 解讀費用為 {DIVINATION_READING_PRICE_LABEL}。
-      </p>
     </div>
   )
 }
 
-export function DivinationDrawPreview({ readingSession = null, autoMockPaid = false }: DivinationDrawPreviewProps) {
+export function DivinationDrawPreview({ readingSession = null }: DivinationDrawPreviewProps) {
   const router = useRouter()
   const [started, setStarted] = useState(false)
   const [shuffling, setShuffling] = useState(false)
@@ -500,10 +494,10 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
       setStarted(true)
       setPendingIndex(restoredCardIndex)
       setPendingPosition(restoredPosition)
-      setHasAcceptedTerms(isManualMode)
+      setHasAcceptedTerms(false)
       setMessage(pendingMessage)
     }
-  }, [readingSession?.readingId, readingSession?.cardId, readingSession?.position, trimmedQuestion, drawMode, isManualMode])
+  }, [readingSession?.readingId, readingSession?.cardId, readingSession?.position, trimmedQuestion, drawMode])
 
   function startShuffle() {
     if (!canDraw || !isManualMode) {
@@ -636,10 +630,10 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
       setPendingIndex(cardIndex)
       setPendingPosition(autoPosition)
       setShuffling(false)
-      setMessage("已為你抽出牌卡，正在產生解讀……")
+      setMessage("已為你抽出牌卡，正在確認解讀資格……")
 
       if (autoCard) {
-        void interpretCard(autoCard, autoPosition, { auto: true, mockPaid: autoMockPaid && !isPersistedReading })
+        void interpretCard(autoCard, autoPosition, { auto: true })
       }
     }, drawDelayMs)
   }
@@ -760,6 +754,11 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
       return
     }
 
+    if (!hasAcceptedTerms) {
+      setErrorMessage("請先閱讀並勾選同意 AI 占卜解讀服務說明、付款與退款規則及服務條款。")
+      return
+    }
+
     if (!readingId) {
       setErrorMessage("缺少占卜紀錄，請重新開始一筆占卜。")
       return
@@ -844,8 +843,8 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
       return
     }
 
-    if (isManualMode && !hasAcceptedTerms) {
-      setErrorMessage("請先閱讀並勾選同意 AI 占卜服務說明、付費解讀規則及服務條款。")
+    if (!hasAcceptedTerms) {
+      setErrorMessage("請先閱讀並勾選同意 AI 占卜解讀服務說明、付款與退款規則及服務條款。")
       return
     }
 
@@ -855,6 +854,11 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
   async function handleMockPaidInterpret() {
     if (!pendingCard || !pendingPosition) {
       setErrorMessage("請先選一張牌。")
+      return
+    }
+
+    if (!hasAcceptedTerms) {
+      setErrorMessage("請先閱讀並勾選同意 AI 占卜解讀服務說明、付款與退款規則及服務條款。")
       return
     }
 
@@ -1192,17 +1196,15 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                   </div>
                 </div>
               )}
-              {isManualMode ? (
-                <DivinationConsentNotice
-                  checked={hasAcceptedTerms}
-                  onCheckedChange={(checked) => {
-                    setHasAcceptedTerms(checked)
-                    if (checked) {
-                      setErrorMessage("")
-                    }
-                  }}
-                />
-              ) : null}
+              <DivinationConsentNotice
+                checked={hasAcceptedTerms}
+                onCheckedChange={(checked) => {
+                  setHasAcceptedTerms(checked)
+                  if (checked) {
+                    setErrorMessage("")
+                  }
+                }}
+              />
               {isManualMode && paymentRequired ? (
                 <p className="rounded-lg border border-darkGold/20 bg-lightGold/40 p-3 text-sm text-textDark">
                   {isPersistedReading
@@ -1217,7 +1219,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                     <button
                       type="button"
                       onClick={() => handleNewebPayDivinationCheckout()}
-                      disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled}
+                      disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled || !hasAcceptedTerms}
                       className="min-h-11 w-full rounded-full bg-deepPurple px-5 py-3 font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {isNewebPayCheckingOut
@@ -1230,7 +1232,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                       <button
                         type="button"
                         onClick={() => handleNewebPayDivinationCheckout({ adminOneDollarTest: true })}
-                        disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled}
+                        disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled || !hasAcceptedTerms}
                         className="min-h-11 w-full rounded-full border border-deepPurple bg-white px-5 py-3 font-semibold text-deepPurple transition hover:bg-softPurple disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         管理員 Apple Pay 測試付款 NT$1
@@ -1241,7 +1243,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                   <button
                     type="button"
                     onClick={confirmCard}
-                    disabled={isInterpreting || (isManualMode && !hasAcceptedTerms)}
+                    disabled={isInterpreting || !hasAcceptedTerms}
                     className="min-h-11 w-full rounded-full bg-deepPurple px-5 py-3 font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isInterpreting || isMockPaying
@@ -1267,18 +1269,51 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
 
           {isAutoMode && pendingCard && pendingPosition && !hasResultPreview && paymentRequired ? (
             <div className="grid w-full max-w-2xl gap-2 rounded-2xl border border-borderSoft bg-white p-4 text-textDark">
+              <div className="grid gap-4 rounded-2xl border border-borderSoft bg-softPurple/45 p-4 sm:grid-cols-[160px_1fr] sm:items-center">
+                {pendingCardImage ? (
+                  <div className="flex justify-center">
+                    <Image
+                      src={pendingCardImage}
+                      alt={pendingCard.name}
+                      width={360}
+                      height={560}
+                      className="w-full max-w-[160px] rounded-2xl border border-darkGold/50 object-cover shadow-sm"
+                    />
+                  </div>
+                ) : null}
+                <div className="grid gap-2 leading-7">
+                  <p className="text-lg font-semibold text-deepPurple">已為你抽出這張牌</p>
+                  <p>
+                    <span className="font-semibold text-deepPurple">牌卡：</span>
+                    {pendingCard.name}
+                  </p>
+                  <p>
+                    <span className="font-semibold text-deepPurple">正反位：</span>
+                    {positionLabels[pendingPosition]}
+                  </p>
+                </div>
+              </div>
               <p className="text-sm text-textMuted">
                 {isPersistedReading
                   ? `本次 AI 占卜解讀需 ${DIVINATION_READING_PRICE_LABEL}，請完成線上付款後再產生解讀。`
                   : DIVINATION_READING_PAYMENT_MESSAGE}
               </p>
+              <DivinationConsentNotice
+                checked={hasAcceptedTerms}
+                onCheckedChange={(checked) => {
+                  setHasAcceptedTerms(checked)
+                  if (checked) {
+                    setErrorMessage("")
+                  }
+                }}
+              />
               <LineInAppBrowserPaymentNotice visible={showLineInAppBrowserPaymentNotice} />
               {isPersistedReading ? (
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => handleNewebPayDivinationCheckout()}
-                    disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled}
+                    disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled || !hasAcceptedTerms}
                     className="rounded-full bg-deepPurple px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isNewebPayCheckingOut
@@ -1291,7 +1326,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                     <button
                       type="button"
                       onClick={() => handleNewebPayDivinationCheckout({ adminOneDollarTest: true })}
-                      disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled}
+                      disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled || !hasAcceptedTerms}
                       className="rounded-full border border-deepPurple bg-white px-5 py-3 text-sm font-semibold text-deepPurple transition hover:bg-softPurple disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       管理員 Apple Pay 測試付款 NT$1
@@ -1302,7 +1337,7 @@ export function DivinationDrawPreview({ readingSession = null, autoMockPaid = fa
                 <button
                   type="button"
                   onClick={handleMockPaidInterpret}
-                  disabled={isInterpreting || isMockPaying}
+                  disabled={isInterpreting || isMockPaying || !hasAcceptedTerms}
                   className="justify-self-start rounded-full bg-deepPurple px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isInterpreting || isMockPaying

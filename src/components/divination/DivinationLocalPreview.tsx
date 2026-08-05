@@ -32,7 +32,6 @@ type DrawMode = DivinationDrawMode
 type QuestionSubmitPayload = {
   question: string
   mode: DrawMode
-  mockPaid?: boolean
 }
 
 type DivinationLocalPreviewProps = {
@@ -44,11 +43,8 @@ function getLocalUserId() {
   return getOrCreateDivinationLocalUserId()
 }
 
-function saveReadingSession(session: DivinationReadingSession, options?: { autoMockPaid?: boolean }) {
-  setDivinationReadingSession({
-    ...session,
-    autoMockPaid: options?.autoMockPaid === true,
-  })
+function saveReadingSession(session: DivinationReadingSession) {
+  setDivinationReadingSession(session)
 }
 
 function clearReadingSession() {
@@ -145,9 +141,7 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
 
           const readingSession = followUpContext ? { ...session, followUpContext } : session
 
-          saveReadingSession(readingSession, {
-            autoMockPaid: payload.mode === "auto" && payload.mockPaid === true && readingSession.persisted !== true,
-          })
+          saveReadingSession(readingSession)
           router.push("/ai-divination/draw")
         }
       }

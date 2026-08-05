@@ -427,7 +427,7 @@ test('reading creation takes a synchronous lock and disables every question subm
     /<DivinationQuestionForm[\s\S]*disabled=\{isCreatingReading\}[\s\S]*onQuestionSubmit=\{handleQuestionSubmit\}/,
   )
   assert.match(formSource, /disabled\?: boolean/)
-  assert.equal(occurrenceCount(formSource, /disabled=\{disabled\}/g), 3)
+  assert.equal(occurrenceCount(formSource, /disabled=\{disabled\}/g), 2)
 })
 
 test('context panel uses fixed grid rows and clamps dynamic follow-up text', () => {
