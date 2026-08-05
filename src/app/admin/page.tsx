@@ -3,8 +3,10 @@ import AdminPageHeader from '@/components/admin/AdminPageHeader'
 import AdminStatusBadge from '@/components/admin/AdminStatusBadge'
 import { getAdminModulesBySection } from '@/components/admin/adminModules'
 import LinePaySandboxE2ePanel from '@/components/admin/LinePaySandboxE2ePanel'
+import NewebPayOneDollarTestPanel from '@/components/admin/NewebPayOneDollarTestPanel'
 import { isLinePaySandboxE2eRouteEnabled } from '@/app/api/internal/line-pay/sandbox-e2e/start/handler'
 import { isLinePayProductionOneDollarRouteEnabled } from '@/app/api/internal/line-pay/production-one-dollar/start/handler'
+import { isNewebPayAdminOneDollarTestEnabled } from '@/app/api/payments/newebpay/test/start/handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,6 +15,8 @@ const toolModules = getAdminModulesBySection('tool')
 const unavailableModules = getAdminModulesBySection('unavailable')
 
 export default function AdminPage() {
+  const newebPayOneDollarEnabled =
+    isNewebPayAdminOneDollarTestEnabled(process.env)
   const sandboxE2eEnabled = isLinePaySandboxE2eRouteEnabled(process.env)
   const productionOneDollarEnabled =
     isLinePayProductionOneDollarRouteEnabled(process.env)
@@ -81,6 +85,7 @@ export default function AdminPage() {
         })}
       </section>
 
+      {newebPayOneDollarEnabled ? <NewebPayOneDollarTestPanel /> : null}
       {linePayTestEnvironment ? <LinePaySandboxE2ePanel environment={linePayTestEnvironment} /> : null}
 
       <section aria-labelledby="unavailable-modules" className="rounded-2xl border border-borderSoft bg-white p-5 shadow-soft md:p-6">

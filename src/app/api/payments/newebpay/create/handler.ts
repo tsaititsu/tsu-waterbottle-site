@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { isAdminEmail } from '../../../../../lib/auth/admin'
 import { ziweiCards } from '../../../../../lib/divination/cards'
 import {
   buildNewebPayApplePayTestContext,
@@ -428,6 +429,7 @@ export async function handleCreateNewebPayPaymentRequest(
   const paymentMode: NewebPayPaymentMode = body?.paymentMode ?? 'credit'
   const source = body?.source as NewebPayPaymentSource | undefined
   let applePayTestContext: NewebPayApplePayTestContext | null = null
+  let applePayTestRequester: DivinationOneDollarTestUser | null = null
 
   if (
     paymentMode === PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE &&
@@ -463,6 +465,28 @@ export async function handleCreateNewebPayPaymentRequest(
       applePayTestContext = buildNewebPayApplePayTestContext(env)
     } catch {
       return applePayTestDisabledResponse()
+    }
+
+    try {
+      applePayTestRequester = deps.getRequesterWithEmail
+        ? await deps.getRequesterWithEmail()
+        : null
+    } catch {
+      applePayTestRequester = null
+    }
+
+    if (!applePayTestRequester) {
+      return NextResponse.json(
+        { ok: false, error: 'unauthorized' },
+        { status: 401 },
+      )
+    }
+
+    if (!isAdminEmail(applePayTestRequester.email, env.ADMIN_EMAILS)) {
+      return NextResponse.json(
+        { ok: false, error: 'admin_required' },
+        { status: 403 },
+      )
     }
   }
 
@@ -845,7 +869,11 @@ export async function handleCreateNewebPayPaymentRequest(
         deps.createPendingPayment ?? (await import('../../../../../lib/supabase/payments')).createPendingPayment
       pendingPayment = await createPayment({
         provider: 'newebpay',
-        userId: aiChartReportPaymentUserId ?? divinationPaymentUserId,
+        userId:
+          aiChartReportPaymentUserId
+          ?? divinationPaymentUserId
+          ?? applePayTestRequester?.id
+          ?? null,
         itemType: pendingPaymentMetadata.itemType,
         itemId: pendingPaymentMetadata.itemId,
         itemName,

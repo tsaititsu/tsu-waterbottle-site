@@ -41,6 +41,7 @@ export const REACT_SERVER_TEST_FILES = Object.freeze([
   'src/app/api/payments/newebpay/create/divinationOneDollarTest.test.ts',
   'src/app/api/payments/newebpay/create/route.test.ts',
   'src/app/api/payments/newebpay/return/handler.test.ts',
+  'src/app/api/payments/newebpay/test/start/handler.test.ts',
   'src/app/api/product-orders/create/route.test.ts',
   'src/app/payment/newebpay/return/route.test.ts',
   'src/lib/ai-chart/reportCompletion.test.ts',
