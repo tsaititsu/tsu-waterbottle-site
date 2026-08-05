@@ -186,7 +186,8 @@ export async function handleServiceLinePayStart(input: {
   if (
     adminOneDollarTest
     && (
-      !authorization.isAdmin
+      source === 'course'
+      || !authorization.isAdmin
       || !isLinePayProductionOneDollarRouteEnabled(input.env, now)
     )
   ) {

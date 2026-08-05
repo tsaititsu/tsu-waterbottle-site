@@ -260,6 +260,27 @@ test('non-admin cannot request the entry NT$1 path and creates no payment aggreg
   assert.equal(deps.calls.executed.length, 0)
 })
 
+test('course checkout cannot opt into the entry NT$1 path', async () => {
+  const deps = dependencies({
+    now: () => new Date('2026-08-05T01:00:00.000Z'),
+  })
+  const response = await handleServiceLinePayStart({
+    request: request({
+      source: 'course',
+      sourceId: 'basic',
+      idempotencyKey: 'course-line-pay:basic',
+      adminOneDollarTest: true,
+    }),
+    env: oneDollarEnv,
+    dependencies: deps.value,
+  })
+
+  assert.equal(response.status, 404)
+  assert.equal(deps.calls.resolved.length, 0)
+  assert.equal(deps.calls.initialized.length, 0)
+  assert.equal(deps.calls.executed.length, 0)
+})
+
 test('admin ordinary checkout keeps the formal amount while the test window is enabled', async () => {
   const deps = dependencies({
     execute: async (input) => {
