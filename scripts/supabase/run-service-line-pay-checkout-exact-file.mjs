@@ -12,11 +12,14 @@ import {
   EXPECTED_MIGRATION_SHA256,
   EXPECTED_POSTFLIGHT_SHA256,
   EXPECTED_PREFLIGHT_SHA256,
+  EXPECTED_VERIFY_SHA256,
   MIGRATION_FILE,
   POSTFLIGHT_FILE,
   PREFLIGHT_FILE,
+  VERIFY_FILE,
   parseDeployOutput,
   parsePreflightOutput,
+  parseVerificationOutput,
 } from './validate-service-line-pay-checkout-production.mjs'
 
 function freeze(value) {
@@ -80,7 +83,36 @@ export const SERVICE_CHECKOUT_DATABASE_CONTRACT = Object.freeze({
   buildDeploySuccessAttestation: buildServiceCheckoutDeployAttestation,
 })
 
+export const SERVICE_CHECKOUT_VERIFICATION_CONTRACT = Object.freeze({
+  phaseFiles: Object.freeze({
+    preflight: VERIFY_FILE,
+  }),
+  successMessages: Object.freeze({
+    preflight: 'SERVICE_CHECKOUT_POSTFLIGHT_VERIFIED',
+  }),
+  fixedFiles: Object.freeze([
+    Object.freeze({
+      path: POSTFLIGHT_FILE,
+      sha256: EXPECTED_POSTFLIGHT_SHA256,
+    }),
+    Object.freeze({
+      path: VERIFY_FILE,
+      sha256: EXPECTED_VERIFY_SHA256,
+    }),
+  ]),
+  parsePreflightOutput: parseVerificationOutput,
+  parseDeployOutput,
+  buildDeploySuccessAttestation: buildServiceCheckoutDeployAttestation,
+})
+
 export function runServiceCheckoutDatabasePhase(phase, options = {}) {
+  if (phase === 'verify') {
+    return runFixedDatabasePhase(
+      'preflight',
+      SERVICE_CHECKOUT_VERIFICATION_CONTRACT,
+      options,
+    )
+  }
   return runFixedDatabasePhase(
     phase,
     SERVICE_CHECKOUT_DATABASE_CONTRACT,

@@ -96,16 +96,42 @@ begin
       v_private_function.oid,
       'EXECUTE'
     )
-    or exists (
-      select 1
-      from pg_catalog.pg_auth_members as membership
-      where membership.roleid =
-        pg_catalog.to_regrole('line_pay_payment_function_owner')::oid
-        and membership.member = (
-          select role.oid
-          from pg_catalog.pg_roles as role
-          where role.rolname = current_user
+    or not (
+      not exists (
+        select 1
+        from pg_catalog.pg_auth_members as membership
+        where membership.roleid =
+          pg_catalog.to_regrole('line_pay_payment_function_owner')::oid
+          or membership.member =
+            pg_catalog.to_regrole('line_pay_payment_function_owner')::oid
+      )
+      or (
+        (
+          select pg_catalog.count(*)
+          from pg_catalog.pg_auth_members as membership
+          where membership.roleid =
+            pg_catalog.to_regrole('line_pay_payment_function_owner')::oid
+            or membership.member =
+              pg_catalog.to_regrole('line_pay_payment_function_owner')::oid
+        ) = 1
+        and exists (
+          select 1
+          from pg_catalog.pg_auth_members as membership
+          join pg_catalog.pg_roles as grantor
+            on grantor.oid = membership.grantor
+          where membership.roleid =
+            pg_catalog.to_regrole('line_pay_payment_function_owner')::oid
+            and membership.member = (
+              select role.oid
+              from pg_catalog.pg_roles as role
+              where role.rolname = current_user
+            )
+            and grantor.rolsuper
+            and membership.admin_option
+            and not membership.inherit_option
+            and not membership.set_option
         )
+      )
     )
     or pg_catalog.strpos(
       pg_catalog.pg_get_functiondef(v_public_function.oid),

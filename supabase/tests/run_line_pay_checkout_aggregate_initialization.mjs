@@ -1160,6 +1160,64 @@ function testHostedNonSuperuserUpgrade() {
     initializationMigration,
     'hosted aggregate initialization migration',
   )
+  psqlFileAsInContainer(
+    hostedContainerName,
+    database,
+    executor,
+    serviceCheckoutPreflight,
+    'hosted service checkout preflight',
+  )
+  psqlFileAsInContainer(
+    hostedContainerName,
+    database,
+    executor,
+    serviceCheckoutMigration,
+    'hosted service checkout migration',
+  )
+  psqlFileAsInContainer(
+    hostedContainerName,
+    database,
+    executor,
+    serviceCheckoutPostflight,
+    'hosted service checkout postflight',
+  )
+  psqlAsInContainer(
+    hostedContainerName,
+    database,
+    clusterAdmin,
+    `
+      grant line_pay_payment_function_owner
+        to service_role with inherit true, set false;
+    `,
+    'add unsafe hosted runtime membership mutation',
+  )
+  const unsafeMembershipOutput = psqlAsInContainer(
+    hostedContainerName,
+    database,
+    executor,
+    readFileSync(serviceCheckoutPostflight, 'utf8'),
+    'hosted service checkout unsafe membership postflight',
+    true,
+  )
+  if (!unsafeMembershipOutput.includes(
+    'line_pay_service_checkout_postflight_contract_failed',
+  )) {
+    throw new Error('unsafe hosted runtime membership was not rejected')
+  }
+  psqlAsInContainer(
+    hostedContainerName,
+    database,
+    clusterAdmin,
+    'revoke line_pay_payment_function_owner from service_role;',
+    'remove unsafe hosted runtime membership mutation',
+  )
+  psqlFileAsInContainer(
+    hostedContainerName,
+    database,
+    executor,
+    serviceCheckoutPostflight,
+    'hosted service checkout postflight after membership cleanup',
+  )
 
   const hostedState = JSON.parse(
     psqlAsInContainer(
@@ -1946,6 +2004,14 @@ async function main() {
     if (!serviceDeployOutput.includes(marker)) {
       throw new Error(`service checkout deployment marker missing: ${marker}`)
     }
+  }
+  const serviceVerifyOutput = psqlWorkspaceFile(
+    'line_pay_service_checkout_deploy',
+    'supabase/deployment/service_line_pay_checkout_initialization_verify.sql',
+    'service checkout read-only verification',
+  )
+  if (serviceVerifyOutput !== 'line_pay_service_checkout_postflight_ready') {
+    throw new Error('service checkout read-only verification output invalid')
   }
   psqlFile(
     'line_pay_service_checkout_deploy',

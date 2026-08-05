@@ -80,10 +80,19 @@ test('workflow context requires the exact authorized main commit', async () => {
   }))
 })
 
-test('runner accepts only fixed preflight and deploy phases', async () => {
+test('runner separates fixed deployment phases from read-only verification', async () => {
   const { validator, runner } = await loadDeploymentModules()
-  const { DEPLOY_FILE, MIGRATION_FILE, POSTFLIGHT_FILE, PREFLIGHT_FILE } = validator
-  const { SERVICE_CHECKOUT_DATABASE_CONTRACT } = runner
+  const {
+    DEPLOY_FILE,
+    MIGRATION_FILE,
+    POSTFLIGHT_FILE,
+    PREFLIGHT_FILE,
+    VERIFY_FILE,
+  } = validator
+  const {
+    SERVICE_CHECKOUT_DATABASE_CONTRACT,
+    SERVICE_CHECKOUT_VERIFICATION_CONTRACT,
+  } = runner
   assert.deepEqual(SERVICE_CHECKOUT_DATABASE_CONTRACT.phaseFiles, {
     preflight: PREFLIGHT_FILE,
     deploy: DEPLOY_FILE,
@@ -94,6 +103,15 @@ test('runner accepts only fixed preflight and deploy phases', async () => {
     ),
     [MIGRATION_FILE, PREFLIGHT_FILE, POSTFLIGHT_FILE, DEPLOY_FILE],
   )
+  assert.deepEqual(SERVICE_CHECKOUT_VERIFICATION_CONTRACT.phaseFiles, {
+    preflight: VERIFY_FILE,
+  })
+  assert.deepEqual(
+    SERVICE_CHECKOUT_VERIFICATION_CONTRACT.fixedFiles.map(
+      (file: { path: string }) => file.path,
+    ),
+    [POSTFLIGHT_FILE, VERIFY_FILE],
+  )
 })
 
 test('fixed files and bounded output parsers fail closed', async () => {
@@ -101,6 +119,7 @@ test('fixed files and bounded output parsers fail closed', async () => {
   const {
     parseDeployOutput,
     parsePreflightOutput,
+    parseVerificationOutput,
     validateSource,
   } = validator
   assert.equal(validateSource(root), true)
@@ -114,6 +133,10 @@ test('fixed files and bounded output parsers fail closed', async () => {
     ),
     { status: 'postflight_ready' },
   )
+  assert.deepEqual(
+    parseVerificationOutput('line_pay_service_checkout_postflight_ready\n'),
+    { status: 'postflight_ready' },
+  )
   assert.throws(() => parsePreflightOutput('unexpected'))
   assert.throws(() => parseDeployOutput(
     'line_pay_service_checkout_postflight_ready\nline_pay_service_checkout_preflight_ready',
@@ -121,14 +144,18 @@ test('fixed files and bounded output parsers fail closed', async () => {
   assert.throws(() => parseDeployOutput(
     'line_pay_service_checkout_preflight_ready\nline_pay_service_checkout_postflight_ready\nsecret=value',
   ))
+  assert.throws(() => parseVerificationOutput(
+    'line_pay_service_checkout_postflight_ready\nunexpected',
+  ))
 })
 
 test('SQL channel is read-only before one exact Migration and exact postflight', async () => {
   const { validator } = await loadDeploymentModules()
-  const { DEPLOY_FILE, POSTFLIGHT_FILE, PREFLIGHT_FILE } = validator
+  const { DEPLOY_FILE, POSTFLIGHT_FILE, PREFLIGHT_FILE, VERIFY_FILE } = validator
   const preflight = read(PREFLIGHT_FILE)
   const postflight = read(POSTFLIGHT_FILE)
   const deploy = read(DEPLOY_FILE)
+  const verify = read(VERIFY_FILE)
 
   assert.match(preflight, /line_pay_service_checkout_preflight_ready/u)
   assert.doesNotMatch(preflight, /\b(?:insert|update|delete|alter|create|drop|grant|revoke|truncate)\b/iu)
@@ -141,12 +168,17 @@ test('SQL channel is read-only before one exact Migration and exact postflight',
   assert.match(deploy, /LINE_PAY_DEPLOY_MIGRATION_STARTED/u)
   assert.match(deploy, /LINE_PAY_DEPLOY_MIGRATION_COMMITTED/u)
   assert.match(deploy, /LINE_PAY_DEPLOY_POSTFLIGHT_COMMITTED/u)
+  assert.match(verify, /BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY/iu)
+  assert.match(verify, /\\ir service_line_pay_checkout_initialization_postflight[.]sql/u)
+  assert.match(verify, /ROLLBACK/u)
+  assert.doesNotMatch(verify, /\b(?:insert|update|delete|alter|create|drop|grant|revoke|truncate)\b/iu)
 })
 
 test('workflow is manual-only, protected, and never exposes a secret input', async () => {
   const { validator } = await loadDeploymentModules()
-  const { WORKFLOW_FILE } = validator
+  const { VERIFY_WORKFLOW_FILE, WORKFLOW_FILE } = validator
   const workflow = read(WORKFLOW_FILE)
+  const verifyWorkflow = read(VERIFY_WORKFLOW_FILE)
   assert.match(workflow, /^on:\n  workflow_dispatch:\n/mu)
   assert.doesNotMatch(workflow, /\b(?:push|pull_request):/u)
   assert.match(workflow, /environment:\n      name: supabase-production/u)
@@ -154,4 +186,38 @@ test('workflow is manual-only, protected, and never exposes a secret input', asy
   assert.doesNotMatch(workflow, /type:\s*string[\s\S]{0,120}(?:database_url|secret|token|password)/iu)
   assert.match(workflow, /run-service-line-pay-checkout-exact-file\.mjs preflight/u)
   assert.match(workflow, /run-service-line-pay-checkout-exact-file\.mjs deploy/u)
+  assert.match(verifyWorkflow, /^on:\n  workflow_dispatch:\n/mu)
+  assert.doesNotMatch(verifyWorkflow, /\b(?:push|pull_request):/u)
+  assert.match(verifyWorkflow, /environment:\n      name: supabase-production/u)
+  assert.match(verifyWorkflow, /SUPABASE_PRODUCTION_DB_URL: \$\{\{ secrets\.SUPABASE_PRODUCTION_DB_URL \}\}/u)
+  assert.doesNotMatch(verifyWorkflow, /type:\s*string[\s\S]{0,120}(?:database_url|secret|token|password)/iu)
+  assert.match(verifyWorkflow, /run-service-line-pay-checkout-exact-file\.mjs verify/u)
+})
+
+test('read-only verification context requires one exact main commit', async () => {
+  const { validator } = await loadDeploymentModules()
+  const {
+    EXPECTED_PROJECT_REF,
+    EXPECTED_VERIFY_CONFIRMATION,
+    validateVerificationWorkflowContext,
+  } = validator
+  const commit = 'c'.repeat(40)
+  assert.doesNotThrow(() => validateVerificationWorkflowContext({
+    GITHUB_REPOSITORY: 'tsaititsu/tsu-waterbottle-site',
+    GITHUB_EVENT_NAME: 'workflow_dispatch',
+    GITHUB_REF: 'refs/heads/main',
+    GITHUB_SHA: commit,
+    AUTHORIZED_COMMIT: commit,
+    PROJECT_REF_INPUT: EXPECTED_PROJECT_REF,
+    VERIFY_CONFIRMATION: EXPECTED_VERIFY_CONFIRMATION,
+  }))
+  assert.throws(() => validateVerificationWorkflowContext({
+    GITHUB_REPOSITORY: 'tsaititsu/tsu-waterbottle-site',
+    GITHUB_EVENT_NAME: 'workflow_dispatch',
+    GITHUB_REF: 'refs/heads/main',
+    GITHUB_SHA: commit,
+    AUTHORIZED_COMMIT: 'd'.repeat(40),
+    PROJECT_REF_INPUT: EXPECTED_PROJECT_REF,
+    VERIFY_CONFIRMATION: EXPECTED_VERIFY_CONFIRMATION,
+  }))
 })
