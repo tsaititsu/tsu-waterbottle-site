@@ -1,9 +1,10 @@
 'use client'
 
 import { useId } from 'react'
-import type {
-  CheckoutPaymentMethod,
-  CheckoutPaymentMethodOption,
+import {
+  isCheckoutPaymentMethod,
+  type CheckoutPaymentMethod,
+  type CheckoutPaymentMethodOption,
 } from '@/lib/payments/paymentMethods'
 
 export function PaymentMethodSelector({
@@ -20,44 +21,46 @@ export function PaymentMethodSelector({
   value: CheckoutPaymentMethod
 }) {
   const groupId = useId().replace(/:/g, '')
+  const selectId = `payment-method-${groupId}`
+  const descriptionId = `${selectId}-description`
+  const selectedOption = options.find((option) => option.value === value) ?? null
 
   return (
-    <fieldset className="grid gap-3" disabled={disabled}>
-      <legend className="text-sm font-semibold text-deepPurple">{legend}</legend>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {options.map((option) => {
-          const checked = option.value === value
-          const inputId = `payment-method-${groupId}-${option.value}`
-
-          return (
-            <label
-              className={`focus-within:ring-2 focus-within:ring-deepPurple/35 grid cursor-pointer gap-2 rounded-xl border p-4 transition disabled:cursor-not-allowed ${
-                checked
-                  ? 'border-deepPurple bg-softPurple shadow-sm'
-                  : 'border-borderSoft bg-white hover:border-deepPurple/45'
-              } ${disabled ? 'cursor-not-allowed opacity-65' : ''}`}
-              htmlFor={inputId}
-              key={option.value}
-            >
-              <span className="flex items-start gap-3">
-                <input
-                  checked={checked}
-                  className="mt-1 size-4 shrink-0 accent-deepPurple"
-                  id={inputId}
-                  name={`payment-method-${groupId}`}
-                  onChange={() => onChange(option.value)}
-                  type="radio"
-                  value={option.value}
-                />
-                <span className="font-semibold text-deepPurple">{option.label}</span>
-              </span>
-              <span className="pl-7 text-sm leading-6 text-textMuted">
-                {option.description}
-              </span>
-            </label>
-          )
-        })}
-      </div>
-    </fieldset>
+    <div className={`grid gap-3 ${disabled ? 'opacity-65' : ''}`}>
+      <label className="text-sm font-semibold text-deepPurple" htmlFor={selectId}>
+        {legend}
+      </label>
+      <select
+        aria-describedby={descriptionId}
+        className="focus-ring min-h-12 w-full rounded-xl border border-borderSoft bg-white px-4 py-3 font-semibold text-deepPurple shadow-sm disabled:cursor-not-allowed"
+        disabled={disabled}
+        id={selectId}
+        name={`payment-method-${groupId}`}
+        onChange={(event) => {
+          const method = event.target.value
+          if (
+            isCheckoutPaymentMethod(method)
+            && options.some((option) => option.value === method)
+          ) {
+            onChange(method)
+          }
+        }}
+        value={selectedOption?.value ?? ''}
+      >
+        {selectedOption ? null : (
+          <option disabled value="">
+            請選擇付款方式
+          </option>
+        )}
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <p className="text-sm leading-6 text-textMuted" id={descriptionId}>
+        {selectedOption?.description ?? '目前沒有可用的付款方式。'}
+      </p>
+    </div>
   )
 }
