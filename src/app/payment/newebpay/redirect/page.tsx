@@ -3,7 +3,8 @@ import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { getNewebPayConfig } from '@/lib/newebpay/config'
 import { createCoursePaymentMpgForm } from '@/lib/newebpay/mpg'
-import type { CourseNewebPayPaymentMode } from '@/lib/newebpay/types'
+import { resolveNewebPayRedirectPaymentMode } from '@/lib/newebpay/redirectPaymentMode'
+import type { SupportedNewebPayRedirectItemType } from '@/lib/newebpay/types'
 import { getSupabaseAdmin, hasSupabaseAdminConfig } from '@/lib/supabase/admin'
 import { NewebPayAutoSubmitForm } from './NewebPayAutoSubmitForm'
 
@@ -27,22 +28,10 @@ type PaymentRow = {
   raw_payload: Record<string, unknown> | null
 }
 
-function isSupportedNewebPayItemType(itemType: string) {
+function isSupportedNewebPayItemType(
+  itemType: string,
+): itemType is SupportedNewebPayRedirectItemType {
   return itemType === 'course' || itemType === 'newebpay_test'
-}
-
-function getCoursePaymentMode(payment: PaymentRow): CourseNewebPayPaymentMode {
-  const mode = payment.raw_payload?.paymentMode
-  if (
-    mode === 'credit'
-    || mode === 'apple_pay'
-    || mode === 'atm'
-    || mode === 'installment_3'
-    || mode === 'installment_6'
-  ) {
-    return mode
-  }
-  return 'credit'
 }
 
 async function getServerSupabaseClient() {
@@ -146,7 +135,10 @@ export default async function NewebPayRedirectPage({ searchParams }: RedirectPag
         notifyUrl: `${config.siteUrl}/api/payments/newebpay/notify`,
         returnUrl: `${config.siteUrl}/api/payments/newebpay/return`,
         clientBackUrl: payment.item_type === 'course' ? `${config.siteUrl}/account/courses` : `${config.siteUrl}/payment/newebpay/test`,
-        paymentMode: payment.item_type === 'course' ? getCoursePaymentMode(payment) : 'credit',
+        paymentMode: resolveNewebPayRedirectPaymentMode({
+          itemType: payment.item_type,
+          rawPayload: payment.raw_payload,
+        }),
       },
       config,
     )

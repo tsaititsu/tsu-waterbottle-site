@@ -212,6 +212,7 @@ function applePayTestBody(overrides: Record<string, unknown> = {}) {
 function createApplePayTestDeps(input: {
   env?: Record<string, string | undefined>
   createPendingPaymentError?: Error
+  requester?: { id: string; email: string | null } | null
 } = {}) {
   const calls: {
     configs: number
@@ -234,7 +235,13 @@ function createApplePayTestDeps(input: {
   return {
     calls,
     deps: {
-      env: input.env ?? {},
+      env: {
+        ADMIN_EMAILS: 'admin@example.com',
+        ...(input.env ?? {}),
+      },
+      getRequesterWithEmail: async () => input.requester === undefined
+        ? { id: 'admin-user-id', email: 'admin@example.com' }
+        : input.requester,
       generateMerchantOrderNo: () => merchantOrderNo,
       getNewebPayConfig: () => {
         calls.configs += 1
@@ -359,6 +366,40 @@ test('apple_pay_test requires the smoke test item and manual source', async () =
   assert.equal(response.status, 400)
   assert.deepEqual(json, { ok: false, error: 'invalid_apple_pay_test_request' })
   assert.deepEqual(calls.productOrderLookups, [])
+  assert.deepEqual(calls.pendingPayments, [])
+})
+
+test('apple_pay_test rejects an unauthenticated requester before creating payment data', async () => {
+  const { calls, deps } = createApplePayTestDeps({
+    env: {
+      ENABLE_NEWEBPAY_APPLE_PAY_TEST_MODE: 'true',
+      ENABLE_NEWEBPAY_ONE_DOLLAR_TEST_MODE: 'true',
+      NEWEBPAY_ENV: 'test',
+    },
+    requester: null,
+  })
+  const response = await handleCreateNewebPayPaymentRequest(applePayTestBody(), deps)
+
+  assert.equal(response.status, 401)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'unauthorized' })
+  assert.equal(calls.configs, 0)
+  assert.deepEqual(calls.pendingPayments, [])
+})
+
+test('apple_pay_test rejects a signed-in non-admin before creating payment data', async () => {
+  const { calls, deps } = createApplePayTestDeps({
+    env: {
+      ENABLE_NEWEBPAY_APPLE_PAY_TEST_MODE: 'true',
+      ENABLE_NEWEBPAY_ONE_DOLLAR_TEST_MODE: 'true',
+      NEWEBPAY_ENV: 'test',
+    },
+    requester: { id: 'member-user-id', email: 'member@example.com' },
+  })
+  const response = await handleCreateNewebPayPaymentRequest(applePayTestBody(), deps)
+
+  assert.equal(response.status, 403)
+  assert.deepEqual(await readJson(response), { ok: false, error: 'admin_required' })
+  assert.equal(calls.configs, 0)
   assert.deepEqual(calls.pendingPayments, [])
 })
 

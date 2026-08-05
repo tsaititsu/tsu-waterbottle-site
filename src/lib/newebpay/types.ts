@@ -1,5 +1,16 @@
 export type NewebPayEnv = 'test' | 'production'
 
+export const NEWEBPAY_ADMIN_ONE_DOLLAR_TEST_CHANNELS = [
+  'credit',
+  'apple_pay',
+  'atm',
+] as const
+
+export type NewebPayAdminOneDollarTestChannel =
+  (typeof NEWEBPAY_ADMIN_ONE_DOLLAR_TEST_CHANNELS)[number]
+
+export type SupportedNewebPayRedirectItemType = 'course' | 'newebpay_test'
+
 export type NewebPayConfig = {
   merchantId: string
   hashKey: string

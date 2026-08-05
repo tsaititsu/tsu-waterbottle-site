@@ -44,7 +44,9 @@ export default function NewebPayTestPage() {
         method: 'POST',
         headers: {
           authorization: `Bearer ${accessToken}`,
+          'content-type': 'application/json',
         },
+        body: JSON.stringify({ channel: 'credit' }),
       })
       const data = (await response.json().catch(() => null)) as { paymentId?: string; message?: string } | null
 

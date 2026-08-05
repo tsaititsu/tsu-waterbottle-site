@@ -37,6 +37,11 @@ assert.match(
 )
 assert.match(
   adminPageSource,
+  /isNewebPayAdminOneDollarTestEnabled\(process\.env\)/,
+  '藍新 NT$1 panel 必須共用 server-side 管理員測試 gate',
+)
+assert.match(
+  adminPageSource,
   /export const dynamic = 'force-dynamic'/,
   'Production NT$1 臨時期限必須在每次後台請求重新判斷',
 )
@@ -44,6 +49,11 @@ assert.match(
   adminPageSource,
   /linePayTestEnvironment \? <LinePaySandboxE2ePanel environment=\{linePayTestEnvironment\} \/> : null/,
   'LINE Pay NT$1 panel 只能在對應 server-side gate 通過後顯示',
+)
+assert.match(
+  adminPageSource,
+  /newebPayOneDollarEnabled \? <NewebPayOneDollarTestPanel \/> : null/,
+  '藍新三通道 NT$1 panel 只能在 server-side gate 通過後顯示',
 )
 
 assert.match(layoutClientSource, /return <AdminShell pathname=\{pathname\}>\{children\}<\/AdminShell>/)
