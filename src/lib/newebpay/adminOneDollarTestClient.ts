@@ -1,11 +1,6 @@
-export const NEWEBPAY_ADMIN_ONE_DOLLAR_TEST_CHANNELS = [
-  'credit',
-  'apple_pay',
-  'atm',
-] as const
+import type { NewebPayAdminOneDollarTestChannel } from './types'
 
-export type NewebPayAdminOneDollarTestChannel =
-  (typeof NEWEBPAY_ADMIN_ONE_DOLLAR_TEST_CHANNELS)[number]
+export type { NewebPayAdminOneDollarTestChannel } from './types'
 
 type NewebPayAdminOneDollarTestClientDependencies = {
   getAccessToken: () => Promise<string | null>

@@ -1,4 +1,7 @@
-import type { CourseNewebPayPaymentMode } from './types'
+import type {
+  CourseNewebPayPaymentMode,
+  SupportedNewebPayRedirectItemType,
+} from './types'
 
 const standardModes = new Set<CourseNewebPayPaymentMode>([
   'credit',
@@ -22,7 +25,7 @@ function getRawPaymentMode(
 }
 
 export function resolveNewebPayRedirectPaymentMode(input: {
-  itemType: string
+  itemType: SupportedNewebPayRedirectItemType
   rawPayload: Record<string, unknown> | null
 }): CourseNewebPayPaymentMode {
   const paymentMode = getRawPaymentMode(input.rawPayload)

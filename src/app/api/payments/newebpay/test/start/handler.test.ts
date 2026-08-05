@@ -3,8 +3,10 @@ import { NextResponse } from 'next/server'
 import {
   handleStartNewebPayAdminOneDollarTest,
   type NewebPayAdminOneDollarPaymentInsert,
-  type NewebPayAdminOneDollarTestChannel,
 } from './handler'
+import { validateNewebPayPaymentMatch } from '@/lib/newebpay/notify'
+import type { NewebPayAdminOneDollarTestChannel } from '@/lib/newebpay/types'
+import type { PaymentRecord } from '@/lib/supabase/payments'
 
 const enabledEnv = {
   NODE_ENV: 'production',
@@ -47,6 +49,33 @@ function makeDependencies(inserts: NewebPayAdminOneDollarPaymentInsert[]) {
   }
 }
 
+function toPaymentRecord(
+  input: NewebPayAdminOneDollarPaymentInsert,
+): PaymentRecord {
+  return {
+    id: `payment-${input.channel}`,
+    userId: input.userId,
+    bookingId: null,
+    provider: input.provider,
+    providerPaymentId: null,
+    itemType: input.itemType,
+    itemId: input.itemId,
+    itemName: input.itemName,
+    amountTwd: input.amountTwd,
+    currency: input.currency,
+    status: input.status,
+    paidAt: null,
+    refundedAt: null,
+    rawPayload: input.rawPayload,
+    merchantOrderNo: input.merchantOrderNo,
+    providerTradeNo: null,
+    notifyReceivedAt: null,
+    failureReason: null,
+    createdAt: '2026-08-05T00:00:00.000Z',
+    updatedAt: '2026-08-05T00:00:00.000Z',
+  }
+}
+
 async function run() {
 for (const channel of channels) {
   const inserts: NewebPayAdminOneDollarPaymentInsert[] = []
@@ -68,9 +97,19 @@ for (const channel of channels) {
   assert.equal(inserts[0]?.provider, 'newebpay')
   assert.equal(inserts[0]?.itemType, 'newebpay_test')
   assert.equal(inserts[0]?.rawPayload.paymentMode, channel)
+  assert.equal(inserts[0]?.rawPayload.amount, 1)
   assert.equal(inserts[0]?.rawPayload.test_payment, true)
   assert.equal(inserts[0]?.rawPayload.one_dollar_test_mode, true)
   assert.equal(inserts[0]?.rawPayload.do_not_fulfill, true)
+
+  const paymentMatch = validateNewebPayPaymentMatch({
+    payment: toPaymentRecord(inserts[0]),
+    expectedMerchantOrderNo: inserts[0].merchantOrderNo,
+    providerMerchantOrderNo: inserts[0].merchantOrderNo,
+    providerAmount: 1,
+  })
+  assert.equal(paymentMatch.ok, true, `${channel} 應通過 Notify NT$1 對帳`)
+  if (paymentMatch.ok) assert.equal(paymentMatch.localAmount, 1)
 }
 
 {

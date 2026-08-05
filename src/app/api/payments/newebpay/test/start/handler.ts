@@ -9,15 +9,11 @@ import {
   isNewebPayOneDollarTestModeEnabled,
   type NewebPayOneDollarTestEnv,
 } from '@/lib/newebpay/oneDollarTestMode'
-
-export const NEWEBPAY_ADMIN_ONE_DOLLAR_TEST_CHANNELS = [
-  'credit',
-  'apple_pay',
-  'atm',
-] as const
-
-export type NewebPayAdminOneDollarTestChannel =
-  (typeof NEWEBPAY_ADMIN_ONE_DOLLAR_TEST_CHANNELS)[number]
+import {
+  NEWEBPAY_ADMIN_ONE_DOLLAR_TEST_CHANNELS,
+  type NewebPayAdminOneDollarTestChannel,
+} from '@/lib/newebpay/types'
+import { buildPendingPaymentInsert } from '@/lib/supabase/payments'
 
 export type NewebPayAdminOneDollarPaymentInsert = {
   userId: string
@@ -33,6 +29,7 @@ export type NewebPayAdminOneDollarPaymentInsert = {
   rawPayload: Record<string, unknown> & {
     source: 'admin_newebpay_one_dollar_test'
     paymentMode: NewebPayAdminOneDollarTestChannel
+    amount: 1
     test_payment: true
     one_dollar_test_mode: true
     do_not_fulfill: true
@@ -95,18 +92,16 @@ async function insertPaymentWithSupabase(
 ) {
   const { data, error } = await authorization.supabase
     .from('payments')
-    .insert({
-      user_id: input.userId,
+    .insert(buildPendingPaymentInsert({
+      userId: input.userId,
       provider: input.provider,
-      item_type: input.itemType,
-      item_id: input.itemId,
-      item_name: input.itemName,
-      amount_twd: input.amountTwd,
-      currency: input.currency,
-      status: input.status,
-      merchant_order_no: input.merchantOrderNo,
-      raw_payload: input.rawPayload,
-    })
+      itemType: input.itemType,
+      itemId: input.itemId,
+      itemName: input.itemName,
+      amountTwd: input.amountTwd,
+      merchantOrderNo: input.merchantOrderNo,
+      rawPayload: input.rawPayload,
+    }))
     .select('id')
     .single()
 
@@ -188,6 +183,7 @@ export async function handleStartNewebPayAdminOneDollarTest(
           ...context.metadata,
           source: 'admin_newebpay_one_dollar_test',
           paymentMode: channel,
+          amount: 1,
           test_payment: true,
           one_dollar_test_mode: true,
           do_not_fulfill: true,

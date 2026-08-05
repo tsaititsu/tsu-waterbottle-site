@@ -4,6 +4,7 @@ import { createServerClient } from '@supabase/ssr'
 import { getNewebPayConfig } from '@/lib/newebpay/config'
 import { createCoursePaymentMpgForm } from '@/lib/newebpay/mpg'
 import { resolveNewebPayRedirectPaymentMode } from '@/lib/newebpay/redirectPaymentMode'
+import type { SupportedNewebPayRedirectItemType } from '@/lib/newebpay/types'
 import { getSupabaseAdmin, hasSupabaseAdminConfig } from '@/lib/supabase/admin'
 import { NewebPayAutoSubmitForm } from './NewebPayAutoSubmitForm'
 
@@ -27,7 +28,9 @@ type PaymentRow = {
   raw_payload: Record<string, unknown> | null
 }
 
-function isSupportedNewebPayItemType(itemType: string) {
+function isSupportedNewebPayItemType(
+  itemType: string,
+): itemType is SupportedNewebPayRedirectItemType {
   return itemType === 'course' || itemType === 'newebpay_test'
 }
 
