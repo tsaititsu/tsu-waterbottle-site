@@ -650,18 +650,19 @@ test('status API route 由 requireAdminUser 守門並交給獨立 handler', asyn
   assert.equal(source.includes('handleDivinationOneDollarTestStatus'), true)
 })
 
-test('前端保留正式按鈕、測試按鈕受 admin 狀態 gate，Apple Pay 由 server 派生', async () => {
+test('前端保留正式付款選單、測試按鈕受 admin 狀態 gate，測試 Apple Pay 由 server 派生', async () => {
   const source = readFileSync(
     join(projectRoot, 'src/components/divination/DivinationDrawPreview.tsx'),
     'utf8',
   )
-  // 正式按鈕與文案仍在
-  assert.equal(source.includes('信用卡線上付款 NT$${paymentRequired.amountTwd}'), true)
+  // 正式付款仍在，且不會把管理員測試模式混進正式選單。
+  assert.equal(source.includes('PaymentMethodSelector'), true)
+  assert.equal(source.includes('使用所選方式付款 NT$${paymentRequired.amountTwd}'), true)
   // 測試按鈕存在且受 isAdminOneDollarTestAvailable 控制
   assert.equal(source.includes('管理員 Apple Pay 測試付款 NT$1'), true)
   assert.equal(source.includes('isAdminOneDollarTestAvailable'), true)
   // Client 維持既有 request shape；server 通過管理員驗證後才派生 Apple Pay。
-  assert.equal(source.includes('paymentMode: "credit"'), true)
+  assert.equal(source.includes('? "credit"'), true)
   assert.equal(source.includes('LINEPAY'), false)
   assert.equal(source.includes('VACC'), false)
   assert.equal(source.includes('apple_pay_test'), false)

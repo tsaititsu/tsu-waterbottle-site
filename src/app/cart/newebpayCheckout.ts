@@ -9,8 +9,14 @@ export const CART_NEWEBPAY_READY_MESSAGE = '將前往藍新金流信用卡一次
 export const CART_NEWEBPAY_APPLE_PAY_READY_MESSAGE = '將前往藍新金流 Apple Pay 付款頁。'
 export const CART_NEWEBPAY_LOADING_MESSAGE = '正在建立信用卡付款資料...'
 export const CART_NEWEBPAY_APPLE_PAY_LOADING_MESSAGE = '正在建立 Apple Pay 付款資料...'
+export const CART_NEWEBPAY_ATM_BUTTON_LABEL = 'ATM 虛擬帳號'
+export const CART_NEWEBPAY_ATM_READY_MESSAGE = '將前往藍新金流取得本次訂單專用 ATM 虛擬帳號。'
+export const CART_NEWEBPAY_ATM_LOADING_MESSAGE = '正在建立 ATM 虛擬帳號付款資料...'
 
-export type CartNewebPayPaymentMode = 'credit' | 'product_order_apple_pay'
+export type CartNewebPayPaymentMode =
+  | 'credit'
+  | 'product_order_apple_pay'
+  | 'atm'
 
 export type CartNewebPayCheckoutItem = {
   id: string
@@ -100,12 +106,17 @@ export type StartNewebPayCartCheckoutError = Extract<StartNewebPayCartCheckoutRe
 export type CartNewebPayButtonState = {
   visible: boolean
   disabled: boolean
-  label: typeof CART_NEWEBPAY_BUTTON_LABEL | typeof CART_NEWEBPAY_APPLE_PAY_BUTTON_LABEL
+  label:
+    | typeof CART_NEWEBPAY_BUTTON_LABEL
+    | typeof CART_NEWEBPAY_APPLE_PAY_BUTTON_LABEL
+    | typeof CART_NEWEBPAY_ATM_BUTTON_LABEL
   message:
     | typeof CART_NEWEBPAY_READY_MESSAGE
     | typeof CART_NEWEBPAY_LOADING_MESSAGE
     | typeof CART_NEWEBPAY_APPLE_PAY_READY_MESSAGE
     | typeof CART_NEWEBPAY_APPLE_PAY_LOADING_MESSAGE
+    | typeof CART_NEWEBPAY_ATM_READY_MESSAGE
+    | typeof CART_NEWEBPAY_ATM_LOADING_MESSAGE
 }
 
 function normalizeRequiredText(value: string | null | undefined) {
@@ -176,18 +187,27 @@ export function getCartNewebPayButtonState(
   paymentMode: CartNewebPayPaymentMode = 'credit',
 ): CartNewebPayButtonState {
   const isApplePay = paymentMode === 'product_order_apple_pay'
+  const isAtm = paymentMode === 'atm'
 
   return {
     visible: true,
     disabled: isCheckingOut,
-    label: isApplePay ? CART_NEWEBPAY_APPLE_PAY_BUTTON_LABEL : CART_NEWEBPAY_BUTTON_LABEL,
+    label: isApplePay
+      ? CART_NEWEBPAY_APPLE_PAY_BUTTON_LABEL
+      : isAtm
+        ? CART_NEWEBPAY_ATM_BUTTON_LABEL
+        : CART_NEWEBPAY_BUTTON_LABEL,
     message: isCheckingOut
       ? isApplePay
         ? CART_NEWEBPAY_APPLE_PAY_LOADING_MESSAGE
-        : CART_NEWEBPAY_LOADING_MESSAGE
+        : isAtm
+          ? CART_NEWEBPAY_ATM_LOADING_MESSAGE
+          : CART_NEWEBPAY_LOADING_MESSAGE
       : isApplePay
         ? CART_NEWEBPAY_APPLE_PAY_READY_MESSAGE
-        : CART_NEWEBPAY_READY_MESSAGE,
+        : isAtm
+          ? CART_NEWEBPAY_ATM_READY_MESSAGE
+          : CART_NEWEBPAY_READY_MESSAGE,
   }
 }
 

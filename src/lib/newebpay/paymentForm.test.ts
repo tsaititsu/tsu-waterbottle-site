@@ -76,6 +76,8 @@ assert.equal(isNewebPayPaymentSource(PRODUCT_ORDER_PAYMENT_SOURCE), true)
 assert.equal(isNewebPayPaymentSource('manual_test'), true)
 assert.equal(isNewebPayPaymentSource('external'), false)
 assert.equal(isNewebPayPaymentMode('credit'), true)
+assert.equal(isNewebPayPaymentMode('apple_pay'), true)
+assert.equal(isNewebPayPaymentMode('atm'), true)
 assert.equal(isNewebPayPaymentMode('merchant_default'), true)
 assert.equal(isNewebPayPaymentMode('apple_pay_test'), true)
 assert.equal(isNewebPayPaymentMode(PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE), true)
@@ -460,6 +462,38 @@ assert.equal(decryptedApplePayTest.has('CVS'), false)
 assert.equal(decryptedApplePayTest.has('BARCODE'), false)
 assert.equal(decryptedApplePayTest.has('ANDROIDPAY'), false)
 assert.equal(decryptedApplePayTest.has('SAMSUNGPAY'), false)
+
+const standardApplePayData = createNewebPayMpgPaymentData({
+  itemKey: 'booking_consultation_60',
+  config,
+  paymentMode: 'apple_pay',
+  merchantOrderNo: 'WB20260703172530APST',
+})
+const decryptedStandardApplePay = new URLSearchParams(
+  decryptTradeInfo(standardApplePayData.fields.TradeInfo, hashKey, hashIv),
+)
+assert.equal(decryptedStandardApplePay.get('APPLEPAY'), '1')
+assert.equal(decryptedStandardApplePay.get('InstFlag'), '0')
+assert.equal(decryptedStandardApplePay.has('CREDIT'), false)
+assert.equal(decryptedStandardApplePay.has('VACC'), false)
+assert.equal(decryptedStandardApplePay.has('WEBATM'), false)
+assert.equal(decryptedStandardApplePay.has('LINEPAY'), false)
+
+const standardAtmData = createNewebPayMpgPaymentData({
+  itemKey: 'booking_consultation_60',
+  config,
+  paymentMode: 'atm',
+  merchantOrderNo: 'WB20260703172530VACC',
+})
+const decryptedStandardAtm = new URLSearchParams(
+  decryptTradeInfo(standardAtmData.fields.TradeInfo, hashKey, hashIv),
+)
+assert.equal(decryptedStandardAtm.get('VACC'), '1')
+assert.equal(decryptedStandardAtm.get('InstFlag'), '0')
+assert.equal(decryptedStandardAtm.has('CREDIT'), false)
+assert.equal(decryptedStandardAtm.has('APPLEPAY'), false)
+assert.equal(decryptedStandardAtm.has('WEBATM'), false)
+assert.equal(decryptedStandardAtm.has('LINEPAY'), false)
 
 const divinationData = createNewebPayMpgPaymentData({
   itemKey: 'ai_divination_single',

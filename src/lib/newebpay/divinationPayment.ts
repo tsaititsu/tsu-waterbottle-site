@@ -4,7 +4,11 @@ export const AI_DIVINATION_ITEM_KEY = 'ai_divination_single'
 export const AI_DIVINATION_AMOUNT_TWD = DIVINATION_READING_PRICE_TWD
 export const AI_DIVINATION_ITEM_TYPE = 'ai_divination'
 
-export type DivinationPaymentMode = 'credit' | 'merchant_default'
+export type DivinationPaymentMode =
+  | 'credit'
+  | 'apple_pay'
+  | 'atm'
+  | 'merchant_default'
 
 export type DivinationPaymentRawPayload = {
   itemKey: typeof AI_DIVINATION_ITEM_KEY

@@ -3,7 +3,7 @@ import { getSupabaseAdmin } from './admin'
 export type MarkBookingPaidInput = {
   bookingId: string
   paymentId?: string | null
-  provider?: 'newebpay'
+  provider?: 'newebpay' | 'line_pay'
   providerTradeNo?: string | null
   paidAt?: string | null
 }

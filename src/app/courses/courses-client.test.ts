@@ -14,6 +14,10 @@ assert.match(source, /salesOpen \? \(\s*<div className="mb-4">\s*<CoursePurchase
 assert.match(source, /登入並購買/)
 assert.doesNotMatch(source, />\s*請先登入\s*</)
 assert.match(homeData, /title: '紫微斗數課程'[\s\S]*badge: '即將開課'/)
+assert.match(source, /<PaymentMethodSelector/)
+assert.match(source, /includeCourseInstallments: true/)
+assert.match(source, /idempotencyKey: `course-line-pay:\$\{course\.id\}`/)
+assert.doesNotMatch(source, /crypto\.randomUUID/)
 
 const disabledBranch = source.slice(source.indexOf('{!salesOpen && !purchased'), source.indexOf(') : !user ? ('))
 assert.doesNotMatch(disabledBranch, /CoursePurchaseNotice/)

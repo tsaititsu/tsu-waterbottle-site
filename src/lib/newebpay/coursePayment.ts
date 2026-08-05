@@ -1,10 +1,12 @@
+import type { CourseNewebPayPaymentMode } from './types'
+
 export type CoursePaymentRawPayload = {
   itemType: 'course'
   courseId: string
   amount: number
   merchantOrderNo: string
   source: 'course'
-  paymentMode: 'credit'
+  paymentMode: CourseNewebPayPaymentMode
   itemDesc: string
 }
 
@@ -32,6 +34,7 @@ export function buildCoursePaymentRawPayload(input: {
   amount: number
   merchantOrderNo: string
   itemDesc: string
+  paymentMode: CourseNewebPayPaymentMode
 }): CoursePaymentRawPayload {
   return {
     itemType: 'course',
@@ -39,7 +42,7 @@ export function buildCoursePaymentRawPayload(input: {
     amount: input.amount,
     merchantOrderNo: input.merchantOrderNo,
     source: 'course',
-    paymentMode: 'credit',
+    paymentMode: input.paymentMode,
     itemDesc: input.itemDesc,
   }
 }
@@ -51,6 +54,7 @@ export function buildCoursePaymentInsertPayload(input: {
   amount: number
   merchantOrderNo: string
   itemDesc: string
+  paymentMode: CourseNewebPayPaymentMode
 }): CoursePaymentInsertPayload {
   return {
     user_id: input.userId,
@@ -67,6 +71,7 @@ export function buildCoursePaymentInsertPayload(input: {
       amount: input.amount,
       merchantOrderNo: input.merchantOrderNo,
       itemDesc: input.itemDesc,
+      paymentMode: input.paymentMode,
     }),
   }
 }

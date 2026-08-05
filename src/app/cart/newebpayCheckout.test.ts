@@ -5,6 +5,9 @@ import {
   CART_NEWEBPAY_APPLE_PAY_BUTTON_LABEL,
   CART_NEWEBPAY_APPLE_PAY_LOADING_MESSAGE,
   CART_NEWEBPAY_APPLE_PAY_READY_MESSAGE,
+  CART_NEWEBPAY_ATM_BUTTON_LABEL,
+  CART_NEWEBPAY_ATM_LOADING_MESSAGE,
+  CART_NEWEBPAY_ATM_READY_MESSAGE,
   CART_NEWEBPAY_BUTTON_LABEL,
   CART_NEWEBPAY_LOADING_MESSAGE,
   CART_NEWEBPAY_READY_MESSAGE,
@@ -137,6 +140,18 @@ test('button state is visible and loading state is disabled', () => {
     disabled: true,
     label: CART_NEWEBPAY_APPLE_PAY_BUTTON_LABEL,
     message: CART_NEWEBPAY_APPLE_PAY_LOADING_MESSAGE,
+  })
+  assert.deepEqual(getCartNewebPayButtonState(false, 'atm'), {
+    visible: true,
+    disabled: false,
+    label: CART_NEWEBPAY_ATM_BUTTON_LABEL,
+    message: CART_NEWEBPAY_ATM_READY_MESSAGE,
+  })
+  assert.deepEqual(getCartNewebPayButtonState(true, 'atm'), {
+    visible: true,
+    disabled: true,
+    label: CART_NEWEBPAY_ATM_BUTTON_LABEL,
+    message: CART_NEWEBPAY_ATM_LOADING_MESSAGE,
   })
 })
 
@@ -318,6 +333,24 @@ test('Apple Pay checkout requests product order Apple Pay mode with formal amoun
   assert.equal(submitCalls.length, 1)
 })
 
+test('ATM checkout requests the enabled VACC payment mode', async () => {
+  const paymentCalls: CartNewebPayPaymentRequestBody[] = []
+
+  const result = await startNewebPayCartCheckout({
+    cartItems,
+    customerInfo,
+    paymentMode: 'atm',
+    createProductOrder: createOrderOk(),
+    createNewebPayPayment: createNewebPayPaymentOk(paymentCalls),
+    submitNewebPayForm: submitFormOk(),
+  })
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(paymentCalls, [
+    { productOrderId: 'product-order-1', paymentMode: 'atm' },
+  ])
+})
+
 test('createNewebPayPayment failure does not submit form', async () => {
   const submitCalls: CartNewebPayFormInput[] = []
   const result = await startNewebPayCartCheckout({
@@ -437,13 +470,12 @@ test('helper does not call global fetch or window location', async () => {
   assert.equal(source.includes('document.createElement'), false)
 })
 
-test('helper source does not enable linepay, atm, or wallet payments', () => {
+test('helper source does not enable NewebPay LINE Pay, WebATM, or unrelated wallets', () => {
   const source = readNewebPayCheckoutSource()
 
   for (const forbidden of [
     'LINEPAY',
     'linepay',
-    'VACC',
     'WEBATM',
     'ANDROIDPAY',
     'SAMSUNGPAY',
@@ -512,38 +544,26 @@ test('success result does not expose contact fields, secrets, or raw TradeInfo',
   }
 })
 
-test('cart page preserves credit card and Apple Pay while gating LINE Pay separately', () => {
+test('cart page uses the shared selector for the four approved payment methods', () => {
   const source = readCartPageSource()
-  const optionsStart = source.indexOf('const cartPaymentMethodOptions')
-  const optionsEnd = source.indexOf('\n]\n\ntype PostOfficeShippingInfo', optionsStart)
-  const optionsSource = source.slice(optionsStart, optionsEnd)
 
-  assert.equal(source.includes('cartPaymentMethodOptions'), true)
-  assert.equal(source.includes('<select'), true)
+  assert.equal(source.includes('PaymentMethodSelector'), true)
+  assert.equal(source.includes('<select'), false)
   assert.equal(source.includes('付款方式'), true)
-  assert.equal(optionsStart >= 0, true)
-  assert.equal(optionsEnd > optionsStart, true)
-  assert.equal(optionsSource.match(/    value: '/g)?.length, 3)
-  assert.equal(optionsSource.includes("value: 'credit'"), true)
-  assert.equal(optionsSource.includes("value: 'product_order_apple_pay'"), true)
-  assert.equal(optionsSource.includes("value: 'line_pay'"), true)
-  assert.equal(optionsSource.includes("label: '信用卡付款'"), true)
-  assert.equal(optionsSource.includes("label: 'Apple Pay 付款（iPhone / Safari）'"), true)
-  assert.equal(optionsSource.includes('郵局匯款'), false)
-  assert.equal(optionsSource.includes("value: 'post_office'"), false)
-  assert.equal(optionsSource.includes("ctaLabel: '前往信用卡付款'"), true)
-  assert.equal(optionsSource.includes("ctaLabel: '前往 Apple Pay 付款'"), true)
-  assert.equal(source.includes("option.value !== 'line_pay' || linePayButtonState.visible"), true)
+  assert.equal(source.includes("method === 'newebpay_atm'"), true)
+  assert.equal(source.includes("method === 'apple_pay'"), true)
+  assert.equal(source.includes("method === 'line_pay'"), true)
+  assert.equal(source.includes('人工提供匯款末五碼'), true)
   assert.equal(source.includes('href="/bank-transfer"'), false)
-  assert.equal(source.includes('前往結帳'), false)
-  assert.equal(source.includes('前往付款'), false)
+  assert.equal(source.includes("'web_atm'"), false)
+  assert.equal(source.includes("'newebpay_line_pay'"), false)
 })
 
 test('cart page selector wires NewebPay choices to product order and NewebPay create APIs', () => {
   const source = readCartPageSource()
 
   assert.equal(source.includes('handleNewebPayCheckoutClick'), true)
-  assert.equal(source.includes('selectedPaymentMethodOption.ctaLabel'), true)
+  assert.equal(source.includes('getCartPaymentButtonLabel(selectedPaymentMethod)'), true)
   assert.equal(source.includes("fetch('/api/product-orders/create'"), true)
   assert.equal(source.includes("fetch('/api/payments/newebpay/create'"), true)
   assert.equal(source.includes("itemKey: 'spiritual_product_order'"), true)
@@ -552,7 +572,7 @@ test('cart page selector wires NewebPay choices to product order and NewebPay cr
   assert.equal(source.includes('orderId: body.productOrderId'), true)
 })
 
-test('cart page posts only NewebPay credit parameters and submits payment form', () => {
+test('cart page maps the approved NewebPay modes and submits the payment form', () => {
   const source = readCartPageSource()
   const handlerStart = source.indexOf('const handleNewebPayCheckoutClick')
   const handlerEnd = source.indexOf('\n  const handleLinePayCheckoutClick', handlerStart)
@@ -564,9 +584,10 @@ test('cart page posts only NewebPay credit parameters and submits payment form',
   assert.equal(handlerEnd > handlerStart, true)
   assert.equal(handlerSource.includes("paymentMethod: 'newebpay'"), true)
   assert.equal(handlerSource.includes("paymentMode: body.paymentMode"), true)
-  assert.equal(source.includes("value: 'credit'"), true)
-  assert.equal(source.includes('handleNewebPayCheckoutClick(selectedPaymentMethod)'), true)
-  assert.equal(source.includes("value: 'product_order_apple_pay'"), true)
+  assert.equal(source.includes("return 'credit'"), true)
+  assert.equal(source.includes('handleNewebPayCheckoutClick(getCartNewebPayMode(selectedPaymentMethod))'), true)
+  assert.equal(source.includes("return 'product_order_apple_pay'"), true)
+  assert.equal(source.includes("return 'atm'"), true)
   assert.equal(handlerSource.includes("paymentMethod: 'line_pay'"), false)
   assert.equal(source.includes("paymentMode: 'linepay'"), false)
   assert.equal(source.includes("paymentMode: 'atm'"), false)

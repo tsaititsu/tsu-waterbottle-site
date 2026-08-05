@@ -20,7 +20,9 @@ function encodeTradeInfo(fields: NewebPayTradeInfoFields) {
   params.set('NotifyURL', fields.NotifyURL)
   params.set('ReturnURL', fields.ReturnURL)
   params.set('ClientBackURL', fields.ClientBackURL)
-  params.set('CREDIT', fields.CREDIT)
+  if (fields.CREDIT) params.set('CREDIT', fields.CREDIT)
+  if (fields.APPLEPAY) params.set('APPLEPAY', fields.APPLEPAY)
+  if (fields.VACC) params.set('VACC', fields.VACC)
   params.set('InstFlag', fields.InstFlag)
   return params.toString()
 }
@@ -43,6 +45,22 @@ export function buildCoursePaymentTradeInfoFields(
   payload: CoursePaymentPayload,
   config = getNewebPayConfig(),
 ): NewebPayTradeInfoFields {
+  const paymentFields = (() => {
+    if (payload.paymentMode === 'apple_pay') {
+      return { APPLEPAY: '1' as const, InstFlag: '0' as const }
+    }
+    if (payload.paymentMode === 'atm') {
+      return { VACC: '1' as const, InstFlag: '0' as const }
+    }
+    if (payload.paymentMode === 'installment_3') {
+      return { CREDIT: '1' as const, InstFlag: '3' as const }
+    }
+    if (payload.paymentMode === 'installment_6') {
+      return { CREDIT: '1' as const, InstFlag: '6' as const }
+    }
+    return { CREDIT: '1' as const, InstFlag: '0' as const }
+  })()
+
   return {
     MerchantID: config.merchantId,
     RespondType: 'JSON',
@@ -56,8 +74,7 @@ export function buildCoursePaymentTradeInfoFields(
     NotifyURL: payload.notifyUrl,
     ReturnURL: payload.returnUrl,
     ClientBackURL: payload.clientBackUrl,
-    CREDIT: '1',
-    InstFlag: payload.instFlag ?? '0',
+    ...paymentFields,
   }
 }
 

@@ -1,8 +1,26 @@
+import { after } from 'next/server'
 import {
   confirmLinePayPayment,
   createLinePayNonce,
 } from '@/lib/linePay'
+import { completePaidAiChartReport } from '@/lib/ai-chart/reportCompletion'
+import { startPaidAiChartReportCompletionInBackground } from '@/lib/ai-chart/reportCompletionBackground'
+import { isSafeLinePayReturnPath } from '@/lib/linePay/serviceCheckout'
+import {
+  syncNewebPayAiChartAfterPayment,
+  syncNewebPayBookingAfterPayment,
+  syncNewebPayCourseAfterPayment,
+  syncNewebPayDivinationAfterPayment,
+  syncNewebPayProductOrderAfterPayment,
+} from '@/lib/newebpay/notify'
 import { getSupabaseAdmin } from '@/lib/supabase/admin'
+import { markBookingPaidById } from '@/lib/supabase/bookingPayments'
+import { markCoursePaidByPayment } from '@/lib/supabase/coursePurchases'
+import {
+  getPaymentById,
+  mapPaymentPaidContext,
+  type PaymentRecord,
+} from '@/lib/supabase/payments'
 import { createLinePayExecutorClient } from '@/lib/supabase/linePayExecutor'
 import {
   createProductOrderLinePayCapabilityDatabase,
@@ -16,10 +34,60 @@ import {
   linePayCapabilityCookieName,
 } from './capabilityToken'
 import {
-  redirectLinePayHandlerResponseToCart,
+  redirectLinePayHandlerResponse,
   resolveLinePayCancelCartRedirectStatus,
   resolveLinePayConfirmCartRedirectStatus,
 } from './redirect'
+
+function getLinePayReturnPath(payment: PaymentRecord | null) {
+  const linePay = payment?.rawPayload?.linePay
+  if (typeof linePay !== 'object' || linePay === null || Array.isArray(linePay)) {
+    return '/cart'
+  }
+  const returnPath = (linePay as Record<string, unknown>).returnPath
+  return isSafeLinePayReturnPath(returnPath) ? returnPath : '/cart'
+}
+
+async function syncPaidLinePayTarget(payment: PaymentRecord) {
+  const context = mapPaymentPaidContext(payment)
+  const merchantOrderNo = payment.merchantOrderNo ?? ''
+  await Promise.all([
+    syncNewebPayBookingAfterPayment({
+      payment: context,
+      markBookingPaid: markBookingPaidById,
+    }),
+    syncNewebPayCourseAfterPayment({
+      payment: context,
+      markCoursePaid: markCoursePaidByPayment,
+    }),
+    syncNewebPayDivinationAfterPayment({
+      payment: context,
+      merchantOrderNo,
+    }),
+    syncNewebPayAiChartAfterPayment({
+      payment: context,
+      merchantOrderNo,
+      startPaidAiChartReportCompletionInBackground: ({ reportId }) =>
+        startPaidAiChartReportCompletionInBackground(
+          { reportId },
+          {
+            completePaidAiChartReport,
+            schedule: (task) => after(task),
+          },
+        ),
+    }),
+    syncNewebPayProductOrderAfterPayment({ payment: context }),
+  ])
+}
+
+async function readResponsePayment(response: Response) {
+  const payload = await response.clone().json().catch(() => null) as {
+    ok?: unknown
+    paymentId?: unknown
+  } | null
+  if (payload?.ok !== true || typeof payload.paymentId !== 'string') return null
+  return getPaymentById(payload.paymentId).catch(() => null)
+}
 
 type CapabilityClient =
   & ProductOrderLinePayCapabilityContextClient
@@ -80,9 +148,19 @@ export async function executePublicProductOrderLinePayCallbackRoute(
       }),
   })
 
-  const redirect = await redirectLinePayHandlerResponseToCart({
+  const payment = await readResponsePayment(response)
+  if (purpose === 'confirm' && payment?.status === 'paid') {
+    try {
+      await syncPaidLinePayTarget(payment)
+    } catch {
+      console.warn('LINE Pay paid target sync failed')
+    }
+  }
+
+  const redirect = await redirectLinePayHandlerResponse({
     request,
     response,
+    returnPath: getLinePayReturnPath(payment),
     resolveStatus:
       purpose === 'confirm'
         ? resolveLinePayConfirmCartRedirectStatus

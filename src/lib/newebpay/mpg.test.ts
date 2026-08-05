@@ -52,12 +52,12 @@ const coursePayload = {
   notifyUrl: 'https://example.com/api/payments/newebpay/notify?merchantOrderNo=COURSE202607080001',
   returnUrl: 'https://example.com/api/payments/newebpay/return?merchantOrderNo=COURSE202607080001',
   clientBackUrl: 'https://example.com/account/courses',
-  instFlag: '3,6' as const,
+  paymentMode: 'installment_3' as const,
 }
 
 const courseFields = buildCoursePaymentTradeInfoFields(coursePayload, config)
 assert.equal(courseFields.CREDIT, '1')
-assert.equal(courseFields.InstFlag, '3,6')
+assert.equal(courseFields.InstFlag, '3')
 
 const courseForm = createCoursePaymentMpgForm(coursePayload, config)
 const decryptedCourse = decryptTradeInfo(courseForm.TradeInfo, config) as Record<string, unknown>
@@ -69,7 +69,7 @@ assert.equal(decryptedCourse.MerchantOrderNo, coursePayload.merchantOrderNo)
 assert.equal(decryptedCourse.Amt, '9800')
 assert.equal(decryptedCourse.ItemDesc, '紫微斗數初級班')
 assert.equal(decryptedCourse.CREDIT, '1')
-assert.equal(decryptedCourse.InstFlag, '3,6')
+assert.equal(decryptedCourse.InstFlag, '3')
 assert.equal('LINEPAY' in decryptedCourse, false)
 assert.equal('WEBATM' in decryptedCourse, false)
 assert.equal('VACC' in decryptedCourse, false)
@@ -84,6 +84,7 @@ const testPaymentPayload = {
   notifyUrl: 'https://example.com/api/payments/newebpay/notify',
   returnUrl: 'https://example.com/api/payments/newebpay/return',
   clientBackUrl: 'https://example.com/payment/newebpay/test',
+  paymentMode: 'credit' as const,
 }
 
 const testPaymentFields = buildCoursePaymentTradeInfoFields(testPaymentPayload, config)
@@ -100,3 +101,21 @@ assert.equal('TradeInfo' in decryptedTestPayment, false)
 assert.equal('TradeSha' in decryptedTestPayment, false)
 assert.equal('HashKey' in decryptedTestPayment, false)
 assert.equal('HashIV' in decryptedTestPayment, false)
+
+for (const [paymentMode, enabledField, instFlag] of [
+  ['apple_pay', 'APPLEPAY', '0'],
+  ['atm', 'VACC', '0'],
+  ['installment_6', 'CREDIT', '6'],
+] as const) {
+  const fields = buildCoursePaymentTradeInfoFields(
+    { ...testPaymentPayload, paymentMode },
+    config,
+  ) as Record<string, unknown>
+  assert.equal(fields[enabledField], '1')
+  assert.equal(fields.InstFlag, instFlag)
+  for (const disabledField of ['CREDIT', 'APPLEPAY', 'VACC']) {
+    if (disabledField !== enabledField) assert.equal(disabledField in fields, false)
+  }
+  assert.equal('WEBATM' in fields, false)
+  assert.equal('LINEPAY' in fields, false)
+}

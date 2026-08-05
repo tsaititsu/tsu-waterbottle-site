@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import {
   buildLinePayCartRedirectUrl,
+  buildLinePayReturnRedirectUrl,
+  redirectLinePayHandlerResponse,
   redirectLinePayHandlerResponseToCart,
   resolveLinePayCancelCartRedirectStatus,
   resolveLinePayConfirmCartRedirectStatus,
@@ -62,6 +64,29 @@ test('buildLinePayCartRedirectUrl only writes allowed linePay status', () => {
   assert.equal(String(buildLinePayCartRedirectUrl({ baseUrl: 'https://example.com/from', status: 'success' })), 'https://example.com/cart?linePay=success')
   assert.equal(String(buildLinePayCartRedirectUrl({ baseUrl: 'https://example.com/from', status: 'reconciliation' })), 'https://example.com/cart?linePay=reconciliation')
   assert.equal(String(buildLinePayCartRedirectUrl({ baseUrl: 'https://example.com/from', status: 'not-safe' })), 'https://example.com/cart?linePay=error')
+})
+
+test('service return redirects preserve only the approved local result path and safe status', async () => {
+  const reportId = '51000000-0000-4000-8000-000000000001'
+  assert.equal(
+    String(buildLinePayReturnRedirectUrl({
+      baseUrl: 'https://example.com/from',
+      returnPath: `/ai-chart/result/${reportId}`,
+      status: 'success',
+    })),
+    `https://example.com/ai-chart/result/${reportId}?linePay=success&payment=success`,
+  )
+
+  const response = await redirectLinePayHandlerResponse({
+    request: createRequest(),
+    response: jsonResponse({ ok: true, confirmed: true, markedPaid: true }),
+    resolveStatus: resolveLinePayConfirmCartRedirectStatus,
+    returnPath: '/account/bookings',
+  })
+  assert.equal(
+    response.headers.get('location'),
+    'https://example.com/account/bookings?linePay=success',
+  )
 })
 
 test('confirm markedPaid=true redirects to success', async () => {

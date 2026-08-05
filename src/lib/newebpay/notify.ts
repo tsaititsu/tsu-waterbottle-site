@@ -323,7 +323,8 @@ export async function syncNewebPayBookingAfterPayment({
     const result = await markBookingPaid({
       bookingId: payment.bookingId,
       paymentId: payment.id,
-      provider: 'newebpay',
+      provider:
+        payment.provider === 'line_pay' ? 'line_pay' : 'newebpay',
       providerTradeNo: payment.providerTradeNo,
       paidAt: payment.paidAt,
     })
