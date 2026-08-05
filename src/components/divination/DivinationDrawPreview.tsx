@@ -1,6 +1,7 @@
 "use client"
 
 import { DivinationResultPreview } from "@/components/divination/DivinationResultPreview"
+import { PaymentMethodSelector } from "@/components/payments/PaymentMethodSelector"
 import { ziweiCards, type ZiweiCard } from "@/lib/divination/cards"
 import {
   DIVINATION_READING_PAYMENT_MESSAGE,
@@ -37,6 +38,16 @@ import {
 } from "@/lib/newebpay/clientForm"
 import { isLineInAppBrowser } from "@/lib/browser/lineInAppBrowser"
 import { getAuthAccessToken, subscribeAuthChange } from "@/lib/mockAuth"
+import {
+  getCheckoutPaymentMethodOptions,
+  isLinePayCheckoutMethod,
+  toStandardNewebPayCheckoutMode,
+  type StandardCheckoutPaymentMethod,
+} from "@/lib/payments/paymentMethods"
+import {
+  getServiceLinePayErrorMessage,
+  requestServiceLinePayCheckout,
+} from "@/lib/linePay/serviceCheckoutClient"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
@@ -94,6 +105,7 @@ const pendingMessage = "你選到一張牌。請確認是不是這張。"
 const resultReadyMessage = "已產生牌義解讀預覽。"
 const blockedMessage = "請先在上方填寫問題，並選擇手動抽牌或自動抽牌。"
 const isNewebPayEnabled = process.env.NEXT_PUBLIC_ENABLE_NEWEBPAY === "true"
+const isLinePayEnabled = process.env.NEXT_PUBLIC_ENABLE_LINE_PAY === "true"
 
 const positionLabels: Record<DivinationPosition, string> = {
   upright: "正位",
@@ -332,6 +344,10 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
   const [isInterpreting, setIsInterpreting] = useState(false)
   const [isMockPaying, setIsMockPaying] = useState(false)
   const [isNewebPayCheckingOut, setIsNewebPayCheckingOut] = useState(false)
+  const [selectedPaymentMethod, setSelectedPaymentMethod] =
+    useState<StandardCheckoutPaymentMethod>(() =>
+      isNewebPayEnabled ? "credit_card" : "line_pay",
+    )
   // 管理員限定 NT$1 測試模式：由 admin-only API 確認可用性，非 admin 永遠 false。
   const [isAdminOneDollarTestAvailable, setIsAdminOneDollarTestAvailable] = useState(false)
   const [isMobileLineInAppBrowser, setIsMobileLineInAppBrowser] = useState(false)
@@ -769,7 +785,8 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
       return
     }
 
-    if (isNewebPayCheckingOut || !isNewebPayEnabled) return
+    const isLinePay = !isAdminOneDollarTest && isLinePayCheckoutMethod(selectedPaymentMethod)
+    if (isNewebPayCheckingOut || (isLinePay ? !isLinePayEnabled : !isNewebPayEnabled)) return
 
     persistDrawState(pendingCard, pendingPosition)
     setIsNewebPayCheckingOut(true)
@@ -779,21 +796,54 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
     let shouldSubmitForm = false
 
     try {
-      // 管理員測試模式需帶登入 token，讓 server 重新驗證 admin 與 flags；
-      // 正式付款請求維持原樣（不帶測試欄位）。
-      const adminAccessToken = isAdminOneDollarTest ? await getAuthAccessToken() : null
+      const accessToken = isAdminOneDollarTest || isLinePay
+        ? await getAuthAccessToken()
+        : null
+
+      if (isLinePay) {
+        if (!accessToken) {
+          setErrorMessage("請先登入會員後再使用 LINE Pay。")
+          setMessage(paymentRequired?.message || DIVINATION_READING_PAYMENT_MESSAGE)
+          return
+        }
+        const result = await requestServiceLinePayCheckout({
+          accessToken,
+          source: "ai_divination",
+          sourceId: readingId,
+          idempotencyKey: `ai-divination-line-pay:${readingId}`,
+          cardId: pendingCard.id,
+          position: pendingPosition,
+        })
+        if (!result.ok) {
+          setErrorMessage(getServiceLinePayErrorMessage(result))
+          setMessage(paymentRequired?.message || DIVINATION_READING_PAYMENT_MESSAGE)
+          return
+        }
+        setMessage("正在前往 LINE Pay 付款頁...")
+        shouldSubmitForm = true
+        window.location.assign(result.paymentUrlWeb)
+        return
+      }
+
+      const newebPayPaymentMethod = selectedPaymentMethod as Exclude<
+        StandardCheckoutPaymentMethod,
+        'line_pay'
+      >
+
       const response = await fetch("/api/payments/newebpay/create", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(isAdminOneDollarTest && adminAccessToken
-            ? { Authorization: `Bearer ${adminAccessToken}` }
+          ...(isAdminOneDollarTest && accessToken
+            ? { Authorization: `Bearer ${accessToken}` }
             : {}),
         },
         body: JSON.stringify({
           itemKey: "ai_divination_single",
           source: "ai_divination",
-          paymentMode: "credit",
+          paymentMode: isAdminOneDollarTest
+            ? "credit"
+            : toStandardNewebPayCheckoutMode(newebPayPaymentMethod),
           readingId,
           cardId: pendingCard.id,
           position: pendingPosition,
@@ -1213,19 +1263,43 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                 </p>
               ) : null}
               <LineInAppBrowserPaymentNotice visible={showLineInAppBrowserPaymentNotice} />
+              {paymentRequired && isPersistedReading ? (
+                <PaymentMethodSelector
+                  disabled={isInterpreting || isNewebPayCheckingOut}
+                  onChange={(method) => {
+                    if (method === "credit_card_installment_3" || method === "credit_card_installment_6") return
+                    setSelectedPaymentMethod(method)
+                    setErrorMessage("")
+                  }}
+                  options={getCheckoutPaymentMethodOptions({
+                    includeLinePay: isLinePayEnabled,
+                    includeNewebPay: isNewebPayEnabled,
+                  })}
+                  value={selectedPaymentMethod}
+                />
+              ) : null}
               <div className="grid gap-3 sm:grid-cols-2">
                 {paymentRequired && isPersistedReading ? (
                   <>
                     <button
                       type="button"
                       onClick={() => handleNewebPayDivinationCheckout()}
-                      disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled || !hasAcceptedTerms}
+                      disabled={
+                        isInterpreting
+                        || isNewebPayCheckingOut
+                        || !hasAcceptedTerms
+                        || (isLinePayCheckoutMethod(selectedPaymentMethod)
+                          ? !isLinePayEnabled
+                          : !isNewebPayEnabled)
+                      }
                       className="min-h-11 w-full rounded-full bg-deepPurple px-5 py-3 font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {isNewebPayCheckingOut
                         ? "建立線上付款資料中..."
-                        : isNewebPayEnabled
-                          ? `信用卡線上付款 NT$${paymentRequired.amountTwd}`
+                        : isLinePayCheckoutMethod(selectedPaymentMethod)
+                          ? `LINE Pay 付款 NT$${paymentRequired.amountTwd}`
+                          : isNewebPayEnabled
+                            ? `使用所選方式付款 NT$${paymentRequired.amountTwd}`
                           : "線上付款尚未啟用"}
                     </button>
                     {isAdminOneDollarTestAvailable ? (
@@ -1309,17 +1383,41 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
               />
               <LineInAppBrowserPaymentNotice visible={showLineInAppBrowserPaymentNotice} />
               {isPersistedReading ? (
+                <PaymentMethodSelector
+                  disabled={isInterpreting || isNewebPayCheckingOut}
+                  onChange={(method) => {
+                    if (method === "credit_card_installment_3" || method === "credit_card_installment_6") return
+                    setSelectedPaymentMethod(method)
+                    setErrorMessage("")
+                  }}
+                  options={getCheckoutPaymentMethodOptions({
+                    includeLinePay: isLinePayEnabled,
+                    includeNewebPay: isNewebPayEnabled,
+                  })}
+                  value={selectedPaymentMethod}
+                />
+              ) : null}
+              {isPersistedReading ? (
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => handleNewebPayDivinationCheckout()}
-                    disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled || !hasAcceptedTerms}
+                    disabled={
+                      isInterpreting
+                      || isNewebPayCheckingOut
+                      || !hasAcceptedTerms
+                      || (isLinePayCheckoutMethod(selectedPaymentMethod)
+                        ? !isLinePayEnabled
+                        : !isNewebPayEnabled)
+                    }
                     className="rounded-full bg-deepPurple px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#4b176b] disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isNewebPayCheckingOut
                       ? "建立線上付款資料中..."
-                      : isNewebPayEnabled
-                        ? `信用卡線上付款 NT$${paymentRequired.amountTwd}`
+                      : isLinePayCheckoutMethod(selectedPaymentMethod)
+                        ? `LINE Pay 付款 NT$${paymentRequired.amountTwd}`
+                        : isNewebPayEnabled
+                          ? `使用所選方式付款 NT$${paymentRequired.amountTwd}`
                         : "線上付款尚未啟用"}
                   </button>
                   {isAdminOneDollarTestAvailable ? (

@@ -28,8 +28,15 @@ export type CoursePaymentPayload = {
   notifyUrl: string
   returnUrl: string
   clientBackUrl: string
-  instFlag?: '0' | '3,6'
+  paymentMode: CourseNewebPayPaymentMode
 }
+
+export type CourseNewebPayPaymentMode =
+  | 'credit'
+  | 'apple_pay'
+  | 'atm'
+  | 'installment_3'
+  | 'installment_6'
 
 export type NewebPayTradeInfoFields = {
   MerchantID: string
@@ -44,6 +51,8 @@ export type NewebPayTradeInfoFields = {
   NotifyURL: string
   ReturnURL: string
   ClientBackURL: string
-  CREDIT: '1'
-  InstFlag: '0' | '3,6'
+  CREDIT?: '1'
+  APPLEPAY?: '1'
+  VACC?: '1'
+  InstFlag: '0' | '3' | '6'
 }

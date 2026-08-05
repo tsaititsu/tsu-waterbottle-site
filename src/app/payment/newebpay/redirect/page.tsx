@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { getNewebPayConfig } from '@/lib/newebpay/config'
 import { createCoursePaymentMpgForm } from '@/lib/newebpay/mpg'
+import type { CourseNewebPayPaymentMode } from '@/lib/newebpay/types'
 import { getSupabaseAdmin, hasSupabaseAdminConfig } from '@/lib/supabase/admin'
 import { NewebPayAutoSubmitForm } from './NewebPayAutoSubmitForm'
 
@@ -23,10 +24,25 @@ type PaymentRow = {
   amount_twd: number
   status: string
   merchant_order_no: string | null
+  raw_payload: Record<string, unknown> | null
 }
 
 function isSupportedNewebPayItemType(itemType: string) {
   return itemType === 'course' || itemType === 'newebpay_test'
+}
+
+function getCoursePaymentMode(payment: PaymentRow): CourseNewebPayPaymentMode {
+  const mode = payment.raw_payload?.paymentMode
+  if (
+    mode === 'credit'
+    || mode === 'apple_pay'
+    || mode === 'atm'
+    || mode === 'installment_3'
+    || mode === 'installment_6'
+  ) {
+    return mode
+  }
+  return 'credit'
 }
 
 async function getServerSupabaseClient() {
@@ -89,7 +105,7 @@ export default async function NewebPayRedirectPage({ searchParams }: RedirectPag
   const admin = getSupabaseAdmin()
   const { data: payment, error: paymentError } = await admin
     .from('payments')
-    .select('id,user_id,provider,item_type,item_id,item_name,amount_twd,status,merchant_order_no')
+    .select('id,user_id,provider,item_type,item_id,item_name,amount_twd,status,merchant_order_no,raw_payload')
     .eq('id', paymentId)
     .eq('user_id', user.id)
     .maybeSingle<PaymentRow>()
@@ -130,7 +146,7 @@ export default async function NewebPayRedirectPage({ searchParams }: RedirectPag
         notifyUrl: `${config.siteUrl}/api/payments/newebpay/notify`,
         returnUrl: `${config.siteUrl}/api/payments/newebpay/return`,
         clientBackUrl: payment.item_type === 'course' ? `${config.siteUrl}/account/courses` : `${config.siteUrl}/payment/newebpay/test`,
-        instFlag: payment.item_type === 'course' ? '3,6' : '0',
+        paymentMode: payment.item_type === 'course' ? getCoursePaymentMode(payment) : 'credit',
       },
       config,
     )

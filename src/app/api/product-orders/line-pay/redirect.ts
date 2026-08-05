@@ -47,6 +47,27 @@ export function buildLinePayCartRedirectUrl({
   return url
 }
 
+export function buildLinePayReturnRedirectUrl({
+  baseUrl,
+  returnPath,
+  status,
+}: {
+  baseUrl: string | URL
+  returnPath: string
+  status: unknown
+}) {
+  const normalizedStatus = normalizeLinePayCartRedirectStatus(status)
+  const url = new URL(returnPath, baseUrl)
+  url.searchParams.set('linePay', normalizedStatus)
+  if (url.pathname.startsWith('/ai-chart/result/') || url.pathname.startsWith('/ai-divination/result/')) {
+    url.searchParams.set(
+      'payment',
+      normalizedStatus === 'success' ? 'success' : normalizedStatus,
+    )
+  }
+  return url
+}
+
 export function resolveLinePayConfirmCartRedirectStatus(payload: unknown): LinePayCartRedirectStatus {
   if (!isRecord(payload)) return 'error'
 
@@ -89,4 +110,26 @@ export async function redirectLinePayHandlerResponseToCart({
   })
 
   return NextResponse.redirect(redirectUrl, { status: 303 })
+}
+
+export async function redirectLinePayHandlerResponse({
+  request,
+  response,
+  resolveStatus,
+  returnPath,
+}: {
+  request: Request
+  response: Response
+  resolveStatus: (payload: unknown) => LinePayCartRedirectStatus
+  returnPath: string
+}) {
+  const payload = await readSafeJson(response)
+  return NextResponse.redirect(
+    buildLinePayReturnRedirectUrl({
+      baseUrl: request.url,
+      returnPath,
+      status: resolveStatus(payload),
+    }),
+    { status: 303 },
+  )
 }

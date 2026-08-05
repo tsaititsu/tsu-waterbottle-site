@@ -11,10 +11,23 @@ import {
   buildNewebPayMerchantOrderUrl,
 } from '../../../../../../lib/newebpay/coursePayment'
 import type {
+  CourseNewebPayPaymentMode,
   CoursePaymentPayload,
   NewebPayConfig,
   NewebPayMpgForm,
 } from '../../../../../../lib/newebpay/types'
+
+const coursePaymentModes = new Set<CourseNewebPayPaymentMode>([
+  'credit',
+  'apple_pay',
+  'atm',
+  'installment_3',
+  'installment_6',
+])
+
+function isCoursePaymentMode(value: unknown): value is CourseNewebPayPaymentMode {
+  return typeof value === 'string' && coursePaymentModes.has(value as CourseNewebPayPaymentMode)
+}
 
 type CoursePaymentInsertPayload = ReturnType<typeof buildCoursePaymentInsertPayload>
 
@@ -47,12 +60,20 @@ export async function handleCourseStartRequest(request: Request, dependencies: C
     return NextResponse.json({ ok: false, message: '尚未登入' }, { status: 401 })
   }
 
-  const body = (await request.json().catch(() => null)) as { courseId?: unknown } | null
+  const body = (await request.json().catch(() => null)) as {
+    courseId?: unknown
+    paymentMode?: unknown
+  } | null
   if (!isCourseId(body?.courseId)) {
     return NextResponse.json({ ok: false, message: '課程不存在' }, { status: 400 })
   }
 
+  if (!isCoursePaymentMode(body.paymentMode)) {
+    return NextResponse.json({ ok: false, message: '不支援的付款方式' }, { status: 400 })
+  }
+
   const courseId = body.courseId
+  const paymentMode = body.paymentMode
   const course = getCourseById(courseId)
   if (!course) {
     return NextResponse.json({ ok: false, message: '課程不存在' }, { status: 400 })
@@ -83,6 +104,7 @@ export async function handleCourseStartRequest(request: Request, dependencies: C
         amount: course.price,
         merchantOrderNo,
         itemDesc,
+        paymentMode,
       }),
     )
 
@@ -94,7 +116,7 @@ export async function handleCourseStartRequest(request: Request, dependencies: C
         notifyUrl: buildNewebPayMerchantOrderUrl(config.siteUrl, '/api/payments/newebpay/notify', merchantOrderNo),
         returnUrl: buildNewebPayMerchantOrderUrl(config.siteUrl, '/api/payments/newebpay/return', merchantOrderNo),
         clientBackUrl: `${config.siteUrl}/account/courses`,
-        instFlag: '3,6',
+        paymentMode,
       },
       config,
     )

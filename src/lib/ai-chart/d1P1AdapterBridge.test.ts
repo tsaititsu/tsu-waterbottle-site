@@ -3501,7 +3501,9 @@ async function run() {
     }
   })
   check('Payment modules import no Adapter Bridge', () => {
-    const paymentFiles = sourceFiles.filter((path) => /payment/iu.test(path))
+    const paymentFiles = sourceFiles.filter((path) =>
+      /payment/iu.test(relative(repositoryRoot, path)),
+    )
     assert.equal(
       paymentFiles.some((path) =>
         readFileSync(path, 'utf8').includes('d1P1AdapterBridge'),

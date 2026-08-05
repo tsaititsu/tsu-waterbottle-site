@@ -3,7 +3,12 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useCart } from '@/components/CartContext'
+import { PaymentMethodSelector } from '@/components/payments/PaymentMethodSelector'
 import { getAuthAccessToken } from '@/lib/mockAuth'
+import {
+  getCheckoutPaymentMethodOptions,
+  type StandardCheckoutPaymentMethod,
+} from '@/lib/payments/paymentMethods'
 import {
   buildLinePayReturnMessage,
   getCartLinePayButtonState,
@@ -30,33 +35,20 @@ const typeLabel: Record<string, string> = {
   other: '其他'
 }
 
-type CartPaymentMethod = CartNewebPayPaymentMode | 'line_pay'
+type CartPaymentMethod = StandardCheckoutPaymentMethod
 
-const cartPaymentMethodOptions: Array<{
-  value: CartPaymentMethod
-  label: string
-  description: string
-  ctaLabel: string
-}> = [
-  {
-    value: 'credit',
-    label: '信用卡付款',
-    description: '前往藍新金流信用卡一次付清頁',
-    ctaLabel: '前往信用卡付款',
-  },
-  {
-    value: 'product_order_apple_pay',
-    label: 'Apple Pay 付款（iPhone / Safari）',
-    description: '前往藍新金流 Apple Pay 付款頁',
-    ctaLabel: '前往 Apple Pay 付款',
-  },
-  {
-    value: 'line_pay',
-    label: 'LINE Pay',
-    description: '前往 LINE Pay 安全付款頁',
-    ctaLabel: '使用 LINE Pay 付款',
-  },
-]
+function getCartNewebPayMode(method: Exclude<CartPaymentMethod, 'line_pay'>): CartNewebPayPaymentMode {
+  if (method === 'apple_pay') return 'product_order_apple_pay'
+  if (method === 'newebpay_atm') return 'atm'
+  return 'credit'
+}
+
+function getCartPaymentButtonLabel(method: CartPaymentMethod) {
+  if (method === 'line_pay') return '使用 LINE Pay 付款'
+  if (method === 'apple_pay') return '前往 Apple Pay 付款'
+  if (method === 'newebpay_atm') return '取得 ATM 虛擬帳號'
+  return '前往信用卡付款'
+}
 
 type PostOfficeShippingInfo = {
   recipientName: string
@@ -110,7 +102,7 @@ export default function CartPage() {
   const [checkoutError, setCheckoutError] = useState('')
   const [isNewebPayCheckingOut, setIsNewebPayCheckingOut] = useState(false)
   const [isLinePayCheckingOut, setIsLinePayCheckingOut] = useState(false)
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<CartPaymentMethod>('credit')
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<CartPaymentMethod>('credit_card')
   const [linePayReturnMessage, setLinePayReturnMessage] = useState<CartLinePayReturnMessage>(() =>
     buildLinePayReturnMessage(null),
   )
@@ -127,13 +119,9 @@ export default function CartPage() {
     process.env.NEXT_PUBLIC_ENABLE_LINE_PAY,
     isLinePayCheckingOut,
   )
-  const availableCartPaymentMethodOptions = cartPaymentMethodOptions.filter(
-    (option) => option.value !== 'line_pay' || linePayButtonState.visible,
-  )
-  const selectedPaymentMethodOption =
-    availableCartPaymentMethodOptions.find((option) => option.value === selectedPaymentMethod) ??
-    availableCartPaymentMethodOptions[0]
-
+  const availableCartPaymentMethodOptions = getCheckoutPaymentMethodOptions({
+    includeLinePay: linePayButtonState.visible,
+  })
   const updatePostOfficeShippingInfo = (key: keyof PostOfficeShippingInfo, value: string) => {
     setPostOfficeShippingInfo((current) => ({
       ...current,
@@ -558,24 +546,18 @@ export default function CartPage() {
                 <div className="grid w-full gap-3 sm:w-auto sm:min-w-80">
                   {hasSpiritualProduct ? (
                     <div className="grid gap-2">
-                      <label className="grid gap-2 text-sm font-semibold text-textDark">
-                        <span>付款方式</span>
-                        <select
-                          className="focus-ring rounded-xl border border-borderSoft bg-white px-4 py-3 text-textDark"
-                          onChange={(event) => {
-                            setSelectedPaymentMethod(event.target.value as CartPaymentMethod)
-                            setCheckoutError('')
-                          }}
-                          value={selectedPaymentMethod}
-                        >
-                          {availableCartPaymentMethodOptions.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <p className="text-xs leading-5 text-textMuted">{selectedPaymentMethodOption.description}</p>
+                      <PaymentMethodSelector
+                        disabled={isCheckoutPending}
+                        onChange={(method) => {
+                          setSelectedPaymentMethod(method as CartPaymentMethod)
+                          setCheckoutError('')
+                        }}
+                        options={availableCartPaymentMethodOptions}
+                        value={selectedPaymentMethod}
+                      />
+                      <p className="text-xs leading-5 text-textMuted">
+                        付款狀態會由藍新或 LINE Pay 系統自動回傳確認，不需人工提供匯款末五碼。
+                      </p>
                     </div>
                   ) : null}
                   <div className="flex flex-wrap gap-3 sm:justify-end">
@@ -583,7 +565,7 @@ export default function CartPage() {
                       <button
                         aria-busy={isCheckoutPending}
                         className={`focus-ring rounded-xl px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70 ${
-                          selectedPaymentMethod === 'product_order_apple_pay'
+                          selectedPaymentMethod === 'apple_pay'
                             ? 'bg-black'
                             : selectedPaymentMethod === 'line_pay'
                               ? 'bg-[#06c755]'
@@ -595,7 +577,7 @@ export default function CartPage() {
                             void handleLinePayCheckoutClick()
                             return
                           }
-                          void handleNewebPayCheckoutClick(selectedPaymentMethod)
+                          void handleNewebPayCheckoutClick(getCartNewebPayMode(selectedPaymentMethod))
                         }}
                         type="button"
                       >
@@ -603,7 +585,7 @@ export default function CartPage() {
                           ? selectedPaymentMethod === 'line_pay'
                             ? linePayButtonState.message
                             : '正在建立付款資料...'
-                          : selectedPaymentMethodOption.ctaLabel}
+                          : getCartPaymentButtonLabel(selectedPaymentMethod)}
                       </button>
                     ) : null}
                   <Link href="/" className="focus-ring rounded-xl border border-borderSoft px-5 py-3 font-semibold text-textDark">

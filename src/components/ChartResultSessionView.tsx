@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ActionButton } from './ActionButton'
 import { LoginModal } from './LoginModal'
+import { PaymentMethodSelector } from './payments/PaymentMethodSelector'
 import { createAsyncIdentityGuard } from '@/lib/auth/asyncIdentityGuard'
 import {
   getAiChartDraftNotes,
@@ -15,6 +16,16 @@ import {
 } from '@/lib/ai-chart/chartDraftMemory'
 import { saveAiChartPaymentSession } from '@/lib/ai-chart/paymentSession'
 import { getAuthAccessToken, getMockUser, subscribeAuthChange } from '@/lib/mockAuth'
+import {
+  getCheckoutPaymentMethodOptions,
+  isLinePayCheckoutMethod,
+  toStandardNewebPayCheckoutMode,
+  type StandardCheckoutPaymentMethod,
+} from '@/lib/payments/paymentMethods'
+import {
+  getServiceLinePayErrorMessage,
+  requestServiceLinePayCheckout,
+} from '@/lib/linePay/serviceCheckoutClient'
 import { buildNewebPayClientFormFields } from '@/lib/newebpay/clientForm'
 import { createZiweiGptPayload, type ChartInput, type ZiweiGptPayload } from '@/features/ziwei-chart/package'
 import { OriginalZiweiChartView } from '@/features/ziwei-chart/components/OriginalZiweiChartView'
@@ -28,6 +39,9 @@ const selectedPlan = {
 const AI_CHART_REPORT_TITLE = 'AI 命盤分析'
 const AI_CHART_REPORT_PRODUCT_NAME = 'AI 命盤分析'
 const isAiChartNewebPayCheckoutEnabled = process.env.NEXT_PUBLIC_ENABLE_AI_CHART_NEWEBPAY === 'true'
+const isLinePayCheckoutEnabled = process.env.NEXT_PUBLIC_ENABLE_LINE_PAY === 'true'
+const isAiChartDirectCheckoutEnabled =
+  isAiChartNewebPayCheckoutEnabled || isLinePayCheckoutEnabled
 
 type CreateAiChartReportResponse =
   | {
@@ -95,6 +109,10 @@ export function ChartResultSessionView() {
   const [formError, setFormError] = useState('')
   const [paymentSetupMessage, setPaymentSetupMessage] = useState('')
   const [isCreatingPendingReport, setIsCreatingPendingReport] = useState(false)
+  const [selectedPaymentMethod, setSelectedPaymentMethod] =
+    useState<StandardCheckoutPaymentMethod>(() =>
+      isAiChartNewebPayCheckoutEnabled ? 'credit_card' : 'line_pay',
+    )
   const [loginOpen, setLoginOpen] = useState(false)
   const [loadError, setLoadError] = useState('')
   const checkoutInFlightRef = useRef(false)
@@ -103,8 +121,9 @@ export function ChartResultSessionView() {
       JSON.stringify({
         accepted: hasAcceptedPaidNotice,
         input: chartInput,
+        paymentMethod: selectedPaymentMethod,
       }),
-    [chartInput, hasAcceptedPaidNotice],
+    [chartInput, hasAcceptedPaidNotice, selectedPaymentMethod],
   )
   const checkoutResourceKeyRef = useRef(checkoutResourceKey)
   const [checkoutGuard] = useState(() => createAsyncIdentityGuard())
@@ -305,6 +324,25 @@ export function ChartResultSessionView() {
       }
 
       const reportId = reportData.reportId
+
+      if (isLinePayCheckoutMethod(selectedPaymentMethod)) {
+        const linePayResult = await requestServiceLinePayCheckout({
+          accessToken,
+          source: 'ai_chart_report',
+          sourceId: reportId,
+          idempotencyKey: `ai-chart-line-pay:${reportId}`,
+        })
+        if (!isCurrentRequest()) return
+        if (!linePayResult.ok) {
+          setFormError(getServiceLinePayErrorMessage(linePayResult))
+          setPaymentSetupMessage('')
+          return
+        }
+        setPaymentSetupMessage('正在前往 LINE Pay。')
+        window.location.assign(linePayResult.paymentUrlWeb)
+        return
+      }
+
       const paymentResponse = await fetch('/api/payments/newebpay/create', {
         method: 'POST',
         headers: {
@@ -314,7 +352,7 @@ export function ChartResultSessionView() {
         body: JSON.stringify({
           itemKey: 'ai_chart_report_single',
           source: 'ai_chart_report',
-          paymentMode: 'credit',
+          paymentMode: toStandardNewebPayCheckoutMode(selectedPaymentMethod),
           reportId
         })
       })
@@ -490,14 +528,32 @@ export function ChartResultSessionView() {
         {formError && <p aria-live="polite" className="text-sm font-semibold text-deepPurple">{formError}</p>}
         {paymentSetupMessage && <p aria-live="polite" className="text-sm font-semibold text-darkGold">{paymentSetupMessage}</p>}
 
-        {isAiChartNewebPayCheckoutEnabled ? (
+        <PaymentMethodSelector
+          disabled={isCreatingPendingReport}
+          onChange={(method) => {
+            if (method === 'credit_card_installment_3' || method === 'credit_card_installment_6') return
+            checkoutGuard.invalidate()
+            setSelectedPaymentMethod(method)
+            setFormError('')
+            setPaymentSetupMessage('')
+          }}
+          options={getCheckoutPaymentMethodOptions({
+            includeLinePay: isLinePayCheckoutEnabled,
+            includeNewebPay: isAiChartNewebPayCheckoutEnabled,
+          })}
+          value={selectedPaymentMethod}
+        />
+
+        {isAiChartDirectCheckoutEnabled ? (
           <button
             className="focus-ring inline-flex w-full justify-center rounded-xl bg-deepPurple px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
             disabled={isCreatingPendingReport}
             onClick={() => void createPendingReportForCheckout()}
             type="button"
           >
-            {isCreatingPendingReport ? '建立付款資料中...' : `前往付款 NT$${selectedPlan.amount}`}
+            {isCreatingPendingReport
+              ? '建立付款資料中...'
+              : `使用所選方式付款 NT$${selectedPlan.amount}`}
           </button>
         ) : (
           <ActionButton

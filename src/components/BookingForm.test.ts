@@ -34,31 +34,40 @@ for (const retiredContract of [
   assert.equal(bookingFormSource.includes(retiredContract), false, retiredContract)
 }
 
-assert.equal(bookingFormSource.includes('信用卡線上付款｜藍新金流'), true)
+assert.equal(bookingFormSource.includes('PaymentMethodSelector'), true)
+assert.equal(bookingFormSource.includes('includeLinePay: isLinePayEnabled'), true)
+assert.equal(bookingFormSource.includes('includeNewebPay: isNewebPayEnabled'), true)
 assert.equal(
   bookingFormSource.includes(
-    '送出後先建立預約，再前往藍新金流信用卡一次付清頁；付款狀態以金流背景通知為準。',
+    '付款狀態由藍新或 LINE Pay 系統背景通知自動確認；ATM 請依藍新提供的本次專用虛擬帳號完成轉帳。',
   ),
   true,
 )
-assert.equal(bookingFormSource.includes("paymentMode: 'credit'"), true)
+assert.equal(
+  bookingFormSource.includes('paymentMode: toStandardNewebPayCheckoutMode(selectedPaymentMethod)'),
+  true,
+)
 assert.equal(bookingFormSource.includes("itemKey: 'booking_consultation_60'"), true)
 assert.equal(bookingFormSource.includes("source: 'booking'"), true)
-assert.equal(bookingFormSource.includes('前往信用卡付款 NT$'), true)
+assert.equal(bookingFormSource.includes("source: 'booking',"), true)
+assert.equal(bookingFormSource.includes('requestServiceLinePayCheckout'), true)
+assert.equal(bookingFormSource.includes('使用所選方式付款 NT$'), true)
 assert.equal(
   bookingFormSource.includes('預約已建立，但付款頁建立失敗。請稍後重試；如仍無法付款，請聯繫客服，勿重複建立預約。'),
   true,
 )
 
-// NewebPay disabled 必須在任何建立預約 POST 前 fail closed。
-const newebPayGuardIndex = bookingFormSource.indexOf('if (!isNewebPayEnabled) {')
+// 選定的付款供應商 disabled 時，必須在任何建立預約 POST 前 fail closed。
+const paymentProviderGuardIndex = bookingFormSource.indexOf(
+  'if (isLinePay ? !isLinePayEnabled : !isNewebPayEnabled) {',
+)
 const bookingCreateIndex = bookingFormSource.indexOf("fetch('/api/bookings/create'")
-assert.equal(newebPayGuardIndex >= 0, true)
+assert.equal(paymentProviderGuardIndex >= 0, true)
 assert.equal(bookingCreateIndex >= 0, true)
-assert.equal(newebPayGuardIndex < bookingCreateIndex, true)
+assert.equal(paymentProviderGuardIndex < bookingCreateIndex, true)
 assert.equal(
   bookingFormSource.includes(
-    "if (!isNewebPayEnabled) {\n      setFormError('目前暫時無法使用線上付款，請稍後再試或聯繫客服。')\n      return false\n    }",
+    "if (isLinePay ? !isLinePayEnabled : !isNewebPayEnabled) {\n      setFormError('目前暫時無法使用線上付款，請稍後再試或聯繫客服。')\n      return false\n    }",
   ),
   true,
 )
@@ -99,4 +108,4 @@ assert.equal(floatingLineSource.includes('md:h-16 md:w-16'), true)
 assert.equal(globalCssSource.includes('right: 14px;'), true)
 assert.equal(globalCssSource.includes('+ 12px'), true)
 
-console.log('✓ booking credit-only payment, mobile input, and consent contracts passed')
+console.log('✓ booking payment-method menu, mobile input, and consent contracts passed')

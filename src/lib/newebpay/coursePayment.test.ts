@@ -31,6 +31,7 @@ const rawPayload = buildCoursePaymentRawPayload({
   amount: 9800,
   merchantOrderNo,
   itemDesc: '初級班｜小白專區',
+  paymentMode: 'credit',
 })
 
 assert.deepEqual(rawPayload, {
@@ -57,6 +58,7 @@ const insertPayload = buildCoursePaymentInsertPayload({
   amount: 9800,
   merchantOrderNo,
   itemDesc: '初級班｜小白專區',
+  paymentMode: 'credit',
 })
 
 assert.deepEqual(insertPayload, {

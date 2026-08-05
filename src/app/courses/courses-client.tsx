@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useState } from 'react'
 import { LoginModal } from '@/components/LoginModal'
 import { PageHero } from '@/components/PageHero'
+import { PaymentMethodSelector } from '@/components/payments/PaymentMethodSelector'
 import {
   canBuyCourse,
   courseCatalog,
@@ -20,11 +21,27 @@ import {
   subscribeAuthChange,
   type UserProfile,
 } from '@/lib/mockAuth'
+import {
+  getCheckoutPaymentMethodOptions,
+  isLinePayCheckoutMethod,
+  toCourseNewebPayCheckoutMode,
+  type CheckoutPaymentMethod,
+} from '@/lib/payments/paymentMethods'
+import {
+  getServiceLinePayErrorMessage,
+  requestServiceLinePayCheckout,
+} from '@/lib/linePay/serviceCheckoutClient'
 
 type PurchaseState = {
   message: string
   courseId: CourseId | null
 }
+
+const isLinePayEnabled = process.env.NEXT_PUBLIC_ENABLE_LINE_PAY === 'true'
+const isNewebPayEnabled = process.env.NEXT_PUBLIC_ENABLE_NEWEBPAY === 'true'
+const defaultCoursePaymentMethod: CheckoutPaymentMethod = isNewebPayEnabled
+  ? 'credit_card'
+  : 'line_pay'
 
 function getCoursePaymentErrorMessage(status: number, fallback?: string) {
   if (status === 401) return '請先登入會員後再購買課程'
@@ -122,6 +139,9 @@ export default function CoursesPageClient() {
   const [loginOpen, setLoginOpen] = useState(false)
   const [purchasingCourseId, setPurchasingCourseId] = useState<CourseId | null>(null)
   const [purchaseState, setPurchaseState] = useState<PurchaseState>({ message: '', courseId: null })
+  const [selectedPaymentMethods, setSelectedPaymentMethods] = useState<
+    Partial<Record<CourseId, CheckoutPaymentMethod>>
+  >({})
   const [acceptedCourseTerms, setAcceptedCourseTerms] = useState<Partial<Record<CourseId, boolean>>>({})
 
   const loadPurchases = useCallback(async () => {
@@ -207,15 +227,38 @@ export default function CoursesPageClient() {
     }
 
     setPurchasingCourseId(course.id)
+    const paymentMethod = selectedPaymentMethods[course.id] ?? defaultCoursePaymentMethod
 
     try {
+      if (isLinePayCheckoutMethod(paymentMethod)) {
+        const result = await requestServiceLinePayCheckout({
+          accessToken,
+          source: 'course',
+          sourceId: course.id,
+          idempotencyKey: `course-line-pay:${course.id}`,
+        })
+        if (!result.ok) {
+          if (result.status === 401) setLoginOpen(true)
+          setPurchaseState({
+            message: getServiceLinePayErrorMessage(result),
+            courseId: course.id,
+          })
+          return
+        }
+        window.location.assign(result.paymentUrlWeb)
+        return
+      }
+
       const response = await fetch('/api/payments/newebpay/course/start', {
         method: 'POST',
         headers: {
           authorization: `Bearer ${accessToken}`,
           'content-type': 'application/json',
         },
-        body: JSON.stringify({ courseId: course.id }),
+        body: JSON.stringify({
+          courseId: course.id,
+          paymentMode: toCourseNewebPayCheckoutMode(paymentMethod),
+        }),
       })
       const data = (await response.json().catch(() => null)) as { paymentId?: string; message?: string } | null
 
@@ -259,6 +302,12 @@ export default function CoursesPageClient() {
             const lockedReason = user ? getCourseLockedReason(course.id, purchasedCourseIds) : null
             const canBuy = user && !purchased && canBuyCourse(course.id, purchasedCourseIds)
             const isPurchasing = purchasingCourseId === course.id
+            const coursePaymentMethodOptions = getCheckoutPaymentMethodOptions({
+              includeCourseInstallments: true,
+              includeLinePay: isLinePayEnabled,
+              includeNewebPay: isNewebPayEnabled,
+            })
+            const hasAvailablePaymentMethod = coursePaymentMethodOptions.length > 0
 
             return (
               <article
@@ -306,6 +355,31 @@ export default function CoursesPageClient() {
                     </div>
                   ) : null}
 
+                  {salesOpen && user && !purchased && !lockedReason ? (
+                    <div className="mb-4 rounded-xl border border-borderSoft bg-softPurple/45 p-4">
+                      <PaymentMethodSelector
+                        disabled={isPurchasing}
+                        onChange={(method) => {
+                          setSelectedPaymentMethods((current) => ({
+                            ...current,
+                            [course.id]: method,
+                          }))
+                          setPurchaseState({ message: '', courseId: null })
+                        }}
+                        options={coursePaymentMethodOptions}
+                        value={selectedPaymentMethods[course.id] ?? defaultCoursePaymentMethod}
+                      />
+                      <p className="mt-3 text-xs leading-6 text-textMuted">
+                        分期僅限本課程；ATM 入帳與其他付款結果會由金流系統自動確認。
+                      </p>
+                      {!hasAvailablePaymentMethod ? (
+                        <p className="mt-3 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-deepPurple">
+                          目前暫時無法使用線上付款，請稍後再試。
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+
                   {!salesOpen && !purchased ? (
                     <div className="grid gap-3">
                       <button type="button" className="w-full rounded-lg bg-lightGold px-4 py-3 font-semibold text-darkGold" disabled>
@@ -345,10 +419,10 @@ export default function CoursesPageClient() {
                     <button
                       type="button"
                       className="focus-ring w-full rounded-lg bg-deepPurple px-4 py-3 font-semibold text-white disabled:opacity-70"
-                      disabled={!canBuy || isPurchasing}
+                      disabled={!canBuy || isPurchasing || !hasAvailablePaymentMethod}
                       onClick={() => void purchaseCourse(course)}
                     >
-                      {isPurchasing ? '建立付款單中...' : `立即購買 ${formatCoursePrice(course.price)}`}
+                      {isPurchasing ? '建立付款單中...' : `使用所選方式購買 ${formatCoursePrice(course.price)}`}
                     </button>
                   )}
 

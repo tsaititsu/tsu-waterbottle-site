@@ -21,7 +21,7 @@ const fakeForm: NewebPayMpgForm = {
   actionUrl: 'https://example.test/mpg',
 }
 
-function createRequest(body: Record<string, unknown> = { courseId: 'basic' }) {
+function createRequest(body: Record<string, unknown> = { courseId: 'basic', paymentMode: 'credit' }) {
   return new Request('https://example.test/api/payments/newebpay/course/start', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -118,7 +118,34 @@ async function runTests() {
     assert.equal(calls.paymentInserts[0]?.status, 'pending')
     assert.equal(calls.mpgPayloads.length, 1)
     assert.equal(calls.mpgPayloads[0]?.amount, 9800)
-    assert.equal(calls.mpgPayloads[0]?.instFlag, '3,6')
+    assert.equal(calls.mpgPayloads[0]?.paymentMode, 'credit')
+  }
+
+  {
+    const { calls, dependencies } = createDependencies(true)
+    const response = await handleCourseStartRequest(
+      createRequest({ courseId: 'basic', paymentMode: 'installment_6' }),
+      dependencies,
+    )
+
+    assert.equal(response.status, 200)
+    assert.equal(calls.mpgPayloads[0]?.paymentMode, 'installment_6')
+    assert.equal(
+      (calls.paymentInserts[0]?.raw_payload as Record<string, unknown>)?.paymentMode,
+      'installment_6',
+    )
+  }
+
+  {
+    const { calls, dependencies } = createDependencies(true)
+    const response = await handleCourseStartRequest(
+      createRequest({ courseId: 'basic', paymentMode: 'webatm' }),
+      dependencies,
+    )
+
+    assert.equal(response.status, 400)
+    assert.equal(calls.paymentInserts.length, 0)
+    assert.equal(calls.mpgPayloads.length, 0)
   }
 }
 

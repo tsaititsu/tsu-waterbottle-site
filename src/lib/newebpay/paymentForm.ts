@@ -17,7 +17,11 @@ export type NewebPayPaymentSource =
   | 'ai_chart_report'
   | 'product_order'
   | 'manual_test'
-export type StandardNewebPayPaymentMode = 'credit' | 'merchant_default'
+export type StandardNewebPayPaymentMode =
+  | 'credit'
+  | 'apple_pay'
+  | 'atm'
+  | 'merchant_default'
 export const PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE = 'product_order_apple_pay'
 export type ProductOrderApplePayPaymentMode = typeof PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE
 export type NewebPayPaymentMode =
@@ -145,7 +149,7 @@ export type NewebPayPendingPaymentMetadata = {
     orderId?: string
     orderNo?: string
     itemType?: string
-    paymentMethod?: 'credit' | 'apple_pay'
+    paymentMethod?: 'credit' | 'apple_pay' | 'atm'
   }
 }
 
@@ -180,6 +184,8 @@ const allowedSources = new Set<NewebPayPaymentSource>([
 ])
 const allowedPaymentModes = new Set<NewebPayPaymentMode>([
   'credit',
+  'apple_pay',
+  'atm',
   'merchant_default',
   'apple_pay_test',
   PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE,
@@ -495,7 +501,11 @@ export function buildNewebPayPendingPaymentMetadata({
       throw new Error('invalid_product_order_payment_input')
     }
     const productOrderPaymentMethod =
-      paymentMode === PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE ? 'apple_pay' : paymentMode === 'credit' ? 'credit' : null
+      paymentMode === PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE || paymentMode === 'apple_pay'
+        ? 'apple_pay'
+        : paymentMode === 'credit' || paymentMode === 'atm'
+          ? paymentMode
+          : null
 
     return {
       itemType: productOrderPayment.itemType,
@@ -571,12 +581,16 @@ export function createNewebPayMpgPaymentData({
     tradeInfoParams.CREDIT = 1
   }
 
-  if (paymentMode === 'apple_pay_test') {
+  if (paymentMode === 'apple_pay' || paymentMode === 'apple_pay_test') {
     tradeInfoParams.APPLEPAY = 1
   }
 
   if (paymentMode === PRODUCT_ORDER_APPLE_PAY_PAYMENT_MODE) {
     tradeInfoParams.APPLEPAY = 1
+  }
+
+  if (paymentMode === 'atm') {
+    tradeInfoParams.VACC = 1
   }
 
   const tradeInfo = encryptTradeInfo(tradeInfoParams, config.hashKey, config.hashIv)

@@ -4,10 +4,21 @@ import { CalendarDays, CheckCircle2 } from 'lucide-react'
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActionButton } from './ActionButton'
+import { PaymentMethodSelector } from './payments/PaymentMethodSelector'
 import { createAsyncIdentityGuard } from '@/lib/auth/asyncIdentityGuard'
 import { bookingPlans, getBookingPlan } from '@/lib/bookingPlans'
 import { getAuthAccessToken, getMockUser, subscribeAuthChange } from '@/lib/mockAuth'
 import type { BookingFormInput } from '@/lib/bookings/types'
+import {
+  getCheckoutPaymentMethodOptions,
+  isLinePayCheckoutMethod,
+  toStandardNewebPayCheckoutMode,
+  type StandardCheckoutPaymentMethod,
+} from '@/lib/payments/paymentMethods'
+import {
+  getServiceLinePayErrorMessage,
+  requestServiceLinePayCheckout,
+} from '@/lib/linePay/serviceCheckoutClient'
 
 const officialLineUrl = 'https://lin.ee/6Tpje1P'
 
@@ -56,6 +67,7 @@ type NewebPayCreateResponse =
     }
 
 const isNewebPayEnabled = process.env.NEXT_PUBLIC_ENABLE_NEWEBPAY === 'true'
+const isLinePayEnabled = process.env.NEXT_PUBLIC_ENABLE_LINE_PAY === 'true'
 
 const taipeiDateInputFormatter = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Taipei',
@@ -136,6 +148,10 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
   const [formStatus, setFormStatus] = useState('')
   const [createdBookingId, setCreatedBookingId] = useState('')
   const [createdBookingSignature, setCreatedBookingSignature] = useState('')
+  const [selectedPaymentMethod, setSelectedPaymentMethod] =
+    useState<StandardCheckoutPaymentMethod>(() =>
+      isNewebPayEnabled ? 'credit_card' : 'line_pay',
+    )
   const authSubjectIdRef = useRef(getMockUser()?.id ?? null)
   const formResourceKey = useMemo(
     () =>
@@ -154,6 +170,7 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
         lineDisplayName,
         note,
         planId,
+        selectedPaymentMethod,
         question,
         resetKey,
         selectedSlotId,
@@ -173,6 +190,7 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
       lineDisplayName,
       note,
       planId,
+      selectedPaymentMethod,
       question,
       resetKey,
       selectedSlotId,
@@ -203,6 +221,7 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
     setFormStatus('')
     setCreatedBookingId('')
     setCreatedBookingSignature('')
+    setSelectedPaymentMethod(isNewebPayEnabled ? 'credit_card' : 'line_pay')
   }, [])
 
   useEffect(() => {
@@ -352,7 +371,8 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
       bookingGuard.isCurrent(requestToken, currentIdentity())
 
     setFormStatus('')
-    if (!isNewebPayEnabled) {
+    const isLinePay = isLinePayCheckoutMethod(selectedPaymentMethod)
+    if (isLinePay ? !isLinePayEnabled : !isNewebPayEnabled) {
       setFormError('目前暫時無法使用線上付款，請稍後再試或聯繫客服。')
       return false
     }
@@ -397,6 +417,25 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
       setFormStatus('正在前往藍新金流付款頁，請稍候。')
       const accessToken = await getAuthAccessToken()
       if (!isCurrentRequest() || !accessToken) return false
+
+      if (isLinePay) {
+        setFormStatus('正在前往 LINE Pay 付款頁，請稍候。')
+        const result = await requestServiceLinePayCheckout({
+          accessToken,
+          source: 'booking',
+          sourceId: bookingId,
+          idempotencyKey: `booking-line-pay:${bookingId}`,
+        })
+        if (!isCurrentRequest()) return false
+        if (!result.ok) {
+          setFormStatus('')
+          setFormError(getServiceLinePayErrorMessage(result))
+          return false
+        }
+        window.location.assign(result.paymentUrlWeb)
+        return false
+      }
+
       const response = await fetch('/api/payments/newebpay/create', {
         method: 'POST',
         headers: {
@@ -406,7 +445,7 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
         body: JSON.stringify({
           itemKey: 'booking_consultation_60',
           source: 'booking',
-          paymentMode: 'credit',
+          paymentMode: toStandardNewebPayCheckoutMode(selectedPaymentMethod),
           bookingId
         })
       })
@@ -655,14 +694,23 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
         </label>
 
         <div className="grid gap-3 rounded-2xl border border-borderSoft bg-softPurple p-5">
-          <p className="text-sm font-semibold text-deepPurple">付款方式</p>
-          <div className="rounded-xl border border-borderSoft bg-white p-4">
-            <p className="font-semibold text-deepPurple">信用卡線上付款｜藍新金流</p>
-            <p className="mt-2 text-sm leading-6 text-textMuted">
-              送出後先建立預約，再前往藍新金流信用卡一次付清頁；付款狀態以金流背景通知為準。
-            </p>
-          </div>
-          {!isNewebPayEnabled ? (
+          <PaymentMethodSelector
+            onChange={(method) => {
+              if (method === 'credit_card_installment_3' || method === 'credit_card_installment_6') return
+              setSelectedPaymentMethod(method)
+              setFormError('')
+              setFormStatus('')
+            }}
+            options={getCheckoutPaymentMethodOptions({
+              includeLinePay: isLinePayEnabled,
+              includeNewebPay: isNewebPayEnabled,
+            })}
+            value={selectedPaymentMethod}
+          />
+          <p className="text-xs leading-6 text-textMuted">
+            付款狀態由藍新或 LINE Pay 系統背景通知自動確認；ATM 請依藍新提供的本次專用虛擬帳號完成轉帳。
+          </p>
+          {(isLinePayCheckoutMethod(selectedPaymentMethod) ? !isLinePayEnabled : !isNewebPayEnabled) ? (
             <p className="rounded-xl border border-borderSoft bg-white p-4 text-sm font-semibold leading-6 text-deepPurple">
               目前暫時無法使用線上付款，請稍後再試或聯繫客服。
             </p>
@@ -773,7 +821,7 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
           itemType="booking"
           loadingText="送出中..."
         >
-          前往信用卡付款 NT${selectedPlan.price.toLocaleString()}
+          使用所選方式付款 NT${selectedPlan.price.toLocaleString()}
         </ActionButton>
       </form>
     </div>

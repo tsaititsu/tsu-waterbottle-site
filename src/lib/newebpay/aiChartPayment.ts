@@ -2,7 +2,11 @@ export const AI_CHART_REPORT_ITEM_KEY = 'ai_chart_report_single'
 export const AI_CHART_REPORT_AMOUNT_TWD = 100
 export const AI_CHART_REPORT_ITEM_TYPE = 'ai_chart_report'
 
-export type AiChartReportPaymentMode = 'credit' | 'merchant_default'
+export type AiChartReportPaymentMode =
+  | 'credit'
+  | 'apple_pay'
+  | 'atm'
+  | 'merchant_default'
 
 export type AiChartReportPaymentRawPayload = {
   itemKey: typeof AI_CHART_REPORT_ITEM_KEY

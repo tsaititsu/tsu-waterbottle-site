@@ -7,7 +7,8 @@ const source = readFileSync(
   'utf8',
 )
 
-assert.equal(source.includes('信用卡線上付款 NT$${paymentRequired.amountTwd}'), true)
+assert.equal(source.includes('PaymentMethodSelector'), true)
+assert.equal(source.includes('使用所選方式付款 NT$${paymentRequired.amountTwd}'), true)
 assert.equal(source.includes('管理員 Apple Pay 測試付款 NT$1'), true)
 assert.equal(
   source.includes('const [isAdminOneDollarTestAvailable, setIsAdminOneDollarTestAvailable] = useState(false)'),
@@ -25,7 +26,8 @@ const checkoutStart = source.indexOf('async function handleNewebPayDivinationChe
 const checkoutEnd = source.indexOf('\n  async function confirmCard', checkoutStart)
 const checkoutSource = source.slice(checkoutStart, checkoutEnd > checkoutStart ? checkoutEnd : undefined)
 
-assert.equal(checkoutSource.includes('paymentMode: "credit"'), true)
+assert.equal(checkoutSource.includes('? "credit"'), true)
+assert.equal(checkoutSource.includes('toStandardNewebPayCheckoutMode(newebPayPaymentMethod)'), true)
 assert.equal(checkoutSource.includes('cardId: pendingCard.id'), true)
 assert.equal(checkoutSource.includes('position: pendingPosition'), true)
 assert.equal(checkoutSource.includes('mockPaid'), false)
