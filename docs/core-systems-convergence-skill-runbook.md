@@ -4,7 +4,7 @@ SOL 模式：極高
 
 Codex 任務等級：Program／雙核心系統完整收斂
 
-目前狀態：`WAITING_FOR_PAYMENT_AND_AI_SOURCE_SYSTEMS`
+目前狀態：`WAITING_FOR_FIRST_SOURCE_SYSTEM`
 
 ## 1. 文件目的
 
@@ -14,19 +14,34 @@ Codex 任務等級：Program／雙核心系統完整收斂
 
 這項工作應定位為既有系統的「收斂、補強與整合」，不得重新建立第二套平行的付款、退款、訂單、權益或 AI 來源驗證架構。
 
-## 2. 正式開始條件
+## 2. 分層開始條件
 
-只有下列條件全部成立，才開始實作：
+這項 Program 採兩個不同 Gate，不要求所有獨立施工都等待兩套系統完成。
 
-1. 金流系統的來源 PR 已合併至最新 `main`。
-2. 命理 AI／來源驗證系統的來源 PR 已合併至最新 `main`。
-3. 已知兩套來源系統的 merge commit、最終檔案範圍、Migration 狀態與測試證據。
-4. 來源 PR 的必要 checks 已成功，沒有未解決的安全阻擋。
+### 2.1 單系統工作 Gate
+
+金流或命理 AI 任一系統符合下列條件，即可先處理該系統內部的收斂與補強：
+
+1. 該來源系統的 PR 已合併至最新 `main`。
+2. 已知該系統的 merge commit、最終檔案範圍、Migration 狀態與測試證據。
+3. 必要 checks 已成功，沒有未解決的安全阻擋。
+4. 工作內容不依賴另一套尚未完成的系統。
 5. 已確認不會覆蓋其他聊天室的未提交成果。
-6. 已建立本任務專用 worktree 與獨立 `codex/*` 分支。
-7. 使用者明確告知：「金流與命理 AI 已完成並已合併 main，可以開始收斂。」
+6. 已建立該工作流專用 worktree 與獨立 `codex/*` 分支。
 
-如果任一來源系統只是 Ready、尚未合併，只能先做唯讀整合盤點，不得建立依賴未合併分支的 release-ready 整合 PR。
+因此，金流先完成時，可以先進行 Payment／Order／Refund／Reconciliation／Audit／Admin Operations；命理 AI 先完成時，也可以先進行 canonical source／validation／privacy／report／Admin Operations。
+
+### 2.2 跨系統收斂 Gate
+
+只有下列條件全部成立，才開始 Entitlement 與完整端到端整合：
+
+1. 金流系統已合併至最新 `main`。
+2. 命理 AI／來源驗證系統已合併至最新 `main`。
+3. 兩套系統各自的單系統 Release Gate 已通過。
+4. 權益消耗、退款後權益、AI 失敗補償等商業規則已確認。
+5. 使用者明確告知：「金流與命理 AI 已完成並已合併 main，可以開始跨系統收斂。」
+
+如果某一來源系統只是 Ready、尚未合併，該系統只能先做唯讀盤點；不得建立依賴未合併分支的 release-ready PR。
 
 ## 3. Matt Pocock Skills 路由
 
@@ -57,16 +72,18 @@ Codex 任務等級：Program／雙核心系統完整收斂
 1. 使用 `codebase-design` 定義未來需要檢查的 Module、Interface、Adapter 與 Seam。
 2. 使用 `domain-modeling` 列出候選領域詞彙與狀態邊界。
 3. 只保存 Runbook，不建立最終 `CONTEXT.md`、ADR 或實作 tickets。
-4. 等待兩套來源系統合併。
+4. 哪一套來源系統先合併，就先啟動該系統的獨立工作流。
+5. 跨系統 Entitlement 整合仍等待兩套來源系統都合併。
 
-### 4.2 來源系統完成：唯讀收斂
+### 4.2 任一來源系統完成：先做單系統收斂
 
 1. 建議使用者明確呼叫 `$wayfinder`。
-2. 固定最新 main、來源 merge commits 與檔案範圍。
-3. 唯讀盤點既有 Module、API、資料表、RPC、Migration、Provider adapter、AI canonical assets 與測試。
+2. 固定最新 main、該來源 merge commit 與檔案範圍。
+3. 唯讀盤點該系統既有 Module、API、資料表、RPC、Migration、adapter、canonical assets 與測試。
 4. 使用 `domain-modeling` 比對程式中的實際語言與狀態機。
 5. 使用 `codebase-design` 產出 target architecture 與 gap map。
 6. 對無法由程式證明的商業規則，建議呼叫 `$grill-with-docs`。
+7. 只施工該系統內部能力，不提前建立另一系統的替身或平行架構。
 
 ### 4.3 規格與 tickets
 
@@ -312,13 +329,15 @@ git diff --check
 
 ## 9. PR 策略
 
-因金流與 AI 來源系統會先各自完成，未來不得再重建一組 PR-A／PR-B。
+因金流與 AI 來源系統可能在不同時間完成，未來不得再重建一組平行的 PR-A／PR-B。
 
 優先策略：
 
-1. 兩套來源系統先各自合併至 main。
-2. 從最新 main 建立一個 convergence branch。
-3. 以一個收斂 PR 完成小而明確的跨系統補強。
+1. 金流先合併時，可從最新 main 建立 Payment hardening／Admin Operations PR。
+2. 命理 AI 先合併時，可從最新 main 建立 AI hardening／Admin Operations PR。
+3. 每個 PR 只能修改已完成來源系統內部的能力，不得依賴未合併分支。
+4. 兩套系統都合併後，再從最新 main 建立 Entitlement integration branch。
+5. 以小而明確的整合 PR 完成跨系統補強。
 
 若唯讀 gap analysis 證明差距過大且完全獨立，最多先拆成：
 
@@ -363,18 +382,38 @@ git diff --check
 - 商業規則未確認且會影響資料模型、交易或權益。
 - 需要合併 main 或正式部署，但尚未取得當次明確授權。
 
-## 12. 下一步
+## 12. 目前 Admin 基線
+
+截至 2026-08-05 的 `origin/main` `e3c907d6cfd68b80671b2b8991b35ed0532348e0`：
+
+- Admin Foundation 與後端管理員 Session 守門已存在。
+- 已啟用唯讀模組：預約紀錄、商品訂單、會員名錄、歷史匯款回報。
+- 已存在預約時段工具。
+- `AI 命盤營運中心` 與 `占卜營運中心` 都只是 `unavailable` 狀態項目，沒有 href、操作按鈕或完整管理 API。
+- `/api/admin/divination-one-dollar-test` 只提供經管理員授權後的一元測試模式狀態，不等於占卜營運後台。
+
+因此，目前不能宣稱占卜系統後台或 AI 命盤營運後台已建立完成。未來應在各自來源系統合併後，依實際資料模型建立最小、後端重新授權、預設唯讀的營運頁面；不得先建立假資料或無後端權限檢查的空殼操作。
+
+## 13. 下一步
 
 目前保持：
 
 ```text
-TSU_CORE_SYSTEMS_CONVERGENCE_WAITING_FOR_SOURCE_SYSTEMS
+TSU_CORE_SYSTEMS_CONVERGENCE_WAITING_FOR_FIRST_SOURCE_SYSTEM
 ```
 
-兩套來源系統完成並合併後，使用者可直接說：
+金流先完成並合併後，使用者可直接說：
 
 ```text
-金流與命理 AI 已完成並已合併 main，可以開始 TSU_CORE_SYSTEMS_CONVERGENCE_V1。
+金流系統已完成並已合併 main，可以先開始 Payment 單系統收斂；命理 AI 尚未完成，不做跨系統整合。
 ```
 
-若兩套系統只是 Ready、尚未合併，請明確說明；下一輪只會先做唯讀整合盤點，不會開始實作。
+命理 AI 先完成並合併後，也可用相同方式啟動 AI 單系統收斂。
+
+兩套來源系統都完成並合併後，使用者可直接說：
+
+```text
+金流與命理 AI 已完成並已合併 main，可以開始 TSU_CORE_SYSTEMS_CONVERGENCE_V1 跨系統收斂。
+```
+
+若某套系統只是 Ready、尚未合併，請明確說明；該系統下一輪只會先做唯讀盤點，不會開始實作。
