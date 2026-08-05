@@ -20,6 +20,8 @@ export const EXPECTED_CONFIRMATION =
   'DEPLOY_SERVICE_LINE_PAY_CHECKOUT_EXACT_FILE_ONCE'
 export const EXPECTED_BACKUP_CONFIRMATION =
   'CONFIRM_SUPABASE_BACKUP_PITR_RESTORE_POINT_AVAILABLE'
+export const EXPECTED_VERIFY_CONFIRMATION =
+  'VERIFY_SERVICE_LINE_PAY_CHECKOUT_POSTFLIGHT_READ_ONLY_ONCE'
 
 export const MIGRATION_FILE =
   'supabase/migrations/20260805025344_initialize_service_line_pay_checkout.sql'
@@ -29,21 +31,29 @@ export const POSTFLIGHT_FILE =
   'supabase/deployment/service_line_pay_checkout_initialization_postflight.sql'
 export const DEPLOY_FILE =
   'supabase/deployment/service_line_pay_checkout_initialization_deploy.sql'
+export const VERIFY_FILE =
+  'supabase/deployment/service_line_pay_checkout_initialization_verify.sql'
 export const RUNNER_FILE =
   'scripts/supabase/run-service-line-pay-checkout-exact-file.mjs'
 export const WORKFLOW_FILE =
   '.github/workflows/supabase-production-service-line-pay-checkout.yml'
+export const VERIFY_WORKFLOW_FILE =
+  '.github/workflows/supabase-production-service-line-pay-checkout-verify.yml'
 
 export const EXPECTED_MIGRATION_SHA256 =
   'ff952bde87970fd1f0542bc49a2351925ca0a9e774fec5700bca0dd73a8c5c1c'
 export const EXPECTED_PREFLIGHT_SHA256 =
   'fb5b02aebff1d4a80672b46389d0a684fa69869945f75ac8f97b4945ab4e4ca0'
 export const EXPECTED_POSTFLIGHT_SHA256 =
-  'a4f46ac93c2245aaa85f73fea608190776a6ca6157fb89648cc0f3fb50d00ca1'
+  '50283b7268278cc5c3f2bec95b6edf5d9c79044f296254475fee3b0b94d83b03'
 export const EXPECTED_DEPLOY_SHA256 =
   '5368f6a0b8a08374929a6d9feaa87be0097f03dc2c0235ec365b3e0f8e75c0ed'
+export const EXPECTED_VERIFY_SHA256 =
+  '151dad42fc557c069ae82b3eb5e4e7f71928770128413b7ce35407963e1c04b0'
 export const EXPECTED_WORKFLOW_SHA256 =
   '18430041ba694d88ed5e2f86581bfa814f8a4293072e51db48798aa1f57b2ab0'
+export const EXPECTED_VERIFY_WORKFLOW_SHA256 =
+  '0db9e1f931b3f7e653b062acdf990a95742803164185535741c6200d3c9fa43f'
 
 const repositoryRoot = resolve(
   fileURLToPath(new URL('../..', import.meta.url)),
@@ -82,6 +92,24 @@ export function validateWorkflowContext(environment = process.env) {
   return true
 }
 
+export function validateVerificationWorkflowContext(
+  environment = process.env,
+) {
+  const commit = environment.GITHUB_SHA ?? ''
+  if (
+    environment.GITHUB_REPOSITORY !== EXPECTED_REPOSITORY
+    || environment.GITHUB_EVENT_NAME !== EXPECTED_EVENT
+    || environment.GITHUB_REF !== EXPECTED_REF
+    || !FULL_SHA_PATTERN.test(commit)
+    || environment.AUTHORIZED_COMMIT !== commit
+    || environment.PROJECT_REF_INPUT !== EXPECTED_PROJECT_REF
+    || environment.VERIFY_CONFIRMATION !== EXPECTED_VERIFY_CONFIRMATION
+  ) {
+    fail('SERVICE_CHECKOUT_SOURCE_INVALID')
+  }
+  return true
+}
+
 function assertSourceContract(source) {
   if (
     !source.migration.includes('\nbegin;')
@@ -111,6 +139,20 @@ function assertSourceContract(source) {
     || !source.workflow.includes('name: supabase-production')
     || !source.workflow.includes(`${RUNNER_FILE} preflight`)
     || !source.workflow.includes(`${RUNNER_FILE} deploy`)
+    || !/^BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY;/mu.test(
+      source.verify,
+    )
+    || !source.verify.includes(
+      '\\ir service_line_pay_checkout_initialization_postflight.sql',
+    )
+    || !/^ROLLBACK;$/mu.test(source.verify)
+    || /\b(?:insert|update|delete|alter|create|drop|grant|revoke|truncate)\b/iu.test(
+      source.verify,
+    )
+    || !/^on:\n  workflow_dispatch:\n/mu.test(source.verifyWorkflow)
+    || /\n  (?:push|pull_request):/u.test(source.verifyWorkflow)
+    || !source.verifyWorkflow.includes('name: supabase-production')
+    || !source.verifyWorkflow.includes(`${RUNNER_FILE} verify`)
   ) {
     fail('SERVICE_CHECKOUT_FIXED_FILE_INVALID')
   }
@@ -137,12 +179,30 @@ export function validateSource(root = repositoryRoot) {
     DEPLOY_FILE,
     EXPECTED_DEPLOY_SHA256,
   )
+  const verify = readAndValidateFixedFile(
+    root,
+    VERIFY_FILE,
+    EXPECTED_VERIFY_SHA256,
+  )
   const workflow = readAndValidateFixedFile(
     root,
     WORKFLOW_FILE,
     EXPECTED_WORKFLOW_SHA256,
   )
-  assertSourceContract({ migration, preflight, postflight, deploy, workflow })
+  const verifyWorkflow = readAndValidateFixedFile(
+    root,
+    VERIFY_WORKFLOW_FILE,
+    EXPECTED_VERIFY_WORKFLOW_SHA256,
+  )
+  assertSourceContract({
+    migration,
+    preflight,
+    postflight,
+    deploy,
+    verify,
+    workflow,
+    verifyWorkflow,
+  })
   return true
 }
 
@@ -177,6 +237,17 @@ export function parseDeployOutput(text) {
   return Object.freeze({ status: 'postflight_ready' })
 }
 
+export function parseVerificationOutput(text) {
+  const lines = normalizedOutputLines(text)
+  if (
+    lines.length !== 1
+    || lines[0] !== 'line_pay_service_checkout_postflight_ready'
+  ) {
+    fail('SERVICE_CHECKOUT_POSTFLIGHT_OUTPUT_INVALID')
+  }
+  return Object.freeze({ status: 'postflight_ready' })
+}
+
 export function safeErrorCode(error) {
   return error instanceof Error && SAFE_ERROR_CODES.has(error.message)
     ? error.message
@@ -201,6 +272,12 @@ async function main() {
     validateWorkflowContext()
     validateSource()
     console.log('SERVICE_CHECKOUT_SOURCE_VALIDATED')
+    return
+  }
+  if (command === 'verify-source') {
+    validateVerificationWorkflowContext()
+    validateSource()
+    console.log('SERVICE_CHECKOUT_VERIFY_SOURCE_VALIDATED')
     return
   }
   if (command === 'channel') {
