@@ -650,7 +650,7 @@ test('status API route 由 requireAdminUser 守門並交給獨立 handler', asyn
   assert.equal(source.includes('handleDivinationOneDollarTestStatus'), true)
 })
 
-test('前端保留正式付款選單、測試按鈕受 admin 狀態 gate，測試 Apple Pay 由 server 派生', async () => {
+test('前端保留正式付款選單，管理員入口驗收改走共用 LINE Pay NT$1 安全路徑', async () => {
   const source = readFileSync(
     join(projectRoot, 'src/components/divination/DivinationDrawPreview.tsx'),
     'utf8',
@@ -658,16 +658,16 @@ test('前端保留正式付款選單、測試按鈕受 admin 狀態 gate，測�
   // 正式付款仍在，且不會把管理員測試模式混進正式選單。
   assert.equal(source.includes('PaymentMethodSelector'), true)
   assert.equal(source.includes('使用所選方式付款 NT$${paymentRequired.amountTwd}'), true)
-  // 測試按鈕存在且受 isAdminOneDollarTestAvailable 控制
-  assert.equal(source.includes('管理員 Apple Pay 測試付款 NT$1'), true)
-  assert.equal(source.includes('isAdminOneDollarTestAvailable'), true)
-  // Client 維持既有 request shape；server 通過管理員驗證後才派生 Apple Pay。
-  assert.equal(source.includes('? "credit"'), true)
+  // 測試按鈕與可用性由共用的 admin-only LINE Pay status gate 控制。
+  assert.equal(source.includes('LinePayEntryOneDollarTestButton'), true)
+  assert.equal(source.includes('isLinePayEntryOneDollarTestAvailable'), true)
+  assert.equal(source.includes('requestServiceLinePayCheckout'), true)
   assert.equal(source.includes('LINEPAY'), false)
   assert.equal(source.includes('VACC'), false)
   assert.equal(source.includes('apple_pay_test'), false)
-  // 測試欄位只在 admin 測試分支加入
-  assert.equal(source.includes('divinationOneDollarTest: true'), true)
+  // Client 只能明確要求管理員驗收；NT$1 金額仍由 LINE Pay server 派生。
+  assert.equal(source.includes('adminOneDollarTest: true'), true)
+  assert.equal(source.includes('divinationOneDollarTest: true'), false)
   assert.equal(source.includes('reading_card_data_missing'), true)
   assert.equal(source.includes('payment_already_exists'), true)
   assert.equal(source.includes('payment_duplicate_conflict'), true)

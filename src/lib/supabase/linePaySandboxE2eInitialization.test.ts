@@ -124,7 +124,8 @@ test('Production NT$1 test uses a fixed non-fulfillment snapshot and complete sy
 
   assert.deepEqual(rpc.calls, [
     {
-      functionName: 'initialize_product_order_line_pay_checkout',
+      functionName:
+        'initialize_line_pay_one_dollar_product_order_test',
       args: {
         p_payload: {
           user_id: userId,

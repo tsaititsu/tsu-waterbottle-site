@@ -4,7 +4,9 @@ import { CalendarDays, CheckCircle2 } from 'lucide-react'
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActionButton } from './ActionButton'
+import { LinePayEntryOneDollarTestButton } from './payments/LinePayEntryOneDollarTestButton'
 import { PaymentMethodSelector } from './payments/PaymentMethodSelector'
+import { useLinePayEntryOneDollarTest } from './payments/useLinePayEntryOneDollarTest'
 import { createAsyncIdentityGuard } from '@/lib/auth/asyncIdentityGuard'
 import { bookingPlans, getBookingPlan } from '@/lib/bookingPlans'
 import { getAuthAccessToken, getMockUser, subscribeAuthChange } from '@/lib/mockAuth'
@@ -124,6 +126,8 @@ function submitNewebPayForm(action: string, fields: Extract<NewebPayCreateRespon
 }
 
 export function BookingForm({ resetKey = '' }: BookingFormProps) {
+  const isLinePayEntryOneDollarTestAvailable =
+    useLinePayEntryOneDollarTest()
   const [planId, setPlanId] = useState(bookingPlans[0].id)
   const [bookingSlots, setBookingSlots] = useState<PublicBookingSlot[]>([])
   const [selectedBookingDate, setSelectedBookingDate] = useState('')
@@ -146,6 +150,7 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
   const [hasAcceptedNotice, setHasAcceptedNotice] = useState(false)
   const [formError, setFormError] = useState('')
   const [formStatus, setFormStatus] = useState('')
+  const [isPreparingPayment, setIsPreparingPayment] = useState(false)
   const [createdBookingId, setCreatedBookingId] = useState('')
   const [createdBookingSignature, setCreatedBookingSignature] = useState('')
   const [selectedPaymentMethod, setSelectedPaymentMethod] =
@@ -153,6 +158,7 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
       isNewebPayEnabled ? 'credit_card' : 'line_pay',
     )
   const authSubjectIdRef = useRef(getMockUser()?.id ?? null)
+  const paymentPreparationInFlightRef = useRef(false)
   const formResourceKey = useMemo(
     () =>
       JSON.stringify({
@@ -355,7 +361,12 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
     }
   }
 
-  const prepareBookingPayment = async () => {
+  const prepareBookingPaymentUnchecked = async (
+    options: { adminOneDollarTest?: boolean } = {},
+  ) => {
+    const adminOneDollarTest =
+      options.adminOneDollarTest === true
+      && isLinePayEntryOneDollarTestAvailable
     const input = buildInput()
     if (!input) return false
     const currentIdentity = () => ({
@@ -371,16 +382,26 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
       bookingGuard.isCurrent(requestToken, currentIdentity())
 
     setFormStatus('')
-    const isLinePay = isLinePayCheckoutMethod(selectedPaymentMethod)
+    const isLinePay =
+      adminOneDollarTest
+      || isLinePayCheckoutMethod(selectedPaymentMethod)
     if (isLinePay ? !isLinePayEnabled : !isNewebPayEnabled) {
       setFormError('目前暫時無法使用線上付款，請稍後再試或聯繫客服。')
       return false
     }
 
-    const bookingSignature = JSON.stringify(input)
+    const bookingSignature = adminOneDollarTest
+      ? JSON.stringify({ mode: 'line-pay-admin-nt1-entry', input })
+      : JSON.stringify(input)
     let bookingId = createdBookingSignature === bookingSignature ? createdBookingId : ''
 
-    if (!bookingId) {
+    if (!bookingId && adminOneDollarTest) {
+      bookingId = crypto.randomUUID()
+      setCreatedBookingId(bookingId)
+      setCreatedBookingSignature(bookingSignature)
+    }
+
+    if (!bookingId && !adminOneDollarTest) {
       try {
         const accessToken = await getAuthAccessToken()
         if (!isCurrentRequest() || !accessToken) return false
@@ -419,12 +440,17 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
       if (!isCurrentRequest() || !accessToken) return false
 
       if (isLinePay) {
-        setFormStatus('正在前往 LINE Pay 付款頁，請稍候。')
+        setFormStatus(
+          adminOneDollarTest
+            ? '此為獨立金流入口驗收，不會建立、占用或確認正式預約。正在前往 LINE Pay 付款頁，請稍候。'
+            : '正在前往 LINE Pay 付款頁，請稍候。',
+        )
         const result = await requestServiceLinePayCheckout({
           accessToken,
           source: 'booking',
           sourceId: bookingId,
           idempotencyKey: `booking-line-pay:${bookingId}`,
+          ...(adminOneDollarTest ? { adminOneDollarTest: true } : {}),
         })
         if (!isCurrentRequest()) return false
         if (!result.ok) {
@@ -461,11 +487,30 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
     } catch {
       if (isCurrentRequest()) {
         setFormStatus('')
-        setFormError('預約已建立，但付款頁建立失敗。請稍後重試；如仍無法付款，請聯繫客服，勿重複建立預約。')
+        setFormError(
+          adminOneDollarTest
+            ? 'LINE Pay 一元入口驗收付款頁建立失敗，未建立或占用正式預約。請稍後重試。'
+            : '預約已建立，但付款頁建立失敗。請稍後重試；如仍無法付款，請聯繫客服，勿重複建立預約。',
+        )
       }
     }
 
     return false
+  }
+
+  const prepareBookingPayment = async (
+    options: { adminOneDollarTest?: boolean } = {},
+  ) => {
+    if (paymentPreparationInFlightRef.current) return false
+
+    paymentPreparationInFlightRef.current = true
+    setIsPreparingPayment(true)
+    try {
+      return await prepareBookingPaymentUnchecked(options)
+    } finally {
+      paymentPreparationInFlightRef.current = false
+      setIsPreparingPayment(false)
+    }
   }
 
   const updateBirthDateFromPicker = (value: string) => {
@@ -823,6 +868,13 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
         >
           使用所選方式付款 NT${selectedPlan.price.toLocaleString()}
         </ActionButton>
+        <LinePayEntryOneDollarTestButton
+          available={isLinePayEntryOneDollarTestAvailable}
+          disabled={isPreparingPayment || !hasAcceptedNotice}
+          onClick={() => void prepareBookingPayment({
+            adminOneDollarTest: true,
+          })}
+        />
       </form>
     </div>
   )

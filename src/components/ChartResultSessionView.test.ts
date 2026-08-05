@@ -45,6 +45,14 @@ assert.equal(paymentRequestSource.includes('paid:'), false)
 assert.equal(paymentRequestSource.includes('success:'), false)
 assert.equal(source.includes('<LoginModal'), true)
 assert.equal(source.includes('void createPendingReportForCheckout()'), true)
+assert.match(
+  source,
+  /const pendingCheckoutOptionsRef =\s*useRef<\{ adminOneDollarTest\?: boolean \}>\(\{\}\)/,
+)
+assert.match(
+  source,
+  /onSuccess=\{\(\) => \{[\s\S]*const pendingOptions = pendingCheckoutOptionsRef\.current[\s\S]*pendingCheckoutOptionsRef\.current = \{\}[\s\S]*void createPendingReportForCheckout\(pendingOptions\)/,
+)
 assert.match(source, /createAsyncIdentityGuard/)
 assert.match(source, /subscribeAuthChange/)
 assert.match(source, /const requestToken = checkoutGuard\.begin\(currentIdentity\(\)\)/)

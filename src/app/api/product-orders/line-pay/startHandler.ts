@@ -10,6 +10,10 @@ import type {
   ExecuteInitializedProductOrderLinePayRequestInput,
   ExecuteInitializedProductOrderLinePayRequestResult,
 } from '../../../../lib/linePay/productOrderRequestExecution'
+import {
+  LINE_PAY_PRODUCTION_ONE_DOLLAR_AMOUNT_TWD,
+  isLinePayProductionOneDollarRouteEnabled,
+} from '../../../../lib/linePay/productionOneDollarTest'
 import { spiritualProducts } from '../../../../lib/spiritualProducts'
 import type { InitializeProductOrderLinePayCheckoutResult } from '../../../../lib/supabase/linePayCheckoutInitialization'
 import {
@@ -20,6 +24,7 @@ import {
 type AuthorizedLinePayContext = {
   userId: string
   client: unknown
+  isAdmin: boolean
 }
 
 type InitializeLinePayCheckout = (
@@ -62,11 +67,26 @@ type ExecuteLinePayCheckout = (
   },
 ) => Promise<ExecuteInitializedProductOrderLinePayRequestResult>
 
+type InitializeOneDollarTestCheckout = (input: {
+  client: unknown
+  userId: string
+  environment: 'production'
+  amountTwd: 1
+  orderNo: string
+  merchantOrderNo: string
+  idempotencyKey: string
+  requestBodySha256: string
+  confirmTokenHash: string
+  cancelTokenHash: string
+  capabilityExpiresAt: string
+}) => Promise<InitializeProductOrderLinePayCheckoutResult>
+
 export type ProductOrderLinePayStartDependencies = {
   authorize: (
     request: Request,
   ) => Promise<AuthorizedLinePayContext | null>
   initialize: InitializeLinePayCheckout
+  initializeOneDollarTest?: InitializeOneDollarTestCheckout
   execute: ExecuteLinePayCheckout
   now?: () => Date
   createUuid?: () => string
@@ -77,6 +97,7 @@ type StartBody = {
   idempotencyKey?: unknown
   customerInfo?: unknown
   items?: unknown
+  adminOneDollarTest?: unknown
 }
 
 type CustomerInfo = {
@@ -277,13 +298,35 @@ export async function handleProductOrderLinePayStart(input: {
   const idempotencyKey = text(body?.idempotencyKey, 200)
   const customerInfo = parseCustomerInfo(body?.customerInfo)
   const items = parseItems(body?.items)
+  const adminOneDollarTest = body?.adminOneDollarTest === true
   if (
     !idempotencyKey
     || idempotencyKey.length < 16
     || /\s/.test(idempotencyKey)
     || !customerInfo
     || !items
+    || (
+      body?.adminOneDollarTest !== undefined
+      && typeof body.adminOneDollarTest !== 'boolean'
+    )
   ) {
+    return errorResponse('invalid_line_pay_checkout', 400)
+  }
+
+  const now = input.dependencies.now?.() ?? new Date()
+  if (
+    adminOneDollarTest
+    && (
+      !authorization.isAdmin
+      || !isLinePayProductionOneDollarRouteEnabled(input.env, now)
+    )
+  ) {
+    return errorResponse('not_found', 404)
+  }
+  const checkoutIdempotencyKey = adminOneDollarTest
+    ? `${idempotencyKey}:admin-nt1`
+    : idempotencyKey
+  if (checkoutIdempotencyKey.length > 200) {
     return errorResponse('invalid_line_pay_checkout', 400)
   }
 
@@ -305,10 +348,9 @@ export async function handleProductOrderLinePayStart(input: {
     return errorResponse('line_pay_config_invalid', 500)
   }
 
-  const now = input.dependencies.now?.() ?? new Date()
   const createUuid = input.dependencies.createUuid ?? randomUUID
   const checkoutId = sha256(
-    `line-pay-cart:${config.environment}:${authorization.userId}:${idempotencyKey}`,
+    `line-pay-cart:${config.environment}:${authorization.userId}:${checkoutIdempotencyKey}`,
   ).slice(0, 32)
   const orderNo = `PO_LINEPAY_${checkoutId}`
   const merchantOrderNo = `LP_CART_${checkoutId}`
@@ -318,27 +360,35 @@ export async function handleProductOrderLinePayStart(input: {
     ?? ((purpose: 'confirm' | 'cancel') =>
       createHmac('sha256', config.channelSecret)
         .update(
-          `line-pay-cart-capability:${config.environment}:${authorization.userId}:${idempotencyKey}:${purpose}`,
+          `line-pay-cart-capability:${config.environment}:${authorization.userId}:${checkoutIdempotencyKey}:${purpose}`,
         )
         .digest('base64url'))
   const confirmToken = createToken('confirm')
   const cancelToken = createToken('cancel')
-  const capabilityExpiresAt = new Date(
-    now.getTime() + 30 * 60 * 1000,
-  ).toISOString()
-  const totalAmountTwd = items.reduce(
-    (total, item) => total + item.unitPriceTwd * item.quantity,
-    0,
-  )
+  const capabilityExpiresAt = adminOneDollarTest
+    ? input.env.LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_EXPIRES_AT!.trim()
+    : new Date(now.getTime() + 30 * 60 * 1000).toISOString()
+  const totalAmountTwd = adminOneDollarTest
+    ? LINE_PAY_PRODUCTION_ONE_DOLLAR_AMOUNT_TWD
+    : items.reduce(
+        (total, item) => total + item.unitPriceTwd * item.quantity,
+        0,
+      )
   const payloadInput = {
     orderId: merchantOrderNo,
     amount: totalAmountTwd,
     currency: 'TWD' as const,
-    products: items.map((item) => ({
-      name: item.productName,
-      quantity: item.quantity,
-      price: item.unitPriceTwd,
-    })),
+    products: adminOneDollarTest
+      ? [{
+          name: '管理員入口驗收｜購物車 NT$1（請勿出貨）',
+          quantity: 1,
+          price: LINE_PAY_PRODUCTION_ONE_DOLLAR_AMOUNT_TWD,
+        }]
+      : items.map((item) => ({
+          name: item.productName,
+          quantity: item.quantity,
+          price: item.unitPriceTwd,
+        })),
     confirmUrl,
     cancelUrl,
   }
@@ -348,34 +398,53 @@ export async function handleProductOrderLinePayStart(input: {
 
   let initialized: InitializeProductOrderLinePayCheckoutResult
   try {
-    initialized = await input.dependencies.initialize({
-      client: authorization.client,
-      userId: authorization.userId,
-      environment: config.environment,
-      orderNo,
-      merchantOrderNo,
-      customerName: customerInfo.customerName,
-      customerEmail: customerInfo.customerEmail,
-      customerPhone: customerInfo.customerPhone,
-      note: customerInfo.note,
-      items: items.map((item) => ({
-        productSlug: item.productSlug,
-        quantity: item.quantity,
-      })),
-      shippingInfo: {
-        recipientName: customerInfo.recipientName,
-        recipientPhone: customerInfo.recipientPhone,
-        recipientEmail: customerInfo.recipientEmail,
-        shippingMethod: 'manual',
-        postalCode: customerInfo.postalCode,
-        address: customerInfo.address,
-      },
-      idempotencyKey,
-      requestBodySha256,
-      confirmTokenHash: sha256(confirmToken),
-      cancelTokenHash: sha256(cancelToken),
-      capabilityExpiresAt,
-    })
+    if (adminOneDollarTest) {
+      if (!input.dependencies.initializeOneDollarTest) {
+        throw new Error('line_pay_one_dollar_initializer_missing')
+      }
+      initialized = await input.dependencies.initializeOneDollarTest({
+        client: authorization.client,
+        userId: authorization.userId,
+        environment: 'production',
+        amountTwd: LINE_PAY_PRODUCTION_ONE_DOLLAR_AMOUNT_TWD,
+        orderNo,
+        merchantOrderNo,
+        idempotencyKey: checkoutIdempotencyKey,
+        requestBodySha256,
+        confirmTokenHash: sha256(confirmToken),
+        cancelTokenHash: sha256(cancelToken),
+        capabilityExpiresAt,
+      })
+    } else {
+      initialized = await input.dependencies.initialize({
+        client: authorization.client,
+        userId: authorization.userId,
+        environment: config.environment,
+        orderNo,
+        merchantOrderNo,
+        customerName: customerInfo.customerName,
+        customerEmail: customerInfo.customerEmail,
+        customerPhone: customerInfo.customerPhone,
+        note: customerInfo.note,
+        items: items.map((item) => ({
+          productSlug: item.productSlug,
+          quantity: item.quantity,
+        })),
+        shippingInfo: {
+          recipientName: customerInfo.recipientName,
+          recipientPhone: customerInfo.recipientPhone,
+          recipientEmail: customerInfo.recipientEmail,
+          shippingMethod: 'manual',
+          postalCode: customerInfo.postalCode,
+          address: customerInfo.address,
+        },
+        idempotencyKey: checkoutIdempotencyKey,
+        requestBodySha256,
+        confirmTokenHash: sha256(confirmToken),
+        cancelTokenHash: sha256(cancelToken),
+        capabilityExpiresAt,
+      })
+    }
   } catch {
     return errorResponse('line_pay_checkout_initialization_failed', 502)
   }
@@ -388,7 +457,7 @@ export async function handleProductOrderLinePayStart(input: {
       attemptId: initialized.attempt_id,
       paymentId: initialized.payment_id,
       productOrderId: initialized.product_order_id,
-      idempotencyKey,
+      idempotencyKey: checkoutIdempotencyKey,
       requestBodySha256,
       merchantOrderNo,
       claimId,

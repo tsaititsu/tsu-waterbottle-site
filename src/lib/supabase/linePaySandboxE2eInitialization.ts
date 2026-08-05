@@ -285,7 +285,9 @@ export async function initializeLinePayOneDollarTestCheckout(
   let response: { data: unknown; error: unknown }
   try {
     response = await input.client
-      .rpc('initialize_product_order_line_pay_checkout', {
+      .rpc(production
+        ? 'initialize_line_pay_one_dollar_product_order_test'
+        : 'initialize_product_order_line_pay_checkout', {
         p_payload: payload,
       })
       .single()

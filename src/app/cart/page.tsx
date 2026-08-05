@@ -3,7 +3,9 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useCart } from '@/components/CartContext'
+import { LinePayEntryOneDollarTestButton } from '@/components/payments/LinePayEntryOneDollarTestButton'
 import { PaymentMethodSelector } from '@/components/payments/PaymentMethodSelector'
+import { useLinePayEntryOneDollarTest } from '@/components/payments/useLinePayEntryOneDollarTest'
 import { getAuthAccessToken } from '@/lib/mockAuth'
 import {
   getCheckoutPaymentMethodOptions,
@@ -97,6 +99,8 @@ function submitCartNewebPayForm(input: CartNewebPayFormInput) {
 
 export default function CartPage() {
   const { items, isLoaded, removeItem, totalAmount, totalQuantity, updateItemQuantity } = useCart()
+  const isLinePayEntryOneDollarTestAvailable =
+    useLinePayEntryOneDollarTest()
   const [spiritualProductsAccepted, setSpiritualProductsAccepted] = useState(false)
   const [postOfficeShippingInfo, setPostOfficeShippingInfo] = useState<PostOfficeShippingInfo>(emptyPostOfficeShippingInfo)
   const [checkoutError, setCheckoutError] = useState('')
@@ -242,7 +246,12 @@ export default function CartPage() {
     }
   }
 
-  const handleLinePayCheckoutClick = async () => {
+  const handleLinePayCheckoutClick = async (
+    options: { adminOneDollarTest?: boolean } = {},
+  ) => {
+    const adminOneDollarTest =
+      options.adminOneDollarTest === true
+      && isLinePayEntryOneDollarTestAvailable
     if (linePayCheckoutPendingRef.current || isCheckoutPending) return
 
     const shippingInfo = getValidatedShippingInfo()
@@ -252,6 +261,7 @@ export default function CartPage() {
     const fingerprint = JSON.stringify({
       items: productItems.map((item) => ({ id: item.id, quantity: item.quantity })),
       shippingInfo,
+      adminOneDollarTest,
     })
     if (linePayAttemptRef.current?.fingerprint !== fingerprint) {
       linePayAttemptRef.current = {
@@ -289,7 +299,10 @@ export default function CartPage() {
             Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(body),
+          body: JSON.stringify({
+            ...body,
+            ...(adminOneDollarTest ? { adminOneDollarTest: true } : {}),
+          }),
         })
         const data = await response.json().catch(() => null)
 
@@ -562,31 +575,40 @@ export default function CartPage() {
                   ) : null}
                   <div className="flex flex-wrap gap-3 sm:justify-end">
                     {hasSpiritualProduct ? (
-                      <button
-                        aria-busy={isCheckoutPending}
-                        className={`focus-ring rounded-xl px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70 ${
-                          selectedPaymentMethod === 'apple_pay'
-                            ? 'bg-black'
-                            : selectedPaymentMethod === 'line_pay'
-                              ? 'bg-[#06c755]'
-                              : 'bg-deepPurple'
-                        }`}
-                        disabled={isCheckoutPending}
-                        onClick={() => {
-                          if (selectedPaymentMethod === 'line_pay') {
-                            void handleLinePayCheckoutClick()
-                            return
-                          }
-                          void handleNewebPayCheckoutClick(getCartNewebPayMode(selectedPaymentMethod))
-                        }}
-                        type="button"
-                      >
-                        {isCheckoutPending
-                          ? selectedPaymentMethod === 'line_pay'
-                            ? linePayButtonState.message
-                            : '正在建立付款資料...'
-                          : getCartPaymentButtonLabel(selectedPaymentMethod)}
-                      </button>
+                      <>
+                        <button
+                          aria-busy={isCheckoutPending}
+                          className={`focus-ring rounded-xl px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70 ${
+                            selectedPaymentMethod === 'apple_pay'
+                              ? 'bg-black'
+                              : selectedPaymentMethod === 'line_pay'
+                                ? 'bg-[#06c755]'
+                                : 'bg-deepPurple'
+                          }`}
+                          disabled={isCheckoutPending}
+                          onClick={() => {
+                            if (selectedPaymentMethod === 'line_pay') {
+                              void handleLinePayCheckoutClick()
+                              return
+                            }
+                            void handleNewebPayCheckoutClick(getCartNewebPayMode(selectedPaymentMethod))
+                          }}
+                          type="button"
+                        >
+                          {isCheckoutPending
+                            ? selectedPaymentMethod === 'line_pay'
+                              ? linePayButtonState.message
+                              : '正在建立付款資料...'
+                            : getCartPaymentButtonLabel(selectedPaymentMethod)}
+                        </button>
+                        <LinePayEntryOneDollarTestButton
+                          available={isLinePayEntryOneDollarTestAvailable}
+                          disabled={isCheckoutPending}
+                          onClick={() => void handleLinePayCheckoutClick({
+                            adminOneDollarTest: true,
+                          })}
+                        />
+                      </>
                     ) : null}
                   <Link href="/" className="focus-ring rounded-xl border border-borderSoft px-5 py-3 font-semibold text-textDark">
                     繼續逛逛

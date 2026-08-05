@@ -11,6 +11,10 @@ import type {
   ExecuteInitializedProductOrderLinePayRequestResult,
 } from '@/lib/linePay/productOrderRequestExecution'
 import {
+  LINE_PAY_PRODUCTION_ONE_DOLLAR_AMOUNT_TWD,
+  isLinePayProductionOneDollarRouteEnabled,
+} from '@/lib/linePay/productionOneDollarTest'
+import {
   isLinePayServiceSource,
   isValidLinePayServiceSourceId,
   type LinePayServiceSource,
@@ -26,6 +30,7 @@ import { trustedLinePayPaymentUrl } from '../../../product-orders/line-pay/start
 type AuthorizedContext = {
   userId: string
   client: unknown
+  isAdmin: boolean
 }
 
 export type ServiceLinePayStartBody = {
@@ -34,6 +39,7 @@ export type ServiceLinePayStartBody = {
   sourceId?: unknown
   cardId?: unknown
   position?: unknown
+  adminOneDollarTest?: unknown
 }
 
 type InitializeServiceCheckout = (input: {
@@ -158,6 +164,7 @@ export async function handleServiceLinePayStart(input: {
   const idempotencyKey = normalizedText(body?.idempotencyKey, 200)
   const cardId = optionalText(body?.cardId, 100)
   const position = optionalText(body?.position, 32)
+  const adminOneDollarTest = body?.adminOneDollarTest === true
   if (
     !isLinePayServiceSource(source)
     || !sourceId
@@ -167,21 +174,68 @@ export async function handleServiceLinePayStart(input: {
     || /\s/.test(idempotencyKey)
     || ((body?.cardId !== undefined && body.cardId !== null && !cardId)
       || (body?.position !== undefined && body.position !== null && !position))
+    || (
+      body?.adminOneDollarTest !== undefined
+      && typeof body.adminOneDollarTest !== 'boolean'
+    )
   ) {
     return errorResponse('invalid_line_pay_service_checkout', 400)
   }
 
+  const now = input.dependencies.now?.() ?? new Date()
+  if (
+    adminOneDollarTest
+    && (
+      source === 'course'
+      || !authorization.isAdmin
+      || !isLinePayProductionOneDollarRouteEnabled(input.env, now)
+    )
+  ) {
+    return errorResponse('not_found', 404)
+  }
+
   let target: LinePayServiceTarget | null
-  try {
-    target = await input.dependencies.resolveTarget({
-      userId: authorization.userId,
+  if (adminOneDollarTest && source === 'booking') {
+    let existingBooking: LinePayServiceTarget | null
+    try {
+      existingBooking = await input.dependencies.resolveTarget({
+        userId: authorization.userId,
+        source,
+        sourceId,
+        cardId: null,
+        position: null,
+      })
+    } catch {
+      return errorResponse('line_pay_service_lookup_failed', 500)
+    }
+    if (existingBooking) {
+      return errorResponse('line_pay_service_not_payable', 409)
+    }
+
+    // The UUID is deliberately absent from bookings. The paid callback can
+    // therefore exercise booking-source reconciliation without reserving or
+    // confirming a real consultation slot.
+    target = {
       source,
       sourceId,
-      cardId,
-      position,
-    })
-  } catch {
-    return errorResponse('line_pay_service_lookup_failed', 500)
+      itemType: source,
+      itemName: '水瓶先生論命入口（不建立正式預約）',
+      amountTwd: LINE_PAY_PRODUCTION_ONE_DOLLAR_AMOUNT_TWD,
+      bookingId: sourceId,
+      returnPath: '/account/bookings',
+    }
+  } else {
+    try {
+      target = await input.dependencies.resolveTarget({
+        userId: authorization.userId,
+        source,
+        sourceId,
+        cardId,
+        position,
+      })
+    } catch {
+      return errorResponse('line_pay_service_lookup_failed', 500)
+    }
   }
   if (!target) return errorResponse('line_pay_service_not_payable', 409)
   if (
@@ -191,6 +245,20 @@ export async function handleServiceLinePayStart(input: {
     || target.amountTwd <= 0
   ) {
     return errorResponse('line_pay_service_contract_invalid', 500)
+  }
+
+  const checkoutTarget: LinePayServiceTarget = adminOneDollarTest
+    ? {
+        ...target,
+        itemName: `管理員 NT$1 驗收｜${target.itemName}`.slice(0, 500),
+        amountTwd: LINE_PAY_PRODUCTION_ONE_DOLLAR_AMOUNT_TWD,
+      }
+    : target
+  const checkoutIdempotencyKey = adminOneDollarTest
+    ? `${idempotencyKey}:admin-nt1`
+    : idempotencyKey
+  if (checkoutIdempotencyKey.length > 200) {
+    return errorResponse('invalid_line_pay_service_checkout', 400)
   }
 
   const requestUrl = new URL(input.request.url)
@@ -211,10 +279,9 @@ export async function handleServiceLinePayStart(input: {
     return errorResponse('line_pay_config_invalid', 500)
   }
 
-  const now = input.dependencies.now?.() ?? new Date()
   const createUuid = input.dependencies.createUuid ?? randomUUID
   const checkoutId = sha256(
-    `line-pay-service:${config.environment}:${authorization.userId}:${source}:${sourceId}:${idempotencyKey}`,
+    `line-pay-service:${config.environment}:${authorization.userId}:${source}:${sourceId}:${checkoutIdempotencyKey}`,
   ).slice(0, 32)
   const orderNo = `PO_LPSVC_${checkoutId}`
   const merchantOrderNo = `LP_SVC_${checkoutId}`
@@ -224,19 +291,23 @@ export async function handleServiceLinePayStart(input: {
     ?? ((purpose: 'confirm' | 'cancel') =>
       createHmac('sha256', config.channelSecret)
         .update(
-          `line-pay-service-capability:${config.environment}:${authorization.userId}:${source}:${sourceId}:${idempotencyKey}:${purpose}`,
+          `line-pay-service-capability:${config.environment}:${authorization.userId}:${source}:${sourceId}:${checkoutIdempotencyKey}:${purpose}`,
         )
         .digest('base64url'))
   const confirmToken = createToken('confirm')
   const cancelToken = createToken('cancel')
-  const capabilityExpiresAt = new Date(
-    now.getTime() + 30 * 60 * 1000,
-  ).toISOString()
+  const capabilityExpiresAt = adminOneDollarTest
+    ? input.env.LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_EXPIRES_AT!.trim()
+    : new Date(now.getTime() + 30 * 60 * 1000).toISOString()
   const payloadInput = {
     orderId: merchantOrderNo,
-    amount: target.amountTwd,
+    amount: checkoutTarget.amountTwd,
     currency: 'TWD' as const,
-    products: [{ name: target.itemName, quantity: 1, price: target.amountTwd }],
+    products: [{
+      name: checkoutTarget.itemName,
+      quantity: 1,
+      price: checkoutTarget.amountTwd,
+    }],
     confirmUrl,
     cancelUrl,
   }
@@ -252,8 +323,8 @@ export async function handleServiceLinePayStart(input: {
       environment: config.environment,
       orderNo,
       merchantOrderNo,
-      target,
-      idempotencyKey,
+      target: checkoutTarget,
+      idempotencyKey: checkoutIdempotencyKey,
       requestBodySha256,
       confirmTokenHash: sha256(confirmToken),
       cancelTokenHash: sha256(cancelToken),
@@ -271,7 +342,7 @@ export async function handleServiceLinePayStart(input: {
       attemptId: initialized.attempt_id,
       paymentId: initialized.payment_id,
       productOrderId: initialized.product_order_id,
-      idempotencyKey,
+      idempotencyKey: checkoutIdempotencyKey,
       requestBodySha256,
       merchantOrderNo,
       claimId,
@@ -294,7 +365,7 @@ export async function handleServiceLinePayStart(input: {
   // reading or report permanently attached to an unusable payment.
   try {
     await input.dependencies.linkTarget({
-      target,
+      target: checkoutTarget,
       paymentId: initialized.payment_id,
       merchantOrderNo,
     })
