@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
 import { checkLinePayEntryOneDollarTestAvailability } from './entryOneDollarTestClient'
 
-test('returns true only for an authenticated enabled admin response', async () => {
+async function runTests() {
   const calls: Array<{ url: string; init: RequestInit }> = []
   const available = await checkLinePayEntryOneDollarTestAvailability({
     getAccessToken: async () => 'synthetic-access-token',
@@ -19,34 +18,30 @@ test('returns true only for an authenticated enabled admin response', async () =
     (calls[0]?.init.headers as Record<string, string>).Authorization,
     'Bearer synthetic-access-token',
   )
-})
 
-for (const [name, input] of [
-  ['missing token', {
-    getAccessToken: async () => null,
-    fetchStatus: async () => Response.json({ ok: true, enabled: true }),
-  }],
-  ['non-admin response', {
-    getAccessToken: async () => 'synthetic-access-token',
-    fetchStatus: async () => Response.json(
-      { ok: false, error: 'forbidden' },
-      { status: 403 },
-    ),
-  }],
-  ['disabled response', {
-    getAccessToken: async () => 'synthetic-access-token',
-    fetchStatus: async () => Response.json({ ok: true, enabled: false }),
-  }],
-] as const) {
-  test(`${name} returns false`, async () => {
+  for (const input of [
+    {
+      getAccessToken: async () => null,
+      fetchStatus: async () => Response.json({ ok: true, enabled: true }),
+    },
+    {
+      getAccessToken: async () => 'synthetic-access-token',
+      fetchStatus: async () => Response.json(
+        { ok: false, error: 'forbidden' },
+        { status: 403 },
+      ),
+    },
+    {
+      getAccessToken: async () => 'synthetic-access-token',
+      fetchStatus: async () => Response.json({ ok: true, enabled: false }),
+    },
+  ] as const) {
     assert.equal(
       await checkLinePayEntryOneDollarTestAvailability(input),
       false,
     )
-  })
-}
+  }
 
-test('network or invalid JSON failures stay hidden', async () => {
   assert.equal(
     await checkLinePayEntryOneDollarTestAvailability({
       getAccessToken: async () => 'synthetic-access-token',
@@ -56,4 +51,8 @@ test('network or invalid JSON failures stay hidden', async () => {
     }),
     false,
   )
-})
+
+  console.log('LINE Pay entry NT$1 availability client tests passed')
+}
+
+void runTests()
