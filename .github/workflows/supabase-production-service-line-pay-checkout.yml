@@ -1,0 +1,124 @@
+name: Supabase Production Service LINE Pay Checkout
+run-name: Service LINE Pay checkout exact-file Migration at ${{ github.sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      authorized_commit:
+        description: Exact main commit SHA authorized for this execution
+        required: true
+        type: string
+      project_ref:
+        description: Exact authorized Supabase project ref
+        required: true
+        type: string
+      migration_sha256:
+        description: Exact authorized service checkout Migration SHA-256
+        required: true
+        type: string
+      backup_restore_point_confirmation:
+        description: Exact confirmation that Backup/PITR and a restore point are available
+        required: true
+        type: string
+      confirmation:
+        description: Exact one-time deployment confirmation phrase
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-production-service-line-pay-checkout
+  cancel-in-progress: false
+
+jobs:
+  source-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact workflow commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up fixed Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24.16.0"
+
+      - name: Validate fixed Node.js runtime
+        run: node scripts/supabase/validate-service-line-pay-checkout-production.mjs node
+
+      - name: Validate fixed source identity and authorization gates
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_SHA: ${{ github.sha }}
+          AUTHORIZED_COMMIT: ${{ inputs.authorized_commit }}
+          PROJECT_REF_INPUT: ${{ inputs.project_ref }}
+          MIGRATION_SHA256_INPUT: ${{ inputs.migration_sha256 }}
+          BACKUP_RESTORE_POINT_CONFIRMATION: ${{ inputs.backup_restore_point_confirmation }}
+          DEPLOY_CONFIRMATION: ${{ inputs.confirmation }}
+        run: node scripts/supabase/validate-service-line-pay-checkout-production.mjs source
+
+  deploy-production:
+    needs: source-validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: supabase-production
+    steps:
+      - name: Check out the exact authorized commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up fixed Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24.16.0"
+
+      - name: Validate fixed PostgreSQL image identity
+        env:
+          POSTGRES_IMAGE: postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+        run: node scripts/supabase/validate-service-line-pay-checkout-production.mjs image
+
+      - name: Revalidate fixed source identity and authorization gates
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_SHA: ${{ github.sha }}
+          AUTHORIZED_COMMIT: ${{ inputs.authorized_commit }}
+          PROJECT_REF_INPUT: ${{ inputs.project_ref }}
+          MIGRATION_SHA256_INPUT: ${{ inputs.migration_sha256 }}
+          BACKUP_RESTORE_POINT_CONFIRMATION: ${{ inputs.backup_restore_point_confirmation }}
+          DEPLOY_CONFIRMATION: ${{ inputs.confirmation }}
+        run: node scripts/supabase/validate-service-line-pay-checkout-production.mjs source
+
+      - name: Validate protected Production channel
+        env:
+          SUPABASE_PRODUCTION_CHANNEL_READY: ${{ vars.SUPABASE_PRODUCTION_CHANNEL_READY }}
+          SUPABASE_PRODUCTION_DB_URL: ${{ secrets.SUPABASE_PRODUCTION_DB_URL }}
+          SUPABASE_PROJECT_ID: ndbqoznvobmpkgxkiezz
+        run: node scripts/supabase/validate-service-line-pay-checkout-production.mjs channel
+
+      - name: Run read-only service checkout preflight
+        env:
+          SUPABASE_PRODUCTION_CHANNEL_READY: ${{ vars.SUPABASE_PRODUCTION_CHANNEL_READY }}
+          SUPABASE_PRODUCTION_DB_URL: ${{ secrets.SUPABASE_PRODUCTION_DB_URL }}
+          SUPABASE_PROJECT_ID: ndbqoznvobmpkgxkiezz
+        run: node scripts/supabase/run-service-line-pay-checkout-exact-file.mjs preflight
+
+      - name: Run locked exact Migration and postflight once
+        env:
+          SUPABASE_PRODUCTION_CHANNEL_READY: ${{ vars.SUPABASE_PRODUCTION_CHANNEL_READY }}
+          SUPABASE_PRODUCTION_DB_URL: ${{ secrets.SUPABASE_PRODUCTION_DB_URL }}
+          SUPABASE_PROJECT_ID: ndbqoznvobmpkgxkiezz
+        run: node scripts/supabase/run-service-line-pay-checkout-exact-file.mjs deploy

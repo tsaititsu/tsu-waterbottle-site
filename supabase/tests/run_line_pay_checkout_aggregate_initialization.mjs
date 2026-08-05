@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { LINE_PAY_POSTGRES_IMAGE } from './line_pay_postgres_image.mjs'
+import { inspectDeployOutput } from '../../scripts/supabase/run-line-pay-production-exact-file.mjs'
+import { parseDeployOutput as parseServiceCheckoutDeployOutput } from '../../scripts/supabase/validate-service-line-pay-checkout-production.mjs'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const root = resolve(scriptDirectory, '../..')
@@ -22,6 +24,18 @@ const baseMigration = join(
 const initializationMigration = join(
   root,
   'supabase/migrations/20260728053215_line_pay_checkout_aggregate_initialization.sql',
+)
+const serviceCheckoutMigration = join(
+  root,
+  'supabase/migrations/20260805025344_initialize_service_line_pay_checkout.sql',
+)
+const serviceCheckoutPreflight = join(
+  root,
+  'supabase/deployment/service_line_pay_checkout_initialization_preflight.sql',
+)
+const serviceCheckoutPostflight = join(
+  root,
+  'supabase/deployment/service_line_pay_checkout_initialization_postflight.sql',
 )
 const initializationRecovery = join(
   root,
@@ -132,6 +146,35 @@ function psqlFileAsInContainer(container, database, user, path, label = path) {
     readFileSync(absolutePath, 'utf8'),
     label,
   )
+}
+
+function psqlWorkspaceFile(database, path, label = path) {
+  const result = spawnSync(
+    'docker',
+    [
+      'exec',
+      '-i',
+      '--workdir',
+      '/workspace/supabase/deployment',
+      containerName,
+      'psql',
+      '-X',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-U',
+      'postgres',
+      '-d',
+      database,
+      '-f',
+      `/workspace/${path}`,
+    ],
+    { cwd: root, encoding: 'utf8' },
+  )
+
+  if (result.status !== 0) {
+    throw new Error(`${label} failed\n${result.stderr || result.stdout}`)
+  }
+  return result.stdout.trim()
 }
 
 function psqlExpectDenied(database, role, label) {
@@ -1776,6 +1819,8 @@ async function main() {
     networkName,
     '--mount',
     `type=volume,src=${volumeName},dst=/var/lib/postgresql/data`,
+    '--mount',
+    `type=bind,src=${root},dst=/workspace,readonly`,
     '--env',
     `POSTGRES_PASSWORD=${localPostgresPassword}`,
     image,
@@ -1792,6 +1837,11 @@ async function main() {
     'postgres',
     'create database line_pay_initialization_concurrent;',
     'create concurrency database',
+  )
+  psql(
+    'postgres',
+    'create database line_pay_service_checkout_deploy;',
+    'create service checkout deploy database',
   )
   psql(
     'postgres',
@@ -1858,6 +1908,13 @@ async function main() {
     'line_pay_initialization_contract',
     'supabase/tests/line_pay_checkout_aggregate_initialization.sql',
   )
+  psqlFile('line_pay_initialization_contract', serviceCheckoutPreflight)
+  psqlFile('line_pay_initialization_contract', serviceCheckoutMigration)
+  psqlFile('line_pay_initialization_contract', serviceCheckoutPostflight)
+  psqlFile(
+    'line_pay_initialization_contract',
+    'supabase/tests/service_line_pay_checkout_initialization.sql',
+  )
   testReviewedRecoveryRequiresFailForward(
     'line_pay_initialization_contract',
   )
@@ -1871,6 +1928,29 @@ async function main() {
 
   prepareDatabase('line_pay_initialization_concurrent')
   await testConcurrentInitialization('line_pay_initialization_concurrent')
+  prepareDatabase('line_pay_service_checkout_deploy')
+  const serviceDeployOutput = psqlWorkspaceFile(
+    'line_pay_service_checkout_deploy',
+    'supabase/deployment/service_line_pay_checkout_initialization_deploy.sql',
+    'service checkout exact deployment',
+  )
+  const serviceDeployEvidence = inspectDeployOutput(serviceDeployOutput)
+  parseServiceCheckoutDeployOutput(serviceDeployEvidence.auditOutput)
+  for (const marker of [
+    'LINE_PAY_DEPLOY_MIGRATION_STARTED',
+    'LINE_PAY_DEPLOY_MIGRATION_COMMITTED',
+    'LINE_PAY_DEPLOY_POSTFLIGHT_STARTED',
+    'LINE_PAY_DEPLOY_POSTFLIGHT_STATE_EMITTED',
+    'LINE_PAY_DEPLOY_POSTFLIGHT_COMMITTED',
+  ]) {
+    if (!serviceDeployOutput.includes(marker)) {
+      throw new Error(`service checkout deployment marker missing: ${marker}`)
+    }
+  }
+  psqlFile(
+    'line_pay_service_checkout_deploy',
+    'supabase/tests/service_line_pay_checkout_initialization.sql',
+  )
   testMigrationLateFailureRollback(
     'line_pay_initialization_migration_rollback',
   )

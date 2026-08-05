@@ -622,10 +622,10 @@ begin
     0
   );
 
-  update public.product_orders
+  update public.product_orders as product_order
   set payment_id = v_payment_id
-  where id = v_product_order_id
-    and payment_id is null;
+  where product_order.id = v_product_order_id
+    and product_order.payment_id is null;
 
   if not found then
     raise exception using
