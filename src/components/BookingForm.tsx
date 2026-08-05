@@ -390,10 +390,18 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
       return false
     }
 
-    const bookingSignature = JSON.stringify(input)
+    const bookingSignature = adminOneDollarTest
+      ? JSON.stringify({ mode: 'line-pay-admin-nt1-entry', input })
+      : JSON.stringify(input)
     let bookingId = createdBookingSignature === bookingSignature ? createdBookingId : ''
 
-    if (!bookingId) {
+    if (!bookingId && adminOneDollarTest) {
+      bookingId = crypto.randomUUID()
+      setCreatedBookingId(bookingId)
+      setCreatedBookingSignature(bookingSignature)
+    }
+
+    if (!bookingId && !adminOneDollarTest) {
       try {
         const accessToken = await getAuthAccessToken()
         if (!isCurrentRequest() || !accessToken) return false
@@ -432,7 +440,11 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
       if (!isCurrentRequest() || !accessToken) return false
 
       if (isLinePay) {
-        setFormStatus('正在前往 LINE Pay 付款頁，請稍候。')
+        setFormStatus(
+          adminOneDollarTest
+            ? '此為獨立金流入口驗收，不會建立、占用或確認正式預約。正在前往 LINE Pay 付款頁，請稍候。'
+            : '正在前往 LINE Pay 付款頁，請稍候。',
+        )
         const result = await requestServiceLinePayCheckout({
           accessToken,
           source: 'booking',
@@ -475,7 +487,11 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
     } catch {
       if (isCurrentRequest()) {
         setFormStatus('')
-        setFormError('預約已建立，但付款頁建立失敗。請稍後重試；如仍無法付款，請聯繫客服，勿重複建立預約。')
+        setFormError(
+          adminOneDollarTest
+            ? 'LINE Pay 一元入口驗收付款頁建立失敗，未建立或占用正式預約。請稍後重試。'
+            : '預約已建立，但付款頁建立失敗。請稍後重試；如仍無法付款，請聯繫客服，勿重複建立預約。',
+        )
       }
     }
 

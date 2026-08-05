@@ -52,6 +52,28 @@ assert.equal(bookingFormSource.includes("source: 'booking'"), true)
 assert.equal(bookingFormSource.includes("source: 'booking',"), true)
 assert.equal(bookingFormSource.includes('requestServiceLinePayCheckout'), true)
 assert.equal(bookingFormSource.includes('paymentPreparationInFlightRef'), true)
+assert.equal(
+  bookingFormSource.includes('【管理員 LINE Pay NT$1 入口驗收，請勿履約】'),
+  false,
+)
+assert.equal(
+  bookingFormSource.includes('const bookingInput = adminOneDollarTest'),
+  false,
+)
+assert.match(
+  bookingFormSource,
+  /if \(!bookingId && adminOneDollarTest\) \{[\s\S]*crypto\.randomUUID\(\)[\s\S]*setCreatedBookingId\(bookingId\)/,
+)
+assert.match(
+  bookingFormSource,
+  /if \(!bookingId && !adminOneDollarTest\) \{[\s\S]*fetch\('\/api\/bookings\/create'/,
+)
+assert.equal(
+  bookingFormSource.includes(
+    '此為獨立金流入口驗收，不會建立、占用或確認正式預約。',
+  ),
+  true,
+)
 assert.equal(bookingFormSource.includes('使用所選方式付款 NT$'), true)
 assert.equal(
   bookingFormSource.includes('預約已建立，但付款頁建立失敗。請稍後重試；如仍無法付款，請聯繫客服，勿重複建立預約。'),

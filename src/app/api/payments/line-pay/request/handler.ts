@@ -195,16 +195,47 @@ export async function handleServiceLinePayStart(input: {
   }
 
   let target: LinePayServiceTarget | null
-  try {
-    target = await input.dependencies.resolveTarget({
-      userId: authorization.userId,
+  if (adminOneDollarTest && source === 'booking') {
+    let existingBooking: LinePayServiceTarget | null
+    try {
+      existingBooking = await input.dependencies.resolveTarget({
+        userId: authorization.userId,
+        source,
+        sourceId,
+        cardId: null,
+        position: null,
+      })
+    } catch {
+      return errorResponse('line_pay_service_lookup_failed', 500)
+    }
+    if (existingBooking) {
+      return errorResponse('line_pay_service_not_payable', 409)
+    }
+
+    // The UUID is deliberately absent from bookings. The paid callback can
+    // therefore exercise booking-source reconciliation without reserving or
+    // confirming a real consultation slot.
+    target = {
       source,
       sourceId,
-      cardId,
-      position,
-    })
-  } catch {
-    return errorResponse('line_pay_service_lookup_failed', 500)
+      itemType: source,
+      itemName: '水瓶先生論命入口（不建立正式預約）',
+      amountTwd: LINE_PAY_PRODUCTION_ONE_DOLLAR_AMOUNT_TWD,
+      bookingId: sourceId,
+      returnPath: '/account/bookings',
+    }
+  } else {
+    try {
+      target = await input.dependencies.resolveTarget({
+        userId: authorization.userId,
+        source,
+        sourceId,
+        cardId,
+        position,
+      })
+    } catch {
+      return errorResponse('line_pay_service_lookup_failed', 500)
+    }
   }
   if (!target) return errorResponse('line_pay_service_not_payable', 409)
   if (

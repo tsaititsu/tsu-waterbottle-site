@@ -29,6 +29,10 @@ const serviceCheckoutMigration = join(
   root,
   'supabase/migrations/20260805025344_initialize_service_line_pay_checkout.sql',
 )
+const productOrderOneDollarEntryTestMigration = join(
+  root,
+  'supabase/migrations/20260805125532_initialize_product_order_line_pay_one_dollar_entry_test_checkout.sql',
+)
 const serviceCheckoutPreflight = join(
   root,
   'supabase/deployment/service_line_pay_checkout_initialization_preflight.sql',
@@ -1983,6 +1987,14 @@ async function main() {
       `${role} initializer RPC guard`,
     )
   }
+  psqlFile(
+    'line_pay_initialization_contract',
+    productOrderOneDollarEntryTestMigration,
+  )
+  psqlFile(
+    'line_pay_initialization_contract',
+    'supabase/tests/product_order_line_pay_one_dollar_entry_test.sql',
+  )
 
   prepareDatabase('line_pay_initialization_concurrent')
   await testConcurrentInitialization('line_pay_initialization_concurrent')

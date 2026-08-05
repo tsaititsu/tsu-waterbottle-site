@@ -120,6 +120,8 @@ export function ChartResultSessionView() {
   const [loginOpen, setLoginOpen] = useState(false)
   const [loadError, setLoadError] = useState('')
   const checkoutInFlightRef = useRef(false)
+  const pendingCheckoutOptionsRef =
+    useRef<{ adminOneDollarTest?: boolean }>({})
   const checkoutResourceKey = useMemo(
     () =>
       JSON.stringify({
@@ -256,12 +258,13 @@ export function ChartResultSessionView() {
   const createPendingReportForCheckout = async (
     options: { adminOneDollarTest?: boolean } = {},
   ) => {
-    const adminOneDollarTest =
-      options.adminOneDollarTest === true
-      && isLinePayEntryOneDollarTestAvailable
+    const adminOneDollarTest = options.adminOneDollarTest === true
     if (checkoutInFlightRef.current) {
       return
     }
+    pendingCheckoutOptionsRef.current = adminOneDollarTest
+      ? { adminOneDollarTest: true }
+      : {}
     if (!validatePaidInterpretationReadiness()) {
       return
     }
@@ -591,10 +594,15 @@ export function ChartResultSessionView() {
       </div>
       <LoginModal
         open={loginOpen}
-        onClose={() => setLoginOpen(false)}
-        onSuccess={() => {
+        onClose={() => {
+          pendingCheckoutOptionsRef.current = {}
           setLoginOpen(false)
-          void createPendingReportForCheckout()
+        }}
+        onSuccess={() => {
+          const pendingOptions = pendingCheckoutOptionsRef.current
+          pendingCheckoutOptionsRef.current = {}
+          setLoginOpen(false)
+          void createPendingReportForCheckout(pendingOptions)
         }}
       />
     </div>

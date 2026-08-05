@@ -265,6 +265,94 @@ test('non-admin cart request cannot opt into the NT$1 entry path', async () => {
   assert.equal(writes, 0)
 })
 
+test('expired cart NT$1 window fails closed before initialization', async () => {
+  let writes = 0
+  const response = await handleProductOrderLinePayStart({
+    request: request({ ...validBody(), adminOneDollarTest: true }),
+    env: oneDollarEnv,
+    dependencies: {
+      authorize: async () => ({ userId, client: { rpc() {} }, isAdmin: true }),
+      initialize: async () => {
+        writes += 1
+        throw new Error('must_not_initialize')
+      },
+      initializeOneDollarTest: async () => {
+        writes += 1
+        throw new Error('must_not_initialize_test')
+      },
+      execute: async () => {
+        writes += 1
+        throw new Error('must_not_execute')
+      },
+      now: () => new Date('2026-08-05T03:00:00.000Z'),
+    },
+  })
+
+  assert.equal(response.status, 404)
+  assert.equal(writes, 0)
+})
+
+test('cart NT$1 initializer failure stops before the provider request', async () => {
+  let executions = 0
+  const response = await handleProductOrderLinePayStart({
+    request: request({ ...validBody(), adminOneDollarTest: true }),
+    env: oneDollarEnv,
+    dependencies: {
+      authorize: async () => ({ userId, client: { rpc() {} }, isAdmin: true }),
+      initialize: async () => {
+        throw new Error('formal_initializer_must_not_run')
+      },
+      initializeOneDollarTest: async () => {
+        throw new Error('synthetic_initializer_failure')
+      },
+      execute: async () => {
+        executions += 1
+        throw new Error('must_not_execute')
+      },
+      now: () => new Date('2026-08-05T01:00:00.000Z'),
+    },
+  })
+
+  assert.equal(response.status, 502)
+  assert.equal(executions, 0)
+})
+
+test('cart NT$1 provider failure returns a redacted error', async () => {
+  const response = await handleProductOrderLinePayStart({
+    request: request({ ...validBody(), adminOneDollarTest: true }),
+    env: oneDollarEnv,
+    dependencies: {
+      authorize: async () => ({ userId, client: { rpc() {} }, isAdmin: true }),
+      initialize: async () => {
+        throw new Error('formal_initializer_must_not_run')
+      },
+      initializeOneDollarTest: async () => ({
+        result_code: 'initialized',
+        product_order_id: productOrderId,
+        payment_id: paymentId,
+        attempt_id: attemptId,
+        outbox_id: '81000000-0000-4000-8000-000000000001',
+        confirm_capability_id: '91000000-0000-4000-8000-000000000001',
+        cancel_capability_id: '91000000-0000-4000-8000-000000000002',
+        merchant_order_no: 'LP_CART_SYNTHETIC',
+        request_state: 'queued',
+      }),
+      execute: async () => {
+        throw new Error('sensitive_provider_detail')
+      },
+      now: () => new Date('2026-08-05T01:00:00.000Z'),
+    },
+  })
+  const payload = await response.json() as Record<string, unknown>
+
+  assert.equal(response.status, 502)
+  assert.deepEqual(payload, {
+    ok: false,
+    error: 'line_pay_checkout_request_failed',
+  })
+  assert.equal(JSON.stringify(payload).includes('sensitive_provider_detail'), false)
+})
+
 test('payment redirect allowlist separates sandbox and production hosts', () => {
   assert.equal(
     trustedLinePayPaymentUrl(
