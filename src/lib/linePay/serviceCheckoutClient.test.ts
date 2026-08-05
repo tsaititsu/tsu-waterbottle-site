@@ -32,6 +32,33 @@ async function runTests() {
   )
   assert.equal(JSON.stringify(calls).includes('channelSecret'), false)
   assert.equal(JSON.stringify(calls).includes('amountTwd'), false)
+  assert.equal(JSON.stringify(calls).includes('adminOneDollarTest'), false)
+
+  const adminCalls: Array<{ url: string; init?: RequestInit }> = []
+  const adminResult = await requestServiceLinePayCheckout({
+    accessToken: 'test-access-token',
+    source: 'booking',
+    sourceId: '51000000-0000-4000-8000-000000000001',
+    idempotencyKey: 'booking-line-pay:test-idempotency-key',
+    adminOneDollarTest: true,
+    fetchFn: async (url, init) => {
+      adminCalls.push({ url: String(url), init })
+      return Response.json({
+        ok: true,
+        paymentUrl: { web: 'https://web-pay.line.me/web/payment/wait' },
+      })
+    },
+  })
+  assert.equal(adminResult.ok, true)
+  assert.deepEqual(
+    JSON.parse(String(adminCalls[0]?.init?.body)),
+    {
+      source: 'booking',
+      sourceId: '51000000-0000-4000-8000-000000000001',
+      idempotencyKey: 'booking-line-pay:test-idempotency-key',
+      adminOneDollarTest: true,
+    },
+  )
 
   const unavailable = await requestServiceLinePayCheckout({
   accessToken: 'test-access-token',

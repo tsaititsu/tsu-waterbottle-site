@@ -42,10 +42,10 @@ assert.equal(accountPage.includes(notice), false)
 // 正式付款選單與管理員測試按鈕都保留，提示不會阻擋 click。
 assert.equal(drawPreview.includes('PaymentMethodSelector'), true)
 assert.equal(drawPreview.includes('使用所選方式付款 NT$${paymentRequired.amountTwd}'), true)
-assert.equal(drawPreview.includes('管理員 Apple Pay 測試付款 NT$1'), true)
+assert.equal(drawPreview.includes('LinePayEntryOneDollarTestButton'), true)
 assert.equal(drawPreview.includes('onClick={() => handleNewebPayDivinationCheckout()}'), true)
 assert.equal(
-  drawPreview.includes('onClick={() => handleNewebPayDivinationCheckout({ adminOneDollarTest: true })}'),
+  drawPreview.includes('onClick={() => handleNewebPayDivinationCheckout({'),
   true,
 )
 
@@ -53,7 +53,7 @@ const checkoutStart = drawPreview.indexOf('async function handleNewebPayDivinati
 const checkoutEnd = drawPreview.indexOf('\n  async function confirmCard', checkoutStart)
 const checkoutSource = drawPreview.slice(checkoutStart, checkoutEnd)
 
-assert.equal(checkoutSource.includes('? "credit"'), true)
+assert.equal(checkoutSource.includes('adminOneDollarTest: true'), true)
 assert.equal(checkoutSource.includes('toStandardNewebPayCheckoutMode(newebPayPaymentMethod)'), true)
 assert.equal(checkoutSource.includes('requestServiceLinePayCheckout'), true)
 assert.equal(checkoutSource.includes('readingId,'), true)

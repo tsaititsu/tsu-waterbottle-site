@@ -166,7 +166,9 @@ test('cart page authenticates and sends the atomic checkout body', () => {
   const source = readCartPageSource()
 
   assert.equal(source.includes('Authorization: `Bearer ${accessToken}`'), true)
-  assert.equal(source.includes('body: JSON.stringify(body)'), true)
+  assert.equal(source.includes('body: JSON.stringify({'), true)
+  assert.equal(source.includes('...body,'), true)
+  assert.equal(source.includes('adminOneDollarTest: true'), true)
   assert.equal(source.includes('productOrderId: body.productOrderId'), false)
 })
 

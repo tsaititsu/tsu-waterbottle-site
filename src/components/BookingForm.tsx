@@ -4,7 +4,9 @@ import { CalendarDays, CheckCircle2 } from 'lucide-react'
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActionButton } from './ActionButton'
+import { LinePayEntryOneDollarTestButton } from './payments/LinePayEntryOneDollarTestButton'
 import { PaymentMethodSelector } from './payments/PaymentMethodSelector'
+import { useLinePayEntryOneDollarTest } from './payments/useLinePayEntryOneDollarTest'
 import { createAsyncIdentityGuard } from '@/lib/auth/asyncIdentityGuard'
 import { bookingPlans, getBookingPlan } from '@/lib/bookingPlans'
 import { getAuthAccessToken, getMockUser, subscribeAuthChange } from '@/lib/mockAuth'
@@ -124,6 +126,8 @@ function submitNewebPayForm(action: string, fields: Extract<NewebPayCreateRespon
 }
 
 export function BookingForm({ resetKey = '' }: BookingFormProps) {
+  const isLinePayEntryOneDollarTestAvailable =
+    useLinePayEntryOneDollarTest()
   const [planId, setPlanId] = useState(bookingPlans[0].id)
   const [bookingSlots, setBookingSlots] = useState<PublicBookingSlot[]>([])
   const [selectedBookingDate, setSelectedBookingDate] = useState('')
@@ -146,6 +150,7 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
   const [hasAcceptedNotice, setHasAcceptedNotice] = useState(false)
   const [formError, setFormError] = useState('')
   const [formStatus, setFormStatus] = useState('')
+  const [isPreparingPayment, setIsPreparingPayment] = useState(false)
   const [createdBookingId, setCreatedBookingId] = useState('')
   const [createdBookingSignature, setCreatedBookingSignature] = useState('')
   const [selectedPaymentMethod, setSelectedPaymentMethod] =
@@ -153,6 +158,7 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
       isNewebPayEnabled ? 'credit_card' : 'line_pay',
     )
   const authSubjectIdRef = useRef(getMockUser()?.id ?? null)
+  const paymentPreparationInFlightRef = useRef(false)
   const formResourceKey = useMemo(
     () =>
       JSON.stringify({
@@ -355,7 +361,12 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
     }
   }
 
-  const prepareBookingPayment = async () => {
+  const prepareBookingPaymentUnchecked = async (
+    options: { adminOneDollarTest?: boolean } = {},
+  ) => {
+    const adminOneDollarTest =
+      options.adminOneDollarTest === true
+      && isLinePayEntryOneDollarTestAvailable
     const input = buildInput()
     if (!input) return false
     const currentIdentity = () => ({
@@ -371,7 +382,9 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
       bookingGuard.isCurrent(requestToken, currentIdentity())
 
     setFormStatus('')
-    const isLinePay = isLinePayCheckoutMethod(selectedPaymentMethod)
+    const isLinePay =
+      adminOneDollarTest
+      || isLinePayCheckoutMethod(selectedPaymentMethod)
     if (isLinePay ? !isLinePayEnabled : !isNewebPayEnabled) {
       setFormError('目前暫時無法使用線上付款，請稍後再試或聯繫客服。')
       return false
@@ -425,6 +438,7 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
           source: 'booking',
           sourceId: bookingId,
           idempotencyKey: `booking-line-pay:${bookingId}`,
+          ...(adminOneDollarTest ? { adminOneDollarTest: true } : {}),
         })
         if (!isCurrentRequest()) return false
         if (!result.ok) {
@@ -466,6 +480,21 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
     }
 
     return false
+  }
+
+  const prepareBookingPayment = async (
+    options: { adminOneDollarTest?: boolean } = {},
+  ) => {
+    if (paymentPreparationInFlightRef.current) return false
+
+    paymentPreparationInFlightRef.current = true
+    setIsPreparingPayment(true)
+    try {
+      return await prepareBookingPaymentUnchecked(options)
+    } finally {
+      paymentPreparationInFlightRef.current = false
+      setIsPreparingPayment(false)
+    }
   }
 
   const updateBirthDateFromPicker = (value: string) => {
@@ -823,6 +852,13 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
         >
           使用所選方式付款 NT${selectedPlan.price.toLocaleString()}
         </ActionButton>
+        <LinePayEntryOneDollarTestButton
+          available={isLinePayEntryOneDollarTestAvailable}
+          disabled={isPreparingPayment || !hasAcceptedNotice}
+          onClick={() => void prepareBookingPayment({
+            adminOneDollarTest: true,
+          })}
+        />
       </form>
     </div>
   )

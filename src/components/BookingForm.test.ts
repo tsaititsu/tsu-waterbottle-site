@@ -51,6 +51,7 @@ assert.equal(bookingFormSource.includes("itemKey: 'booking_consultation_60'"), t
 assert.equal(bookingFormSource.includes("source: 'booking'"), true)
 assert.equal(bookingFormSource.includes("source: 'booking',"), true)
 assert.equal(bookingFormSource.includes('requestServiceLinePayCheckout'), true)
+assert.equal(bookingFormSource.includes('paymentPreparationInFlightRef'), true)
 assert.equal(bookingFormSource.includes('使用所選方式付款 NT$'), true)
 assert.equal(
   bookingFormSource.includes('預約已建立，但付款頁建立失敗。請稍後重試；如仍無法付款，請聯繫客服，勿重複建立預約。'),

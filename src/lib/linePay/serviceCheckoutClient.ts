@@ -11,6 +11,7 @@ export async function requestServiceLinePayCheckout(input: {
   idempotencyKey: string
   cardId?: string | null
   position?: string | null
+  adminOneDollarTest?: boolean
   fetchFn?: typeof fetch
 }): Promise<ServiceLinePayCheckoutResult> {
   const fetchFn = input.fetchFn ?? fetch
@@ -28,6 +29,9 @@ export async function requestServiceLinePayCheckout(input: {
         idempotencyKey: input.idempotencyKey,
         ...(input.cardId ? { cardId: input.cardId } : {}),
         ...(input.position ? { position: input.position } : {}),
+        ...(input.adminOneDollarTest === true
+          ? { adminOneDollarTest: true }
+          : {}),
       }),
     })
   } catch {

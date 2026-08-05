@@ -30,6 +30,7 @@ export const REACT_SERVER_TEST_FILES = Object.freeze([
   'src/app/api/admin/adminReadOnlyHandlers.test.ts',
   'src/app/api/admin/bookings/handler.test.ts',
   'src/app/api/admin/divination-one-dollar-test/handler.test.ts',
+  'src/app/api/admin/line-pay-entry-one-dollar-test/handler.test.ts',
   'src/app/api/ai-chart/reports/create/route.test.ts',
   'src/app/api/ai-chart/reports/read/route.test.ts',
   'src/app/api/bookings/create/route.test.ts',

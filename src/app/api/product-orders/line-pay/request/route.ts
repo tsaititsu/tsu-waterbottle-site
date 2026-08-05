@@ -2,13 +2,15 @@ import {
   createLinePayNonce,
   requestLinePayPayment,
 } from '@/lib/linePay'
+import { isAdminEmail } from '@/lib/auth/admin'
 import { executeInitializedProductOrderLinePayRequest } from '@/lib/linePay/productOrderRequestExecution'
 import { getSupabaseAdmin } from '@/lib/supabase/admin'
-import { getUserIdFromRequest } from '@/lib/supabase/auth'
+import { getUserWithEmailFromRequest } from '@/lib/supabase/auth'
 import {
   initializeProductOrderLinePayCheckout,
   type LinePayCheckoutInitializationRpcClient,
 } from '@/lib/supabase/linePayCheckoutInitialization'
+import { initializeLinePayOneDollarTestCheckout } from '@/lib/supabase/linePaySandboxE2eInitialization'
 import {
   createLinePayRequestDatabase,
   type LinePayRequestRpcClient,
@@ -39,9 +41,13 @@ export async function POST(request: Request) {
     env: process.env,
     dependencies: {
       authorize: async (startRequest) => {
-        const userId = await getUserIdFromRequest(startRequest)
-        if (!userId) return null
-        return { userId, client: requireRpcClient(getSupabaseAdmin()) }
+        const user = await getUserWithEmailFromRequest(startRequest)
+        if (!user) return null
+        return {
+          userId: user.id,
+          client: requireRpcClient(getSupabaseAdmin()),
+          isAdmin: isAdminEmail(user.email, process.env.ADMIN_EMAILS),
+        }
       },
       initialize: ({ client, userId, environment, ...checkoutInput }) =>
         initializeProductOrderLinePayCheckout(
@@ -49,6 +55,11 @@ export async function POST(request: Request) {
           { authenticatedUserId: userId, environment },
           requireRpcClient(client),
         ),
+      initializeOneDollarTest: ({ client, ...checkoutInput }) =>
+        initializeLinePayOneDollarTestCheckout({
+          ...checkoutInput,
+          client: requireRpcClient(client),
+        }),
       execute: async ({
         client,
         channelId,

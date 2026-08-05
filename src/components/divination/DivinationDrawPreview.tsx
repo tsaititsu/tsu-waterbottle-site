@@ -1,7 +1,9 @@
 "use client"
 
 import { DivinationResultPreview } from "@/components/divination/DivinationResultPreview"
+import { LinePayEntryOneDollarTestButton } from "@/components/payments/LinePayEntryOneDollarTestButton"
 import { PaymentMethodSelector } from "@/components/payments/PaymentMethodSelector"
+import { useLinePayEntryOneDollarTest } from "@/components/payments/useLinePayEntryOneDollarTest"
 import { ziweiCards, type ZiweiCard } from "@/lib/divination/cards"
 import {
   DIVINATION_READING_PAYMENT_MESSAGE,
@@ -37,7 +39,7 @@ import {
   type NewebPayClientFormField,
 } from "@/lib/newebpay/clientForm"
 import { isLineInAppBrowser } from "@/lib/browser/lineInAppBrowser"
-import { getAuthAccessToken, subscribeAuthChange } from "@/lib/mockAuth"
+import { getAuthAccessToken } from "@/lib/mockAuth"
 import {
   getCheckoutPaymentMethodOptions,
   isLinePayCheckoutMethod,
@@ -348,8 +350,8 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
     useState<StandardCheckoutPaymentMethod>(() =>
       isNewebPayEnabled ? "credit_card" : "line_pay",
     )
-  // 管理員限定 NT$1 測試模式：由 admin-only API 確認可用性，非 admin 永遠 false。
-  const [isAdminOneDollarTestAvailable, setIsAdminOneDollarTestAvailable] = useState(false)
+  const isLinePayEntryOneDollarTestAvailable =
+    useLinePayEntryOneDollarTest()
   const [isMobileLineInAppBrowser, setIsMobileLineInAppBrowser] = useState(false)
   const [paymentRequired, setPaymentRequired] = useState<PaymentRequiredState | null>(null)
   const [hasAcceptedTerms, setHasAcceptedTerms] = useState(false)
@@ -422,52 +424,6 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
     syncLineBrowserState()
     mobileMedia.addEventListener("change", syncLineBrowserState)
     return () => mobileMedia.removeEventListener("change", syncLineBrowserState)
-  }, [])
-
-  useEffect(() => {
-    // 詢問 admin-only API 是否開放 NT$1 測試模式；未登入或非 admin 會拿到 401/403，
-    // 一律維持 false。任何錯誤都靜默處理，不影響正式付款流程。
-    let cancelled = false
-    let requestVersion = 0
-
-    const checkAdminOneDollarTest = async () => {
-      const currentRequestVersion = ++requestVersion
-      if (!cancelled) setIsAdminOneDollarTestAvailable(false)
-
-      try {
-        const accessToken = await getAuthAccessToken()
-        if (!accessToken) return
-
-        const response = await fetch("/api/admin/divination-one-dollar-test", {
-          cache: "no-store",
-          headers: { authorization: `Bearer ${accessToken}` },
-        })
-        if (!response.ok) return
-
-        const data = (await response.json().catch(() => null)) as { ok?: boolean; enabled?: boolean } | null
-        if (
-          !cancelled &&
-          currentRequestVersion === requestVersion &&
-          data?.ok === true &&
-          data.enabled === true
-        ) {
-          setIsAdminOneDollarTestAvailable(true)
-        }
-      } catch {
-        // 靜默：非 admin 或未登入不顯示測試入口。
-      }
-    }
-
-    void checkAdminOneDollarTest()
-    const unsubscribe = subscribeAuthChange(() => {
-      void checkAdminOneDollarTest()
-    })
-
-    return () => {
-      cancelled = true
-      requestVersion += 1
-      unsubscribe()
-    }
   }, [])
 
   useEffect(() => {
@@ -763,7 +719,9 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
   }
 
   async function handleNewebPayDivinationCheckout(options: { adminOneDollarTest?: boolean } = {}) {
-    const isAdminOneDollarTest = options.adminOneDollarTest === true && isAdminOneDollarTestAvailable
+    const isAdminOneDollarTest =
+      options.adminOneDollarTest === true
+      && isLinePayEntryOneDollarTestAvailable
 
     if (!pendingCard || !pendingPosition) {
       setErrorMessage("請先選一張牌。")
@@ -785,7 +743,9 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
       return
     }
 
-    const isLinePay = !isAdminOneDollarTest && isLinePayCheckoutMethod(selectedPaymentMethod)
+    const isLinePay =
+      isAdminOneDollarTest
+      || isLinePayCheckoutMethod(selectedPaymentMethod)
     if (isNewebPayCheckingOut || (isLinePay ? !isLinePayEnabled : !isNewebPayEnabled)) return
 
     persistDrawState(pendingCard, pendingPosition)
@@ -796,9 +756,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
     let shouldSubmitForm = false
 
     try {
-      const accessToken = isAdminOneDollarTest || isLinePay
-        ? await getAuthAccessToken()
-        : null
+      const accessToken = isLinePay ? await getAuthAccessToken() : null
 
       if (isLinePay) {
         if (!accessToken) {
@@ -813,6 +771,7 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
           idempotencyKey: `ai-divination-line-pay:${readingId}`,
           cardId: pendingCard.id,
           position: pendingPosition,
+          ...(isAdminOneDollarTest ? { adminOneDollarTest: true } : {}),
         })
         if (!result.ok) {
           setErrorMessage(getServiceLinePayErrorMessage(result))
@@ -834,20 +793,14 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(isAdminOneDollarTest && accessToken
-            ? { Authorization: `Bearer ${accessToken}` }
-            : {}),
         },
         body: JSON.stringify({
           itemKey: "ai_divination_single",
           source: "ai_divination",
-          paymentMode: isAdminOneDollarTest
-            ? "credit"
-            : toStandardNewebPayCheckoutMode(newebPayPaymentMethod),
+          paymentMode: toStandardNewebPayCheckoutMode(newebPayPaymentMethod),
           readingId,
           cardId: pendingCard.id,
           position: pendingPosition,
-          ...(isAdminOneDollarTest ? { divinationOneDollarTest: true } : {}),
         }),
       })
       const data = (await response.json().catch(() => null)) as NewebPayCreateResponse | null
@@ -1302,16 +1255,19 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                             ? `使用所選方式付款 NT$${paymentRequired.amountTwd}`
                           : "線上付款尚未啟用"}
                     </button>
-                    {isAdminOneDollarTestAvailable ? (
-                      <button
-                        type="button"
-                        onClick={() => handleNewebPayDivinationCheckout({ adminOneDollarTest: true })}
-                        disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled || !hasAcceptedTerms}
-                        className="min-h-11 w-full rounded-full border border-deepPurple bg-white px-5 py-3 font-semibold text-deepPurple transition hover:bg-softPurple disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        管理員 Apple Pay 測試付款 NT$1
-                      </button>
-                    ) : null}
+                    <LinePayEntryOneDollarTestButton
+                      available={isLinePayEntryOneDollarTestAvailable}
+                      className="min-h-11 w-full rounded-full"
+                      disabled={
+                        isInterpreting
+                        || isNewebPayCheckingOut
+                        || !isLinePayEnabled
+                        || !hasAcceptedTerms
+                      }
+                      onClick={() => handleNewebPayDivinationCheckout({
+                        adminOneDollarTest: true,
+                      })}
+                    />
                   </>
                 ) : (
                   <button
@@ -1420,16 +1376,19 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                           ? `使用所選方式付款 NT$${paymentRequired.amountTwd}`
                         : "線上付款尚未啟用"}
                   </button>
-                  {isAdminOneDollarTestAvailable ? (
-                    <button
-                      type="button"
-                      onClick={() => handleNewebPayDivinationCheckout({ adminOneDollarTest: true })}
-                      disabled={isInterpreting || isNewebPayCheckingOut || !isNewebPayEnabled || !hasAcceptedTerms}
-                      className="rounded-full border border-deepPurple bg-white px-5 py-3 text-sm font-semibold text-deepPurple transition hover:bg-softPurple disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      管理員 Apple Pay 測試付款 NT$1
-                    </button>
-                  ) : null}
+                  <LinePayEntryOneDollarTestButton
+                    available={isLinePayEntryOneDollarTestAvailable}
+                    className="rounded-full text-sm"
+                    disabled={
+                      isInterpreting
+                      || isNewebPayCheckingOut
+                      || !isLinePayEnabled
+                      || !hasAcceptedTerms
+                    }
+                    onClick={() => handleNewebPayDivinationCheckout({
+                      adminOneDollarTest: true,
+                    })}
+                  />
                 </div>
               ) : (
                 <button

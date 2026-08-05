@@ -16,6 +16,26 @@ const env: LinePayServerEnv = {
   LINE_PAY_CANCEL_URL: 'https://example.com/api/product-orders/line-pay/cancel',
 }
 
+const oneDollarEnv: LinePayServerEnv = {
+  ...env,
+  VERCEL_ENV: 'production',
+  VERCEL_GIT_COMMIT_SHA: 'a'.repeat(40),
+  LINE_PAY_ENV: 'production',
+  LINE_PAY_TRANSPORT: 'gateway',
+  LINE_PAY_GATEWAY_URL: 'https://gateway.example.com',
+  LINE_PAY_GATEWAY_KEY_ID: 'synthetic-key-id',
+  LINE_PAY_GATEWAY_SECRET: 'synthetic-gateway-secret',
+  LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_ENABLED: 'true',
+  LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_CONFIRMATION:
+    'RUN_LINE_PAY_PRODUCTION_NT1_ONCE',
+  LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_EXPIRES_AT:
+    '2026-08-05T02:00:00.000Z',
+  LINE_PAY_CONFIRM_URL:
+    'https://example.com/api/product-orders/line-pay/confirm',
+  LINE_PAY_CANCEL_URL:
+    'https://example.com/api/product-orders/line-pay/cancel',
+}
+
 const userId = '41000000-0000-4000-8000-000000000001'
 const sourceId = '51000000-0000-4000-8000-000000000001'
 const target: LinePayServiceTarget = {
@@ -56,7 +76,11 @@ function dependencies(overrides: Partial<ServiceLinePayStartDependencies> = {}) 
     linked: [] as unknown[],
   }
   const value: ServiceLinePayStartDependencies = {
-    authorize: async () => ({ userId, client: { kind: 'test-client' } }),
+    authorize: async () => ({
+      userId,
+      client: { kind: 'test-client' },
+      isAdmin: true,
+    }),
     resolveTarget: async (input) => {
       calls.resolved.push(input)
       return target
@@ -161,6 +185,114 @@ test('uses the server-resolved amount and links the service after provider readi
   assert.equal(execution.payloadInput.products[0]?.price, 3600)
   assert.equal(JSON.stringify(payload).includes('test_channel_secret'), false)
   assert.match(response.headers.get('set-cookie') ?? '', /HttpOnly/i)
+})
+
+test('explicit admin entry test keeps the service target but charges LINE Pay NT$1', async () => {
+  const deps = dependencies({
+    execute: async (input) => {
+      deps.calls.executed.push(input)
+      return {
+        status: 'payment_url_ready',
+        attemptId: initialized.attempt_id,
+        paymentId: initialized.payment_id,
+        productOrderId: initialized.product_order_id,
+        merchantOrderNo: initialized.merchant_order_no,
+        transactionId: '2026080500000000001',
+        paymentUrlWeb: 'https://web-pay.line.me/web/payment/wait',
+        paymentUrlApp: null,
+      }
+    },
+    now: () => new Date('2026-08-05T01:00:00.000Z'),
+  })
+  const response = await handleServiceLinePayStart({
+    request: request({
+      source: 'booking',
+      sourceId,
+      idempotencyKey: `booking-line-pay:${sourceId}`,
+      adminOneDollarTest: true,
+    }),
+    env: oneDollarEnv,
+    dependencies: deps.value,
+  })
+
+  assert.equal(response.status, 200)
+  const initializedInput = deps.calls.initialized[0] as {
+    target: LinePayServiceTarget
+    idempotencyKey: string
+  }
+  assert.equal(initializedInput.target.source, 'booking')
+  assert.equal(initializedInput.target.sourceId, sourceId)
+  assert.equal(initializedInput.target.itemType, 'booking')
+  assert.equal(initializedInput.target.bookingId, sourceId)
+  assert.equal(initializedInput.target.amountTwd, 1)
+  assert.match(initializedInput.target.itemName, /管理員 NT\$1 驗收/)
+  assert.match(initializedInput.idempotencyKey, /admin-nt1/)
+  const execution = deps.calls.executed[0] as {
+    payloadInput: { amount: number; products: Array<{ price: number }> }
+  }
+  assert.equal(execution.payloadInput.amount, 1)
+  assert.equal(execution.payloadInput.products[0]?.price, 1)
+})
+
+test('non-admin cannot request the entry NT$1 path and creates no payment aggregate', async () => {
+  const deps = dependencies({
+    authorize: async () => ({
+      userId,
+      client: { kind: 'test-client' },
+      isAdmin: false,
+    }),
+    now: () => new Date('2026-08-05T01:00:00.000Z'),
+  })
+  const response = await handleServiceLinePayStart({
+    request: request({
+      source: 'booking',
+      sourceId,
+      idempotencyKey: `booking-line-pay:${sourceId}`,
+      adminOneDollarTest: true,
+    }),
+    env: oneDollarEnv,
+    dependencies: deps.value,
+  })
+
+  assert.equal(response.status, 404)
+  assert.equal(deps.calls.resolved.length, 0)
+  assert.equal(deps.calls.initialized.length, 0)
+  assert.equal(deps.calls.executed.length, 0)
+})
+
+test('admin ordinary checkout keeps the formal amount while the test window is enabled', async () => {
+  const deps = dependencies({
+    execute: async (input) => {
+      deps.calls.executed.push(input)
+      return {
+        status: 'payment_url_ready',
+        attemptId: initialized.attempt_id,
+        paymentId: initialized.payment_id,
+        productOrderId: initialized.product_order_id,
+        merchantOrderNo: initialized.merchant_order_no,
+        transactionId: '2026080500000000001',
+        paymentUrlWeb: 'https://web-pay.line.me/web/payment/wait',
+        paymentUrlApp: null,
+      }
+    },
+    now: () => new Date('2026-08-05T01:00:00.000Z'),
+  })
+  const response = await handleServiceLinePayStart({
+    request: request({
+      source: 'booking',
+      sourceId,
+      idempotencyKey: `booking-line-pay:${sourceId}`,
+    }),
+    env: oneDollarEnv,
+    dependencies: deps.value,
+  })
+
+  assert.equal(response.status, 200)
+  const execution = deps.calls.executed[0] as {
+    payloadInput: { amount: number; products: Array<{ price: number }> }
+  }
+  assert.equal(execution.payloadInput.amount, 3600)
+  assert.equal(execution.payloadInput.products[0]?.price, 3600)
 })
 
 test('does not link the service when the provider request is not ready', async () => {

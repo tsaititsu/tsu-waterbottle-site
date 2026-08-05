@@ -5,7 +5,9 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ActionButton } from './ActionButton'
 import { LoginModal } from './LoginModal'
+import { LinePayEntryOneDollarTestButton } from './payments/LinePayEntryOneDollarTestButton'
 import { PaymentMethodSelector } from './payments/PaymentMethodSelector'
+import { useLinePayEntryOneDollarTest } from './payments/useLinePayEntryOneDollarTest'
 import { createAsyncIdentityGuard } from '@/lib/auth/asyncIdentityGuard'
 import {
   getAiChartDraftNotes,
@@ -101,6 +103,8 @@ function submitNewebPayForm(input: {
 
 export function ChartResultSessionView() {
   const router = useRouter()
+  const isLinePayEntryOneDollarTestAvailable =
+    useLinePayEntryOneDollarTest()
   const [session, setSession] = useState<AiChartDraftSession | null>(null)
   const [chartInput, setChartInput] = useState<ChartInput | null>(null)
   const [chartPayload, setChartPayload] = useState<ZiweiGptPayload | null>(null)
@@ -249,7 +253,12 @@ export function ChartResultSessionView() {
     return true
   }
 
-  const createPendingReportForCheckout = async () => {
+  const createPendingReportForCheckout = async (
+    options: { adminOneDollarTest?: boolean } = {},
+  ) => {
+    const adminOneDollarTest =
+      options.adminOneDollarTest === true
+      && isLinePayEntryOneDollarTestAvailable
     if (checkoutInFlightRef.current) {
       return
     }
@@ -325,12 +334,16 @@ export function ChartResultSessionView() {
 
       const reportId = reportData.reportId
 
-      if (isLinePayCheckoutMethod(selectedPaymentMethod)) {
+      if (
+        adminOneDollarTest
+        || isLinePayCheckoutMethod(selectedPaymentMethod)
+      ) {
         const linePayResult = await requestServiceLinePayCheckout({
           accessToken,
           source: 'ai_chart_report',
           sourceId: reportId,
           idempotencyKey: `ai-chart-line-pay:${reportId}`,
+          ...(adminOneDollarTest ? { adminOneDollarTest: true } : {}),
         })
         if (!isCurrentRequest()) return
         if (!linePayResult.ok) {
@@ -545,16 +558,25 @@ export function ChartResultSessionView() {
         />
 
         {isAiChartDirectCheckoutEnabled ? (
-          <button
-            className="focus-ring inline-flex w-full justify-center rounded-xl bg-deepPurple px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
-            disabled={isCreatingPendingReport}
-            onClick={() => void createPendingReportForCheckout()}
-            type="button"
-          >
-            {isCreatingPendingReport
-              ? '建立付款資料中...'
-              : `使用所選方式付款 NT$${selectedPlan.amount}`}
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <button
+              className="focus-ring inline-flex w-full justify-center rounded-xl bg-deepPurple px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
+              disabled={isCreatingPendingReport}
+              onClick={() => void createPendingReportForCheckout()}
+              type="button"
+            >
+              {isCreatingPendingReport
+                ? '建立付款資料中...'
+                : `使用所選方式付款 NT$${selectedPlan.amount}`}
+            </button>
+            <LinePayEntryOneDollarTestButton
+              available={isLinePayEntryOneDollarTestAvailable}
+              disabled={isCreatingPendingReport || !hasAcceptedPaidNotice}
+              onClick={() => void createPendingReportForCheckout({
+                adminOneDollarTest: true,
+              })}
+            />
+          </div>
         ) : (
           <ActionButton
             amount={selectedPlan.amount}

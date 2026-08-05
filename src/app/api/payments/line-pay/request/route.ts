@@ -5,6 +5,7 @@ import {
   isCourseSalesOpen,
   type CourseId,
 } from '@/lib/courses'
+import { isAdminEmail } from '@/lib/auth/admin'
 import { ziweiCards } from '@/lib/divination/cards'
 import {
   createLinePayNonce,
@@ -20,7 +21,7 @@ import {
   getAiChartReportPaymentContext,
   linkAiChartReportPendingPayment,
 } from '@/lib/supabase/aiChartReports'
-import { getUserIdFromRequest } from '@/lib/supabase/auth'
+import { getUserWithEmailFromRequest } from '@/lib/supabase/auth'
 import {
   getDivinationReadingPaymentContext,
   linkDivinationReadingPendingPayment,
@@ -71,9 +72,13 @@ export async function POST(request: Request) {
     env: process.env,
     dependencies: {
       authorize: async (startRequest) => {
-        const userId = await getUserIdFromRequest(startRequest)
-        if (!userId) return null
-        return { userId, client: requireRpcClient(getSupabaseAdmin()) }
+        const user = await getUserWithEmailFromRequest(startRequest)
+        if (!user) return null
+        return {
+          userId: user.id,
+          client: requireRpcClient(getSupabaseAdmin()),
+          isAdmin: isAdminEmail(user.email, process.env.ADMIN_EMAILS),
+        }
       },
       resolveTarget: async ({ userId, source, sourceId, cardId, position }) => {
         if (source === 'ai_chart_report') {
