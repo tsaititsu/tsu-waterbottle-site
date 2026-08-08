@@ -11,6 +11,10 @@ const linePayEntryGuideSource = readFileSync(
   join(root, 'src/components/admin/LinePayProductionEntryTestGuide.tsx'),
   'utf8',
 )
+const linePayEntryDomainSource = readFileSync(
+  join(root, 'src/lib/linePay/productionOneDollarEntry.ts'),
+  'utf8',
+)
 
 assert.equal(
   adminPageSource.startsWith("'use client'"),
@@ -62,13 +66,17 @@ assert.match(
 assert.equal(adminPageSource.includes('linePayTestEnvironment'), false)
 for (const entryHref of ['/ai-chart', '/ai-divination', '/cart', '/booking']) {
   assert.match(
-    linePayEntryGuideSource,
+    linePayEntryDomainSource,
     new RegExp(`href: ["']${entryHref}["']`),
     `Production NT$1 後台導引必須包含實際入口 ${entryHref}`,
   )
 }
 assert.match(linePayEntryGuideSource, /實際付款選單/)
 assert.match(linePayEntryGuideSource, /管理員 LINE Pay 入口測試付款 NT\$1/)
+assert.match(
+  linePayEntryGuideSource,
+  /LINE_PAY_PRODUCTION_ONE_DOLLAR_ENTRY_DEFINITIONS\.map/,
+)
 assert.match(
   adminPageSource,
   /newebPayOneDollarEnabled \? <NewebPayOneDollarTestPanel \/> : null/,

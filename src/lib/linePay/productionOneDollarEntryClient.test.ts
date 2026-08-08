@@ -8,24 +8,52 @@ import {
 test('authorized admin sees the temporary Production entry test without exposing the token', async () => {
   const token = 'synthetic-admin-access-token'
   const calls: Array<{ input: string; init?: RequestInit }> = []
-  const enabled = await checkLinePayProductionOneDollarEntryAvailability({
+  const availability = await checkLinePayProductionOneDollarEntryAvailability({
     accessToken: token,
+    now: () => new Date('2026-08-08T12:00:00.000Z'),
     fetchFn: async (input, init) => {
       calls.push({ input: String(input), init })
-      return new Response(JSON.stringify({ ok: true, enabled: true }), {
+      return new Response(JSON.stringify({
+        ok: true,
+        enabled: true,
+        enabledUntil: '2026-08-08T12:55:00.000Z',
+      }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       })
     },
   })
 
-  assert.equal(enabled, true)
+  assert.deepEqual(availability, {
+    status: 'enabled',
+    enabledUntil: '2026-08-08T12:55:00.000Z',
+  })
   assert.equal(calls[0]?.input, '/api/admin/line-pay-production-one-dollar-test')
   assert.deepEqual(calls[0]?.init, {
     cache: 'no-store',
     headers: { authorization: `Bearer ${token}` },
   })
-  assert.equal(JSON.stringify(enabled).includes(token), false)
+  assert.equal(JSON.stringify(availability).includes(token), false)
+})
+
+test('non-admin response enables the regular full-price flow', async () => {
+  const availability = await checkLinePayProductionOneDollarEntryAvailability({
+    accessToken: 'member-token',
+    fetchFn: async () => new Response('{}', { status: 403 }),
+  })
+
+  assert.deepEqual(availability, { status: 'disabled' })
+})
+
+test('status transport failure blocks an ambiguous payment mode', async () => {
+  const availability = await checkLinePayProductionOneDollarEntryAvailability({
+    accessToken: 'synthetic-admin-access-token',
+    fetchFn: async () => {
+      throw new Error('network detail')
+    },
+  })
+
+  assert.deepEqual(availability, { status: 'error' })
 })
 
 test('AI chart entry starts only its fixed Production NT$1 checkout', async () => {

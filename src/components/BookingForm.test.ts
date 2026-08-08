@@ -62,7 +62,11 @@ assert.equal(
 )
 assert.equal(bookingFormSource.includes("entrySource: 'booking'"), true)
 assert.equal(
-  bookingFormSource.includes('管理員 LINE Pay 入口測試付款 NT$1'),
+  bookingFormSource.includes('linePayEntryTestBlocked'),
+  true,
+)
+assert.equal(
+  bookingFormSource.includes('linePayEntryTestButtonLabel'),
   true,
 )
 assert.equal(

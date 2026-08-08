@@ -78,7 +78,8 @@ assert.equal(source.indexOf('const accessToken = await getAuthAccessToken()') < 
 assert.equal(source.includes('useLinePayProductionOneDollarEntryTest'), true)
 assert.equal(source.includes('requestLinePayProductionOneDollarEntryCheckout'), true)
 assert.equal(source.includes("entrySource: 'ai_chart_report'"), true)
-assert.equal(source.includes('管理員 LINE Pay 入口測試付款 NT$1'), true)
+assert.equal(source.includes('linePayEntryTestBlocked'), true)
+assert.equal(source.includes('linePayEntryTestButtonLabel'), true)
 assert.ok(
   source.indexOf("entrySource: 'ai_chart_report'") < createRequestStart,
   'the admin NT$1 entry check must not create a real AI chart report',

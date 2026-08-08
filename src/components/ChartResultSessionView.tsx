@@ -6,7 +6,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ActionButton } from './ActionButton'
 import { LoginModal } from './LoginModal'
 import { PaymentMethodSelector } from './payments/PaymentMethodSelector'
-import { useLinePayProductionOneDollarEntryTest } from './payments/useLinePayProductionOneDollarEntryTest'
+import {
+  getLinePayProductionOneDollarEntryTestButtonLabel,
+  isLinePayProductionOneDollarEntryTestBlocked,
+  useLinePayProductionOneDollarEntryTest,
+} from './payments/useLinePayProductionOneDollarEntryTest'
 import { createAsyncIdentityGuard } from '@/lib/auth/asyncIdentityGuard'
 import {
   getAiChartDraftNotes,
@@ -103,7 +107,14 @@ function submitNewebPayForm(input: {
 
 export function ChartResultSessionView() {
   const router = useRouter()
-  const linePayEntryTestEnabled = useLinePayProductionOneDollarEntryTest()
+  const linePayEntryTestStatus = useLinePayProductionOneDollarEntryTest()
+  const linePayEntryTestEnabled = linePayEntryTestStatus === 'enabled'
+  const linePayEntryTestBlocked =
+    isLinePayProductionOneDollarEntryTestBlocked(linePayEntryTestStatus)
+  const linePayEntryTestButtonLabel =
+    getLinePayProductionOneDollarEntryTestButtonLabel(
+      linePayEntryTestStatus,
+    )
   const [session, setSession] = useState<AiChartDraftSession | null>(null)
   const [chartInput, setChartInput] = useState<ChartInput | null>(null)
   const [chartPayload, setChartPayload] = useState<ZiweiGptPayload | null>(null)
@@ -292,9 +303,14 @@ export function ChartResultSessionView() {
       }
 
       if (
-        linePayEntryTestEnabled
+        linePayEntryTestBlocked
         && isLinePayCheckoutMethod(selectedPaymentMethod)
       ) {
+        setFormError('暫時無法確認 LINE Pay 付款模式，請重新整理後再試。')
+        return
+      }
+
+      if (linePayEntryTestEnabled && isLinePayCheckoutMethod(selectedPaymentMethod)) {
         const testResult =
           await requestLinePayProductionOneDollarEntryCheckout({
             accessToken,
@@ -569,15 +585,21 @@ export function ChartResultSessionView() {
         {isAiChartDirectCheckoutEnabled ? (
           <button
             className="focus-ring inline-flex w-full justify-center rounded-xl bg-deepPurple px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
-            disabled={isCreatingPendingReport}
+            disabled={
+              isCreatingPendingReport
+              || (
+                linePayEntryTestBlocked
+                && isLinePayCheckoutMethod(selectedPaymentMethod)
+              )
+            }
             onClick={() => void createPendingReportForCheckout()}
             type="button"
           >
             {isCreatingPendingReport
               ? '建立付款資料中...'
-              : linePayEntryTestEnabled
+              : linePayEntryTestButtonLabel
                   && isLinePayCheckoutMethod(selectedPaymentMethod)
-                ? '管理員 LINE Pay 入口測試付款 NT$1'
+                ? linePayEntryTestButtonLabel
               : `使用所選方式付款 NT$${selectedPlan.amount}`}
           </button>
         ) : (

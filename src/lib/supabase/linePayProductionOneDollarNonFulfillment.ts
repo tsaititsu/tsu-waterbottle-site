@@ -1,0 +1,2 @@
+export const LINE_PAY_PRODUCTION_ONE_DOLLAR_NON_FULFILLMENT_RPC =
+  'initialize_line_pay_production_nt1_non_fulfillment_checkout'

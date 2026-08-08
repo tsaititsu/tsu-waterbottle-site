@@ -21,13 +21,14 @@ import {
   LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION as SHARED_LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION,
   getLinePayProductionOneDollarEntryLabel,
   isLinePayProductionOneDollarEntrySource,
+  trustedProductionLinePayWebUrl,
   type LinePayProductionOneDollarEntrySource,
 } from '../../../../../../lib/linePay/productionOneDollarEntry'
 
 export const LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION =
   SHARED_LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION
 export const LINE_PAY_PRODUCTION_ONE_DOLLAR_AMOUNT_TWD = 1
-const LINE_PAY_PRODUCTION_ONE_DOLLAR_MIN_WINDOW_MS = 5 * 60 * 1000
+export const LINE_PAY_PRODUCTION_ONE_DOLLAR_MIN_WINDOW_MS = 5 * 60 * 1000
 const LINE_PAY_PRODUCTION_ONE_DOLLAR_MAX_WINDOW_MS = 24 * 60 * 60 * 1000
 
 export type LinePayProductionOneDollarEnvironment = LinePayServerEnv & {
@@ -138,21 +139,6 @@ function trustedProductionCallbackUrl(
   return callbackUrl.toString()
 }
 
-function trustedProductionPaymentUrl(value: string) {
-  const url = new URL(value)
-  if (
-    url.protocol !== 'https:'
-    || url.hostname !== 'web-pay.line.me'
-    || url.port !== ''
-    || url.username !== ''
-    || url.password !== ''
-    || !url.pathname.startsWith('/web/')
-  ) {
-    throw new Error('line_pay_production_one_dollar_payment_url_invalid')
-  }
-  return url.toString()
-}
-
 export async function handleLinePayProductionOneDollarStart(input: {
   request: Request
   env: LinePayProductionOneDollarEnvironment
@@ -177,7 +163,7 @@ export async function handleLinePayProductionOneDollarStart(input: {
   if (body?.confirmation !== LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION) {
     return errorResponse('invalid_confirmation', 400)
   }
-  const entrySource = body.entrySource === undefined ? 'admin' : body.entrySource
+  const entrySource = body?.entrySource
   if (!isLinePayProductionOneDollarEntrySource(entrySource)) {
     return errorResponse('invalid_entry_source', 400)
   }
@@ -234,9 +220,7 @@ export async function handleLinePayProductionOneDollarStart(input: {
         .digest('base64url'))
   const confirmToken = createToken('confirm')
   const cancelToken = createToken('cancel')
-  const productName = entrySource === 'admin'
-    ? 'LINE Pay Production NT$1 測試（不出貨）'
-    : `LINE Pay NT$1 入口測試｜${getLinePayProductionOneDollarEntryLabel(entrySource)}（不出貨／不提供服務）`
+  const productName = `LINE Pay NT$1 入口測試｜${getLinePayProductionOneDollarEntryLabel(entrySource)}（不出貨／不提供服務）`
   const payloadInput = {
     orderId: merchantOrderNo,
     amount: LINE_PAY_PRODUCTION_ONE_DOLLAR_AMOUNT_TWD,
@@ -324,7 +308,10 @@ export async function handleLinePayProductionOneDollarStart(input: {
   }
 
   try {
-    const paymentUrl = trustedProductionPaymentUrl(result.paymentUrlWeb)
+    const paymentUrl = trustedProductionLinePayWebUrl(result.paymentUrlWeb)
+    if (!paymentUrl) {
+      throw new Error('line_pay_production_one_dollar_payment_url_invalid')
+    }
     const response = NextResponse.json(
       {
         ok: true,

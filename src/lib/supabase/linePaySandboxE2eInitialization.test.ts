@@ -125,8 +125,10 @@ test('Production NT$1 test uses a fixed non-fulfillment snapshot and complete sy
 
   assert.deepEqual(rpc.calls, [
     {
-      functionName: 'initialize_product_order_line_pay_checkout',
+      functionName:
+        'initialize_line_pay_production_nt1_non_fulfillment_checkout',
       args: {
+        p_entry_source: 'booking',
         p_payload: {
           user_id: userId,
           environment: 'production',
@@ -195,6 +197,21 @@ test('production or a non-1 amount fails before RPC', async () => {
     )
   }
 
+  assert.equal(rpc.calls.length, 0)
+})
+
+test('Production NT$1 initialization requires one real payment entry', async () => {
+  const rpc = createClient({ data: result, error: null })
+
+  await assert.rejects(
+    () => initializeLinePayOneDollarTestCheckout({
+      ...createInput(rpc.client),
+      environment: 'production',
+    }),
+    (error: unknown) =>
+      error instanceof LinePaySandboxE2eInitializationError
+      && error.code === 'invalid_input',
+  )
   assert.equal(rpc.calls.length, 0)
 })
 

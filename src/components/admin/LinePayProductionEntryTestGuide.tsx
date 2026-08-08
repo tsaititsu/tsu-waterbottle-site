@@ -1,27 +1,5 @@
 import Link from 'next/link'
-
-const entryLinks = [
-  {
-    href: '/ai-chart',
-    label: 'AI 命盤分析',
-    description: '完成命盤資料後，在報告付款選單選擇 LINE Pay。',
-  },
-  {
-    href: '/ai-divination',
-    label: 'AI 紫微牌卡占卜',
-    description: '完成抽牌與同意確認後，在付款選單選擇 LINE Pay。',
-  },
-  {
-    href: '/cart',
-    label: '購物車',
-    description: '購物車內需先有商品，再於付款選單選擇 LINE Pay。',
-  },
-  {
-    href: '/booking',
-    label: '水瓶先生論命',
-    description: '填妥預約資料與條款確認後，在付款選單選擇 LINE Pay。',
-  },
-] as const
+import { LINE_PAY_PRODUCTION_ONE_DOLLAR_ENTRY_DEFINITIONS } from '@/lib/linePay/productionOneDollarEntry'
 
 export default function LinePayProductionEntryTestGuide() {
   return (
@@ -40,7 +18,7 @@ export default function LinePayProductionEntryTestGuide() {
         按鈕會顯示「管理員 LINE Pay 入口測試付款 NT$1」。測試不會建立正式報告、出貨訂單或預約。
       </p>
       <div className="mt-5 grid gap-4 md:grid-cols-2">
-        {entryLinks.map((entry) => (
+        {LINE_PAY_PRODUCTION_ONE_DOLLAR_ENTRY_DEFINITIONS.map((entry) => (
           <article
             className="rounded-2xl border border-[#bce9ce] bg-white p-5"
             key={entry.href}
@@ -49,7 +27,7 @@ export default function LinePayProductionEntryTestGuide() {
               {entry.label}
             </h3>
             <p className="mt-2 text-sm leading-7 text-textMuted">
-              {entry.description}
+              {entry.instruction}
             </p>
             <Link
               className="focus-ring mt-4 inline-flex rounded-lg bg-[#06c755] px-4 py-2 text-sm font-semibold text-white"

@@ -19,6 +19,8 @@ on:
       - ".github/workflows/supabase-production-line-pay-partial-acl-recovery-capability-diagnostic.yml"
       - ".github/workflows/supabase-production-service-line-pay-checkout.yml"
       - ".github/workflows/supabase-production-service-line-pay-checkout-verify.yml"
+      - ".github/workflows/supabase-production-line-pay-one-dollar-non-fulfillment.yml"
+      - ".github/workflows/supabase-production-line-pay-one-dollar-non-fulfillment-verify.yml"
       - "package.json"
       - "package-lock.json"
       - "scripts/supabase/run-bank-transfer-production-forensic.mjs"
@@ -35,6 +37,7 @@ on:
       - "scripts/supabase/run-line-pay-partial-acl-metadata-recovery.mjs"
       - "scripts/supabase/run-line-pay-partial-acl-recovery-capability-diagnostic.mjs"
       - "scripts/supabase/run-service-line-pay-checkout-exact-file.mjs"
+      - "scripts/supabase/run-line-pay-production-one-dollar-non-fulfillment-exact-file.mjs"
       - "scripts/supabase/validate-bank-transfer-production-forensic.mjs"
       - "scripts/supabase/validate-bank-transfer-production-baseline-capture.mjs"
       - "scripts/supabase/validate-line-pay-production-diagnostic.mjs"
@@ -48,6 +51,7 @@ on:
       - "scripts/supabase/validate-line-pay-partial-acl-recovery-capability-diagnostic.mjs"
       - "scripts/supabase/validate-line-pay-production-deployment.mjs"
       - "scripts/supabase/validate-service-line-pay-checkout-production.mjs"
+      - "scripts/supabase/validate-line-pay-production-one-dollar-non-fulfillment.mjs"
       - "src/lib/supabase/linePayDatabaseContracts.ts"
       - "src/lib/supabase/linePayDatabaseContracts.test.ts"
       - "src/lib/supabase/linePayCheckoutInitialization.ts"
@@ -90,6 +94,10 @@ on:
       - "supabase/deployment/service_line_pay_checkout_initialization_postflight.sql"
       - "supabase/deployment/service_line_pay_checkout_initialization_deploy.sql"
       - "supabase/deployment/service_line_pay_checkout_initialization_verify.sql"
+      - "supabase/deployment/line_pay_production_one_dollar_non_fulfillment_preflight.sql"
+      - "supabase/deployment/line_pay_production_one_dollar_non_fulfillment_postflight.sql"
+      - "supabase/deployment/line_pay_production_one_dollar_non_fulfillment_deploy.sql"
+      - "supabase/deployment/line_pay_production_one_dollar_non_fulfillment_verify.sql"
       - "docs/line-pay-checkout-aggregate-initialization-deployment.md"
       - "supabase/line_pay_remediation_contracts.test.ts"
       - "supabase/line_pay_atomic_confirmation_finalization.test.ts"
@@ -111,6 +119,7 @@ on:
       - "supabase/line_pay_production_deployment_workflow.test.ts"
       - "supabase/line_pay_production_exact_file_runner.test.ts"
       - "supabase/service_line_pay_checkout_production_runner.test.ts"
+      - "supabase/line_pay_production_one_dollar_non_fulfillment.test.ts"
       - "supabase/migrations/*_retire_bank_transfer_submissions_writes.sql"
       - "supabase/migrations/20260719033404_line_pay_remediation_contracts.sql"
       - "supabase/migrations/20260728053215_line_pay_checkout_aggregate_initialization.sql"
@@ -118,6 +127,7 @@ on:
       - "supabase/migrations/20260802160000_line_pay_atomic_confirmation_finalization.sql"
       - "supabase/migrations/20260803193000_line_pay_paid_reconciliation_recovery.sql"
       - "supabase/migrations/20260805025344_initialize_service_line_pay_checkout.sql"
+      - "supabase/migrations/20260808092959_line_pay_production_one_dollar_non_fulfillment.sql"
       - "supabase/tests/run_bank_transfer_historical_forensic_contracts.mjs"
       - "supabase/tests/run_bank_transfer_baseline_capture_contracts.mjs"
       - "supabase/tests/run_bank_transfer_submissions_readonly_fence.mjs"
@@ -132,6 +142,8 @@ on:
       - "supabase/tests/run_line_pay_second_remediation_conflicts.mjs"
       - "supabase/tests/run_line_pay_checkout_aggregate_initialization.mjs"
       - "supabase/tests/service_line_pay_checkout_initialization.sql"
+      - "supabase/tests/line_pay_production_one_dollar_non_fulfillment.sql"
+      - "supabase/tests/run_line_pay_production_one_dollar_non_fulfillment.mjs"
 
 permissions:
   contents: read
@@ -189,6 +201,7 @@ jobs:
           node --test supabase/line_pay_production_exact_file_runner.test.ts
           node --test supabase/line_pay_production_deployment_workflow.test.ts
           node --import tsx --test supabase/service_line_pay_checkout_production_runner.test.ts
+          node --import tsx --test supabase/line_pay_production_one_dollar_non_fulfillment.test.ts
           node --test src/lib/supabase/linePayDatabaseContracts.test.ts
           node --import tsx --test src/lib/supabase/linePayCheckoutInitialization.test.ts
           node --import tsx --test src/lib/supabase/linePayCapabilityRuntime.test.ts
@@ -230,6 +243,9 @@ jobs:
 
       - name: Run LINE Pay atomic finalization capability diagnostic contracts
         run: node supabase/tests/run_line_pay_atomic_finalization_capability_diagnostic_contracts.mjs
+
+      - name: Run LINE Pay Production NT$1 non-fulfillment contracts
+        run: node supabase/tests/run_line_pay_production_one_dollar_non_fulfillment.mjs
 
       - name: Run fail-closed conflict fixtures
         run: node supabase/tests/run_line_pay_second_remediation_conflicts.mjs
@@ -308,3 +324,5 @@ jobs:
             xargs -r docker volume rm
           docker network ls -q --filter label=task=line-pay-initialize-aggregate-v1 |
             xargs -r docker network rm
+          docker ps -aq --filter label=task=line-pay-nt1-non-fulfillment |
+            xargs -r docker rm --force

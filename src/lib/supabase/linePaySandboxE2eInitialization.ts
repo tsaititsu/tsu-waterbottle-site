@@ -8,6 +8,7 @@ import {
   isLinePayProductionOneDollarEntrySource,
   type LinePayProductionOneDollarEntrySource,
 } from '../linePay/productionOneDollarEntry'
+import { LINE_PAY_PRODUCTION_ONE_DOLLAR_NON_FULFILLMENT_RPC } from './linePayProductionOneDollarNonFulfillment'
 
 export type LinePaySandboxE2eInitializationErrorCode =
   | 'invalid_input'
@@ -179,7 +180,10 @@ function validateInput(input: InitializeLinePayOneDollarTestCheckoutInput) {
     || (
       input.environment === 'sandbox'
       && input.entrySource !== undefined
-      && input.entrySource !== 'admin'
+    )
+    || (
+      input.environment === 'production'
+      && !isLinePayProductionOneDollarEntrySource(input.entrySource)
     )
   ) {
     fail('invalid_input')
@@ -243,17 +247,15 @@ export async function initializeLinePayOneDollarTestCheckout(
   validateInput(input)
 
   const production = input.environment === 'production'
-  const entrySource = production ? input.entrySource ?? 'admin' : 'admin'
-  const entryLabel = getLinePayProductionOneDollarEntryLabel(entrySource)
+  const entrySource = production ? input.entrySource! : null
+  const entryLabel = entrySource
+    ? getLinePayProductionOneDollarEntryLabel(entrySource)
+    : null
   const productSlug = production
-    ? entrySource === 'admin'
-      ? 'line-pay-production-one-dollar-test'
-      : `line-pay-production-one-dollar-test-${entrySource}`
+    ? `line-pay-production-one-dollar-test-${entrySource}`
     : 'line-pay-sandbox-e2e-nt1'
   const productName = production
-    ? entrySource === 'admin'
-      ? 'LINE Pay Production NT$1 測試（不出貨）'
-      : `LINE Pay NT$1 入口測試｜${entryLabel}（不出貨／不提供服務）`
+    ? `LINE Pay NT$1 入口測試｜${entryLabel}（不出貨／不提供服務）`
     : 'LINE Pay Sandbox E2E 測試'
 
   const payload = {
@@ -262,16 +264,12 @@ export async function initializeLinePayOneDollarTestCheckout(
     order_no: input.orderNo,
     merchant_order_no: input.merchantOrderNo,
     customer_name: production
-      ? entrySource === 'admin'
-        ? 'LINE Pay Production NT$1 測試'
-        : `LINE Pay NT$1 入口測試｜${entryLabel}`
+      ? `LINE Pay NT$1 入口測試｜${entryLabel}`
       : 'LINE Pay Sandbox E2E',
     customer_email: null,
     customer_phone: production ? '0900000000' : null,
     note: production
-      ? entrySource === 'admin'
-        ? 'Production 管理員 NT$1 金流測試，請勿出貨'
-        : `Production 管理員 NT$1 入口測試｜${entryLabel}；不出貨、不提供服務`
+      ? `Production 管理員 NT$1 入口測試｜${entryLabel}；不出貨、不提供服務`
       : 'Preview-only LINE Pay Sandbox NT$1 E2E',
     items: [
       {
@@ -310,9 +308,14 @@ export async function initializeLinePayOneDollarTestCheckout(
   let response: { data: unknown; error: unknown }
   try {
     response = await input.client
-      .rpc('initialize_product_order_line_pay_checkout', {
-        p_payload: payload,
-      })
+      .rpc(
+        production
+          ? LINE_PAY_PRODUCTION_ONE_DOLLAR_NON_FULFILLMENT_RPC
+          : 'initialize_product_order_line_pay_checkout',
+        production
+          ? { p_payload: payload, p_entry_source: entrySource }
+          : { p_payload: payload },
+      )
       .single()
   } catch {
     fail('rpc_failed')

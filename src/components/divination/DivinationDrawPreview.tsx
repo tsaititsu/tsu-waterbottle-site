@@ -2,7 +2,11 @@
 
 import { DivinationResultPreview } from "@/components/divination/DivinationResultPreview"
 import { PaymentMethodSelector } from "@/components/payments/PaymentMethodSelector"
-import { useLinePayProductionOneDollarEntryTest } from "@/components/payments/useLinePayProductionOneDollarEntryTest"
+import {
+  getLinePayProductionOneDollarEntryTestButtonLabel,
+  isLinePayProductionOneDollarEntryTestBlocked,
+  useLinePayProductionOneDollarEntryTest,
+} from "@/components/payments/useLinePayProductionOneDollarEntryTest"
 import { ziweiCards, type ZiweiCard } from "@/lib/divination/cards"
 import {
   DIVINATION_READING_PAYMENT_MESSAGE,
@@ -329,7 +333,12 @@ function DivinationConsentNotice({
 }
 
 export function DivinationDrawPreview({ readingSession = null }: DivinationDrawPreviewProps) {
-  const linePayEntryTestEnabled = useLinePayProductionOneDollarEntryTest()
+  const linePayEntryTestStatus = useLinePayProductionOneDollarEntryTest()
+  const linePayEntryTestEnabled = linePayEntryTestStatus === "enabled"
+  const linePayEntryTestBlocked =
+    isLinePayProductionOneDollarEntryTestBlocked(linePayEntryTestStatus)
+  const linePayEntryTestButtonLabel =
+    getLinePayProductionOneDollarEntryTestButtonLabel(linePayEntryTestStatus)
   const router = useRouter()
   const [started, setStarted] = useState(false)
   const [shuffling, setShuffling] = useState(false)
@@ -790,6 +799,10 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
 
     const isLinePay = !isAdminOneDollarTest && isLinePayCheckoutMethod(selectedPaymentMethod)
     if (isNewebPayCheckingOut || (isLinePay ? !isLinePayEnabled : !isNewebPayEnabled)) return
+    if (isLinePay && linePayEntryTestBlocked) {
+      setErrorMessage("暫時無法確認 LINE Pay 付款模式，請重新整理後再試。")
+      return
+    }
 
     persistDrawState(pendingCard, pendingPosition)
     setIsNewebPayCheckingOut(true)
@@ -1307,6 +1320,10 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                         isInterpreting
                         || isNewebPayCheckingOut
                         || !hasAcceptedTerms
+                        || (
+                          isLinePayCheckoutMethod(selectedPaymentMethod)
+                          && linePayEntryTestBlocked
+                        )
                         || (isLinePayCheckoutMethod(selectedPaymentMethod)
                           ? !isLinePayEnabled
                           : !isNewebPayEnabled)
@@ -1316,9 +1333,8 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                       {isNewebPayCheckingOut
                         ? "建立線上付款資料中..."
                         : isLinePayCheckoutMethod(selectedPaymentMethod)
-                          ? linePayEntryTestEnabled
-                            ? "管理員 LINE Pay 入口測試付款 NT$1"
-                            : `LINE Pay 付款 NT$${paymentRequired.amountTwd}`
+                          ? linePayEntryTestButtonLabel
+                            ?? `LINE Pay 付款 NT$${paymentRequired.amountTwd}`
                           : isNewebPayEnabled
                             ? `使用所選方式付款 NT$${paymentRequired.amountTwd}`
                           : "線上付款尚未啟用"}
@@ -1427,6 +1443,10 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                       isInterpreting
                       || isNewebPayCheckingOut
                       || !hasAcceptedTerms
+                      || (
+                        isLinePayCheckoutMethod(selectedPaymentMethod)
+                        && linePayEntryTestBlocked
+                      )
                       || (isLinePayCheckoutMethod(selectedPaymentMethod)
                         ? !isLinePayEnabled
                         : !isNewebPayEnabled)
@@ -1436,9 +1456,8 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                     {isNewebPayCheckingOut
                       ? "建立線上付款資料中..."
                       : isLinePayCheckoutMethod(selectedPaymentMethod)
-                        ? linePayEntryTestEnabled
-                          ? "管理員 LINE Pay 入口測試付款 NT$1"
-                          : `LINE Pay 付款 NT$${paymentRequired.amountTwd}`
+                        ? linePayEntryTestButtonLabel
+                          ?? `LINE Pay 付款 NT$${paymentRequired.amountTwd}`
                         : isNewebPayEnabled
                           ? `使用所選方式付款 NT$${paymentRequired.amountTwd}`
                         : "線上付款尚未啟用"}

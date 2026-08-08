@@ -1,5 +1,6 @@
 import {
   LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION,
+  trustedProductionLinePayWebUrl,
   type LinePayProductionOneDollarEntrySource,
 } from './productionOneDollarEntry'
 
@@ -12,32 +13,18 @@ export type LinePayProductionOneDollarEntryCheckoutResult =
   | Readonly<{ ok: true; paymentUrlWeb: string }>
   | Readonly<{ ok: false; error: string; status: number }>
 
-function trustedProductionPaymentUrl(value: unknown) {
-  if (typeof value !== 'string') return null
-  let url: URL
-  try {
-    url = new URL(value)
-  } catch {
-    return null
-  }
-  if (
-    url.protocol !== 'https:'
-    || url.hostname !== 'web-pay.line.me'
-    || url.port !== ''
-    || url.username !== ''
-    || url.password !== ''
-    || !url.pathname.startsWith('/web/')
-  ) {
-    return null
-  }
-  return url.toString()
-}
+export type LinePayProductionOneDollarEntryAvailability =
+  | Readonly<{ status: 'enabled'; enabledUntil: string }>
+  | Readonly<{ status: 'disabled' | 'error' }>
 
 export async function checkLinePayProductionOneDollarEntryAvailability(input: {
   accessToken: string
   fetchFn?: FetchLike
+  now?: () => Date
 }) {
-  if (!input.accessToken.trim()) return false
+  if (!input.accessToken.trim()) {
+    return Object.freeze({ status: 'disabled' as const })
+  }
   const fetchFn = input.fetchFn ?? fetch
 
   try {
@@ -48,20 +35,43 @@ export async function checkLinePayProductionOneDollarEntryAvailability(input: {
         headers: { authorization: `Bearer ${input.accessToken}` },
       },
     )
-    if (!response.ok) return false
+    if (response.status === 401 || response.status === 403) {
+      return Object.freeze({ status: 'disabled' as const })
+    }
+    if (!response.ok) return Object.freeze({ status: 'error' as const })
     const payload = await response.json().catch(() => null) as {
       ok?: unknown
       enabled?: unknown
+      enabledUntil?: unknown
     } | null
-    return payload?.ok === true && payload.enabled === true
+    if (payload?.ok !== true || typeof payload.enabled !== 'boolean') {
+      return Object.freeze({ status: 'error' as const })
+    }
+    if (!payload.enabled) {
+      return Object.freeze({ status: 'disabled' as const })
+    }
+    const enabledUntilMs = typeof payload.enabledUntil === 'string'
+      ? Date.parse(payload.enabledUntil)
+      : Number.NaN
+    if (
+      !Number.isFinite(enabledUntilMs)
+      || new Date(enabledUntilMs).toISOString() !== payload.enabledUntil
+      || enabledUntilMs <= (input.now?.() ?? new Date()).getTime()
+    ) {
+      return Object.freeze({ status: 'error' as const })
+    }
+    return Object.freeze({
+      status: 'enabled' as const,
+      enabledUntil: payload.enabledUntil,
+    })
   } catch {
-    return false
+    return Object.freeze({ status: 'error' as const })
   }
 }
 
 export async function requestLinePayProductionOneDollarEntryCheckout(input: {
   accessToken: string
-  entrySource: Exclude<LinePayProductionOneDollarEntrySource, 'admin'>
+  entrySource: LinePayProductionOneDollarEntrySource
   fetchFn?: FetchLike
 }): Promise<LinePayProductionOneDollarEntryCheckoutResult> {
   if (!input.accessToken.trim()) {
@@ -96,7 +106,7 @@ export async function requestLinePayProductionOneDollarEntryCheckout(input: {
       currency?: unknown
       paymentUrl?: unknown
     } | null
-    const paymentUrlWeb = trustedProductionPaymentUrl(payload?.paymentUrl)
+    const paymentUrlWeb = trustedProductionLinePayWebUrl(payload?.paymentUrl)
     if (
       !response.ok
       || payload?.ok !== true

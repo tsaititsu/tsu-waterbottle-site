@@ -152,7 +152,11 @@ test('Production admin confirmation initializes fixed NT$1 and returns only the 
   })
 
   assert.equal(response.status, 200)
-  assert.deepEqual(deps.calls, ['authorize', 'initialize', 'execute'])
+  assert.deepEqual(deps.calls, [
+    'authorize',
+    'initialize',
+    'execute',
+  ])
   assert.deepEqual(await json(response), {
     ok: true,
     environment: 'production',
@@ -240,6 +244,24 @@ test('unknown payment entry returns 400 before authorization or writes', async (
     request: createRequest({
       confirmation: LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION,
       entrySource: 'forged_entry',
+    }),
+    env: enabledEnv,
+    ...deps,
+  })
+
+  assert.equal(response.status, 400)
+  assert.deepEqual(await json(response), {
+    ok: false,
+    error: 'invalid_entry_source',
+  })
+  assert.deepEqual(deps.calls, [])
+})
+
+test('missing payment entry returns 400 before authorization or writes', async () => {
+  const deps = successDependencies()
+  const response = await handleLinePayProductionOneDollarStart({
+    request: createRequest({
+      confirmation: LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION,
     }),
     env: enabledEnv,
     ...deps,
@@ -375,11 +397,35 @@ test('Production execution failure preserves only an allowlisted safe reason', a
   })
 })
 
+test('atomic initialization failure stops before any LINE Pay request', async () => {
+  const deps = successDependencies()
+  const response = await handleLinePayProductionOneDollarStart({
+    request: createRequest(),
+    env: enabledEnv,
+    ...deps,
+    initialize: async () => {
+      deps.calls.push('initialize')
+      throw new Error('private database detail')
+    },
+  })
+
+  assert.equal(response.status, 502)
+  assert.deepEqual(await json(response), {
+    ok: false,
+    error: 'line_pay_production_one_dollar_initialization_failed',
+  })
+  assert.deepEqual(deps.calls, [
+    'authorize',
+    'initialize',
+  ])
+})
+
 test('route is POST-only, admin-protected, atomic, and uses the Gateway transport', () => {
   const source = readFileSync(new URL('./route.ts', import.meta.url), 'utf8')
 
   assert.match(source, /requireAdminUser/)
   assert.match(source, /initializeLinePayOneDollarTestCheckout/)
+  assert.doesNotMatch(source, /markLinePayProductionOneDollarNonFulfillment/)
   assert.match(source, /createLinePayRequestDatabase/)
   assert.match(source, /executeInitializedProductOrderLinePayRequest/)
   assert.match(source, /requestLinePayPayment/)

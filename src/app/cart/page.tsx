@@ -4,7 +4,11 @@ import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useCart } from '@/components/CartContext'
 import { PaymentMethodSelector } from '@/components/payments/PaymentMethodSelector'
-import { useLinePayProductionOneDollarEntryTest } from '@/components/payments/useLinePayProductionOneDollarEntryTest'
+import {
+  getLinePayProductionOneDollarEntryTestButtonLabel,
+  isLinePayProductionOneDollarEntryTestBlocked,
+  useLinePayProductionOneDollarEntryTest,
+} from '@/components/payments/useLinePayProductionOneDollarEntryTest'
 import { requestLinePayProductionOneDollarEntryCheckout } from '@/lib/linePay/productionOneDollarEntryClient'
 import { getAuthAccessToken } from '@/lib/mockAuth'
 import {
@@ -98,7 +102,14 @@ function submitCartNewebPayForm(input: CartNewebPayFormInput) {
 }
 
 export default function CartPage() {
-  const linePayEntryTestEnabled = useLinePayProductionOneDollarEntryTest()
+  const linePayEntryTestStatus = useLinePayProductionOneDollarEntryTest()
+  const linePayEntryTestEnabled = linePayEntryTestStatus === 'enabled'
+  const linePayEntryTestBlocked =
+    isLinePayProductionOneDollarEntryTestBlocked(linePayEntryTestStatus)
+  const linePayEntryTestButtonLabel =
+    getLinePayProductionOneDollarEntryTestButtonLabel(
+      linePayEntryTestStatus,
+    )
   const { items, isLoaded, removeItem, totalAmount, totalQuantity, updateItemQuantity } = useCart()
   const [spiritualProductsAccepted, setSpiritualProductsAccepted] = useState(false)
   const [postOfficeShippingInfo, setPostOfficeShippingInfo] = useState<PostOfficeShippingInfo>(emptyPostOfficeShippingInfo)
@@ -247,6 +258,10 @@ export default function CartPage() {
 
   const handleLinePayCheckoutClick = async () => {
     if (linePayCheckoutPendingRef.current || isCheckoutPending) return
+    if (linePayEntryTestBlocked) {
+      setCheckoutError('暫時無法確認 LINE Pay 付款模式，請重新整理後再試。')
+      return
+    }
 
     const shippingInfo = getValidatedShippingInfo()
     if (!shippingInfo) return
@@ -591,7 +606,13 @@ export default function CartPage() {
                               ? 'bg-[#06c755]'
                               : 'bg-deepPurple'
                         }`}
-                        disabled={isCheckoutPending}
+                        disabled={
+                          isCheckoutPending
+                          || (
+                            selectedPaymentMethod === 'line_pay'
+                            && linePayEntryTestBlocked
+                          )
+                        }
                         onClick={() => {
                           if (selectedPaymentMethod === 'line_pay') {
                             void handleLinePayCheckoutClick()
@@ -606,8 +627,8 @@ export default function CartPage() {
                             ? linePayButtonState.message
                             : '正在建立付款資料...'
                           : selectedPaymentMethod === 'line_pay'
-                              && linePayEntryTestEnabled
-                            ? '管理員 LINE Pay 入口測試付款 NT$1'
+                              && linePayEntryTestButtonLabel
+                            ? linePayEntryTestButtonLabel
                           : getCartPaymentButtonLabel(selectedPaymentMethod)}
                       </button>
                     ) : null}

@@ -23,7 +23,8 @@ assert.equal(source.includes('position: pendingPosition'), true)
 assert.equal(source.includes('useLinePayProductionOneDollarEntryTest'), true)
 assert.equal(source.includes('requestLinePayProductionOneDollarEntryCheckout'), true)
 assert.equal(source.includes('entrySource: "ai_divination"'), true)
-assert.equal(source.includes('管理員 LINE Pay 入口測試付款 NT$1'), true)
+assert.equal(source.includes('linePayEntryTestBlocked'), true)
+assert.equal(source.includes('linePayEntryTestButtonLabel'), true)
 assert.equal(
   source.includes('isAdminOneDollarTestAvailable && !linePayEntryTestEnabled'),
   true,

@@ -20,7 +20,11 @@ import {
   requestServiceLinePayCheckout,
 } from '@/lib/linePay/serviceCheckoutClient'
 import { requestLinePayProductionOneDollarEntryCheckout } from '@/lib/linePay/productionOneDollarEntryClient'
-import { useLinePayProductionOneDollarEntryTest } from './payments/useLinePayProductionOneDollarEntryTest'
+import {
+  getLinePayProductionOneDollarEntryTestButtonLabel,
+  isLinePayProductionOneDollarEntryTestBlocked,
+  useLinePayProductionOneDollarEntryTest,
+} from './payments/useLinePayProductionOneDollarEntryTest'
 
 const officialLineUrl = 'https://lin.ee/6Tpje1P'
 
@@ -126,7 +130,14 @@ function submitNewebPayForm(action: string, fields: Extract<NewebPayCreateRespon
 }
 
 export function BookingForm({ resetKey = '' }: BookingFormProps) {
-  const linePayEntryTestEnabled = useLinePayProductionOneDollarEntryTest()
+  const linePayEntryTestStatus = useLinePayProductionOneDollarEntryTest()
+  const linePayEntryTestEnabled = linePayEntryTestStatus === 'enabled'
+  const linePayEntryTestBlocked =
+    isLinePayProductionOneDollarEntryTestBlocked(linePayEntryTestStatus)
+  const linePayEntryTestButtonLabel =
+    getLinePayProductionOneDollarEntryTestButtonLabel(
+      linePayEntryTestStatus,
+    )
   const [planId, setPlanId] = useState(bookingPlans[0].id)
   const [bookingSlots, setBookingSlots] = useState<PublicBookingSlot[]>([])
   const [selectedBookingDate, setSelectedBookingDate] = useState('')
@@ -377,6 +388,11 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
     const isLinePay = isLinePayCheckoutMethod(selectedPaymentMethod)
     if (isLinePay ? !isLinePayEnabled : !isNewebPayEnabled) {
       setFormError('目前暫時無法使用線上付款，請稍後再試或聯繫客服。')
+      return false
+    }
+
+    if (isLinePay && linePayEntryTestBlocked) {
+      setFormError('暫時無法確認 LINE Pay 付款模式，請重新整理後再試。')
       return false
     }
 
@@ -850,8 +866,8 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
           itemType="booking"
           loadingText="送出中..."
         >
-          {isLinePayCheckoutMethod(selectedPaymentMethod) && linePayEntryTestEnabled
-            ? '管理員 LINE Pay 入口測試付款 NT$1'
+          {isLinePayCheckoutMethod(selectedPaymentMethod) && linePayEntryTestButtonLabel
+            ? linePayEntryTestButtonLabel
             : `使用所選方式付款 NT$${selectedPlan.price.toLocaleString()}`}
         </ActionButton>
       </form>

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import {
+  LINE_PAY_PRODUCTION_ONE_DOLLAR_MIN_WINDOW_MS,
   isLinePayProductionOneDollarRouteEnabled,
   type LinePayProductionOneDollarEnvironment,
 } from '../../internal/line-pay/production-one-dollar/start/handler'
@@ -16,13 +17,25 @@ export async function handleLinePayProductionOneDollarTestStatus(input: {
     const authError = await input.authorizeAdmin(input.request)
     if (authError) return authError
 
+    const now = input.now?.() ?? new Date()
+    const enabled = isLinePayProductionOneDollarRouteEnabled(
+      input.env,
+      now,
+    )
+    const expiresAt = input.env
+      .LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_EXPIRES_AT?.trim()
+    const enabledUntil = enabled && expiresAt
+      ? new Date(
+          Date.parse(expiresAt)
+          - LINE_PAY_PRODUCTION_ONE_DOLLAR_MIN_WINDOW_MS,
+        ).toISOString()
+      : null
+
     return NextResponse.json(
       {
         ok: true,
-        enabled: isLinePayProductionOneDollarRouteEnabled(
-          input.env,
-          input.now?.() ?? new Date(),
-        ),
+        enabled,
+        ...(enabledUntil ? { enabledUntil } : {}),
       },
       { headers: { 'Cache-Control': 'no-store' } },
     )

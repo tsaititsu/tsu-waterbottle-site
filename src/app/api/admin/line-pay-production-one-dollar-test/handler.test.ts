@@ -27,6 +27,10 @@ test('authorized admin sees the active entry test window', async () => {
   })
 
   assert.equal(response.status, 200)
-  assert.deepEqual(await response.json(), { ok: true, enabled: true })
+  assert.deepEqual(await response.json(), {
+    ok: true,
+    enabled: true,
+    enabledUntil: '2026-08-08T12:55:00.000Z',
+  })
   assert.equal(response.headers.get('cache-control'), 'no-store')
 })
