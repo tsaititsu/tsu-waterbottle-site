@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { Download } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { AI_CHART_REPORT_PRICE_TWD } from '@/lib/ai-chart/pricing'
 import { getAuthAccessToken } from '@/lib/mockAuth'
 
 type AiChartReportReadResponse =
@@ -168,7 +169,7 @@ export default function AiChartResultPage() {
         if (!data.ok && data.error === 'PAYMENT_REQUIRED') {
           setDbReportState({
             status: 'payment_required',
-            amountTwd: data.amountTwd ?? 100,
+            amountTwd: data.amountTwd ?? AI_CHART_REPORT_PRICE_TWD,
           })
           return
         }

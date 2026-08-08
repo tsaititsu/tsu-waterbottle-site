@@ -17,6 +17,7 @@ import {
   validateNewebPayBookingPayment,
 } from './paymentForm'
 import { getNewebPayPaymentItem } from './paymentItems'
+import { AI_CHART_REPORT_AMOUNT_TWD } from './aiChartPayment'
 import {
   PRODUCT_ORDER_PAYMENT_ITEM_KEY,
   PRODUCT_ORDER_PAYMENT_ITEM_TYPE,
@@ -55,7 +56,7 @@ assert.deepEqual(getNewebPayPaymentItem('ai_divination_single'), {
 assert.deepEqual(getNewebPayPaymentItem('ai_chart_report_single'), {
   itemKey: 'ai_chart_report_single',
   itemDesc: 'AI 命盤分析',
-  amount: 100,
+  amount: AI_CHART_REPORT_AMOUNT_TWD,
 })
 assert.deepEqual(getNewebPayPaymentItem(PRODUCT_ORDER_PAYMENT_ITEM_KEY), {
   itemKey: PRODUCT_ORDER_PAYMENT_ITEM_KEY,
@@ -288,7 +289,7 @@ assert.deepEqual(
 assert.deepEqual(
   validateNewebPayAiChartReportPayment({
     report: null,
-    expectedAmountTwd: 100,
+    expectedAmountTwd: AI_CHART_REPORT_AMOUNT_TWD,
   }),
   { ok: false, error: 'ai_chart_report_not_found' },
 )
@@ -301,7 +302,7 @@ assert.deepEqual(
       paymentId: null,
       merchantOrderNo: null,
     },
-    expectedAmountTwd: 100,
+    expectedAmountTwd: AI_CHART_REPORT_AMOUNT_TWD,
   }),
   { ok: false, error: 'ai_chart_report_not_payable' },
 )
@@ -309,12 +310,12 @@ assert.deepEqual(
   validateNewebPayAiChartReportPayment({
     report: {
       id: reportId,
-      amountTwd: 100,
+      amountTwd: AI_CHART_REPORT_AMOUNT_TWD,
       paymentStatus: 'pending',
       paymentId: 'payment-existing',
       merchantOrderNo: null,
     },
-    expectedAmountTwd: 100,
+    expectedAmountTwd: AI_CHART_REPORT_AMOUNT_TWD,
   }),
   { ok: false, error: 'ai_chart_report_already_linked' },
 )
@@ -322,12 +323,12 @@ assert.deepEqual(
   validateNewebPayAiChartReportPayment({
     report: {
       id: reportId,
-      amountTwd: 100,
+      amountTwd: AI_CHART_REPORT_AMOUNT_TWD,
       paymentStatus: 'paid',
       paymentId: null,
       merchantOrderNo: null,
     },
-    expectedAmountTwd: 100,
+    expectedAmountTwd: AI_CHART_REPORT_AMOUNT_TWD,
   }),
   { ok: false, error: 'ai_chart_report_not_payable' },
 )
@@ -335,12 +336,12 @@ assert.deepEqual(
   validateNewebPayAiChartReportPayment({
     report: {
       id: reportId,
-      amountTwd: 100,
+      amountTwd: AI_CHART_REPORT_AMOUNT_TWD,
       paymentStatus: 'pending',
       paymentId: null,
       merchantOrderNo: null,
     },
-    expectedAmountTwd: 100,
+    expectedAmountTwd: AI_CHART_REPORT_AMOUNT_TWD,
   }),
   { ok: true },
 )
@@ -348,12 +349,12 @@ assert.deepEqual(
   validateNewebPayAiChartReportPayment({
     report: {
       id: reportId,
-      amountTwd: 100,
+      amountTwd: AI_CHART_REPORT_AMOUNT_TWD,
       paymentStatus: null,
       paymentId: null,
       merchantOrderNo: null,
     },
-    expectedAmountTwd: 100,
+    expectedAmountTwd: AI_CHART_REPORT_AMOUNT_TWD,
   }),
   { ok: true },
 )
@@ -521,8 +522,8 @@ const aiChartData = createNewebPayMpgPaymentData({
 const decryptedAiChart = new URLSearchParams(decryptTradeInfo(aiChartData.fields.TradeInfo, hashKey, hashIv))
 
 assert.equal(aiChartData.itemKey, 'ai_chart_report_single')
-assert.equal(aiChartData.amount, 100)
-assert.equal(decryptedAiChart.get('Amt'), '100')
+assert.equal(aiChartData.amount, AI_CHART_REPORT_AMOUNT_TWD)
+assert.equal(decryptedAiChart.get('Amt'), String(AI_CHART_REPORT_AMOUNT_TWD))
 assert.equal(decryptedAiChart.get('ItemDesc'), 'AI 命盤分析')
 assert.equal(decryptedAiChart.get('CREDIT'), '1')
 assert.equal(decryptedAiChart.get('InstFlag'), '0')
@@ -665,7 +666,7 @@ assert.deepEqual(aiChartPendingPaymentMetadata.rawPayload, {
   itemKey: 'ai_chart_report_single',
   itemType: 'ai_chart_report',
   reportId,
-  amount: 100,
+  amount: AI_CHART_REPORT_AMOUNT_TWD,
   source: 'ai_chart_report',
   paymentMode: 'credit',
   merchantOrderNo: aiChartData.merchantOrderNo,

@@ -6,6 +6,7 @@ import {
   AI_CHART_BIRTH_INPUT_VERSION,
   type CanonicalAiChartBirthInput,
 } from '@/lib/ai-chart/birthInput'
+import { AI_CHART_REPORT_PRICE_TWD } from '@/lib/ai-chart/pricing'
 import {
   AI_CHART_ENGINE_NAME,
   AI_CHART_ENGINE_VERSION,
@@ -20,6 +21,7 @@ const validBirthInput = {
   timeIndex: 6,
   gender: 'female' as const,
   name: '測試者',
+  birthPlace: '台灣彰化',
   fixLeap: true,
 }
 const palaceNames = [
@@ -190,7 +192,7 @@ test('authenticated valid birth input creates a pending report owned by the sess
     ok: true,
     reportId: '2df1a8da-3893-4b81-8d00-774a9cc0e472',
     paymentStatus: 'pending',
-    amountTwd: 100,
+    amountTwd: AI_CHART_REPORT_PRICE_TWD,
   })
   assert.deepEqual(calls, [
     {
@@ -203,7 +205,7 @@ test('authenticated valid birth input creates a pending report owned by the sess
       chartProfileId: null,
       title: 'AI 命盤分析',
       productName: 'AI 命盤分析',
-      amountTwd: 100,
+      amountTwd: AI_CHART_REPORT_PRICE_TWD,
       reportContent: null,
     },
   ])
@@ -268,7 +270,7 @@ test('explicit valid title and productName are trimmed before creating the repor
     {
       title: '  紫微命盤完整分析  ',
       productName: '  AI 命盤分析  ',
-      amountTwd: 100,
+      amountTwd: AI_CHART_REPORT_PRICE_TWD,
       birthInput: { ...validBirthInput },
     },
     { onCreate: (input) => calls.push(input) },
@@ -288,6 +290,7 @@ test('canonical snapshot adds version, defaults fixLeap, trims name, and omits b
       timeIndex: 0,
       gender: 'male',
       name: '  修整姓名  ',
+      birthPlace: '  美國紐約  ',
     },
   }), { onCreate: (input) => calls.push(input) })
   const responseWithoutName = await call(validBody({
@@ -296,6 +299,7 @@ test('canonical snapshot adds version, defaults fixLeap, trims name, and omits b
       timeIndex: 0,
       gender: 'male',
       name: '   ',
+      birthPlace: '大陸北京',
     },
   }), { onCreate: (input) => calls.push(input) })
 
@@ -307,6 +311,7 @@ test('canonical snapshot adds version, defaults fixLeap, trims name, and omits b
     timeIndex: 0,
     gender: 'male',
     name: '修整姓名',
+    birthPlace: '美國紐約',
     fixLeap: false,
   })
   assert.deepEqual(calls[1].birthInputSnapshot, {
@@ -314,6 +319,7 @@ test('canonical snapshot adds version, defaults fixLeap, trims name, and omits b
     solarDate: '2001-02-03',
     timeIndex: 0,
     gender: 'male',
+    birthPlace: '大陸北京',
     fixLeap: false,
   })
 })

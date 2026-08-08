@@ -9,6 +9,7 @@ export type ChartInput = {
   timeIndex: number
   gender: 'male' | 'female'
   name?: string
+  birthPlace?: string
   fixLeap?: boolean
 }
 
@@ -86,4 +87,3 @@ export function createZiweiChart(input: ChartInput): ZiweiChart
 export function createZiweiGptPayload(input: ChartInput): ZiweiGptPayload
 export function toGptChartContext(chart: ZiweiChart): ZiweiGptChartContext
 export function ZiweiChartEmbed(props: ZiweiChartEmbedProps): JSX.Element
-

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { AI_CHART_REPORT_PRICE_LABEL } from '@/lib/ai-chart/pricing'
 import { DIVINATION_READING_PRICE_LABEL } from '@/lib/divination/pricing'
 
 export const SITE_NAME = 'WATERBOTTLE'
@@ -20,8 +21,8 @@ export const PUBLIC_PAGE_METADATA = {
     absoluteTitle: true,
   },
   aiChart: {
-    title: '紫微命盤分析 NT$100',
-    description: '輸入出生資料，建立紫微命盤並取得 AI 命盤分析，單次分析 NT$100。',
+    title: `紫微命盤分析 ${AI_CHART_REPORT_PRICE_LABEL}`,
+    description: `輸入出生資料，建立紫微命盤並取得 AI 命盤分析，單次分析 ${AI_CHART_REPORT_PRICE_LABEL}。`,
     path: '/ai-chart',
   },
   aiDivination: {

@@ -54,7 +54,7 @@ test('saveAiChartPaymentSession keeps reportId in memory with the default amount
   assert.equal(session.amountTwd, AI_CHART_PAYMENT_SESSION_DEFAULT_AMOUNT_TWD)
   assert.equal(session.source, 'ai_chart_report')
   assert.equal(saved?.reportId, reportId)
-  assert.equal(saved?.amountTwd, 100)
+  assert.equal(saved?.amountTwd, 600)
   assert.equal(saved?.source, 'ai_chart_report')
   assert.equal(typeof saved?.createdAt, 'string')
   assert.equal(Number.isNaN(Date.parse(saved?.createdAt ?? '')), false)

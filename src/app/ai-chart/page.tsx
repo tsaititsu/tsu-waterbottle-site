@@ -2,6 +2,7 @@ import './chart-form.css'
 import type { Metadata } from 'next'
 import { ChartBirthForm } from '@/components/ChartBirthForm'
 import { PageHero } from '@/components/PageHero'
+import { AI_CHART_REPORT_PRICE_LABEL } from '@/lib/ai-chart/pricing'
 import { createPublicMetadata, PUBLIC_PAGE_METADATA } from '@/lib/seo/publicMetadata'
 import { AI_CHART_SERVICE_JSON_LD, serializeJsonLd } from '@/lib/seo/serviceJsonLd'
 
@@ -30,7 +31,7 @@ export default async function AiChartPage({ searchParams }: AiChartPageProps) {
       <PageHero
         eyebrow="紫微命盤"
         title="紫微命盤分析"
-        description="填寫出生資料，完成分析後會建立命盤分析紀錄並保存到會員中心。單次分析 NT$100。"
+        description={`填寫出生資料，完成分析後會建立命盤分析紀錄並保存到會員中心。單次分析 ${AI_CHART_REPORT_PRICE_LABEL}。`}
         contentClassName="section-shell max-w-[1400px]"
         centered
         sectionClassName="pt-8 pb-4 md:pt-10 md:pb-6"

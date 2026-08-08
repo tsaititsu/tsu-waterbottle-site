@@ -11,6 +11,16 @@ import {
   setAiChartDraftWorkspace,
   type AiChartDraftWorkspace,
 } from '@/lib/ai-chart/chartDraftMemory'
+import {
+  deleteMemberAiChartProfile,
+  loadMemberAiChartProfiles,
+  saveMemberAiChartProfile,
+} from '@/lib/ai-chart/chartProfilesClient'
+import {
+  normalizeAiChartProfileId,
+  type MemberAiChartProfile,
+} from '@/lib/ai-chart/chartProfiles'
+import { subscribeAuthChange } from '@/lib/mockAuth'
 
 const timeOptions = [
   { label: '早子時　00:00-00:59', value: 0 },
@@ -48,7 +58,7 @@ function normalizeCategories(categories: string[]) {
 }
 
 function chartId(input: ChartInput) {
-  return `${input.name || '未命名'}-${input.solarDate}-${input.timeIndex}-${input.gender}`
+  return `${input.name || '未命名'}-${input.solarDate}-${input.timeIndex}-${input.gender}-${input.birthPlace || '未填出生地'}`
 }
 
 function chartLabel(input: ChartInput) {
@@ -97,6 +107,26 @@ function restoreSavedCharts(storedCharts: AiChartDraftWorkspace['charts']) {
   }, {})
 }
 
+function restoreMemberProfiles(profiles: MemberAiChartProfile[]) {
+  return profiles.reduce<Record<string, SavedChart[]>>((result, profile) => {
+    const current = result[profile.category] ?? []
+    result[profile.category] = [...current, toSavedChart(profile.input, profile.id)]
+    return result
+  }, {})
+}
+
+function toMemberBirthInput(input: ChartInput) {
+  if (!input.birthPlace?.trim()) throw new Error('birth_place_required')
+  return {
+    solarDate: input.solarDate,
+    timeIndex: input.timeIndex,
+    gender: input.gender,
+    ...(input.name ? { name: input.name } : {}),
+    birthPlace: input.birthPlace.trim(),
+    ...(typeof input.fixLeap === 'boolean' ? { fixLeap: input.fixLeap } : {}),
+  }
+}
+
 export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
   const router = useRouter()
   const [gender, setGender] = useState<'female' | 'male'>('female')
@@ -111,11 +141,16 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
   const [birthYear, setBirthYear] = useState('')
   const [birthMonth, setBirthMonth] = useState('')
   const [birthDay, setBirthDay] = useState('')
+  const [birthPlace, setBirthPlace] = useState('')
   const [timeIndex, setTimeIndex] = useState(0)
   const [formError, setFormError] = useState('')
   const [selectedChartId, setSelectedChartId] = useState('')
   const [chartsByCategory, setChartsByCategory] = useState<Record<string, SavedChart[]>>({})
   const [hasLoadedSavedCharts, setHasLoadedSavedCharts] = useState(false)
+  const [memberStorageStatus, setMemberStorageStatus] = useState<
+    'checking' | 'temporary' | 'ready' | 'error'
+  >('checking')
+  const [isSavingProfile, setIsSavingProfile] = useState(false)
 
   const applyChartToForm = (input: ChartInput) => {
     const [year, month, day] = input.solarDate.split('-')
@@ -124,6 +159,7 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
     setBirthDay(day ? String(Number(day)) : '')
     setGender(input.gender)
     setName(input.name ?? '')
+    setBirthPlace(input.birthPlace ?? '')
     setTimeIndex(input.timeIndex)
   }
 
@@ -139,6 +175,7 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
     setBirthYear('')
     setBirthMonth('')
     setBirthDay('')
+    setBirthPlace('')
     setTimeIndex(0)
     setFormError('')
     setSelectedChartId('')
@@ -175,10 +212,29 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
     setFormError('')
   }
 
-  const deleteSelectedSavedChart = () => {
+  const deleteSelectedSavedChart = async () => {
     if (!selectedChartId) return
-    const confirmed = window.confirm('確定要刪除這張命盤嗎？此動作只會刪除目前分頁中的資料。')
+    const confirmed = window.confirm(
+      memberStorageStatus === 'ready'
+        ? '確定要刪除這張會員命盤嗎？'
+        : '確定要刪除這張命盤嗎？此動作只會刪除目前分頁中的資料。',
+    )
     if (!confirmed) return
+
+    if (
+      memberStorageStatus === 'ready' &&
+      normalizeAiChartProfileId(selectedChartId)
+    ) {
+      setIsSavingProfile(true)
+      try {
+        await deleteMemberAiChartProfile(selectedChartId)
+      } catch {
+        setFormError('會員命盤刪除失敗，請稍後再試。')
+        setIsSavingProfile(false)
+        return
+      }
+      setIsSavingProfile(false)
+    }
 
     setChartsByCategory((current) => {
       const existing = current[selectedCategory] ?? []
@@ -206,6 +262,45 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
       setChartsByCategory({})
     } finally {
       setHasLoadedSavedCharts(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    const syncMemberProfiles = async () => {
+      setMemberStorageStatus('checking')
+      try {
+        const result = await loadMemberAiChartProfiles()
+        if (!active) return
+
+        if (!result.authenticated) {
+          setMemberStorageStatus('temporary')
+          return
+        }
+
+        const nextCharts = restoreMemberProfiles(result.profiles)
+        const nextCategories = normalizeCategories(
+          result.profiles.map((profile) => profile.category),
+        )
+        setCategories(nextCategories)
+        setChartsByCategory(nextCharts)
+        setSelectedCategory('自己')
+        setSelectedChartId('')
+        setMemberStorageStatus('ready')
+      } catch {
+        if (active) setMemberStorageStatus('error')
+      }
+    }
+
+    void syncMemberProfiles()
+    const unsubscribe = subscribeAuthChange(() => {
+      void syncMemberProfiles()
+    })
+
+    return () => {
+      active = false
+      unsubscribe()
     }
   }, [])
 
@@ -249,11 +344,32 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
     setEditingValue(category)
   }
 
-  const saveCategoryName = () => {
+  const saveCategoryName = async () => {
     const value = editingValue.trim()
     if (!value || value === '自己') return
     const isDuplicate = categories.some((category) => category === value && category !== editingCategory)
     if (isDuplicate) return
+
+    const categoryCharts = chartsByCategory[editingCategory] ?? []
+    if (memberStorageStatus === 'ready' && categoryCharts.length > 0) {
+      setIsSavingProfile(true)
+      try {
+        await Promise.all(
+          categoryCharts.map((chart) =>
+            saveMemberAiChartProfile({
+              id: chart.id,
+              category: value,
+              birthInput: toMemberBirthInput(chart.input),
+            }),
+          ),
+        )
+      } catch {
+        setFormError('分類名稱同步失敗，請稍後再試。')
+        setIsSavingProfile(false)
+        return
+      }
+      setIsSavingProfile(false)
+    }
 
     setCategories((current) => current.map((category) => (category === editingCategory ? value : category)))
     if (selectedCategory === editingCategory) setSelectedCategory(value)
@@ -269,7 +385,29 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
     setEditingValue('')
   }
 
-  const deleteCategory = (category: string) => {
+  const deleteCategory = async (category: string) => {
+    const categoryCharts = chartsByCategory[category] ?? []
+    const confirmed = window.confirm(
+      categoryCharts.length > 0
+        ? `確定要刪除「${category}」分類與其中的會員命盤嗎？`
+        : `確定要刪除「${category}」分類嗎？`,
+    )
+    if (!confirmed) return
+
+    if (memberStorageStatus === 'ready' && categoryCharts.length > 0) {
+      setIsSavingProfile(true)
+      try {
+        await Promise.all(
+          categoryCharts.map((chart) => deleteMemberAiChartProfile(chart.id)),
+        )
+      } catch {
+        setFormError('分類刪除失敗，請稍後再試。')
+        setIsSavingProfile(false)
+        return
+      }
+      setIsSavingProfile(false)
+    }
+
     setCategories((current) => current.filter((item) => item !== category))
     setChartsByCategory((current) => {
       const next = { ...current }
@@ -283,11 +421,15 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
     }
   }
 
-  const canAnalyze = birthYear.trim() !== '' && birthMonth.trim() !== '' && birthDay.trim() !== ''
+  const canAnalyze =
+    birthYear.trim() !== '' &&
+    birthMonth.trim() !== '' &&
+    birthDay.trim() !== '' &&
+    birthPlace.trim() !== ''
 
   const buildChartInput = (): ChartInputResult => {
     if (!canAnalyze) {
-      return { error: '請先填寫陽曆生日的年、月、日，才能產生命盤。' }
+      return { error: '請先填寫陽曆生日與出生地點，才能產生命盤。' }
     }
     const year = Number(birthYear)
     const month = Number(birthMonth)
@@ -295,18 +437,22 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
     if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day) || year < 1900 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) {
       return { error: '請確認陽曆生日的年、月、日格式正確。' }
     }
+    if (Array.from(birthPlace.trim()).length > 120) {
+      return { error: '出生地點請控制在 120 個字以內。' }
+    }
 
     return {
       input: {
-      solarDate: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
-      timeIndex,
-      gender,
-        name: name.trim()
-      }
+        solarDate: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+        timeIndex,
+        gender,
+        name: name.trim(),
+        birthPlace: birthPlace.trim(),
+      },
     }
   }
 
-  const generateChart = () => {
+  const generateChart = async () => {
     const result = buildChartInput()
     if ('error' in result) {
       setFormError(result.error)
@@ -315,16 +461,39 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
 
     try {
       const payload = createZiweiGptPayload(result.input)
-      const id = chartId(result.input)
+      const localId = chartId(result.input)
+      let id = localId
+      let savedInput = result.input
+
+      if (memberStorageStatus === 'error') {
+        setFormError('會員命盤服務暫時無法使用，請稍後再試。')
+        return
+      }
+
+      if (memberStorageStatus === 'ready') {
+        setIsSavingProfile(true)
+        const currentProfileId = normalizeAiChartProfileId(selectedChartId)
+        const savedProfile = await saveMemberAiChartProfile({
+          ...(currentProfileId ? { id: currentProfileId } : {}),
+          category: selectedCategory,
+          birthInput: toMemberBirthInput(result.input),
+        })
+        id = savedProfile.id
+        savedInput = savedProfile.input
+      }
+
       const savedChart: SavedChart = {
         id,
-        label: chartLabel(result.input),
-        input: result.input,
+        label: chartLabel(savedInput),
+        input: savedInput,
         payload
       }
       const existing = chartsByCategory[selectedCategory] ?? []
-      const savedCharts = existing.some((item) => item.id === id)
-        ? existing.map((item) => (item.id === id ? savedChart : item))
+      const existingId = normalizeAiChartProfileId(selectedChartId)
+        ? selectedChartId
+        : localId
+      const savedCharts = existing.some((item) => item.id === existingId)
+        ? existing.map((item) => (item.id === existingId ? savedChart : item))
         : [...existing, savedChart]
       const nextChartsByCategory = {
         ...chartsByCategory,
@@ -349,15 +518,21 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
       setChartsByCategory(nextChartsByCategory)
       setAiChartDraftWorkspace(storedState)
       setAiChartDraftSession({
-        input: result.input,
+        input: savedInput,
         chartId: id,
         selectedCategory,
         birthOrder: selectedBirthOrder
       })
       setFormError('')
       router.push('/ai-chart/result')
-    } catch (error) {
-      setFormError(error instanceof Error ? `命盤產生失敗：${error.message}` : '命盤產生失敗，請確認資料後再試一次。')
+    } catch {
+      setFormError(
+        memberStorageStatus === 'ready'
+          ? '會員命盤儲存失敗，請稍後再試。'
+          : '命盤產生失敗，請確認資料後再試一次。',
+      )
+    } finally {
+      setIsSavingProfile(false)
     }
   }
 
@@ -424,7 +599,7 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') {
                         event.preventDefault()
-                        saveCategoryName()
+                        void saveCategoryName()
                       }
                       if (event.key === 'Escape') {
                         setEditingCategory('')
@@ -433,7 +608,7 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
                     }}
                     value={editingValue}
                   />
-                  <button aria-label="儲存分類名稱" className="grid h-7 w-7 place-items-center rounded-full text-deepPurple hover:bg-softPurple" onClick={saveCategoryName} type="button">
+                  <button aria-label="儲存分類名稱" className="grid h-7 w-7 place-items-center rounded-full text-deepPurple hover:bg-softPurple" onClick={() => void saveCategoryName()} type="button">
                     <Check size={15} />
                   </button>
                   <button
@@ -464,7 +639,7 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
                       <button aria-label={`修改${category}分類`} className="grid h-7 w-7 place-items-center rounded-full text-textMuted hover:bg-softPurple hover:text-deepPurple" onClick={() => startEditCategory(category)} type="button">
                         <Pencil size={14} />
                       </button>
-                      <button aria-label={`刪除${category}分類`} className="grid h-7 w-7 place-items-center rounded-full text-textMuted hover:bg-softPurple hover:text-deepPurple" onClick={() => deleteCategory(category)} type="button">
+                      <button aria-label={`刪除${category}分類`} className="grid h-7 w-7 place-items-center rounded-full text-textMuted hover:bg-softPurple hover:text-deepPurple" onClick={() => void deleteCategory(category)} type="button">
                         <Trash2 size={14} />
                       </button>
                     </div>
@@ -513,14 +688,17 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
             <button
               className="focus-ring min-w-0 max-w-full rounded-lg border border-borderSoft bg-white px-4 py-3 text-sm font-semibold text-textMuted disabled:cursor-not-allowed disabled:opacity-50"
               disabled={!selectedChartId}
-              onClick={deleteSelectedSavedChart}
+              onClick={() => void deleteSelectedSavedChart()}
               type="button"
             >
               刪除命盤
             </button>
           </div>
           <span className="text-xs text-textMuted">
-            產生命盤後會儲存在目前分類；之後點分類，再從這裡選人。
+            {memberStorageStatus === 'checking' && '正在確認會員命盤儲存空間…'}
+            {memberStorageStatus === 'ready' && '已登入：命盤會安全儲存在會員帳號；之後點分類，再從這裡選人。'}
+            {memberStorageStatus === 'temporary' && '未登入：命盤只保留在目前分頁；登入會員後可永久儲存。'}
+            {memberStorageStatus === 'error' && '會員命盤載入失敗，請稍後重新整理。'}
           </span>
         </div>
       </div>
@@ -582,6 +760,21 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
         </select>
       </label>
 
+      <label className="grid gap-2">
+        <span className="text-sm font-semibold text-textDark">
+          出生地點 <span className="text-deepPurple">*</span>
+        </span>
+        <input
+          className="focus-ring min-w-0 max-w-full rounded-lg border border-borderSoft bg-white px-4 py-3"
+          maxLength={120}
+          onChange={(event) => setBirthPlace(event.target.value)}
+          placeholder="例如：台灣彰化、美國紐約、大陸北京"
+          required
+          type="text"
+          value={birthPlace}
+        />
+      </label>
+
       <div className="rounded-xl border border-borderSoft bg-softPurple/45">
         <button
           aria-controls="twin-birth-order-options"
@@ -629,8 +822,13 @@ export function ChartBirthForm({ resetKey = '' }: ChartBirthFormProps) {
         )}
       </div>
 
-      <button className="focus-ring w-full rounded-lg bg-deepPurple px-4 py-3 font-semibold text-white" onClick={generateChart} type="button">
-        產生命盤
+      <button
+        className="focus-ring w-full rounded-lg bg-deepPurple px-4 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
+        disabled={isSavingProfile || memberStorageStatus === 'checking'}
+        onClick={() => void generateChart()}
+        type="button"
+      >
+        {isSavingProfile ? '儲存命盤中…' : memberStorageStatus === 'checking' ? '確認會員資料中…' : '產生命盤'}
       </button>
 
       {formError && <p className="text-sm font-semibold text-deepPurple">{formError}</p>}

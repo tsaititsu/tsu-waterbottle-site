@@ -179,7 +179,7 @@ function createAiChartDeps(input: {
       getAiChartReportPaymentContext: async () =>
         input.report ?? {
           id: aiChartReportId,
-          amountTwd: 100,
+          amountTwd: 600,
           paymentStatus: 'pending',
           paymentId: null,
           merchantOrderNo: null,

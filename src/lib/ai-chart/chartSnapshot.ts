@@ -98,6 +98,7 @@ const FORBIDDEN_FIELD_NAMES = new Set([
   'solarDate',
   'timeIndex',
   'gender',
+  'birthPlace',
   'fixLeap',
 ])
 

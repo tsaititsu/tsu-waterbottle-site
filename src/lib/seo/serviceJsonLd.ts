@@ -1,5 +1,6 @@
 import { serializeJsonLd } from './homepageJsonLd'
 import { PUBLIC_PAGE_METADATA } from './publicMetadata'
+import { AI_CHART_REPORT_PRICE_TWD } from '@/lib/ai-chart/pricing'
 import { DIVINATION_READING_PRICE_TWD } from '@/lib/divination/pricing'
 
 const SITE_URL = 'https://tsu-waterbottle.com'
@@ -20,7 +21,7 @@ export const AI_CHART_SERVICE_JSON_LD = {
   offers: {
     '@type': 'Offer',
     name: 'AI 命盤分析',
-    price: 100,
+    price: AI_CHART_REPORT_PRICE_TWD,
     priceCurrency: 'TWD',
     url: `${SITE_URL}/ai-chart`,
   },
