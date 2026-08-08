@@ -85,6 +85,26 @@ assert.equal(paymentProviderGuardIndex < bookingCreateIndex, true)
 const linePayEntryTestIndex = bookingFormSource.indexOf("entrySource: 'booking'")
 assert.equal(linePayEntryTestIndex >= 0, true)
 assert.equal(linePayEntryTestIndex < bookingCreateIndex, true)
+
+// 管理員 LINE Pay NT$1 是獨立的 non-fulfillment 驗收，不得先被正式預約欄位或時段阻擋。
+const prepareBookingPaymentStart = bookingFormSource.indexOf(
+  'const prepareBookingPayment = async () => {',
+)
+const prepareBookingPaymentEnd = bookingFormSource.indexOf(
+  '\n  const updateBirthDateFromPicker',
+  prepareBookingPaymentStart,
+)
+const prepareBookingPaymentSource = bookingFormSource.slice(
+  prepareBookingPaymentStart,
+  prepareBookingPaymentEnd,
+)
+const oneDollarBranchIndex = prepareBookingPaymentSource.indexOf(
+  'if (isLinePay && linePayEntryTestEnabled) {',
+)
+const buildInputIndex = prepareBookingPaymentSource.indexOf('const input = buildInput()')
+assert.equal(oneDollarBranchIndex >= 0, true)
+assert.equal(buildInputIndex >= 0, true)
+assert.equal(oneDollarBranchIndex < buildInputIndex, true)
 assert.equal(
   bookingFormSource.includes(
     "if (isLinePay ? !isLinePayEnabled : !isNewebPayEnabled) {\n      setFormError('目前暫時無法使用線上付款，請稍後再試或聯繫客服。')\n      return false\n    }",

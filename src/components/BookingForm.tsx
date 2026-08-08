@@ -370,8 +370,6 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
   }
 
   const prepareBookingPayment = async () => {
-    const input = buildInput()
-    if (!input) return false
     const currentIdentity = () => ({
       resourceKey: formResourceKeyRef.current,
       subjectId: getMockUser()?.id ?? null,
@@ -421,6 +419,9 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
       }
       return false
     }
+
+    const input = buildInput()
+    if (!input) return false
 
     const bookingSignature = JSON.stringify(input)
     let bookingId = createdBookingSignature === bookingSignature ? createdBookingId : ''
