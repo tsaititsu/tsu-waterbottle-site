@@ -811,6 +811,16 @@ export type AccountDivinationReadingDetail = AccountDivinationReadingListItem & 
   interpretation: unknown | null
 }
 
+type RecentDivinationQuestionRow = {
+  question: string
+  created_at: string | null
+}
+
+export type RecentDivinationQuestion = {
+  question: string
+  createdAt: string
+}
+
 export function normalizeAccountDivinationListLimit(value: unknown): number {
   const parsed =
     typeof value === 'number'
@@ -871,6 +881,40 @@ export async function listDivinationReadingsForUser(
   }
 
   return ((data ?? []) as AccountDivinationReadingListRow[]).map(mapAccountDivinationReadingListItem)
+}
+
+export async function listRecentDivinationQuestionsForUser(
+  userId: string,
+  since: string,
+  supabase: SupabaseAdminClient = getSupabaseAdmin(),
+): Promise<RecentDivinationQuestion[]> {
+  assertRequiredText(userId, 'userId')
+  assertRequiredText(since, 'since')
+
+  const { data, error } = await supabase
+    .from('divination_readings')
+    .select('question,created_at')
+    .eq('user_id', userId.trim())
+    .gte('created_at', since.trim())
+    .order('created_at', { ascending: false })
+    .limit(50)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return ((data ?? []) as RecentDivinationQuestionRow[])
+    .filter(
+      (row): row is { question: string; created_at: string } =>
+        typeof row.question === 'string' &&
+        Boolean(row.question.trim()) &&
+        typeof row.created_at === 'string' &&
+        Boolean(row.created_at.trim()),
+    )
+    .map((row) => ({
+      question: row.question.trim(),
+      createdAt: row.created_at.trim(),
+    }))
 }
 
 export async function getDivinationReadingForUser(

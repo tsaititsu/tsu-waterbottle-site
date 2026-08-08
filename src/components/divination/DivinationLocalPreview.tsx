@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { DivinationQuestionForm } from "./DivinationQuestionForm"
+import { DivinationQuestionAdvisoryDialog } from "./DivinationQuestionAdvisoryDialog"
 import { DivinationQuestionContextPanel } from "./DivinationQuestionContextPanel"
 import { getAuthAccessToken } from "@/lib/mockAuth"
 import { DIVINATION_READING_PRICE_LABEL } from "@/lib/divination/pricing"
@@ -24,6 +25,7 @@ import type {
   DivinationFollowUpDraft,
   DivinationFollowUpDisplayThread,
   DivinationInterpretation,
+  DivinationQuestionAdvisoryNotice,
   DivinationReadingSession,
 } from "@/lib/divination/types"
 
@@ -56,6 +58,8 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
   const [isCreatingReading, setIsCreatingReading] = useState(false)
   const [errorMessage, setErrorMessage] = useState("")
   const [safetyInterpretation, setSafetyInterpretation] = useState<DivinationInterpretation | null>(null)
+  const [questionAdvisory, setQuestionAdvisory] = useState<DivinationQuestionAdvisoryNotice | null>(null)
+  const [pendingQuestionSubmission, setPendingQuestionSubmission] = useState<QuestionSubmitPayload | null>(null)
   const [followUpDraft, setFollowUpDraft] = useState<DivinationFollowUpDraft | null>(null)
   const [followUpDisplayThread, setFollowUpDisplayThread] = useState<DivinationFollowUpDisplayThread | null>(null)
   const resetVersionRef = useRef(0)
@@ -65,6 +69,7 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
     question: string
     drawMode: DrawMode
     followUpContext?: unknown
+    proceedDespiteQuestionAdvisory?: boolean
   }) {
     const localUserId = getLocalUserId()
     // 已登入時帶上 token，讓後端把占卜紀錄歸戶到會員；未登入維持匿名流程。
@@ -81,6 +86,7 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
         localUserId,
         // 追問時把前文一併送到後端，讓安全判斷在建立紀錄（付款之前）就使用完整脈絡。
         followUpContext: input.followUpContext,
+        proceedDespiteQuestionAdvisory: input.proceedDespiteQuestionAdvisory,
       }),
     })
     const data = (await response.json()) as CreateDivinationReadingResponse
@@ -98,6 +104,12 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
       }
     }
 
+    if ("questionAdvisory" in data) {
+      return {
+        questionAdvisory: data.questionAdvisory,
+      }
+    }
+
     if ("reading" in data) {
       return {
         readingId: data.reading.id,
@@ -105,13 +117,17 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
         drawMode: input.drawMode,
         localUserId,
         persisted: data.persisted === true,
+        questionAdvisoryAcknowledgedReasons: data.questionAdvisoryAcknowledgedReasons,
       } satisfies DivinationReadingSession
     }
 
     throw new Error("建立占卜紀錄失敗，請稍後再試。")
   }
 
-  async function handleQuestionSubmit(payload: QuestionSubmitPayload) {
+  async function handleQuestionSubmit(
+    payload: QuestionSubmitPayload,
+    options: { proceedDespiteQuestionAdvisory?: boolean } = {},
+  ) {
     if (createReadingInFlightRef.current) {
       return
     }
@@ -120,6 +136,7 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
     setIsCreatingReading(true)
     setErrorMessage("")
     setSafetyInterpretation(null)
+    setQuestionAdvisory(null)
 
     try {
       const followUpContext = followUpKey
@@ -129,10 +146,18 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
         question: payload.question,
         drawMode: payload.mode,
         followUpContext,
+        proceedDespiteQuestionAdvisory: options.proceedDespiteQuestionAdvisory,
       })
 
       if (session) {
         if (requestResetVersion === resetVersionRef.current) {
+          if ("questionAdvisory" in session && session.questionAdvisory) {
+            clearReadingSession()
+            setPendingQuestionSubmission(payload)
+            setQuestionAdvisory(session.questionAdvisory)
+            return
+          }
+
           if ("safetyBlocked" in session && session.safetyBlocked) {
             clearReadingSession()
             setSafetyInterpretation(session.interpretation)
@@ -142,6 +167,7 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
           const readingSession = followUpContext ? { ...session, followUpContext } : session
 
           saveReadingSession(readingSession)
+          setPendingQuestionSubmission(null)
           router.push("/ai-divination/draw")
         }
       }
@@ -159,12 +185,30 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
     }
   }
 
+  function handleModifyQuestion() {
+    setQuestionAdvisory(null)
+    setPendingQuestionSubmission(null)
+    requestAnimationFrame(() => {
+      document.getElementById("divination-question-preview")?.focus()
+    })
+  }
+
+  function handleContinueDespiteQuestionAdvisory() {
+    if (!pendingQuestionSubmission) return
+
+    void handleQuestionSubmit(pendingQuestionSubmission, {
+      proceedDespiteQuestionAdvisory: true,
+    })
+  }
+
   useEffect(() => {
     resetVersionRef.current += 1
     createReadingInFlightRef.current = false
     setIsCreatingReading(false)
     setErrorMessage("")
     setSafetyInterpretation(null)
+    setQuestionAdvisory(null)
+    setPendingQuestionSubmission(null)
     setFollowUpDraft(null)
     setFollowUpDisplayThread(null)
     clearReadingSession()
@@ -239,6 +283,14 @@ export function DivinationLocalPreview({ resetKey = "", followUpKey = "" }: Divi
           </article>
         ) : null}
       </section>
+      {questionAdvisory ? (
+        <DivinationQuestionAdvisoryDialog
+          advisory={questionAdvisory}
+          disabled={isCreatingReading}
+          onModify={handleModifyQuestion}
+          onContinue={handleContinueDespiteQuestionAdvisory}
+        />
+      ) : null}
     </section>
   )
 }

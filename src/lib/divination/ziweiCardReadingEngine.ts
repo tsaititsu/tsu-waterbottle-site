@@ -4,6 +4,7 @@ import {
   READING_SYSTEM_INSTRUCTIONS,
   REVIEW_SYSTEM_INSTRUCTIONS,
 } from "./ziweiCardReadingInstructions";
+import { getZiweiLoveMindConclusion } from "./ziweiCardReasoningDomain";
 import {
   getDivinationOpenAIModel,
   getDivinationReasoningEffort,
@@ -25,7 +26,7 @@ export function getZiweiCardOpenAiRequestConfig() {
 }
 
 const ANSWER_VERSION = "answer-investment-llm-v20260710";
-const PROMPT_VERSION = "prompt-cached-dedup-v20260710";
+const PROMPT_VERSION = "prompt-domain-reasoning-v20260809";
 const ROUTE_VERSION = "route-reading-v20260601";
 const REVIEW_PROMPT_VERSION = "review-cached-dedup-v20260710";
 const MAX_FOLLOW_UP_CONTEXT_ITEMS = 20;
@@ -5760,7 +5761,16 @@ function isLoveMindQuestion(questionType: string, question: string) {
   ]);
 }
 
-function buildLoveMindConclusion(cardName: string, position: string, question: string) {
+function buildLoveMindConclusion(
+  cardName: string,
+  position: "正位" | "反位",
+  question: string
+) {
+  const canonicalConclusion = getZiweiLoveMindConclusion(cardName, position);
+  if (canonicalConclusion) {
+    return canonicalConclusion;
+  }
+
   const isReversed = position === "反位";
   const q = question || "";
 
@@ -5937,7 +5947,7 @@ function enforceLoveMindConclusion(
   questionType: string,
   question: string,
   cardName: string,
-  position: string
+  position: "正位" | "反位"
 ) {
   if (!isLoveMindQuestion(questionType, question)) {
     return answer;

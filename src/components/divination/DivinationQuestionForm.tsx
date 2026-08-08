@@ -19,24 +19,21 @@ const questionPlaceholder = `請問一個你現在最想知道的具體問題。
 export function DivinationQuestionForm({ disabled = false, onQuestionSubmit }: DivinationQuestionFormProps) {
   const [question, setQuestion] = useState('')
   const [message, setMessage] = useState('')
-  const [messageType, setMessageType] = useState<'error' | 'info'>('info')
   const [selectedMode, setSelectedMode] = useState<DrawMode | null>(null)
 
   const handlePreviewDraw = (mode: DrawMode) => {
     const trimmedQuestion = question.trim()
 
     if (!trimmedQuestion) {
-      setMessageType('error')
       setMessage('請先填寫占卜問題。')
       return
     }
 
+    setMessage('')
     onQuestionSubmit?.({
       question: trimmedQuestion,
       mode,
     })
-    setMessageType('info')
-    setMessage(mode === 'auto' ? '正在建立占卜紀錄並前往自動抽牌頁。' : '已收到問題，正在確認是否可以進入抽牌流程。')
   }
 
   return (
@@ -62,7 +59,7 @@ export function DivinationQuestionForm({ disabled = false, onQuestionSubmit }: D
             value={question}
             onChange={(event) => {
               setQuestion(event.target.value)
-              if (messageType === 'error') setMessage('')
+              if (message) setMessage('')
             }}
             placeholder={questionPlaceholder}
             className="focus-ring mt-3 min-h-[120px] w-full resize-none rounded-xl border border-borderSoft bg-white p-4 text-base leading-7 text-textDark placeholder:text-textMuted"
@@ -111,12 +108,7 @@ export function DivinationQuestionForm({ disabled = false, onQuestionSubmit }: D
 
         {message ? (
           <p
-            className={[
-              'mt-4 rounded-xl border px-4 py-3 text-sm leading-7',
-              messageType === 'error'
-                ? 'border-red-200 bg-red-50 text-red-700'
-                : 'border-[#cfe8dc] bg-[#f0fbf6] text-[#16664f]'
-            ].join(' ')}
+            className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-7 text-red-700"
           >
             {message}
           </p>

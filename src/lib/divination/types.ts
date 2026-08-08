@@ -89,6 +89,8 @@ export type CreateDivinationReadingRequest = {
   mockPaid?: boolean
   // 追問時附上前文脈絡，讓建立紀錄前的安全檢查與 interpret 使用同一組輸入（先判斷、再收費）。
   followUpContext?: unknown
+  // 付款前提醒屬於知情提醒，不是硬阻擋；使用者可明確選擇仍要繼續抽牌。
+  proceedDespiteQuestionAdvisory?: boolean
 }
 
 export type DivinationReadingSession = {
@@ -103,6 +105,7 @@ export type DivinationReadingSession = {
   entitlement?: DivinationLocalEntitlement
   mockPaymentGate?: DivinationMockPaymentGate
   followUpContext?: DivinationFollowUpContext
+  questionAdvisoryAcknowledgedReasons?: string[]
 }
 
 export type CreateDivinationReadingSuccessResponse = {
@@ -111,6 +114,20 @@ export type CreateDivinationReadingSuccessResponse = {
   persisted?: boolean
   entitlement?: DivinationLocalEntitlement
   mockPaymentGate?: DivinationMockPaymentGate
+  questionAdvisoryAcknowledgedReasons?: string[]
+}
+
+export type DivinationQuestionAdvisoryNotice = {
+  needsConfirmation: boolean
+  reasons: Array<"precise_time" | "multiple_options" | "repeat_question">
+  title: string
+  message: string
+  suggestions: string[]
+}
+
+export type CreateDivinationReadingAdvisoryResponse = {
+  ok: true
+  questionAdvisory: DivinationQuestionAdvisoryNotice
 }
 
 export type CreateDivinationReadingSafetyResponse = {
@@ -130,6 +147,7 @@ export type DivinationErrorResponse = {
 
 export type CreateDivinationReadingResponse =
   | CreateDivinationReadingSuccessResponse
+  | CreateDivinationReadingAdvisoryResponse
   | CreateDivinationReadingSafetyResponse
   | DivinationErrorResponse
 
