@@ -147,6 +147,8 @@ const P1_RULE_STATUS_AUTHORITY = Object.freeze({
   lecture_backfill: 1,
   working_inference: 2,
 } satisfies Record<AiChartD1RuleStatus, number>)
+const P1_SERVER_OWNED_CANDIDATE_RULE_STATUS_WIRE_VALUE =
+  'working_inference' satisfies AiChartD1RuleStatus
 
 type CandidateSourcePolicy = Readonly<{
   allowedPalaceIds: ReadonlySet<string>
@@ -306,6 +308,7 @@ function assertCandidateSourceBinding(
   candidate: AiChartD1Candidate,
   rules: readonly AiChartD1P1ModelRule[],
   policy: CandidateSourcePolicy,
+  candidateRuleStatusServerOwned = false,
 ): void {
   if (
     hasDuplicates(candidate.palaceIds) ||
@@ -338,6 +341,10 @@ function assertCandidateSourceBinding(
     )
   }
 
+  if (candidateRuleStatusServerOwned) {
+    deriveAiChartD1P1CandidateRuleStatus(candidate.usedRuleIds, rules)
+    return
+  }
   assertAiChartD1P1CandidateRuleAuthority(
     candidate,
     rules,
@@ -476,6 +483,14 @@ function createSourceBoundP1OutputSchema(
   const primaryAxisProperties = schemaRecord(primaryAxis.properties)
   const coverage = schemaRecord(properties.coverage)
   const coverageProperties = schemaRecord(coverage.properties)
+  for (const field of P1_CANDIDATE_COLLECTION_FIELDS) {
+    const collection = schemaRecord(properties[field])
+    const candidate = schemaRecord(collection.items)
+    const candidateProperties = schemaRecord(candidate.properties)
+    candidateProperties.ruleStatus = createAiChartD1StringSchema({
+      enumValues: [P1_SERVER_OWNED_CANDIDATE_RULE_STATUS_WIRE_VALUE],
+    })
+  }
   primaryAxisProperties.majorStarCore = createAiChartD1ArraySchema(
     createAiChartD1StringSchema(
       effectiveMajorStars.length === 0
@@ -552,6 +567,28 @@ function injectServerOwnedMajorStarBindings(
       ...result.coverage,
       majorStarsCovered: [...effectiveMajorStars],
     },
+  }
+}
+
+function injectServerOwnedCandidateRuleStatuses(
+  result: AiChartD1P1Result,
+  modelInput: AiChartD1P1ModelInput,
+): unknown {
+  const candidateCollections = Object.fromEntries(
+    P1_CANDIDATE_COLLECTION_FIELDS.map((field) => [
+      field,
+      result[field].map((candidate) => ({
+        ...candidate,
+        ruleStatus: deriveAiChartD1P1CandidateRuleStatus(
+          candidate.usedRuleIds,
+          modelInput.knowledgeContext.rules,
+        ),
+      })),
+    ]),
+  )
+  return {
+    ...result,
+    ...candidateCollections,
   }
 }
 
@@ -753,6 +790,7 @@ function starNamesForPalaces(
 function assertRulePalaceAndStarBindings(
   result: AiChartD1P1Result,
   modelInput: AiChartD1P1ModelInput,
+  candidateRuleStatusServerOwned = false,
 ): void {
   const ruleStatusById = new Map(
     modelInput.knowledgeContext.rules.map((rule) => [
@@ -837,6 +875,7 @@ function assertRulePalaceAndStarBindings(
         candidate,
         modelInput.knowledgeContext.rules,
         policies[field],
+        candidateRuleStatusServerOwned,
       )
     }
   }
@@ -1325,10 +1364,32 @@ function createAiChartD1P1SourceBoundResultParser(
       assertIdentityAndStatus(resultWithServerMajorStars, modelInput)
       assertBorrowedStarBinding(resultWithServerMajorStars, modelInput)
       assertPrimaryAxisSourceBinding(resultWithServerMajorStars, modelInput)
-      assertRulePalaceAndStarBindings(resultWithServerMajorStars, modelInput)
+      if (
+        allCandidates(resultWithServerMajorStars).some(
+          (candidate) =>
+            candidate.ruleStatus !==
+            P1_SERVER_OWNED_CANDIDATE_RULE_STATUS_WIRE_VALUE,
+        )
+      ) {
+        resultInvalid(
+          AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.CANDIDATE_RULE_AUTHORITY_MISMATCH,
+        )
+      }
+      assertRulePalaceAndStarBindings(
+        resultWithServerMajorStars,
+        modelInput,
+        true,
+      )
+      const resultWithServerOwnedBindings = parseAiChartD1P1Result(
+        injectServerOwnedCandidateRuleStatuses(
+          resultWithServerMajorStars,
+          modelInput,
+        ),
+      )
+      assertRulePalaceAndStarBindings(resultWithServerOwnedBindings, modelInput)
       const result = parseAiChartD1P1Result(
         injectServerOwnedSupportingStarCoverage(
-          resultWithServerMajorStars,
+          resultWithServerOwnedBindings,
           modelInput,
         ),
       )

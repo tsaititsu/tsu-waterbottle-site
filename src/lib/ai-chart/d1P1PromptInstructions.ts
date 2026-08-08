@@ -106,6 +106,7 @@ formal_teacher_confirmed
 - starBasis 只能使用上述五個宮位視圖中實際存在的 canonicalMajorStars[].name、borrowedMajorStars[].name 與 modeledSupportingStars[].name。
 - observationOnlyStars[] 只表示星曜確實落在該宮位；在 knowledgeContext 沒有對應固定規則前，不得把它加入 starBasis、不得自行解釋，也不得用模型記憶補造其命理含義。
 - usedRuleIds 只能使用 knowledgeContext.rules[].ruleId。
+- 每個 Candidate.ruleStatus 都是 Server 擁有的規則權威欄位；模型輸出必須固定為 working_inference。Server 會依該 Candidate 的 usedRuleIds 對照 knowledgeContext.rules[].ruleStatus，注入實際使用規則中最弱的可信任權威，不得由模型自行宣告、提升或猜測。
 - coverage.directMeaningsConsidered 的每個元素必須逐字複製自 userInput.knowledgeContext.meanings[].meaningId，且該 meaning 的 palaceRole 必須逐字等於 target。
 - coverage.directMeaningsConsidered 不得填入 meaning 文字、text、title、summary、中文說明、ruleId、placementId、palaceId、hash 或模型自行產生的 ID。
 - coverage.directMeaningsConsidered 不得有重複值。

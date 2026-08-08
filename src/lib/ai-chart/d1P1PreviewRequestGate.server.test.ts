@@ -10,6 +10,7 @@ import {
   AI_CHART_D1_P1_MAX_OUTPUT_TOKENS,
 } from './d1P1AdapterBridgeContracts'
 import {
+  AI_CHART_D1_P1_CANDIDATE_COLLECTION_FIELDS,
   createValidAiChartD1P1Result as createValidAiChartD1P1ResultWithServerFacts,
   createAdapterBridgeFixture,
   type AdapterBridgeFixture,
@@ -61,6 +62,11 @@ function createValidAiChartD1P1Result(
   result.coverage.majorStarsCovered = []
   result.coverage.minorStarsCovered = []
   result.coverage.noblesCovered = []
+  for (const field of AI_CHART_D1_P1_CANDIDATE_COLLECTION_FIELDS) {
+    for (const candidate of result[field]) {
+      candidate.ruleStatus = 'working_inference'
+    }
+  }
   return result
 }
 

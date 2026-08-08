@@ -195,6 +195,17 @@ function coverageNoblesSchema(
   return asSchemaRecord(coverageProperties.noblesCovered)
 }
 
+function candidateRuleStatusSchema(
+  schema: Readonly<Record<string, unknown>>,
+  field: (typeof CANDIDATE_FIELDS)[number],
+): Record<string, unknown> {
+  const properties = asSchemaRecord(schema.properties)
+  const collection = asSchemaRecord(properties[field])
+  const candidate = asSchemaRecord(collection.items)
+  const candidateProperties = asSchemaRecord(candidate.properties)
+  return asSchemaRecord(candidateProperties.ruleStatus)
+}
+
 function effectiveMajorStarNames(
   modelInput: AdapterBridgeFixture['modelInputs'][number],
 ): readonly string[] {
@@ -218,6 +229,24 @@ function buildFrom(
     modelInputs,
     promptPackages,
   )
+}
+
+function setCandidateRuleStatusWireValues(
+  wireResult: Record<string, unknown>,
+): void {
+  for (const field of CANDIDATE_FIELDS) {
+    const collection = wireResult[field]
+    if (!Array.isArray(collection)) continue
+    for (const candidate of collection) {
+      if (
+        candidate !== null &&
+        typeof candidate === 'object' &&
+        !Array.isArray(candidate)
+      ) {
+        ;(candidate as Record<string, unknown>).ruleStatus = 'working_inference'
+      }
+    }
+  }
 }
 
 function parseResult(
@@ -256,6 +285,7 @@ function parseResult(
         coverageRecord.noblesCovered = []
       }
     }
+    setCandidateRuleStatusWireValues(wireResult)
   }
   return bridge.request.parseResult(wireResult)
 }
@@ -264,7 +294,9 @@ function parseWireResult(
   bridge: AiChartD1P1AdapterBridge,
   result: unknown,
 ) {
-  return bridge.request.parseResult(result)
+  const wireResult = result as Record<string, unknown>
+  setCandidateRuleStatusWireValues(wireResult)
+  return bridge.request.parseResult(wireResult)
 }
 
 function parseCoverageWireResult(
@@ -286,6 +318,7 @@ function parseCoverageWireResult(
     ) {
       ;(primaryAxis as Record<string, unknown>).majorStarCore = []
     }
+    setCandidateRuleStatusWireValues(wireResult)
   }
   return bridge.request.parseResult(wireResult)
 }
@@ -297,6 +330,9 @@ function parseMinorCoverageWireResult(
   const wireResult = structuredClone(result) as Mutable<AiChartD1P1Result>
   wireResult.primaryAxis.majorStarCore = []
   wireResult.coverage.majorStarsCovered = []
+  setCandidateRuleStatusWireValues(
+    wireResult as unknown as Record<string, unknown>,
+  )
   return bridge.request.parseResult(wireResult)
 }
 
@@ -308,6 +344,9 @@ function parseNobleCoverageWireResult(
   wireResult.primaryAxis.majorStarCore = []
   wireResult.coverage.majorStarsCovered = []
   wireResult.coverage.minorStarsCovered = []
+  setCandidateRuleStatusWireValues(
+    wireResult as unknown as Record<string, unknown>,
+  )
   return bridge.request.parseResult(wireResult)
 }
 
@@ -560,11 +599,25 @@ async function run() {
     const formalCoverageMinorStars = coverageMinorStarsSchema(formal)
     const sourceBoundCoverageNobles = coverageNoblesSchema(sourceBound)
     const formalCoverageNobles = coverageNoblesSchema(formal)
+    for (const field of CANDIDATE_FIELDS) {
+      Object.assign(
+        candidateRuleStatusSchema(sourceBound, field),
+        candidateRuleStatusSchema(formal, field),
+      )
+    }
     Object.assign(sourceBoundMajorStarCore, formalMajorStarCore)
     Object.assign(sourceBoundCoverageMajorStars, formalCoverageMajorStars)
     Object.assign(sourceBoundCoverageMinorStars, formalCoverageMinorStars)
     Object.assign(sourceBoundCoverageNobles, formalCoverageNobles)
     assert.deepEqual(sourceBound, formal)
+  })
+  check('each request Schema reserves Candidate ruleStatus for Server derivation', () => {
+    for (const entry of bridges) {
+      for (const field of CANDIDATE_FIELDS) {
+        const ruleStatus = candidateRuleStatusSchema(entry.request.schema, field)
+        assert.deepEqual(ruleStatus.enum, ['working_inference'])
+      }
+    }
   })
   check('each request Schema reserves primaryAxis majorStarCore for Server injection', () => {
     bridges.forEach((entry, index) => {
@@ -642,6 +695,9 @@ async function run() {
       wireResult.coverage.majorStarsCovered = []
       wireResult.coverage.minorStarsCovered = []
       wireResult.coverage.noblesCovered = []
+      setCandidateRuleStatusWireValues(
+        wireResult as unknown as Record<string, unknown>,
+      )
       const parsed = entry.request.parseResult(wireResult)
       const expected = effectiveMajorStarNames(modelInputs[index])
       const expectedSupportingStars =
@@ -2221,6 +2277,9 @@ async function run() {
     value.coverage.majorStarsCovered = []
     value.coverage.minorStarsCovered = []
     value.coverage.noblesCovered = []
+    setCandidateRuleStatusWireValues(
+      value as unknown as Record<string, unknown>,
+    )
     assert.deepEqual(
       bridge.request.parseResult(value).coverage.majorStarsCovered,
       effectiveMajorStarNames(modelInput),
@@ -2627,50 +2686,45 @@ async function run() {
   )
   assert.ok(teacherRule)
   assert.ok(lectureRule)
-  check('teacher-only Candidate with teacher status passes', () => {
+  check('teacher-only Candidate receives Server-derived teacher status', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.directCandidates[0].usedRuleIds = [teacherRule.ruleId]
-    value.directCandidates[0].ruleStatus = 'teacher_confirmed'
-    assert.doesNotThrow(() => parseResult(bridge, value))
-  })
-  check('teacher-only Candidate cannot report working status', () => {
-    const value = createValidAiChartD1P1Result(modelInput)
-    value.directCandidates[0].usedRuleIds = [teacherRule.ruleId]
-    value.directCandidates[0].ruleStatus = 'working_inference'
-    assertResultInvalid(
-      () => parseResult(bridge, value),
-      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.CANDIDATE_RULE_AUTHORITY_MISMATCH,
+    assert.equal(
+      parseResult(bridge, value).directCandidates[0].ruleStatus,
+      'teacher_confirmed',
     )
   })
-  check('lecture-only Candidate with lecture status passes', () => {
+  check('lecture-only Candidate receives Server-derived lecture status', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.directCandidates[0].usedRuleIds = [lectureRule.ruleId]
-    value.directCandidates[0].ruleStatus = 'lecture_backfill'
-    assert.doesNotThrow(() => parseResult(bridge, value))
+    assert.equal(
+      parseResult(bridge, value).directCandidates[0].ruleStatus,
+      'lecture_backfill',
+    )
   })
-  check('lecture-only Candidate cannot promote to teacher status', () => {
-    const value = createValidAiChartD1P1Result(modelInput)
-    value.directCandidates[0].usedRuleIds = [lectureRule.ruleId]
-    value.directCandidates[0].ruleStatus = 'teacher_confirmed'
-    assertResultInvalid(() => parseResult(bridge, value))
-  })
-  check('teacher plus lecture derives lecture status', () => {
+  check('teacher plus lecture receives the weakest Server-derived status', () => {
     const value = createValidAiChartD1P1Result(modelInput)
     value.directCandidates[0].usedRuleIds = [
       teacherRule.ruleId,
       lectureRule.ruleId,
     ]
-    value.directCandidates[0].ruleStatus = 'lecture_backfill'
-    assert.doesNotThrow(() => parseResult(bridge, value))
+    assert.equal(
+      parseResult(bridge, value).directCandidates[0].ruleStatus,
+      'lecture_backfill',
+    )
   })
-  check('teacher plus lecture cannot promote to teacher status', () => {
+  check('wire parser rejects a model-authored Candidate authority value', () => {
     const value = createValidAiChartD1P1Result(modelInput)
-    value.directCandidates[0].usedRuleIds = [
-      teacherRule.ruleId,
-      lectureRule.ruleId,
-    ]
+    value.primaryAxis.majorStarCore = []
+    value.coverage.majorStarsCovered = []
+    value.coverage.minorStarsCovered = []
+    value.coverage.noblesCovered = []
+    value.directCandidates[0].usedRuleIds = [teacherRule.ruleId]
     value.directCandidates[0].ruleStatus = 'teacher_confirmed'
-    assertResultInvalid(() => parseResult(bridge, value))
+    assertResultInvalid(
+      () => bridge.request.parseResult(value),
+      AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS.CANDIDATE_RULE_AUTHORITY_MISMATCH,
+    )
   })
   const syntheticAuthorityRules = [
     { ruleId: 'rule:teacher', ruleStatus: 'teacher_confirmed' },
@@ -2748,11 +2802,14 @@ async function run() {
     )
   })
   for (const field of CANDIDATE_FIELDS) {
-    check(`${field} rejects lecture-to-teacher authority promotion`, () => {
+    check(`${field} receives Server-derived Candidate authority`, () => {
       const value = resultWithSingleCandidate(modelInput, field)
       value[field][0].usedRuleIds = [lectureRule.ruleId]
       value[field][0].ruleStatus = 'teacher_confirmed'
-      assertResultInvalid(() => parseResult(bridge, value))
+      assert.equal(
+        parseResult(bridge, value)[field][0].ruleStatus,
+        'lecture_backfill',
+      )
     })
   }
 
@@ -3293,7 +3350,7 @@ async function run() {
     }
 
     visit(sourceFile)
-    assert.equal(callSites.length, 46)
+    assert.equal(callSites.length, 47)
 
     const allowedReasonNames = new Set(
       Object.keys(AI_CHART_D1_P1_SOURCE_BOUND_VALIDATION_REASONS),
@@ -3370,7 +3427,7 @@ async function run() {
     }
     assert.equal(controlledHelperReasons, 1)
     assert.equal(controlledDuplicateMappingReasons, 1)
-    assert.equal(directFixedReasons, 44)
+    assert.equal(directFixedReasons, 45)
 
     assert.equal(stringCoverageCallSites.length, 3)
     assert.deepEqual(
