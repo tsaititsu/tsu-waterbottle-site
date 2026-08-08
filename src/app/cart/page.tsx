@@ -4,6 +4,8 @@ import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useCart } from '@/components/CartContext'
 import { PaymentMethodSelector } from '@/components/payments/PaymentMethodSelector'
+import { useLinePayProductionOneDollarEntryTest } from '@/components/payments/useLinePayProductionOneDollarEntryTest'
+import { requestLinePayProductionOneDollarEntryCheckout } from '@/lib/linePay/productionOneDollarEntryClient'
 import { getAuthAccessToken } from '@/lib/mockAuth'
 import {
   getCheckoutPaymentMethodOptions,
@@ -96,6 +98,7 @@ function submitCartNewebPayForm(input: CartNewebPayFormInput) {
 }
 
 export default function CartPage() {
+  const linePayEntryTestEnabled = useLinePayProductionOneDollarEntryTest()
   const { items, isLoaded, removeItem, totalAmount, totalQuantity, updateItemQuantity } = useCart()
   const [spiritualProductsAccepted, setSpiritualProductsAccepted] = useState(false)
   const [postOfficeShippingInfo, setPostOfficeShippingInfo] = useState<PostOfficeShippingInfo>(emptyPostOfficeShippingInfo)
@@ -265,6 +268,23 @@ export default function CartPage() {
     setCheckoutError('')
 
     const accessToken = await getAuthAccessToken().catch(() => null)
+
+    if (linePayEntryTestEnabled) {
+      const testResult = accessToken
+        ? await requestLinePayProductionOneDollarEntryCheckout({
+            accessToken,
+            entrySource: 'cart',
+          })
+        : { ok: false as const }
+      if (!testResult.ok) {
+        setCheckoutError('LINE Pay NT$1 測試付款資料建立失敗，請重新登入後再試。')
+        linePayCheckoutPendingRef.current = false
+        setIsLinePayCheckingOut(false)
+        return
+      }
+      window.location.assign(testResult.paymentUrlWeb)
+      return
+    }
 
     const result = await startLinePayCartCheckout({
       cartItems: productItems,
@@ -585,6 +605,9 @@ export default function CartPage() {
                           ? selectedPaymentMethod === 'line_pay'
                             ? linePayButtonState.message
                             : '正在建立付款資料...'
+                          : selectedPaymentMethod === 'line_pay'
+                              && linePayEntryTestEnabled
+                            ? '管理員 LINE Pay 入口測試付款 NT$1'
                           : getCartPaymentButtonLabel(selectedPaymentMethod)}
                       </button>
                     ) : null}

@@ -117,6 +117,7 @@ test('Production NT$1 test uses a fixed non-fulfillment snapshot and complete sy
   const initialized = await initializeLinePayOneDollarTestCheckout({
     ...createInput(rpc.client),
     environment: 'production',
+    entrySource: 'booking',
     orderNo: 'LPONE-a1000000000040008000000000000001',
     idempotencyKey:
       'line-pay-production-one-dollar:a1000000-0000-4000-8000-000000000001',
@@ -131,19 +132,19 @@ test('Production NT$1 test uses a fixed non-fulfillment snapshot and complete sy
           environment: 'production',
           order_no: 'LPONE-a1000000000040008000000000000001',
           merchant_order_no: result.merchant_order_no,
-          customer_name: 'LINE Pay Production NT$1 測試',
+          customer_name: 'LINE Pay NT$1 入口測試｜水瓶先生論命',
           customer_email: null,
           customer_phone: '0900000000',
-          note: 'Production 管理員 NT$1 金流測試，請勿出貨',
+          note: 'Production 管理員 NT$1 入口測試｜水瓶先生論命；不出貨、不提供服務',
           items: [
             {
-              product_slug: 'line-pay-production-one-dollar-test',
-              product_name: 'LINE Pay Production NT$1 測試（不出貨）',
+              product_slug: 'line-pay-production-one-dollar-test-booking',
+              product_name: 'LINE Pay NT$1 入口測試｜水瓶先生論命（不出貨／不提供服務）',
               unit_price_twd: 1,
               quantity: 1,
               product_snapshot: {
-                slug: 'line-pay-production-one-dollar-test',
-                name: 'LINE Pay Production NT$1 測試（不出貨）',
+                slug: 'line-pay-production-one-dollar-test-booking',
+                name: 'LINE Pay NT$1 入口測試｜水瓶先生論命（不出貨／不提供服務）',
                 category: '符咒商品',
                 priceTwd: 1,
               },

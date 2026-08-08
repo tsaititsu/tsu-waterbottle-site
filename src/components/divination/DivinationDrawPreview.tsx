@@ -2,6 +2,7 @@
 
 import { DivinationResultPreview } from "@/components/divination/DivinationResultPreview"
 import { PaymentMethodSelector } from "@/components/payments/PaymentMethodSelector"
+import { useLinePayProductionOneDollarEntryTest } from "@/components/payments/useLinePayProductionOneDollarEntryTest"
 import { ziweiCards, type ZiweiCard } from "@/lib/divination/cards"
 import {
   DIVINATION_READING_PAYMENT_MESSAGE,
@@ -48,6 +49,7 @@ import {
   getServiceLinePayErrorMessage,
   requestServiceLinePayCheckout,
 } from "@/lib/linePay/serviceCheckoutClient"
+import { requestLinePayProductionOneDollarEntryCheckout } from "@/lib/linePay/productionOneDollarEntryClient"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
@@ -327,6 +329,7 @@ function DivinationConsentNotice({
 }
 
 export function DivinationDrawPreview({ readingSession = null }: DivinationDrawPreviewProps) {
+  const linePayEntryTestEnabled = useLinePayProductionOneDollarEntryTest()
   const router = useRouter()
   const [started, setStarted] = useState(false)
   const [shuffling, setShuffling] = useState(false)
@@ -804,6 +807,22 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
         if (!accessToken) {
           setErrorMessage("請先登入會員後再使用 LINE Pay。")
           setMessage(paymentRequired?.message || DIVINATION_READING_PAYMENT_MESSAGE)
+          return
+        }
+        if (linePayEntryTestEnabled) {
+          const testResult =
+            await requestLinePayProductionOneDollarEntryCheckout({
+              accessToken,
+              entrySource: "ai_divination",
+            })
+          if (!testResult.ok) {
+            setErrorMessage("LINE Pay NT$1 測試付款資料建立失敗，請稍後再試。")
+            setMessage(paymentRequired?.message || DIVINATION_READING_PAYMENT_MESSAGE)
+            return
+          }
+          setMessage("正在前往 LINE Pay NT$1 測試付款頁...")
+          shouldSubmitForm = true
+          window.location.assign(testResult.paymentUrlWeb)
           return
         }
         const result = await requestServiceLinePayCheckout({
@@ -1297,12 +1316,14 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                       {isNewebPayCheckingOut
                         ? "建立線上付款資料中..."
                         : isLinePayCheckoutMethod(selectedPaymentMethod)
-                          ? `LINE Pay 付款 NT$${paymentRequired.amountTwd}`
+                          ? linePayEntryTestEnabled
+                            ? "管理員 LINE Pay 入口測試付款 NT$1"
+                            : `LINE Pay 付款 NT$${paymentRequired.amountTwd}`
                           : isNewebPayEnabled
                             ? `使用所選方式付款 NT$${paymentRequired.amountTwd}`
                           : "線上付款尚未啟用"}
                     </button>
-                    {isAdminOneDollarTestAvailable ? (
+                    {isAdminOneDollarTestAvailable && !linePayEntryTestEnabled ? (
                       <button
                         type="button"
                         onClick={() => handleNewebPayDivinationCheckout({ adminOneDollarTest: true })}
@@ -1415,12 +1436,14 @@ export function DivinationDrawPreview({ readingSession = null }: DivinationDrawP
                     {isNewebPayCheckingOut
                       ? "建立線上付款資料中..."
                       : isLinePayCheckoutMethod(selectedPaymentMethod)
-                        ? `LINE Pay 付款 NT$${paymentRequired.amountTwd}`
+                        ? linePayEntryTestEnabled
+                          ? "管理員 LINE Pay 入口測試付款 NT$1"
+                          : `LINE Pay 付款 NT$${paymentRequired.amountTwd}`
                         : isNewebPayEnabled
                           ? `使用所選方式付款 NT$${paymentRequired.amountTwd}`
                         : "線上付款尚未啟用"}
                   </button>
-                  {isAdminOneDollarTestAvailable ? (
+                  {isAdminOneDollarTestAvailable && !linePayEntryTestEnabled ? (
                     <button
                       type="button"
                       onClick={() => handleNewebPayDivinationCheckout({ adminOneDollarTest: true })}

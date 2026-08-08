@@ -136,6 +136,18 @@ test('cart page routes LINE Pay checkout through the existing request endpoint',
   assert.equal(readLinePayCheckoutSource().includes('/api/payments/newebpay/create'), false)
 })
 
+test('cart admin NT$1 entry test never creates a real cart order', () => {
+  const source = readCartPageSource()
+  const testEntryIndex = source.indexOf("entrySource: 'cart'")
+  const realCheckoutIndex = source.indexOf('startLinePayCartCheckout({')
+
+  assert.equal(source.includes('useLinePayProductionOneDollarEntryTest'), true)
+  assert.equal(source.includes('requestLinePayProductionOneDollarEntryCheckout'), true)
+  assert.equal(source.includes('管理員 LINE Pay 入口測試付款 NT$1'), true)
+  assert.ok(testEntryIndex >= 0)
+  assert.ok(testEntryIndex < realCheckoutIndex)
+})
+
 test('cart page sends one atomic LINE Pay checkout request', () => {
   const source = readCartPageSource()
 

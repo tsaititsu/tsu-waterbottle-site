@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ActionButton } from './ActionButton'
 import { LoginModal } from './LoginModal'
 import { PaymentMethodSelector } from './payments/PaymentMethodSelector'
+import { useLinePayProductionOneDollarEntryTest } from './payments/useLinePayProductionOneDollarEntryTest'
 import { createAsyncIdentityGuard } from '@/lib/auth/asyncIdentityGuard'
 import {
   getAiChartDraftNotes,
@@ -26,6 +27,7 @@ import {
   getServiceLinePayErrorMessage,
   requestServiceLinePayCheckout,
 } from '@/lib/linePay/serviceCheckoutClient'
+import { requestLinePayProductionOneDollarEntryCheckout } from '@/lib/linePay/productionOneDollarEntryClient'
 import { buildNewebPayClientFormFields } from '@/lib/newebpay/clientForm'
 import { createZiweiGptPayload, type ChartInput, type ZiweiGptPayload } from '@/features/ziwei-chart/package'
 import { OriginalZiweiChartView } from '@/features/ziwei-chart/components/OriginalZiweiChartView'
@@ -101,6 +103,7 @@ function submitNewebPayForm(input: {
 
 export function ChartResultSessionView() {
   const router = useRouter()
+  const linePayEntryTestEnabled = useLinePayProductionOneDollarEntryTest()
   const [session, setSession] = useState<AiChartDraftSession | null>(null)
   const [chartInput, setChartInput] = useState<ChartInput | null>(null)
   const [chartPayload, setChartPayload] = useState<ZiweiGptPayload | null>(null)
@@ -285,6 +288,25 @@ export function ChartResultSessionView() {
       }
       if (!accessToken) {
         setLoginOpen(true)
+        return
+      }
+
+      if (
+        linePayEntryTestEnabled
+        && isLinePayCheckoutMethod(selectedPaymentMethod)
+      ) {
+        const testResult =
+          await requestLinePayProductionOneDollarEntryCheckout({
+            accessToken,
+            entrySource: 'ai_chart_report',
+          })
+        if (!isCurrentRequest()) return
+        if (!testResult.ok) {
+          setFormError('LINE Pay NT$1 測試付款資料建立失敗，請稍後再試。')
+          return
+        }
+        setPaymentSetupMessage('正在前往 LINE Pay NT$1 測試付款頁。')
+        window.location.assign(testResult.paymentUrlWeb)
         return
       }
 
@@ -553,6 +575,9 @@ export function ChartResultSessionView() {
           >
             {isCreatingPendingReport
               ? '建立付款資料中...'
+              : linePayEntryTestEnabled
+                  && isLinePayCheckoutMethod(selectedPaymentMethod)
+                ? '管理員 LINE Pay 入口測試付款 NT$1'
               : `使用所選方式付款 NT$${selectedPlan.amount}`}
           </button>
         ) : (

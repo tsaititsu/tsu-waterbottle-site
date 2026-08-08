@@ -17,9 +17,15 @@ import {
   LINE_PAY_CAPABILITY_COOKIE_OPTIONS,
   linePayCapabilityCookieName,
 } from '../../../../product-orders/line-pay/capabilityToken'
+import {
+  LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION as SHARED_LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION,
+  getLinePayProductionOneDollarEntryLabel,
+  isLinePayProductionOneDollarEntrySource,
+  type LinePayProductionOneDollarEntrySource,
+} from '../../../../../../lib/linePay/productionOneDollarEntry'
 
 export const LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION =
-  'RUN_LINE_PAY_PRODUCTION_NT1_ONCE'
+  SHARED_LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION
 export const LINE_PAY_PRODUCTION_ONE_DOLLAR_AMOUNT_TWD = 1
 const LINE_PAY_PRODUCTION_ONE_DOLLAR_MIN_WINDOW_MS = 5 * 60 * 1000
 const LINE_PAY_PRODUCTION_ONE_DOLLAR_MAX_WINDOW_MS = 24 * 60 * 60 * 1000
@@ -43,6 +49,7 @@ type InitializeProductionOneDollar = (
     client: unknown
     userId: string
     environment: 'production'
+    entrySource: LinePayProductionOneDollarEntrySource
     amountTwd: 1
     orderNo: string
     merchantOrderNo: string
@@ -165,9 +172,14 @@ export async function handleLinePayProductionOneDollarStart(input: {
 
   const body = (await input.request.json().catch(() => null)) as {
     confirmation?: unknown
+    entrySource?: unknown
   } | null
   if (body?.confirmation !== LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION) {
     return errorResponse('invalid_confirmation', 400)
+  }
+  const entrySource = body.entrySource === undefined ? 'admin' : body.entrySource
+  if (!isLinePayProductionOneDollarEntrySource(entrySource)) {
+    return errorResponse('invalid_entry_source', 400)
   }
 
   let authorization: AuthorizedProductionOneDollarContext | null = null
@@ -203,12 +215,12 @@ export async function handleLinePayProductionOneDollarStart(input: {
   const createUuid = input.createUuid ?? randomUUID
   const commitSha = input.env.VERCEL_GIT_COMMIT_SHA!.trim().toLowerCase()
   const identity = sha256(
-    `line-pay-production-one-dollar:${commitSha}:${authorization.userId}`,
+    `line-pay-production-one-dollar:${commitSha}:${authorization.userId}:${entrySource}`,
   ).slice(0, 32)
   const orderNo = `LPONE-${identity}`
   const merchantOrderNo = `LP_ONE_${identity}`
   const idempotencyKey =
-    `line-pay-production-one-dollar:${commitSha}:${authorization.userId}`
+    `line-pay-production-one-dollar:${commitSha}:${authorization.userId}:${entrySource}`
   const claimId = createUuid()
   const requestId = `line-pay-production-one-dollar:${createUuid()}`
   const capabilityExpiresAt =
@@ -217,17 +229,20 @@ export async function handleLinePayProductionOneDollarStart(input: {
     ?? ((purpose: 'confirm' | 'cancel') =>
       createHmac('sha256', config.channelSecret)
         .update(
-          `line-pay-production-one-dollar-capability:${commitSha}:${authorization.userId}:${purpose}`,
+          `line-pay-production-one-dollar-capability:${commitSha}:${authorization.userId}:${entrySource}:${purpose}`,
         )
         .digest('base64url'))
   const confirmToken = createToken('confirm')
   const cancelToken = createToken('cancel')
+  const productName = entrySource === 'admin'
+    ? 'LINE Pay Production NT$1 測試（不出貨）'
+    : `LINE Pay NT$1 入口測試｜${getLinePayProductionOneDollarEntryLabel(entrySource)}（不出貨／不提供服務）`
   const payloadInput = {
     orderId: merchantOrderNo,
     amount: LINE_PAY_PRODUCTION_ONE_DOLLAR_AMOUNT_TWD,
     currency: 'TWD' as const,
     products: [{
-      name: 'LINE Pay Production NT$1 測試（不出貨）',
+      name: productName,
       quantity: 1,
       price: LINE_PAY_PRODUCTION_ONE_DOLLAR_AMOUNT_TWD,
     }],
@@ -244,6 +259,7 @@ export async function handleLinePayProductionOneDollarStart(input: {
       client: authorization.client,
       userId: authorization.userId,
       environment: 'production',
+      entrySource,
       amountTwd: LINE_PAY_PRODUCTION_ONE_DOLLAR_AMOUNT_TWD,
       orderNo,
       merchantOrderNo,
@@ -313,6 +329,7 @@ export async function handleLinePayProductionOneDollarStart(input: {
       {
         ok: true,
         environment: 'production',
+        entrySource,
         amountTwd: LINE_PAY_PRODUCTION_ONE_DOLLAR_AMOUNT_TWD,
         currency: 'TWD',
         paymentUrl,

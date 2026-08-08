@@ -2,6 +2,7 @@ import Link from 'next/link'
 import AdminPageHeader from '@/components/admin/AdminPageHeader'
 import AdminStatusBadge from '@/components/admin/AdminStatusBadge'
 import { getAdminModulesBySection } from '@/components/admin/adminModules'
+import LinePayProductionEntryTestGuide from '@/components/admin/LinePayProductionEntryTestGuide'
 import LinePaySandboxE2ePanel from '@/components/admin/LinePaySandboxE2ePanel'
 import NewebPayOneDollarTestPanel from '@/components/admin/NewebPayOneDollarTestPanel'
 import { isLinePaySandboxE2eRouteEnabled } from '@/app/api/internal/line-pay/sandbox-e2e/start/handler'
@@ -20,11 +21,6 @@ export default function AdminPage() {
   const sandboxE2eEnabled = isLinePaySandboxE2eRouteEnabled(process.env)
   const productionOneDollarEnabled =
     isLinePayProductionOneDollarRouteEnabled(process.env)
-  const linePayTestEnvironment = sandboxE2eEnabled
-    ? 'sandbox'
-    : productionOneDollarEnabled
-      ? 'production'
-      : null
 
   return (
     <main className="grid gap-5">
@@ -86,7 +82,8 @@ export default function AdminPage() {
       </section>
 
       {newebPayOneDollarEnabled ? <NewebPayOneDollarTestPanel /> : null}
-      {linePayTestEnvironment ? <LinePaySandboxE2ePanel environment={linePayTestEnvironment} /> : null}
+      {sandboxE2eEnabled ? <LinePaySandboxE2ePanel environment="sandbox" /> : null}
+      {productionOneDollarEnabled ? <LinePayProductionEntryTestGuide /> : null}
 
       <section aria-labelledby="unavailable-modules" className="rounded-2xl border border-borderSoft bg-white p-5 shadow-soft md:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">

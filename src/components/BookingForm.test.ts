@@ -53,6 +53,19 @@ assert.equal(bookingFormSource.includes("source: 'booking',"), true)
 assert.equal(bookingFormSource.includes('requestServiceLinePayCheckout'), true)
 assert.equal(bookingFormSource.includes('使用所選方式付款 NT$'), true)
 assert.equal(
+  bookingFormSource.includes('useLinePayProductionOneDollarEntryTest'),
+  true,
+)
+assert.equal(
+  bookingFormSource.includes('requestLinePayProductionOneDollarEntryCheckout'),
+  true,
+)
+assert.equal(bookingFormSource.includes("entrySource: 'booking'"), true)
+assert.equal(
+  bookingFormSource.includes('管理員 LINE Pay 入口測試付款 NT$1'),
+  true,
+)
+assert.equal(
   bookingFormSource.includes('預約已建立，但付款頁建立失敗。請稍後重試；如仍無法付款，請聯繫客服，勿重複建立預約。'),
   true,
 )
@@ -65,6 +78,9 @@ const bookingCreateIndex = bookingFormSource.indexOf("fetch('/api/bookings/creat
 assert.equal(paymentProviderGuardIndex >= 0, true)
 assert.equal(bookingCreateIndex >= 0, true)
 assert.equal(paymentProviderGuardIndex < bookingCreateIndex, true)
+const linePayEntryTestIndex = bookingFormSource.indexOf("entrySource: 'booking'")
+assert.equal(linePayEntryTestIndex >= 0, true)
+assert.equal(linePayEntryTestIndex < bookingCreateIndex, true)
 assert.equal(
   bookingFormSource.includes(
     "if (isLinePay ? !isLinePayEnabled : !isNewebPayEnabled) {\n      setFormError('目前暫時無法使用線上付款，請稍後再試或聯繫客服。')\n      return false\n    }",

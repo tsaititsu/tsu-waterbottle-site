@@ -17,10 +17,17 @@ assert.equal(
 assert.equal(source.includes('/api/admin/divination-one-dollar-test'), true)
 assert.equal(source.includes('getAuthAccessToken()'), true)
 assert.equal(source.includes('subscribeAuthChange'), true)
-assert.equal(source.includes('isAdminOneDollarTestAvailable ?'), true)
 assert.equal(source.includes('divinationOneDollarTest: true'), true)
 assert.equal(source.includes('cardId: pendingCard.id'), true)
 assert.equal(source.includes('position: pendingPosition'), true)
+assert.equal(source.includes('useLinePayProductionOneDollarEntryTest'), true)
+assert.equal(source.includes('requestLinePayProductionOneDollarEntryCheckout'), true)
+assert.equal(source.includes('entrySource: "ai_divination"'), true)
+assert.equal(source.includes('管理員 LINE Pay 入口測試付款 NT$1'), true)
+assert.equal(
+  source.includes('isAdminOneDollarTestAvailable && !linePayEntryTestEnabled'),
+  true,
+)
 
 const checkoutStart = source.indexOf('async function handleNewebPayDivinationCheckout')
 const checkoutEnd = source.indexOf('\n  async function confirmCard', checkoutStart)

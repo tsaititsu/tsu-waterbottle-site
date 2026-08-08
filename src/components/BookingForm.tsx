@@ -19,6 +19,8 @@ import {
   getServiceLinePayErrorMessage,
   requestServiceLinePayCheckout,
 } from '@/lib/linePay/serviceCheckoutClient'
+import { requestLinePayProductionOneDollarEntryCheckout } from '@/lib/linePay/productionOneDollarEntryClient'
+import { useLinePayProductionOneDollarEntryTest } from './payments/useLinePayProductionOneDollarEntryTest'
 
 const officialLineUrl = 'https://lin.ee/6Tpje1P'
 
@@ -124,6 +126,7 @@ function submitNewebPayForm(action: string, fields: Extract<NewebPayCreateRespon
 }
 
 export function BookingForm({ resetKey = '' }: BookingFormProps) {
+  const linePayEntryTestEnabled = useLinePayProductionOneDollarEntryTest()
   const [planId, setPlanId] = useState(bookingPlans[0].id)
   const [bookingSlots, setBookingSlots] = useState<PublicBookingSlot[]>([])
   const [selectedBookingDate, setSelectedBookingDate] = useState('')
@@ -374,6 +377,32 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
     const isLinePay = isLinePayCheckoutMethod(selectedPaymentMethod)
     if (isLinePay ? !isLinePayEnabled : !isNewebPayEnabled) {
       setFormError('目前暫時無法使用線上付款，請稍後再試或聯繫客服。')
+      return false
+    }
+
+    if (isLinePay && linePayEntryTestEnabled) {
+      try {
+        const accessToken = await getAuthAccessToken()
+        if (!isCurrentRequest() || !accessToken) return false
+        setFormError('')
+        setFormStatus('正在前往 LINE Pay NT$1 測試付款頁，請稍候。')
+        const result = await requestLinePayProductionOneDollarEntryCheckout({
+          accessToken,
+          entrySource: 'booking',
+        })
+        if (!isCurrentRequest()) return false
+        if (!result.ok) {
+          setFormStatus('')
+          setFormError('LINE Pay NT$1 測試付款頁建立失敗，請稍後再試。')
+          return false
+        }
+        window.location.assign(result.paymentUrlWeb)
+      } catch {
+        if (isCurrentRequest()) {
+          setFormStatus('')
+          setFormError('LINE Pay NT$1 測試付款頁建立失敗，請稍後再試。')
+        }
+      }
       return false
     }
 
@@ -821,7 +850,9 @@ export function BookingForm({ resetKey = '' }: BookingFormProps) {
           itemType="booking"
           loadingText="送出中..."
         >
-          使用所選方式付款 NT${selectedPlan.price.toLocaleString()}
+          {isLinePayCheckoutMethod(selectedPaymentMethod) && linePayEntryTestEnabled
+            ? '管理員 LINE Pay 入口測試付款 NT$1'
+            : `使用所選方式付款 NT$${selectedPlan.price.toLocaleString()}`}
         </ActionButton>
       </form>
     </div>

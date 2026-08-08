@@ -44,7 +44,10 @@ const enabledEnv: LinePayProductionOneDollarEnvironment = {
 }
 
 function createRequest(
-  body: unknown = { confirmation: LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION },
+  body: unknown = {
+    confirmation: LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION,
+    entrySource: 'ai_chart_report',
+  },
   url = 'https://tsu-waterbottle.com/api/internal/line-pay/production-one-dollar/start',
 ) {
   return new Request(url, {
@@ -101,7 +104,7 @@ function successDependencies() {
       }
       assert.equal(payloadInput.amount, 1)
       assert.deepEqual(payloadInput.products, [{
-        name: 'LINE Pay Production NT$1 測試（不出貨）',
+        name: 'LINE Pay NT$1 入口測試｜AI 命盤分析（不出貨／不提供服務）',
         quantity: 1,
         price: 1,
       }])
@@ -153,6 +156,7 @@ test('Production admin confirmation initializes fixed NT$1 and returns only the 
   assert.deepEqual(await json(response), {
     ok: true,
     environment: 'production',
+    entrySource: 'ai_chart_report',
     amountTwd: 1,
     currency: 'TWD',
     paymentUrl: 'https://web-pay.line.me/web/payment/wait',
@@ -230,6 +234,25 @@ test('wrong browser confirmation returns 400 before authorization or writes', as
   assert.deepEqual(deps.calls, [])
 })
 
+test('unknown payment entry returns 400 before authorization or writes', async () => {
+  const deps = successDependencies()
+  const response = await handleLinePayProductionOneDollarStart({
+    request: createRequest({
+      confirmation: LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION,
+      entrySource: 'forged_entry',
+    }),
+    env: enabledEnv,
+    ...deps,
+  })
+
+  assert.equal(response.status, 400)
+  assert.deepEqual(await json(response), {
+    ok: false,
+    error: 'invalid_entry_source',
+  })
+  assert.deepEqual(deps.calls, [])
+})
+
 test('missing admin authorization stays hidden and never writes', async () => {
   const deps = successDependencies()
   const response = await handleLinePayProductionOneDollarStart({
@@ -275,6 +298,34 @@ test('one Production Head and admin always derive one database identity', async 
     first.initializations[0]?.capabilityExpiresAt,
     enabledEnv.LINE_PAY_PRODUCTION_ONE_DOLLAR_TEST_EXPIRES_AT,
   )
+})
+
+test('each real payment entry derives its own stable one-dollar identity', async () => {
+  const sources = [
+    'ai_chart_report',
+    'ai_divination',
+    'cart',
+    'booking',
+  ] as const
+  const identities = new Set<string>()
+
+  for (const entrySource of sources) {
+    const deps = successDependencies()
+    await handleLinePayProductionOneDollarStart({
+      request: createRequest({
+        confirmation: LINE_PAY_PRODUCTION_ONE_DOLLAR_CONFIRMATION,
+        entrySource,
+      }),
+      env: enabledEnv,
+      ...deps,
+      createToken: undefined,
+    })
+
+    assert.equal(deps.initializations[0]?.entrySource, entrySource)
+    identities.add(String(deps.initializations[0]?.idempotencyKey))
+  }
+
+  assert.equal(identities.size, sources.length)
 })
 
 test('untrusted Production payment URL is redacted and never returned', async () => {

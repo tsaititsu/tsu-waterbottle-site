@@ -7,6 +7,10 @@ const adminPageSource = readFileSync(join(root, 'src/app/admin/page.tsx'), 'utf8
 const layoutClientSource = readFileSync(join(root, 'src/app/admin/AdminLayoutClient.tsx'), 'utf8')
 const shellSource = readFileSync(join(root, 'src/components/admin/AdminShell.tsx'), 'utf8')
 const navigationSource = readFileSync(join(root, 'src/components/admin/AdminNavigation.tsx'), 'utf8')
+const linePayEntryGuideSource = readFileSync(
+  join(root, 'src/components/admin/LinePayProductionEntryTestGuide.tsx'),
+  'utf8',
+)
 
 assert.equal(
   adminPageSource.startsWith("'use client'"),
@@ -47,9 +51,24 @@ assert.match(
 )
 assert.match(
   adminPageSource,
-  /linePayTestEnvironment \? <LinePaySandboxE2ePanel environment=\{linePayTestEnvironment\} \/> : null/,
-  'LINE Pay NT$1 panel 只能在對應 server-side gate 通過後顯示',
+  /sandboxE2eEnabled \? <LinePaySandboxE2ePanel environment="sandbox" \/> : null/,
+  'LINE Pay Sandbox panel 只能在 Sandbox server-side gate 通過後顯示',
 )
+assert.match(
+  adminPageSource,
+  /productionOneDollarEnabled \? <LinePayProductionEntryTestGuide \/> : null/,
+  'Production NT$1 模式必須導向四個實際付款入口',
+)
+assert.equal(adminPageSource.includes('linePayTestEnvironment'), false)
+for (const entryHref of ['/ai-chart', '/ai-divination', '/cart', '/booking']) {
+  assert.match(
+    linePayEntryGuideSource,
+    new RegExp(`href: ["']${entryHref}["']`),
+    `Production NT$1 後台導引必須包含實際入口 ${entryHref}`,
+  )
+}
+assert.match(linePayEntryGuideSource, /實際付款選單/)
+assert.match(linePayEntryGuideSource, /管理員 LINE Pay 入口測試付款 NT\$1/)
 assert.match(
   adminPageSource,
   /newebPayOneDollarEnabled \? <NewebPayOneDollarTestPanel \/> : null/,

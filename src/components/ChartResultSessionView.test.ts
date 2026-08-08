@@ -75,5 +75,13 @@ assert.equal(source.includes('sessionStorage'), false)
 assert.equal(source.includes('getAiChartDraftSession()'), true)
 assert.equal(source.includes('setAiChartDraftSession(nextSession)'), true)
 assert.equal(source.indexOf('const accessToken = await getAuthAccessToken()') < createRequestStart, true)
+assert.equal(source.includes('useLinePayProductionOneDollarEntryTest'), true)
+assert.equal(source.includes('requestLinePayProductionOneDollarEntryCheckout'), true)
+assert.equal(source.includes("entrySource: 'ai_chart_report'"), true)
+assert.equal(source.includes('管理員 LINE Pay 入口測試付款 NT$1'), true)
+assert.ok(
+  source.indexOf("entrySource: 'ai_chart_report'") < createRequestStart,
+  'the admin NT$1 entry check must not create a real AI chart report',
+)
 
 console.log('✓ AI chart report checkout sends an explicit birth input and preserves payment ownership auth')
