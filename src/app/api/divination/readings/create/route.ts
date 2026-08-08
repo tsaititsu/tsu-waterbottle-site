@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { ziweiCards } from "@/lib/divination/cards"
+import { decideDivinationQuestionSubmission } from "./handler"
 import {
   buildFollowUpSafetyCheckText,
   runPreOpenAISafetyCheck,
@@ -12,7 +13,10 @@ import type {
   DivinationReadingPreview,
 } from "@/lib/divination/types"
 import { getUserIdFromRequest } from "@/lib/supabase/auth"
-import { createPendingDivinationReading } from "@/lib/supabase/divinationReadings"
+import {
+  createPendingDivinationReading,
+  listRecentDivinationQuestionsForUser,
+} from "@/lib/supabase/divinationReadings"
 
 type RequestBody = Partial<Record<keyof CreateDivinationReadingRequest, unknown>>
 
@@ -35,6 +39,12 @@ function createMockReadingId() {
 
 function shouldPersistDivinationReading() {
   return process.env.ENABLE_DIVINATION_DB_READINGS === "true"
+}
+
+function threeMonthsAgoIso(now = new Date()) {
+  const cutoff = new Date(now)
+  cutoff.setUTCMonth(cutoff.getUTCMonth() - 3)
+  return cutoff.toISOString()
 }
 
 export async function POST(request: Request) {
@@ -85,15 +95,64 @@ export async function POST(request: Request) {
     } satisfies CreateDivinationReadingResponse)
   }
 
+  const initialQuestionDecision = decideDivinationQuestionSubmission({
+    question,
+    proceedDespiteQuestionAdvisory: body.proceedDespiteQuestionAdvisory === true,
+    followUpContext: body.followUpContext,
+  })
+
+  if (initialQuestionDecision.action === "show_advisory") {
+    return NextResponse.json({
+      ok: true,
+      questionAdvisory: initialQuestionDecision.advisory,
+    } satisfies CreateDivinationReadingResponse)
+  }
+
+  let authenticatedUserId: string | null = null
+  let recentQuestions: Awaited<ReturnType<typeof listRecentDivinationQuestionsForUser>> = []
+
+  if (shouldPersistDivinationReading()) {
+    try {
+      authenticatedUserId = await getUserIdFromRequest(request)
+    } catch {
+      return jsonError("divination_reading_create_failed", 500)
+    }
+
+    if (authenticatedUserId) {
+      try {
+        recentQuestions = await listRecentDivinationQuestionsForUser(
+          authenticatedUserId,
+          threeMonthsAgoIso(),
+        )
+      } catch {
+        // 重複題提醒是知情提醒，不應因唯讀歷史查詢暫時失敗而阻斷原有抽牌流程。
+        recentQuestions = []
+      }
+    }
+  }
+
+  const questionDecision = decideDivinationQuestionSubmission({
+    question,
+    proceedDespiteQuestionAdvisory: body.proceedDespiteQuestionAdvisory === true,
+    followUpContext: body.followUpContext,
+    recentQuestions,
+  })
+
+  if (questionDecision.action === "show_advisory") {
+    return NextResponse.json({
+      ok: true,
+      questionAdvisory: questionDecision.advisory,
+    } satisfies CreateDivinationReadingResponse)
+  }
+
+  const questionAdvisoryAcknowledgedReasons = questionDecision.acknowledgedReasons
+
   const localReadingId = createMockReadingId()
   let readingId = localReadingId
   let persisted = false
 
   if (shouldPersistDivinationReading()) {
     try {
-      // 會員歸戶：已登入時寫入 Supabase auth user id；未登入維持匿名（user_id = null），
-      // 不影響既有匿名 localUserId 流程。
-      const authenticatedUserId = await getUserIdFromRequest(request)
       const persistedReading = await createPendingDivinationReading({
         userId: authenticatedUserId,
         externalReadingId: localReadingId,
@@ -110,6 +169,7 @@ export async function POST(request: Request) {
           drawMode: drawMode as DivinationDrawMode,
           cardId: selectedCard?.id ?? null,
           position: positions.has(position as DivinationPosition) ? (position as DivinationPosition) : null,
+          questionAdvisoryAcknowledgedReasons,
         },
       })
 
@@ -135,6 +195,7 @@ export async function POST(request: Request) {
     ok: true,
     reading,
     persisted,
+    questionAdvisoryAcknowledgedReasons,
   } as CreateDivinationReadingResponse & { persisted: boolean }
 
   // Local development only. Gate is checked when the user starts interpretation.

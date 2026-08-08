@@ -96,6 +96,22 @@ test('follow-up context is included in the safety check before a reading can be 
   assert.equal(persistIndex > safetyCheckIndex, true, '必須先完成完整脈絡安全判題，再建立收費紀錄')
 })
 
+test('付款前問題提醒必須在建立占卜紀錄之前完成，使用者確認後才可繼續', () => {
+  assert.equal(createRouteSource.includes('decideDivinationQuestionSubmission'), true)
+  assert.equal(createRouteSource.includes('proceedDespiteQuestionAdvisory'), true)
+  assert.equal(createRouteSource.includes('questionAdvisory: questionDecision.advisory'), true)
+  assert.equal(createRouteSource.includes('questionAdvisoryAcknowledgedReasons'), true)
+
+  const questionDecisionIndex = createRouteSource.indexOf('decideDivinationQuestionSubmission({')
+  const persistIndex = createRouteSource.indexOf('createPendingDivinationReading({')
+  assert.equal(questionDecisionIndex >= 0, true)
+  assert.equal(
+    persistIndex > questionDecisionIndex,
+    true,
+    '不適用或重複問題必須先提醒，不能先建立付款紀錄',
+  )
+})
+
 function runTests() {
   for (const { name, fn } of tests) {
     try {

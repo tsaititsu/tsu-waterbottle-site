@@ -14,6 +14,7 @@ import {
   getDivinationReadingResumeContextForUser,
   getDivinationReadingForUser,
   listDivinationReadingsForUser,
+  listRecentDivinationQuestionsForUser,
   mapAccountDivinationReadingDetail,
   mapAccountDivinationReadingListItem,
   mapDivinationReadingPaymentContext,
@@ -809,12 +810,13 @@ type AccountQueryCalls = {
   tables: string[]
   selects: string[]
   eqs: Array<[string, unknown]>
+  gtes: Array<[string, unknown]>
   orders: Array<[string, unknown]>
   limits: number[]
 }
 
 function createAccountReadingsMockSupabase(response: { data: unknown; error: { message: string } | null }) {
-  const calls: AccountQueryCalls = { tables: [], selects: [], eqs: [], orders: [], limits: [] }
+  const calls: AccountQueryCalls = { tables: [], selects: [], eqs: [], gtes: [], orders: [], limits: [] }
   const chain = {
     select(columns: string) {
       calls.selects.push(columns)
@@ -822,6 +824,10 @@ function createAccountReadingsMockSupabase(response: { data: unknown; error: { m
     },
     eq(column: string, value: unknown) {
       calls.eqs.push([column, value])
+      return chain
+    },
+    gte(column: string, value: unknown) {
+      calls.gtes.push([column, value])
       return chain
     },
     order(column: string, options: unknown) {
@@ -876,6 +882,29 @@ async function accountQueriesMain() {
   assert.equal(listColumns.includes('payment_id'), false)
   assert.equal(listColumns.includes('merchant_order_no'), false)
   assert.equal(listColumns.includes('user_id'), false)
+
+  // 付款前重複題檢查：只讀本人三個月內的問題與時間，不查牌、答案、付款或 raw payload。
+  const recentMock = createAccountReadingsMockSupabase({
+    data: [
+      { question: '他對我有沒有心？', created_at: '2026-07-01T08:00:00.000Z' },
+      { question: '無效時間資料', created_at: null },
+    ],
+    error: null,
+  })
+  const recentQuestions = await listRecentDivinationQuestionsForUser(
+    'user-a',
+    '2026-05-09T00:00:00.000Z',
+    recentMock.supabase,
+  )
+
+  assert.deepEqual(recentQuestions, [
+    { question: '他對我有沒有心？', createdAt: '2026-07-01T08:00:00.000Z' },
+  ])
+  assert.deepEqual(recentMock.calls.eqs, [['user_id', 'user-a']])
+  assert.deepEqual(recentMock.calls.gtes, [['created_at', '2026-05-09T00:00:00.000Z']])
+  assert.deepEqual(recentMock.calls.orders, [['created_at', { ascending: false }]])
+  assert.deepEqual(recentMock.calls.limits, [50])
+  assert.equal(recentMock.calls.selects[0], 'question,created_at')
 
   // limit 上限 50
   const cappedMock = createAccountReadingsMockSupabase({ data: [], error: null })
