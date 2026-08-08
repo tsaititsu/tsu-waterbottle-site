@@ -1,5 +1,7 @@
+import { AI_CHART_REPORT_PRICE_TWD } from '@/lib/ai-chart/pricing'
+
 export const AI_CHART_REPORT_ITEM_KEY = 'ai_chart_report_single'
-export const AI_CHART_REPORT_AMOUNT_TWD = 100
+export const AI_CHART_REPORT_AMOUNT_TWD = AI_CHART_REPORT_PRICE_TWD
 export const AI_CHART_REPORT_ITEM_TYPE = 'ai_chart_report'
 
 export type AiChartReportPaymentMode =

@@ -13,6 +13,7 @@ const minimalInput = {
   solarDate: '1990-02-03',
   timeIndex: 6,
   gender: 'female',
+  birthPlace: '  台灣彰化  ',
 } as const
 
 function parseValid(value: unknown): CanonicalAiChartBirthInput {
@@ -48,6 +49,7 @@ assert.deepEqual(minimal, {
   solarDate: '1990-02-03',
   timeIndex: 6,
   gender: 'female',
+  birthPlace: '台灣彰化',
   fixLeap: false,
 })
 assert.equal(minimal.version, 'ai-chart-birth-input/v1')
@@ -64,6 +66,7 @@ assert.deepEqual(complete, {
   timeIndex: 6,
   gender: 'female',
   name: '測試使用者',
+  birthPlace: '台灣彰化',
   fixLeap: true,
 })
 
@@ -96,6 +99,10 @@ for (const gender of ['other', '', 1]) {
 
 for (const name of [123, {}, [], 'a'.repeat(81)]) {
   expectIssue({ ...minimalInput, name }, 'invalid_name', 'name')
+}
+
+for (const birthPlace of [undefined, null, 123, '', '   ', '地'.repeat(121)]) {
+  expectIssue({ ...minimalInput, birthPlace }, 'invalid_birth_place', 'birthPlace')
 }
 
 for (const fixLeap of [0, 1, 'true', 'false', null]) {
@@ -147,17 +154,18 @@ assert.deepEqual(engineInput, {
   timeIndex: 6,
   gender: 'female',
   name: '測試使用者',
+  birthPlace: '台灣彰化',
   fixLeap: true,
 })
 assert.equal('version' in engineInput, false)
 
 const minimalEngineInput: ChartInput = toZiweiChartEngineInput(minimal)
 assert.equal('name' in minimalEngineInput, false)
-assert.deepEqual(Object.keys(minimalEngineInput).sort(), ['fixLeap', 'gender', 'solarDate', 'timeIndex'])
+assert.deepEqual(Object.keys(minimalEngineInput).sort(), ['birthPlace', 'fixLeap', 'gender', 'solarDate', 'timeIndex'])
 
 assert.equal(AI_CHART_BIRTH_INPUT_REQUEST_JSON_SCHEMA.type, 'object')
 assert.equal(AI_CHART_BIRTH_INPUT_REQUEST_JSON_SCHEMA.additionalProperties, false)
-assert.deepEqual(AI_CHART_BIRTH_INPUT_REQUEST_JSON_SCHEMA.required, ['solarDate', 'timeIndex', 'gender'])
+assert.deepEqual(AI_CHART_BIRTH_INPUT_REQUEST_JSON_SCHEMA.required, ['solarDate', 'timeIndex', 'gender', 'birthPlace'])
 assert.equal(
   AI_CHART_BIRTH_INPUT_REQUEST_JSON_SCHEMA.properties.solarDate.pattern,
   '^[0-9]{4}-[0-9]{2}-[0-9]{2}$',
@@ -167,6 +175,8 @@ assert.equal(AI_CHART_BIRTH_INPUT_REQUEST_JSON_SCHEMA.properties.timeIndex.minim
 assert.equal(AI_CHART_BIRTH_INPUT_REQUEST_JSON_SCHEMA.properties.timeIndex.maximum, 12)
 assert.deepEqual(AI_CHART_BIRTH_INPUT_REQUEST_JSON_SCHEMA.properties.gender.enum, ['male', 'female'])
 assert.equal(AI_CHART_BIRTH_INPUT_REQUEST_JSON_SCHEMA.properties.name.maxLength, 80)
+assert.equal(AI_CHART_BIRTH_INPUT_REQUEST_JSON_SCHEMA.properties.birthPlace.minLength, 1)
+assert.equal(AI_CHART_BIRTH_INPUT_REQUEST_JSON_SCHEMA.properties.birthPlace.maxLength, 120)
 assert.equal(AI_CHART_BIRTH_INPUT_REQUEST_JSON_SCHEMA.properties.fixLeap.type, 'boolean')
 assert.deepEqual(
   JSON.parse(JSON.stringify(AI_CHART_BIRTH_INPUT_REQUEST_JSON_SCHEMA)),

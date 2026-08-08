@@ -4,6 +4,7 @@ import type {
   AiChartReportPaymentStatus,
   AiChartReportResultContext,
 } from '../../../../../lib/supabase/aiChartReports'
+import { AI_CHART_REPORT_PRICE_TWD } from '@/lib/ai-chart/pricing'
 
 const tests: Array<{ name: string; fn: () => Promise<void> }> = []
 const VALID_REPORT_ID = '2df1a8da-3893-4b81-8d00-774a9cc0e472'
@@ -39,7 +40,7 @@ function createReport(
     id: VALID_REPORT_ID,
     title: 'AI 命盤分析',
     productName: 'AI 命盤分析',
-    amountTwd: 100,
+    amountTwd: AI_CHART_REPORT_PRICE_TWD,
     status: reportContent ? 'completed' : 'pending',
     paymentStatus,
     reportContent,
@@ -121,7 +122,7 @@ test('pending owner report returns payment required without paid content', async
     ok: false,
     error: 'PAYMENT_REQUIRED',
     requiresPayment: true,
-    amountTwd: 100,
+    amountTwd: AI_CHART_REPORT_PRICE_TWD,
   })
   assertNoReportContent(json)
 })

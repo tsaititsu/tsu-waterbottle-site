@@ -20,6 +20,7 @@ import {
   type AiChartDraftSession,
 } from '@/lib/ai-chart/chartDraftMemory'
 import { saveAiChartPaymentSession } from '@/lib/ai-chart/paymentSession'
+import { AI_CHART_REPORT_PRICE_TWD } from '@/lib/ai-chart/pricing'
 import { getAuthAccessToken, getMockUser, subscribeAuthChange } from '@/lib/mockAuth'
 import {
   getCheckoutPaymentMethodOptions,
@@ -40,7 +41,7 @@ const TIME_OPTION_COUNT = 13
 
 const selectedPlan = {
   title: '紫微命盤完整分析｜完整解析命盤個性分析',
-  amount: 100
+  amount: AI_CHART_REPORT_PRICE_TWD
 }
 const AI_CHART_REPORT_TITLE = 'AI 命盤分析'
 const AI_CHART_REPORT_PRODUCT_NAME = 'AI 命盤分析'
@@ -341,6 +342,9 @@ export function ChartResultSessionView() {
             timeIndex: requestChartInput.timeIndex,
             gender: requestChartInput.gender,
             ...(requestChartInput.name ? { name: requestChartInput.name } : {}),
+            ...(requestChartInput.birthPlace
+              ? { birthPlace: requestChartInput.birthPlace }
+              : {}),
             ...(typeof requestChartInput.fixLeap === 'boolean'
               ? { fixLeap: requestChartInput.fixLeap }
               : {})
@@ -534,7 +538,7 @@ export function ChartResultSessionView() {
               <p className="font-semibold text-deepPurple">AI 命盤分析服務說明</p>
               <ul className="mt-2 grid gap-1">
                 <li>服務名稱：紫微命盤完整分析</li>
-                <li>價格：NT$100 / 份</li>
+                <li>價格：NT${AI_CHART_REPORT_PRICE_TWD} / 份</li>
                 <li>服務內容：完整解析命盤個性分析</li>
                 <li>交付方式：付款後於網站產生命盤分析結果</li>
               </ul>

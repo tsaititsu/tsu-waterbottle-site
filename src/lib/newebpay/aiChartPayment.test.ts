@@ -14,14 +14,14 @@ const creditPayload = buildAiChartReportPaymentPayload({
 })
 
 assert.equal(AI_CHART_REPORT_ITEM_KEY, 'ai_chart_report_single')
-assert.equal(AI_CHART_REPORT_AMOUNT_TWD, 100)
+assert.equal(AI_CHART_REPORT_AMOUNT_TWD, 600)
 assert.equal(AI_CHART_REPORT_ITEM_TYPE, 'ai_chart_report')
 
 assert.deepEqual(creditPayload, {
   itemKey: 'ai_chart_report_single',
   itemType: 'ai_chart_report',
   itemId: reportId,
-  amount: 100,
+  amount: 600,
   source: 'ai_chart_report',
   paymentMode: 'credit',
   merchantOrderNo,
@@ -29,14 +29,14 @@ assert.deepEqual(creditPayload, {
     itemKey: 'ai_chart_report_single',
     itemType: 'ai_chart_report',
     reportId,
-    amount: 100,
+    amount: 600,
     source: 'ai_chart_report',
     paymentMode: 'credit',
     merchantOrderNo,
   },
 })
 
-assert.equal(creditPayload.rawPayload.amount, 100)
+assert.equal(creditPayload.rawPayload.amount, 600)
 assert.equal(creditPayload.rawPayload.reportId, reportId)
 assert.equal(creditPayload.paymentMode, 'credit')
 

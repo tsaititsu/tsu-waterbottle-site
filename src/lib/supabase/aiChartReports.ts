@@ -5,9 +5,10 @@ import {
   type CanonicalAiChartSnapshot,
 } from '@/lib/ai-chart/chartSnapshot'
 import { createAiChartD1CanonicalSha256 } from '@/lib/ai-chart/d1CanonicalDigest'
+import { AI_CHART_REPORT_PRICE_TWD } from '@/lib/ai-chart/pricing'
 
 export type AiChartReportPaymentStatus = 'pending' | 'paid' | 'failed' | 'canceled' | 'refunded'
-export const AI_CHART_REPORT_DEFAULT_AMOUNT_TWD = 100
+export const AI_CHART_REPORT_DEFAULT_AMOUNT_TWD = AI_CHART_REPORT_PRICE_TWD
 
 export type BuildPendingAiChartReportPayloadInput = {
   userId: string
@@ -298,6 +299,7 @@ export function buildPendingAiChartReportPayload(
       timeIndex: input.birthInputSnapshot.timeIndex,
       gender: input.birthInputSnapshot.gender,
       ...(input.birthInputSnapshot.name ? { name: input.birthInputSnapshot.name } : {}),
+      birthPlace: input.birthInputSnapshot.birthPlace,
       fixLeap: input.birthInputSnapshot.fixLeap,
     },
     chart_snapshot: chartSnapshot,

@@ -21,6 +21,7 @@ const canonicalInput: CanonicalAiChartBirthInput = {
   timeIndex: 6,
   gender: 'female',
   name: '人工測試姓名',
+  birthPlace: '台灣彰化',
   fixLeap: false,
 }
 
@@ -110,6 +111,7 @@ const lateMidnightInput: CanonicalAiChartBirthInput = {
   solarDate: '2001-09-09',
   timeIndex: 12,
   gender: 'female',
+  birthPlace: '美國紐約',
   fixLeap: false,
 }
 const lateMidnightSnapshot = buildCanonicalAiChartSnapshot(

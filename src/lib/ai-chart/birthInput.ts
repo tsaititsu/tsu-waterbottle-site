@@ -7,6 +7,7 @@ export type AiChartBirthInputRequest = {
   timeIndex: number
   gender: 'male' | 'female'
   name?: string
+  birthPlace: string
   fixLeap?: boolean
 }
 
@@ -16,6 +17,7 @@ export type CanonicalAiChartBirthInput = {
   timeIndex: number
   gender: 'male' | 'female'
   name?: string
+  birthPlace: string
   fixLeap: boolean
 }
 
@@ -26,6 +28,7 @@ export type AiChartBirthInputIssueCode =
   | 'invalid_time_index'
   | 'invalid_gender'
   | 'invalid_name'
+  | 'invalid_birth_place'
   | 'invalid_fix_leap'
 
 export type AiChartBirthInputIssue = {
@@ -48,13 +51,21 @@ const SOLAR_DATE_PATTERN = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/
 const MIN_SOLAR_DATE = '1900-01-01'
 const MAX_SOLAR_DATE = '2100-12-31'
 const MAX_NAME_LENGTH = 80
+const MAX_BIRTH_PLACE_LENGTH = 120
 
-const ALLOWED_FIELDS = new Set(['solarDate', 'timeIndex', 'gender', 'name', 'fixLeap'])
+const ALLOWED_FIELDS = new Set([
+  'solarDate',
+  'timeIndex',
+  'gender',
+  'name',
+  'birthPlace',
+  'fixLeap',
+])
 
 export const AI_CHART_BIRTH_INPUT_REQUEST_JSON_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['solarDate', 'timeIndex', 'gender'],
+  required: ['solarDate', 'timeIndex', 'gender', 'birthPlace'],
   properties: {
     solarDate: {
       type: 'string',
@@ -75,6 +86,11 @@ export const AI_CHART_BIRTH_INPUT_REQUEST_JSON_SCHEMA = {
     name: {
       type: 'string',
       maxLength: MAX_NAME_LENGTH,
+    },
+    birthPlace: {
+      type: 'string',
+      minLength: 1,
+      maxLength: MAX_BIRTH_PLACE_LENGTH,
     },
     fixLeap: {
       type: 'boolean',
@@ -175,6 +191,21 @@ function parsePlainBirthInput(value: Record<string, unknown>): AiChartBirthInput
     }
   }
 
+  let birthPlace: string | null = null
+  if (typeof value.birthPlace === 'string') {
+    const normalizedBirthPlace = value.birthPlace.trim()
+    if (
+      normalizedBirthPlace.length > 0 &&
+      Array.from(normalizedBirthPlace).length <= MAX_BIRTH_PLACE_LENGTH
+    ) {
+      birthPlace = normalizedBirthPlace
+    } else {
+      issues.push({ code: 'invalid_birth_place', field: 'birthPlace' })
+    }
+  } else {
+    issues.push({ code: 'invalid_birth_place', field: 'birthPlace' })
+  }
+
   let fixLeap = false
   if (hasOwnField(value, 'fixLeap')) {
     if (typeof value.fixLeap !== 'boolean') {
@@ -184,7 +215,13 @@ function parsePlainBirthInput(value: Record<string, unknown>): AiChartBirthInput
     }
   }
 
-  if (issues.length > 0 || solarDate === null || timeIndex === null || gender === null) {
+  if (
+    issues.length > 0 ||
+    solarDate === null ||
+    timeIndex === null ||
+    gender === null ||
+    birthPlace === null
+  ) {
     return invalidResult(issues)
   }
 
@@ -196,6 +233,7 @@ function parsePlainBirthInput(value: Record<string, unknown>): AiChartBirthInput
       timeIndex,
       gender,
       ...(name ? { name } : {}),
+      birthPlace,
       fixLeap,
     },
   }
@@ -219,6 +257,7 @@ export function toZiweiChartEngineInput(input: CanonicalAiChartBirthInput): Char
     timeIndex: input.timeIndex,
     gender: input.gender,
     ...(input.name ? { name: input.name } : {}),
+    birthPlace: input.birthPlace,
     fixLeap: input.fixLeap,
   }
 }

@@ -3,6 +3,10 @@ import {
   DIVINATION_READING_PRICE_LABEL,
   DIVINATION_READING_PRICE_TWD,
 } from '@/lib/divination/pricing'
+import {
+  AI_CHART_REPORT_PRICE_LABEL,
+  AI_CHART_REPORT_PRICE_TWD,
+} from '@/lib/ai-chart/pricing'
 
 export const serviceCards = [
   {
@@ -62,8 +66,8 @@ export const pricingPlans = [
     itemType: 'ai-chart',
     title: '紫微命盤完整分析',
     description: '完整解析命盤個性分析',
-    price: 100,
-    priceLabel: 'NT$100 / 份',
+    price: AI_CHART_REPORT_PRICE_TWD,
+    priceLabel: `${AI_CHART_REPORT_PRICE_LABEL} / 份`,
     cta: '立即分析',
     href: '/ai-chart',
     featured: true,

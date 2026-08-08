@@ -24,6 +24,7 @@ export interface ChartInput {
   timeIndex: number;
   gender: 'male' | 'female';
   name?: string;
+  birthPlace?: string;
   fixLeap?: boolean;
 }
 

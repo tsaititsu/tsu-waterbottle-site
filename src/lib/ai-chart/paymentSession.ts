@@ -1,6 +1,8 @@
+import { AI_CHART_REPORT_PRICE_TWD } from './pricing'
+
 export const AI_CHART_PAYMENT_SESSION_KEY = 'waterbottle_ai_chart_payment_session'
 export const AI_CHART_PAYMENT_SESSION_SOURCE = 'ai_chart_report'
-export const AI_CHART_PAYMENT_SESSION_DEFAULT_AMOUNT_TWD = 100
+export const AI_CHART_PAYMENT_SESSION_DEFAULT_AMOUNT_TWD = AI_CHART_REPORT_PRICE_TWD
 
 export type AiChartPaymentSession = {
   reportId: string

@@ -10,6 +10,7 @@ import {
   type CanonicalAiChartSnapshot,
 } from '@/lib/ai-chart/chartSnapshot'
 import { normalizeAiChartD1N0 } from '@/lib/ai-chart/d1N0'
+import { AI_CHART_REPORT_PRICE_TWD } from '@/lib/ai-chart/pricing'
 import {
   buildAiChartReportCompletedPayload,
   buildAiChartReportFailedPayload,
@@ -145,7 +146,7 @@ function createResultReport(
     id: 'report-result-1',
     title: 'AI 命盤分析',
     productName: 'AI 命盤分析',
-    amountTwd: 100,
+    amountTwd: AI_CHART_REPORT_PRICE_TWD,
     status: 'pending',
     paymentStatus,
     reportContent,
@@ -161,6 +162,7 @@ const canonicalBirthInput: CanonicalAiChartBirthInput = {
   timeIndex: 6,
   gender: 'female',
   name: '測試者',
+  birthPlace: '台灣彰化',
   fixLeap: false,
 }
 const palaceNames = [
@@ -222,7 +224,7 @@ const pendingReportPayload = buildPendingAiChartReportPayload(
     chartProfileId: 'chart-profile-1',
     title: '紫微命盤完整分析',
     productName: 'AI 命盤分析',
-    amountTwd: 100,
+    amountTwd: AI_CHART_REPORT_PRICE_TWD,
     reportContent: null,
   },
   '2026-07-06T10:00:00.000Z',
@@ -236,7 +238,7 @@ assert.deepEqual(pendingReportPayload, {
   chart_profile_id: 'chart-profile-1',
   title: '紫微命盤完整分析',
   product_name: 'AI 命盤分析',
-  amount_twd: 100,
+  amount_twd: AI_CHART_REPORT_PRICE_TWD,
   status: 'pending',
   payment_status: 'pending',
   report_content: null,
@@ -253,7 +255,7 @@ const pendingReportPayloadWithTrimmedText = buildPendingAiChartReportPayload(
     chartProfileId: null,
     title: '  AI 命盤分析  ',
     productName: '  紫微命盤完整分析  ',
-    amountTwd: 100,
+    amountTwd: AI_CHART_REPORT_PRICE_TWD,
     reportContent: '  付款前安全摘要  ',
   },
   '2026-07-06T10:05:00.000Z',
@@ -285,7 +287,7 @@ const isolatedSnapshotPayload = buildPendingAiChartReportPayload({
   chartSnapshot: canonicalChartSnapshot,
   title: 'AI 命盤分析',
   productName: 'AI 命盤分析',
-  amountTwd: 100,
+  amountTwd: AI_CHART_REPORT_PRICE_TWD,
 })
 
 assert.deepEqual(mutableBirthInput, originalBirthInput)
@@ -294,6 +296,7 @@ mutableBirthInput.name = '修改後姓名'
 mutableBirthInput.solarDate = '2000-01-01'
 assert.deepEqual(isolatedSnapshotPayload.birth_input_snapshot, expectedIsolatedSnapshot)
 assert.deepEqual(Object.keys(isolatedSnapshotPayload.birth_input_snapshot).sort(), [
+  'birthPlace',
   'fixLeap',
   'gender',
   'name',
@@ -331,7 +334,7 @@ const isolatedChartPayload = buildPendingAiChartReportPayload({
   chartSnapshot: mutableChartSnapshot,
   title: 'AI 命盤分析',
   productName: 'AI 命盤分析',
-  amountTwd: 100,
+  amountTwd: AI_CHART_REPORT_PRICE_TWD,
 })
 
 assert.notEqual(isolatedChartPayload.chart_snapshot, mutableChartSnapshot)
@@ -667,7 +670,7 @@ assert.throws(
       chartSnapshot: canonicalChartSnapshot,
       title: '',
       productName: 'AI 命盤分析',
-      amountTwd: 100,
+      amountTwd: AI_CHART_REPORT_PRICE_TWD,
     }),
   /title/,
 )
@@ -691,7 +694,7 @@ assert.throws(
       chartSnapshot: canonicalChartSnapshot,
       title: '紫微命盤完整分析',
       productName: 'AI 命盤分析',
-      amountTwd: 100,
+      amountTwd: AI_CHART_REPORT_PRICE_TWD,
     }),
   /userId/,
 )
@@ -763,7 +766,7 @@ async function runAsyncHelperTests() {
   assert.equal(createMock.calls.inserts[0].chart_profile_id, null)
   assert.equal(createMock.calls.inserts[0].title, '紫微命盤完整分析')
   assert.equal(createMock.calls.inserts[0].product_name, 'AI 命盤分析')
-  assert.equal(createMock.calls.inserts[0].amount_twd, 100)
+  assert.equal(createMock.calls.inserts[0].amount_twd, AI_CHART_REPORT_PRICE_TWD)
   assert.equal(createMock.calls.inserts[0].status, 'pending')
   assert.equal(createMock.calls.inserts[0].payment_status, 'pending')
   assert.equal(createMock.calls.inserts[0].report_content, null)
@@ -790,7 +793,7 @@ async function runAsyncHelperTests() {
       chartProfileId: null,
       title: 'AI 命盤分析',
       productName: '紫微命盤完整分析',
-      amountTwd: 100,
+      amountTwd: AI_CHART_REPORT_PRICE_TWD,
       reportContent: null,
     },
     createWithNullableInputsMock.supabase,
@@ -824,7 +827,7 @@ async function runAsyncHelperTests() {
   assert.equal(createWithSummaryMock.calls.inserts[0].user_id, 'user-1')
   assert.equal(createWithSummaryMock.calls.inserts[0].chart_profile_id, null)
   assert.equal(createWithSummaryMock.calls.inserts[0].report_content, '付款前安全摘要')
-  assert.equal(createWithSummaryMock.calls.inserts[0].amount_twd, 100)
+  assert.equal(createWithSummaryMock.calls.inserts[0].amount_twd, AI_CHART_REPORT_PRICE_TWD)
   assertNoUnsafePaymentKeys(createWithSummaryMock.calls.inserts[0])
 
   const createFailureMock = createMockSupabase({
@@ -859,7 +862,7 @@ async function runAsyncHelperTests() {
       payment_status: 'pending',
       payment_id: null,
       merchant_order_no: null,
-      amount_twd: 100,
+      amount_twd: AI_CHART_REPORT_PRICE_TWD,
     },
     error: null,
   })
@@ -870,7 +873,7 @@ async function runAsyncHelperTests() {
     paymentStatus: 'pending',
     paymentId: null,
     merchantOrderNo: null,
-    amountTwd: 100,
+    amountTwd: AI_CHART_REPORT_PRICE_TWD,
   })
   assert.deepEqual(contextMock.calls.tables, ['ai_chart_reports'])
   assert.deepEqual(contextMock.calls.selects, ['id,payment_status,payment_id,merchant_order_no,amount_twd'])
@@ -886,7 +889,7 @@ async function runAsyncHelperTests() {
       id: 'report-result-1',
       title: 'AI 命盤分析',
       product_name: 'AI 命盤分析',
-      amount_twd: 100,
+      amount_twd: AI_CHART_REPORT_PRICE_TWD,
       status: 'pending',
       payment_status: 'paid',
       report_content: '短測試報告內容',
@@ -902,7 +905,7 @@ async function runAsyncHelperTests() {
     id: 'report-result-1',
     title: 'AI 命盤分析',
     productName: 'AI 命盤分析',
-    amountTwd: 100,
+    amountTwd: AI_CHART_REPORT_PRICE_TWD,
     status: 'pending',
     paymentStatus: 'paid',
     reportContent: '短測試報告內容',
@@ -924,7 +927,7 @@ async function runAsyncHelperTests() {
       id: 'report-completion-subject-1',
       title: 'AI 命盤分析',
       product_name: 'AI 命盤分析',
-      amount_twd: 100,
+      amount_twd: AI_CHART_REPORT_PRICE_TWD,
       status: 'pending',
       payment_status: 'paid',
       report_content: null,
@@ -998,7 +1001,7 @@ async function runAsyncHelperTests() {
       id: 'report-result-1',
       title: 'AI 命盤分析',
       product_name: 'AI 命盤分析',
-      amount_twd: 100,
+      amount_twd: AI_CHART_REPORT_PRICE_TWD,
       status: 'completed',
       payment_status: 'paid',
       report_content: '本人正式報告',
@@ -1138,7 +1141,7 @@ async function runAsyncHelperTests() {
       payment_status: 'pending',
       payment_id: null,
       merchant_order_no: null,
-      amount_twd: 100,
+      amount_twd: AI_CHART_REPORT_PRICE_TWD,
     },
     error: null,
   })
@@ -1181,7 +1184,7 @@ async function runAsyncHelperTests() {
       payment_status: 'pending',
       payment_id: 'payment-existing',
       merchant_order_no: null,
-      amount_twd: 100,
+      amount_twd: AI_CHART_REPORT_PRICE_TWD,
     },
     error: null,
   })
@@ -1226,7 +1229,7 @@ async function runAsyncHelperTests() {
         payment_status: paymentStatus,
         payment_id: null,
         merchant_order_no: null,
-        amount_twd: 100,
+        amount_twd: AI_CHART_REPORT_PRICE_TWD,
       },
       error: null,
     })
