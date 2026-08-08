@@ -1,3 +1,5 @@
+import type { CompleteAiChartReportResult } from './reportCompletion'
+
 export const AI_CHART_REPORT_COMPLETION_BACKGROUND_SCHEDULE_FAILED =
   'AI_CHART_REPORT_COMPLETION_BACKGROUND_SCHEDULE_FAILED' as const
 
@@ -15,7 +17,7 @@ export type StartPaidAiChartReportCompletionResult =
 
 export type CompletePaidAiChartReportHandler = (
   input: StartPaidAiChartReportCompletionInput,
-) => Promise<unknown>
+) => Promise<CompleteAiChartReportResult>
 
 type BackgroundScheduler = (task: () => Promise<void>) => void
 
@@ -38,18 +40,21 @@ export function startPaidAiChartReportCompletionInBackground(
   deps: {
     completePaidAiChartReport: CompletePaidAiChartReportHandler
     schedule?: BackgroundScheduler
+    onResult?: (result: CompleteAiChartReportResult) => void
     onError?: (error: unknown) => void
   },
 ): StartPaidAiChartReportCompletionResult {
   const reportId = normalizeReportId(input.reportId)
   const completeReport = deps.completePaidAiChartReport
   const schedule = deps.schedule ?? defaultSchedule
+  const onResult = deps.onResult ?? (() => {})
   const onError = deps.onError ?? (() => {})
 
   try {
     schedule(async () => {
       try {
-        await completeReport({ reportId })
+        const result = await completeReport({ reportId })
+        onResult(result)
       } catch (error) {
         onError(error)
       }

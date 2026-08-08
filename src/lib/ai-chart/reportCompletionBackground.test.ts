@@ -39,6 +39,36 @@ async function main() {
   assert.deepEqual(completedReportIds, ['report-1'])
   assert.deepEqual(errors, [])
 
+  const completionResults: unknown[] = []
+  const resultTasks: Array<() => Promise<void>> = []
+  startPaidAiChartReportCompletionInBackground(
+    { reportId: 'report-human-review' },
+    {
+      schedule: (task) => {
+        resultTasks.push(task)
+      },
+      completePaidAiChartReport: async ({ reportId }) => ({
+        result: 'human_review_required',
+        reportId,
+        assemblyFingerprint: 'a'.repeat(64),
+        palaceCount: 12,
+      }),
+      onResult: (result) => {
+        completionResults.push(result)
+      },
+    },
+  )
+
+  await resultTasks[0]()
+  assert.deepEqual(completionResults, [
+    {
+      result: 'human_review_required',
+      reportId: 'report-human-review',
+      assemblyFingerprint: 'a'.repeat(64),
+      palaceCount: 12,
+    },
+  ])
+
   const failingTasks: Array<() => Promise<void>> = []
   const taskErrors: unknown[] = []
   startPaidAiChartReportCompletionInBackground(

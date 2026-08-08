@@ -15,6 +15,11 @@ import type {
   MarkAiChartReportFailedResult,
 } from '../supabase/aiChartReports'
 import { completeModelInputSnapshot, getTestCatalog } from './d1P1ModelInputTestSupport'
+import { AI_CHART_D1_PALACE_IDENTITIES } from './d1N0Constants'
+import {
+  AI_CHART_D1_REPORT_ASSEMBLY_VERSION,
+  type AiChartD1ReportAssembly,
+} from './d1ReportAssemblyContracts'
 
 function test(name: string, fn: () => void | Promise<void>) {
   Promise.resolve()
@@ -357,6 +362,158 @@ test('default generator uses chart snapshot pipeline and keeps the paid report r
     error: 'AI_CHART_D1_REPORT_WRITER_RUNTIME_NOT_READY',
   })
   assert.deepEqual(failedCalls, [])
+})
+
+test('twelve-palace assembly is persisted for human review without marking the paid report completed', async () => {
+  const snapshotSha256 = 'a'.repeat(64)
+  const assembly = Object.freeze({
+    contractVersion: AI_CHART_D1_REPORT_ASSEMBLY_VERSION,
+    chartId: 'chart:report-completion-1',
+    runId: 'run:d1-report:report-completion-1',
+    sourceSnapshotSha256: snapshotSha256,
+    sourceContentGridSha256: 'b'.repeat(64),
+    primaryLifeRegion: 'TW',
+    reportLanguage: 'zh-Hant-TW',
+    palaces: Object.freeze(
+      AI_CHART_D1_PALACE_IDENTITIES.map(({ palaceId }) =>
+        Object.freeze({
+          targetPalaceId: palaceId,
+          sourcePackageFingerprint: 'c'.repeat(64),
+          sourceWritingResultSha256: 'd'.repeat(64),
+          sourceFidelityReviewId: `review:${palaceId}`,
+          sections: Object.freeze([]),
+          healthReminderSection: null,
+        }),
+      ),
+    ),
+    healthDirectionScan: Object.freeze({}),
+    fidelityReviewStatus: 'approved',
+    humanReviewStatus: 'required',
+    customerDeliveryStatus: 'blocked_pending_human_review',
+    openAiCallable: false,
+  }) as unknown as AiChartD1ReportAssembly
+  const persisted: Array<{
+    reportId: string
+    sourceSnapshotSha256: string
+    assemblyFingerprint: string
+    assembly: AiChartD1ReportAssembly
+  }> = []
+  let completedCalls = 0
+  let failedCalls = 0
+  const receivedGenerationInputs: AiChartReportGenerationInput[] = []
+
+  const result = await completePaidAiChartReport(
+    { reportId: 'report-completion-1', chartInput: null },
+    {
+      getAiChartReportCompletionSubject: async () => ({
+        ...createReportWithSnapshot('paid', null),
+        chartSnapshotSha256: snapshotSha256,
+      }),
+      prepareAiChartD1ReportAssemblyInput: async (generationInput) => {
+        receivedGenerationInputs.push(generationInput)
+        return { source: 'twelve-approved-palace-sources' }
+      },
+      buildAiChartD1ReportAssembly: (assemblyInput) => {
+        assert.deepEqual(assemblyInput, {
+          source: 'twelve-approved-palace-sources',
+        })
+        return assembly
+      },
+      persistAiChartD1ReportAssemblyForHumanReview: async (input) => {
+        persisted.push(input)
+        return {
+          result: 'persisted',
+          reportId: input.reportId,
+          assemblyFingerprint: input.assemblyFingerprint,
+        }
+      },
+      markAiChartReportCompleted: async () => {
+        completedCalls += 1
+        throw new Error('must_not_mark_pending_review_report_completed')
+      },
+      markAiChartReportFailed: async () => {
+        failedCalls += 1
+        throw new Error('must_not_mark_pending_review_report_failed')
+      },
+    },
+  )
+
+  assert.equal(receivedGenerationInputs[0].reportId, 'report-completion-1')
+  assert.equal(
+    receivedGenerationInputs[0].chartSnapshotSha256,
+    snapshotSha256,
+  )
+  assert.deepEqual(result, {
+    result: 'human_review_required',
+    reportId: 'report-completion-1',
+    assemblyFingerprint: persisted[0].assemblyFingerprint,
+    palaceCount: 12,
+  })
+  assert.match(persisted[0].assemblyFingerprint, /^[a-f0-9]{64}$/u)
+  assert.equal(persisted[0].reportId, 'report-completion-1')
+  assert.equal(persisted[0].sourceSnapshotSha256, snapshotSha256)
+  assert.equal(persisted[0].assembly, assembly)
+  assert.equal(completedCalls, 0)
+  assert.equal(failedCalls, 0)
+})
+
+test('twelve-palace assembly source drift fails closed before persistence or completion', async () => {
+  const persisted: unknown[] = []
+  const completed: unknown[] = []
+  const failed: MarkAiChartReportFailedInput[] = []
+  const snapshotSha256 = 'a'.repeat(64)
+  const driftedAssembly = Object.freeze({
+    contractVersion: AI_CHART_D1_REPORT_ASSEMBLY_VERSION,
+    chartId: 'chart:different-report',
+    sourceSnapshotSha256: 'b'.repeat(64),
+    palaces: Object.freeze(Array.from({ length: 12 }, () => Object.freeze({}))),
+    fidelityReviewStatus: 'approved',
+    humanReviewStatus: 'required',
+    customerDeliveryStatus: 'blocked_pending_human_review',
+    openAiCallable: false,
+  }) as unknown as AiChartD1ReportAssembly
+
+  const result = await completePaidAiChartReport(
+    { reportId: 'report-completion-1', chartInput: null },
+    {
+      getAiChartReportCompletionSubject: async () => ({
+        ...createReportWithSnapshot('paid', null),
+        chartSnapshotSha256: snapshotSha256,
+      }),
+      prepareAiChartD1ReportAssemblyInput: async () => ({ source: 'drifted' }),
+      buildAiChartD1ReportAssembly: () => driftedAssembly,
+      persistAiChartD1ReportAssemblyForHumanReview: async (input) => {
+        persisted.push(input)
+        return {
+          result: 'persisted',
+          reportId: input.reportId,
+          assemblyFingerprint: input.assemblyFingerprint,
+        }
+      },
+      markAiChartReportCompleted: async (input) => {
+        completed.push(input)
+        return { result: 'updated', reportId: input.reportId }
+      },
+      markAiChartReportFailed: async (input) => {
+        failed.push(input)
+        return { result: 'updated', reportId: input.reportId }
+      },
+    },
+  )
+
+  assert.deepEqual(result, {
+    result: 'failed',
+    reportId: 'report-completion-1',
+    error: AI_CHART_REPORT_GENERATION_FAILED,
+  })
+  assert.deepEqual(persisted, [])
+  assert.deepEqual(completed, [])
+  assert.deepEqual(failed, [
+    {
+      reportId: 'report-completion-1',
+      errorMessage: AI_CHART_REPORT_GENERATION_FAILED,
+    },
+  ])
 })
 
 test('mark completed throw marks failed with a safe error code', async () => {

@@ -482,6 +482,17 @@ flowchart TD
 
 - 身體較弱或需要保養的方向，只能做保養提醒，不能醫療診斷。
 - 父母宮所呈現的遺傳相關訊號，詳細說明放在疾厄宮，不在父母宮重複展開。
+- 命宮、遷移宮、疾厄宮與父母宮的身體保養方向先由命理規則層合併、去重；沒有明確煞忌、祿權科、事件狀態或可說清楚的作用機制時，不得為了湊齊三方或暗合而新增健康方向。
+- 通過命理規則層的 canonical 身體方向，只能由 deterministic 程式選擇固定健康提醒卡。OpenAI 不選卡、不改寫醫療提醒，也不得自行增加症狀；無法解析的方向必須 fail-closed。
+- 固定健康提醒只附加在疾厄宮。其他十一宮不得重複輸出身體弱項；卡片文字使用生活可觀察狀態、一般就醫門檻與必要急症提醒，並明確聲明不是疾病診斷。
+- Runtime 只掃描 N0 的 `sourceMajorStars`，固定順序為命宮、遷移宮、疾厄宮、父母宮；不掃描 `borrowedMajorStars`，也不沿三方、暗合或對宮二次擴張主星身體對應。
+- 天機遇天梁同宮或對宮時可另加脊椎方向；這是講義明定的單一條件規則，不是允許掃描器匯入所有對宮身體含義。
+- 太陽、太陰只在星曜實際落於午或未時增加眼睛方向；太陰、破軍只在女性條件成立時增加婦科與生殖方向。性別只用來觸發固定條件，不寫入健康掃描結果。
+- `d1ReportAssemblyContracts.ts` 是十二宮客戶文章的單一正式組裝接點。它要求十二宮依 canonical 順序完整出現，逐宮重驗 Writing Prompt Package、Writing Result 與 Fidelity Review，並綁定同一 chart、run、Snapshot、內容格與報告語境；任一宮需要修補、缺漏、重排或來源漂移都 fail-closed。
+- 組裝器完整保留已核准的 `customerText`，不進行第二次改寫。它只把同一 N0 的身體方向掃描交給固定健康卡選擇器，並只在疾厄宮附加提醒；技術組裝完成仍固定 `humanReviewStatus=required`、`customerDeliveryStatus=blocked_pending_human_review` 與 `openAiCallable=false`。
+- `reportCompletion.ts` 現已提供十二宮 Assembly 的背景完成交接 seam。它只使用 Server 讀回的 Report Snapshot 與 digest，將 Assembly 重新綁定固定 Report chart ID，計算 canonical fingerprint，再交給受限的待人工審查 persistence Port。Port 回綁成功後只回傳安全的 `human_review_required` metadata；不呼叫 `markAiChartReportCompleted`、不寫正式 `report_content`，來源或 receipt 漂移一律 fail-closed。
+- `reportCompletionBackground.ts` 可把完成器的安全結果傳給受控 `onResult` observer，不會把 Assembly 正文帶入結果。正式 Assembly input preparer 與 persistence Port 尚未啟用，因此現有 Production 背景流程仍會停在 Runtime 未就緒；本切片沒有 OpenAI request、Supabase 寫入或客戶交付能力。
+- 同一身體方向由多顆星或多宮觸發時，客戶提醒只需輸出一次，但 Runtime 必須保留每個來源宮位、placement ID、固定 rule ID 與條件軌跡。
 - 外貌不是目前強項，只能在正式依據充分時低比重提及。
 
 ### 遷移宮

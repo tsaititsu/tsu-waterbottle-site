@@ -151,7 +151,7 @@ async function run() {
   const first = await compileAiChartD1K0Catalog()
   const second = await compileAiChartD1K0Catalog()
 
-  await asyncCheck('teacher-confirmed Tianxiang health mapping excludes neck', async () => {
+  await asyncCheck('teacher-confirmed Tianxiang health mapping includes neck', async () => {
     const source = await readFile(
       join(
         process.cwd(),
@@ -159,8 +159,7 @@ async function run() {
       ),
       'utf8',
     )
-    assert.match(source, /天相（腎、內分泌、淋巴、循環）/u)
-    assert.doesNotMatch(source, /天相（[^）]*頸部[^）]*）/u)
+    assert.match(source, /天相（腎、內分泌、淋巴、頸部、循環）/u)
   })
 
   check('catalog version and manifest lock', () => {
@@ -290,7 +289,7 @@ async function run() {
       '太陰：腎、眼睛；女性另看婦科、子宮、生殖系統',
       '貪狼：肝、筋脈',
       '巨門：腎、支氣管、口腔、牙齒',
-      '天相：腎、內分泌、淋巴、循環系統',
+      '天相：腎、內分泌、淋巴、頸部、循環系統',
       '天梁：脊椎、脾胃',
       '七殺：肺、骨頭、頭部、皮膚',
       '破軍：腎、泌尿系統；女性另看婦科、生殖系統',
@@ -298,7 +297,7 @@ async function run() {
     for (const mapping of expectedMappings) {
       assert.match(health.content, new RegExp(mapping, 'u'))
     }
-    assert.doesNotMatch(health.content, /天相[^\n]*頸部/u)
+    assert.match(health.content, /天相[^\n]*頸部/u)
   })
   check('eligible borrowed stars are not counted again as opposite evidence', () => {
     const emptyBorrow = first.rules.find(
