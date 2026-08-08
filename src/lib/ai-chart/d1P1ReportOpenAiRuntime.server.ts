@@ -21,6 +21,7 @@ import {
   createAiChartD1P1ReportExecutionPlanFingerprint,
   runAiChartD1P1ReportExecutionRuntime,
   type AiChartD1P1ReportExecutionLedger,
+  type AiChartD1P1ReportExecutionPalaceSettlement,
   type AiChartD1P1ReportExecutionRuntimePlan,
 } from './d1P1ReportExecutionRuntimeContracts'
 import {
@@ -446,6 +447,9 @@ export async function executeAiChartD1P1ReportOpenAiRuntime(
   authorization: AiChartD1P1ReportOpenAiRuntimeAuthorization,
   dependencies: Readonly<{
     requestStructuredResponse?: StructuredRequester
+    onPalaceSettled?: (
+      settlement: AiChartD1P1ReportExecutionPalaceSettlement,
+    ) => void | Promise<void>
   }> = {},
 ): Promise<AiChartD1P1ReportExecutionLedger> {
   assertValidCapsule(capsule)
@@ -469,6 +473,9 @@ export async function executeAiChartD1P1ReportOpenAiRuntime(
       if (bridge === undefined) invalid()
       assertDescriptorMatchesBridge(descriptor, bridge)
       return requester(bridge.request)
+    },
+    {
+      onPalaceSettled: dependencies.onPalaceSettled,
     },
   )
 }

@@ -105,6 +105,35 @@ export type AiChartD1P1ReportExecutionRuntimeExecutor = (
   index: number,
 ) => Promise<AiChartOpenAiStructuredResult<unknown>>
 
+export type AiChartD1P1ReportExecutionPalaceSettlement =
+  | Readonly<{
+      status: 'SUCCEEDED'
+      sequenceNumber: number
+      targetPalaceId: string
+      bridgeFingerprint: string
+      result: unknown
+      resultFingerprint: string
+      usage: AiChartOpenAiUsage | null
+    }>
+  | Readonly<{
+      status: 'FAILED'
+      sequenceNumber: number
+      targetPalaceId: string
+      bridgeFingerprint: string
+      result: null
+      errorCode: AiChartOpenAiErrorCode
+      retryable: boolean
+      responseDiagnostic: AiChartOpenAiResponseDiagnostic | null
+      transportDiagnostic: AiChartOpenAiTransportDiagnostic | null
+      usage: AiChartOpenAiUsage | null
+    }>
+
+export type AiChartD1P1ReportExecutionRuntimeOptions = Readonly<{
+  onPalaceSettled?: (
+    settlement: AiChartD1P1ReportExecutionPalaceSettlement,
+  ) => void | Promise<void>
+}>
+
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u
 const SAFE_DIAGNOSTIC_TOKEN = /^[A-Za-z0-9_.:-]{1,80}$/u
 const DIAGNOSTIC_ITEM_LIMIT = 32
@@ -544,29 +573,10 @@ function createSuccessEntry(
 
 function createFailureEntry(
   entry: AiChartD1P1ReportExecutionPalaceLedgerEntry,
-  error: unknown,
+  error: AiChartOpenAiError,
 ): AiChartD1P1ReportExecutionPalaceLedgerEntry {
-  if (error instanceof AiChartOpenAiError) {
-    const errorCode = normalizeOpenAiErrorCode(error.code)
-    const responseDiagnostic = normalizeResponseDiagnostic(error.diagnostic)
-    return freezeAiChartD1Value({
-      ...entry,
-      status: 'FAILED' as const,
-      attemptedRequests: 1 as const,
-      executedRequests: 0 as const,
-      fetchCount: 1 as const,
-      openAiRequests: 1 as const,
-      errorCode,
-      retryable:
-        errorCode === error.code ? error.retryable : false,
-      responseDiagnostic,
-      transportDiagnostic: normalizeTransportDiagnostic(
-        error.transportDiagnostic,
-      ),
-      usage: responseDiagnostic?.usage ?? null,
-    })
-  }
-
+  const errorCode = normalizeOpenAiErrorCode(error.code)
+  const responseDiagnostic = normalizeResponseDiagnostic(error.diagnostic)
   return freezeAiChartD1Value({
     ...entry,
     status: 'FAILED' as const,
@@ -574,21 +584,77 @@ function createFailureEntry(
     executedRequests: 0 as const,
     fetchCount: 1 as const,
     openAiRequests: 1 as const,
-    errorCode:
-      error instanceof Error
-        ? AI_CHART_OPENAI_RESPONSE_INVALID
-        : AI_CHART_OPENAI_REQUEST_FAILED,
-    retryable: false,
+    errorCode,
+    retryable:
+      errorCode === error.code ? error.retryable : false,
+    responseDiagnostic,
+    transportDiagnostic: normalizeTransportDiagnostic(
+      error.transportDiagnostic,
+    ),
+    usage: responseDiagnostic?.usage ?? null,
+  })
+}
+
+function createSuccessSettlement(
+  entry: AiChartD1P1ReportExecutionPalaceLedgerEntry,
+  result: AiChartOpenAiStructuredResult<unknown>,
+): AiChartD1P1ReportExecutionPalaceSettlement {
+  if (
+    entry.status !== 'SUCCEEDED' ||
+    entry.resultFingerprint === null
+  ) {
+    throw new Error(
+      AI_CHART_D1_P1_REPORT_EXECUTION_PLAN_INVALID,
+    )
+  }
+
+  return freezeAiChartD1Value({
+    status: 'SUCCEEDED' as const,
+    sequenceNumber: entry.sequenceNumber,
+    targetPalaceId: entry.targetPalaceId,
+    bridgeFingerprint: entry.bridgeFingerprint,
+    result: result.data,
+    resultFingerprint: entry.resultFingerprint,
+    usage: entry.usage,
+  })
+}
+
+function createFailureSettlement(
+  entry: AiChartD1P1ReportExecutionPalaceLedgerEntry,
+): AiChartD1P1ReportExecutionPalaceSettlement {
+  if (
+    entry.status !== 'FAILED' ||
+    entry.errorCode === null ||
+    entry.retryable === null
+  ) {
+    throw new Error(
+      AI_CHART_D1_P1_REPORT_EXECUTION_PLAN_INVALID,
+    )
+  }
+
+  return freezeAiChartD1Value({
+    status: 'FAILED' as const,
+    sequenceNumber: entry.sequenceNumber,
+    targetPalaceId: entry.targetPalaceId,
+    bridgeFingerprint: entry.bridgeFingerprint,
+    result: null,
+    errorCode: entry.errorCode,
+    retryable: entry.retryable,
+    responseDiagnostic: entry.responseDiagnostic,
+    transportDiagnostic: entry.transportDiagnostic,
+    usage: entry.usage,
   })
 }
 
 export async function runAiChartD1P1ReportExecutionRuntime(
   plan: AiChartD1P1ReportExecutionRuntimePlan,
   executor: AiChartD1P1ReportExecutionRuntimeExecutor,
+  options: AiChartD1P1ReportExecutionRuntimeOptions = {},
 ): Promise<AiChartD1P1ReportExecutionLedger> {
   assertValidRuntimePlan(plan)
   const palaceExecutions =
     plan.p1AdapterBridgeDescriptors.map(createPendingEntry)
+  let firstFailedPalaceId: string | null = null
 
   for (
     let index = 0;
@@ -596,27 +662,39 @@ export async function runAiChartD1P1ReportExecutionRuntime(
     index += 1
   ) {
     const descriptor = plan.p1AdapterBridgeDescriptors[index]
+    let result: AiChartOpenAiStructuredResult<unknown>
     try {
-      palaceExecutions[index] = createSuccessEntry(
-        palaceExecutions[index],
-        await executor(descriptor, index),
-      )
+      result = await executor(descriptor, index)
     } catch (error) {
-      palaceExecutions[index] = createFailureEntry(
+      if (!(error instanceof AiChartOpenAiError)) {
+        throw error
+      }
+      const entry = createFailureEntry(
         palaceExecutions[index],
         error,
       )
-      return buildLedger(plan, {
-        status: 'FAILED',
-        currentPalaceId: descriptor.targetPalaceId,
-        palaceExecutions,
-      })
+      palaceExecutions[index] = entry
+      firstFailedPalaceId ??= descriptor.targetPalaceId
+      await options.onPalaceSettled?.(
+        createFailureSettlement(entry),
+      )
+      continue
     }
+
+    const entry = createSuccessEntry(
+      palaceExecutions[index],
+      result,
+    )
+    palaceExecutions[index] = entry
+    await options.onPalaceSettled?.(
+      createSuccessSettlement(entry, result),
+    )
   }
 
   return buildLedger(plan, {
-    status: 'SUCCEEDED',
-    currentPalaceId: null,
+    status:
+      firstFailedPalaceId === null ? 'SUCCEEDED' : 'FAILED',
+    currentPalaceId: firstFailedPalaceId,
     palaceExecutions,
   })
 }

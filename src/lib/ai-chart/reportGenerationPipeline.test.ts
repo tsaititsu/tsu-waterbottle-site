@@ -212,6 +212,10 @@ async function main() {
   assert.equal(Object.isFrozen(readyLedger.palaceExecutions[0]), true)
 
   const successfulCalls: string[] = []
+  const successfulSettlements: Array<{
+    targetPalaceId: string
+    result: unknown
+  }> = []
   const successLedger = await runAiChartD1P1ReportExecutionRuntime(
     plan.p1ReportExecutionPlan,
     async (descriptor) => {
@@ -230,8 +234,30 @@ async function main() {
         },
       }
     },
+    {
+      onPalaceSettled: async (settlement) => {
+        assert.equal(settlement.status, 'SUCCEEDED')
+        successfulSettlements.push({
+          targetPalaceId: settlement.targetPalaceId,
+          result: settlement.result,
+        })
+      },
+    },
   )
   assert.deepEqual(successfulCalls, plan.targetPalaceIds)
+  assert.deepEqual(
+    successfulSettlements.map(({ targetPalaceId }) => targetPalaceId),
+    plan.targetPalaceIds,
+  )
+  assert.equal(
+    successfulSettlements.every(
+      ({ result }) =>
+        typeof result === 'object' &&
+        result !== null &&
+        Object.isFrozen(result),
+    ),
+    true,
+  )
   assert.equal(successLedger.status, 'SUCCEEDED')
   assert.equal(successLedger.attemptedRequests, 12)
   assert.equal(successLedger.executedRequests, 12)
@@ -264,40 +290,77 @@ async function main() {
   )
 
   const failedCalls: string[] = []
+  const failedSettlements: Array<{
+    targetPalaceId: string
+    status: string
+    result: unknown
+  }> = []
   const leakedOutputText = 'sensitive output_text marker'
   const failureLedger = await runAiChartD1P1ReportExecutionRuntime(
     plan.p1ReportExecutionPlan,
     async (descriptor) => {
       failedCalls.push(descriptor.targetPalaceId)
-      throw new AiChartOpenAiError(
-        AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID,
-        false,
-        {
-          responseStatus: 'completed',
-          incompleteReason: null,
-          responseErrorCode: null,
-          outputItemTypes: ['message'],
-          contentItemTypes: ['output_text'],
-          outputTextCount: 1,
-          outputSchemaValidationCode:
-            'COVERAGE_MAJOR_STARS_MISMATCH',
-          usage: {
-            inputTokens: 17,
-            outputTokens: 8,
-            reasoningTokens: 2,
-            totalTokens: 27,
-          },
-          unsafe: leakedOutputText,
-        } as never,
-      )
+      if (descriptor.targetPalaceId === plan.targetPalaceIds[0]) {
+        throw new AiChartOpenAiError(
+          AI_CHART_OPENAI_OUTPUT_SCHEMA_INVALID,
+          false,
+          {
+            responseStatus: 'completed',
+            incompleteReason: null,
+            responseErrorCode: null,
+            outputItemTypes: ['message'],
+            contentItemTypes: ['output_text'],
+            outputTextCount: 1,
+            outputSchemaValidationCode:
+              'COVERAGE_MAJOR_STARS_MISMATCH',
+            usage: {
+              inputTokens: 17,
+              outputTokens: 8,
+              reasoningTokens: 2,
+              totalTokens: 27,
+            },
+            unsafe: leakedOutputText,
+          } as never,
+        )
+      }
+      return {
+        data: Object.freeze({
+          targetPalaceId: descriptor.targetPalaceId,
+        }),
+        usage: null,
+      }
+    },
+    {
+      onPalaceSettled: async (settlement) => {
+        failedSettlements.push({
+          targetPalaceId: settlement.targetPalaceId,
+          status: settlement.status,
+          result:
+            settlement.status === 'SUCCEEDED'
+              ? settlement.result
+              : null,
+        })
+      },
     },
   )
-  assert.deepEqual(failedCalls, [plan.targetPalaceIds[0]])
+  assert.deepEqual(failedCalls, plan.targetPalaceIds)
+  assert.deepEqual(
+    failedSettlements.map(({ targetPalaceId }) => targetPalaceId),
+    plan.targetPalaceIds,
+  )
+  assert.deepEqual(
+    failedSettlements.map(({ status }) => status),
+    [
+      'FAILED',
+      ...Array.from({ length: 11 }, () => 'SUCCEEDED'),
+    ],
+  )
+  assert.equal(failedSettlements[0].result, null)
   assert.equal(failureLedger.status, 'FAILED')
-  assert.equal(failureLedger.attemptedRequests, 1)
-  assert.equal(failureLedger.executedRequests, 0)
-  assert.equal(failureLedger.fetchCount, 1)
-  assert.equal(failureLedger.openAiRequests, 1)
+  assert.equal(failureLedger.attemptedRequests, 12)
+  assert.equal(failureLedger.executedRequests, 11)
+  assert.equal(failureLedger.fetchCount, 12)
+  assert.equal(failureLedger.openAiRequests, 12)
   assert.equal(failureLedger.retryPerformed, false)
   assert.equal(failureLedger.currentPalaceId, plan.targetPalaceIds[0])
   assert.equal(
@@ -319,7 +382,7 @@ async function main() {
     failureLedger.palaceExecutions
       .slice(1)
       .map((entry) => entry.status),
-    Array.from({ length: 11 }, () => 'PENDING'),
+    Array.from({ length: 11 }, () => 'SUCCEEDED'),
   )
   assert.equal(JSON.stringify(failureLedger).includes(leakedOutputText), false)
   assert.equal(JSON.stringify(failureLedger).includes('output_text'), true)
@@ -330,6 +393,44 @@ async function main() {
     ),
     true,
   )
+
+  let persistenceFailureExecutorCalls = 0
+  await assert.rejects(
+    () =>
+      runAiChartD1P1ReportExecutionRuntime(
+        plan.p1ReportExecutionPlan,
+        async (descriptor) => {
+          persistenceFailureExecutorCalls += 1
+          return {
+            data: Object.freeze({
+              targetPalaceId: descriptor.targetPalaceId,
+            }),
+            usage: null,
+          }
+        },
+        {
+          onPalaceSettled: async () => {
+            throw new Error('durable_palace_result_write_failed')
+          },
+        },
+      ),
+    { message: 'durable_palace_result_write_failed' },
+  )
+  assert.equal(persistenceFailureExecutorCalls, 1)
+
+  let runtimeIntegrityFailureExecutorCalls = 0
+  await assert.rejects(
+    () =>
+      runAiChartD1P1ReportExecutionRuntime(
+        plan.p1ReportExecutionPlan,
+        async () => {
+          runtimeIntegrityFailureExecutorCalls += 1
+          throw new Error('runtime_bridge_integrity_failed')
+        },
+      ),
+    { message: 'runtime_bridge_integrity_failed' },
+  )
+  assert.equal(runtimeIntegrityFailureExecutorCalls, 1)
 
   let forgedPlanExecutorCalls = 0
   const forgedThirteenPalacePlan = Object.freeze({
