@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
 import {
   checkLinePayProductionOneDollarEntryAvailability,
   requestLinePayProductionOneDollarEntryCheckout,
 } from './productionOneDollarEntryClient'
+
+const tests: Array<{ name: string; run: () => Promise<void> }> = []
+
+function test(name: string, run: () => Promise<void>) {
+  tests.push({ name, run })
+}
 
 test('authorized admin sees the temporary Production entry test without exposing the token', async () => {
   const token = 'synthetic-admin-access-token'
@@ -91,3 +96,13 @@ test('AI chart entry starts only its fixed Production NT$1 checkout', async () =
     entrySource: 'ai_chart_report',
   })
 })
+
+async function main() {
+  for (const current of tests) {
+    await current.run()
+    console.log(`✓ ${current.name}`)
+  }
+  console.log(`LINE Pay Production NT$1 entry client tests passed (${tests.length} cases)`)
+}
+
+void main()
